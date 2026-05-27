@@ -99,15 +99,15 @@ function LoginPage() {
           <div className="relative">
             {/* Orbit rings */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="animate-orbit-slow size-[420px] rounded-full border border-neon-blue/20" />
+              <div className="animate-orbit-slow size-[520px] rounded-full border border-neon-blue/20" />
             </div>
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="animate-orbit-reverse size-[520px] rounded-full border border-neon-purple/15 border-dashed" />
+              <div className="animate-orbit-reverse size-[620px] rounded-full border border-neon-purple/15 border-dashed" />
             </div>
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="size-[340px] rounded-full bg-gradient-to-br from-neon-blue/20 via-transparent to-neon-purple/20 blur-2xl" />
+              <div className="size-[420px] rounded-full bg-gradient-to-br from-neon-blue/20 via-transparent to-neon-purple/20 blur-2xl" />
             </div>
-            <BrainAI size={360} speaking />
+            <BrainAI size={460} speaking />
           </div>
           <div className="mt-8 text-center max-w-md">
             <h2 className="text-3xl font-bold text-gradient-brand">Inteligência operacional ao vivo</h2>
@@ -127,7 +127,7 @@ function LoginPage() {
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="animate-orbit-reverse size-[220px] rounded-full border border-neon-purple/15 border-dashed" />
               </div>
-              <BrainAI size={150} speaking />
+              <BrainAI size={200} speaking />
             </div>
           </div>
 
