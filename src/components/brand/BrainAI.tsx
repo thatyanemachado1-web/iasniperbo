@@ -50,21 +50,33 @@ export function BrainAI({ size = 120, speaking = false, className = "" }: BrainA
         transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
         style={{ width: size, height: size }}
       >
-        <motion.img
-          src={brainImg}
-          alt="Cérebro IA holográfico SNIPER BO IA"
-          loading="lazy"
-          width={size}
-          height={size}
-          className="w-full h-full object-contain select-none pointer-events-none"
+        <motion.div
+          className="w-full h-full overflow-hidden"
           style={{
-            mixBlendMode: "screen",
-            filter: "drop-shadow(0 0 18px color-mix(in oklab, var(--neon-blue) 85%, transparent)) drop-shadow(0 0 38px color-mix(in oklab, var(--neon-purple) 60%, transparent))",
+            WebkitMaskImage:
+              "radial-gradient(circle at 50% 45%, black 38%, rgba(0,0,0,0.75) 55%, transparent 72%)",
+            maskImage:
+              "radial-gradient(circle at 50% 45%, black 38%, rgba(0,0,0,0.75) 55%, transparent 72%)",
+            filter:
+              "drop-shadow(0 0 18px color-mix(in oklab, var(--neon-blue) 85%, transparent)) drop-shadow(0 0 38px color-mix(in oklab, var(--neon-purple) 55%, transparent))",
           }}
           animate={speaking ? { scale: [1, 1.035, 1] } : { scale: 1 }}
           transition={{ duration: 1.4, repeat: speaking ? Infinity : 0, ease: "easeInOut" }}
-          draggable={false}
-        />
+        >
+          <img
+            src={brainImg}
+            alt="Cérebro IA holográfico SNIPER BO IA"
+            loading="lazy"
+            draggable={false}
+            className="w-full h-full object-cover select-none pointer-events-none"
+            style={{
+              objectPosition: "50% 42%",
+              transform: "scale(1.55)",
+              transformOrigin: "50% 42%",
+              mixBlendMode: "screen",
+            }}
+          />
+        </motion.div>
         {/* holographic scan overlay */}
         <div
           className="absolute inset-0 rounded-full pointer-events-none opacity-40 holo-scan"
