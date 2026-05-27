@@ -6,16 +6,30 @@ const colorMap: Record<Round["result"], string> = {
   T: "bg-tie text-white border-tie/50",
 };
 
-export function RoadmapDots({ rounds, compact = false }: { rounds: Round[]; compact?: boolean }) {
+function displayValue(round: Round, showScore: boolean) {
+  if (!showScore) return round.result;
+  if (round.result === "P") return round.playerScore;
+  return round.bankerScore;
+}
+
+export function RoadmapDots({
+  rounds,
+  compact = false,
+  showScore = false,
+}: {
+  rounds: Round[];
+  compact?: boolean;
+  showScore?: boolean;
+}) {
   return (
     <div className={`flex gap-1.5 ${compact ? "overflow-x-auto pb-1" : "flex-wrap"}`}>
       {rounds.map((r) => (
         <div
           key={r.id}
-          title={`#${r.id} ${r.bankerScore}x${r.playerScore}`}
+          title={`#${r.id} Banker ${r.bankerScore} x Player ${r.playerScore}`}
           className={`shrink-0 size-7 rounded-full border-2 ${colorMap[r.result]} flex items-center justify-center text-[11px] font-bold shadow-[0_0_10px_-2px_currentColor]`}
         >
-          {r.result}
+          {displayValue(r, showScore)}
         </div>
       ))}
     </div>
