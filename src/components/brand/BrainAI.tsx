@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import brainImg from "@/assets/brain-ai.png";
 
 interface BrainAIProps {
   size?: number;
@@ -7,82 +8,104 @@ interface BrainAIProps {
 }
 
 export function BrainAI({ size = 120, speaking = false, className = "" }: BrainAIProps) {
+  const particleCount = size >= 220 ? 14 : size >= 120 ? 8 : 0;
   return (
     <div
       className={`relative inline-flex items-center justify-center ${className}`}
       style={{ width: size, height: size }}
     >
-      {/* halo */}
+      {/* outer halo */}
       <div
-        className="absolute inset-0 rounded-full blur-2xl opacity-70"
+        className="absolute inset-0 rounded-full blur-3xl opacity-80 animate-brain-pulse"
         style={{
           background:
-            "radial-gradient(circle, color-mix(in oklab, var(--neon-blue) 60%, transparent), transparent 70%)",
+            "radial-gradient(circle, color-mix(in oklab, var(--neon-blue) 70%, transparent), transparent 65%)",
         }}
       />
       <div
-        className="absolute inset-2 rounded-full blur-xl opacity-60"
+        className="absolute inset-[10%] rounded-full blur-2xl opacity-70"
         style={{
           background:
-            "radial-gradient(circle, color-mix(in oklab, var(--neon-purple) 60%, transparent), transparent 70%)",
+            "radial-gradient(circle, color-mix(in oklab, var(--neon-purple) 70%, transparent), transparent 65%)",
         }}
       />
 
-      <motion.svg
-        viewBox="0 0 200 200"
-        width={size}
-        height={size}
-        className="animate-brain-pulse relative"
-        animate={speaking ? { scale: [1, 1.04, 1] } : { scale: 1 }}
-        transition={{ duration: 1.4, repeat: speaking ? Infinity : 0 }}
+      {/* holographic base ring */}
+      <div
+        className="absolute left-1/2 -translate-x-1/2 rounded-full animate-base-pulse"
+        style={{
+          bottom: size * 0.02,
+          width: size * 0.78,
+          height: size * 0.1,
+          background:
+            "radial-gradient(ellipse at center, color-mix(in oklab, var(--neon-blue) 80%, transparent), transparent 70%)",
+          filter: "blur(6px)",
+        }}
+      />
+
+      {/* floating brain image */}
+      <motion.div
+        className="relative animate-brain-pulse"
+        animate={{ y: [0, -6, 0] }}
+        transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
+        style={{ width: size, height: size }}
       >
-        <defs>
-          <linearGradient id="brainGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="oklch(0.85 0.18 200)" />
-            <stop offset="50%" stopColor="oklch(0.62 0.22 255)" />
-            <stop offset="100%" stopColor="oklch(0.55 0.25 295)" />
-          </linearGradient>
-          <radialGradient id="coreGlow" cx="0.5" cy="0.5" r="0.5">
-            <stop offset="0%" stopColor="white" stopOpacity="0.9" />
-            <stop offset="60%" stopColor="oklch(0.7 0.22 245)" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="transparent" />
-          </radialGradient>
-        </defs>
+        <motion.img
+          src={brainImg}
+          alt="Cérebro IA holográfico SNIPER BO IA"
+          loading="lazy"
+          width={size}
+          height={size}
+          className="w-full h-full object-contain select-none pointer-events-none"
+          style={{
+            mixBlendMode: "screen",
+            filter: "drop-shadow(0 0 18px color-mix(in oklab, var(--neon-blue) 85%, transparent)) drop-shadow(0 0 38px color-mix(in oklab, var(--neon-purple) 60%, transparent))",
+          }}
+          animate={speaking ? { scale: [1, 1.035, 1] } : { scale: 1 }}
+          transition={{ duration: 1.4, repeat: speaking ? Infinity : 0, ease: "easeInOut" }}
+          draggable={false}
+        />
+        {/* holographic scan overlay */}
+        <div
+          className="absolute inset-0 rounded-full pointer-events-none opacity-40 holo-scan"
+          style={{
+            background:
+              "repeating-linear-gradient(180deg, transparent 0 3px, color-mix(in oklab, var(--neon-cyan) 18%, transparent) 3px 4px)",
+            mixBlendMode: "overlay",
+          }}
+        />
+      </motion.div>
 
-        {/* brain silhouette */}
-        <g stroke="url(#brainGrad)" strokeWidth="1.6" fill="none" strokeLinecap="round">
-          <path d="M100 28c-22 0-36 14-36 30 0 4-6 6-10 12-6 8-6 18 0 24-6 8-4 18 4 24-2 10 6 20 18 22 4 10 14 16 24 16s20-6 24-16c12-2 20-12 18-22 8-6 10-16 4-24 6-6 6-16 0-24-4-6-10-8-10-12 0-16-14-30-36-30z" />
-          <path d="M100 28v128" />
-          <path d="M70 60c8 6 8 18 0 24M70 96c10 4 10 18 0 24M70 130c8 4 10 14 6 22" />
-          <path d="M130 60c-8 6-8 18 0 24M130 96c-10 4-10 18 0 24M130 130c-8 4-10 14-6 22" />
-          <path d="M86 50c-4 8-4 14 0 22M114 50c4 8 4 14 0 22M84 110c-4 8-2 18 4 24M116 110c4 8 2 18-4 24" />
-        </g>
-
-        {/* circuit nodes */}
-        <g fill="oklch(0.85 0.18 200)">
-          <circle cx="70" cy="60" r="2.5" />
-          <circle cx="70" cy="96" r="2.5" />
-          <circle cx="70" cy="130" r="2.5" />
-          <circle cx="130" cy="60" r="2.5" />
-          <circle cx="130" cy="96" r="2.5" />
-          <circle cx="130" cy="130" r="2.5" />
-          <circle cx="100" cy="92" r="3" fill="white" />
-        </g>
-
-        {/* core */}
-        <circle cx="100" cy="92" r="40" fill="url(#coreGlow)" opacity="0.65" />
-
-        {/* base light */}
-        <ellipse cx="100" cy="178" rx="40" ry="5" fill="oklch(0.7 0.22 245)" opacity="0.5" />
-      </motion.svg>
+      {/* orbit particles */}
+      {particleCount > 0 && (
+        <div className="absolute inset-0 pointer-events-none">
+          {Array.from({ length: particleCount }).map((_, i) => {
+            const angle = (i * 360) / particleCount;
+            const delay = (i * 0.4) % 3;
+            return (
+              <span
+                key={i}
+                className="absolute left-1/2 top-1/2 size-1.5 rounded-full bg-neon-cyan animate-orbit-particle"
+                style={{
+                  boxShadow: "0 0 8px color-mix(in oklab, var(--neon-cyan) 80%, transparent)",
+                  // @ts-expect-error css var
+                  "--angle": `${angle}deg`,
+                  "--radius": `${size * 0.42}px`,
+                  animationDelay: `${delay}s`,
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
 
       {speaking && (
-        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 flex items-end gap-1 h-6">
-          {[0, 1, 2, 3, 4].map((i) => (
+        <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex items-end gap-1 h-6">
+          {[0, 1, 2, 3, 4, 5, 6].map((i) => (
             <span
               key={i}
-              className="wave-bar block w-1 rounded-full bg-neon-blue"
-              style={{ height: 22, animationDelay: `${i * 0.12}s` }}
+              className="wave-bar block w-1 rounded-full bg-gradient-to-t from-neon-blue to-neon-purple"
+              style={{ height: 22, animationDelay: `${i * 0.1}s` }}
             />
           ))}
         </div>
