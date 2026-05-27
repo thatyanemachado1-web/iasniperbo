@@ -33,6 +33,7 @@ export function SignalCard({
   const status = signalStatus(signal, tieAlertIsActive, tieAlert?.validityRounds);
   const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
   const StatusIcon = status.Icon;
+  const tieRisk = tieAlert ? tieRiskBadge(tieAlert) : null;
   const riskTone = surfSummary?.oppositeRiskLevel === "ALTO"
     ? "text-destructive"
     : surfSummary?.oppositeRiskLevel === "MEDIO"
@@ -54,8 +55,15 @@ export function SignalCard({
             <Zap className="size-3" />
             {isWaiting ? "Monitorando mesa" : isTieWatch ? "Aviso paralelo" : "Prioridade operacional"}
           </div>
-          <div className={`${displaySideClass} font-extrabold ${sideColor}`}>
-            {displaySide}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className={`${displaySideClass} font-extrabold ${sideColor}`}>
+              {displaySide}
+            </div>
+            {tieRisk && (
+              <span className={`rounded-full border px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide ${tieRisk.className}`}>
+                Risco de empate: {tieRisk.label}
+              </span>
+            )}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">{sideCaption}</div>
         </div>
@@ -210,4 +218,35 @@ function lastSignalResult(result: NonNullable<MainSignal["lastResult"]>) {
     side: result.side,
     protection: result.protection,
   };
+}
+
+function tieRiskBadge(alert: TieAlert) {
+  const level = normalizeRisk(alert.level);
+  if (level === "ALTO") {
+    return {
+      label: "ALTO",
+      className: "border-destructive/35 bg-destructive/15 text-destructive",
+    };
+  }
+  if (level === "MEDIO") {
+    return {
+      label: "MEDIO",
+      className: "border-warning/35 bg-warning/15 text-warning",
+    };
+  }
+  return {
+    label: "BAIXO",
+    className: "border-success/35 bg-success/15 text-success",
+  };
+}
+
+function normalizeRisk(level: TieAlert["level"]) {
+  const value = String(level)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+
+  if (value.includes("ALTO")) return "ALTO";
+  if (value.includes("MED")) return "MEDIO";
+  return "BAIXO";
 }
