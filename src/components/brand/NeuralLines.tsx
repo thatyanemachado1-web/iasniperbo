@@ -85,14 +85,14 @@ export function NeuralLines({
         </filter>
       </defs>
 
-      <g vectorEffect="non-scaling-stroke" style={{ filter: "url(#nl-glow)" }}>
+      <g style={{ filter: "url(#nl-glow)" }}>
         {paths.map((p) => (
           <g key={p.key}>
             <path
               d={p.d}
               fill="none"
               stroke={p.stroke}
-              strokeWidth={0.18}
+              strokeWidth={1.4}
               strokeLinecap="round"
               vectorEffect="non-scaling-stroke"
               style={{
@@ -100,7 +100,7 @@ export function NeuralLines({
               }}
             />
             {/* moving luminous dot */}
-            <circle r={0.55} fill="white" style={{ filter: "drop-shadow(0 0 1.2px white)" }}>
+            <circle r={0.9} fill="white" style={{ filter: "drop-shadow(0 0 2px white)" }}>
               <animateMotion
                 dur={`${p.dur}s`}
                 begin={`${p.delay}s`}
