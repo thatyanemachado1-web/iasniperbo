@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import type { DashboardData } from "@/types/dashboard";
 
+const PUBLIC_DASHBOARD_URL = "https://courts-slides-pretty-escape.trycloudflare.com/dashboard";
+
 function configuredDashboardUrl() {
   const directUrl = import.meta.env.VITE_SNIPER_DASHBOARD_URL as string | undefined;
   if (directUrl) return directUrl;
@@ -10,11 +12,42 @@ function configuredDashboardUrl() {
   if (apiBase) return `${apiBase.replace(/\/+$/, "")}/dashboard`;
 
   if (typeof window !== "undefined") {
+    const queryUrl = dashboardUrlFromQuery(window.location.search);
+    if (queryUrl) {
+      window.localStorage.setItem("sniper_admin_api_url", stripDashboardPath(queryUrl));
+      return queryUrl;
+    }
+
     const savedAdminApi = window.localStorage.getItem("sniper_admin_api_url");
-    if (savedAdminApi) return `${savedAdminApi.replace(/\/+$/, "")}/dashboard`;
+    if (savedAdminApi) return ensureDashboardPath(savedAdminApi);
   }
 
-  return "http://127.0.0.1:8787/dashboard";
+  return PUBLIC_DASHBOARD_URL;
+}
+
+function dashboardUrlFromQuery(search: string) {
+  const params = new URLSearchParams(search);
+  const rawUrl = params.get("sniper_api") || params.get("api");
+  if (!rawUrl) return null;
+
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "https:" && parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
+      return null;
+    }
+    return ensureDashboardPath(parsed.toString());
+  } catch {
+    return null;
+  }
+}
+
+function ensureDashboardPath(url: string) {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  return trimmed.endsWith("/dashboard") ? trimmed : `${trimmed}/dashboard`;
+}
+
+function stripDashboardPath(url: string) {
+  return url.replace(/\/dashboard\/?$/, "");
 }
 
 async function fetchDashboardData(): Promise<DashboardData> {
