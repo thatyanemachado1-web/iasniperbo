@@ -75,7 +75,7 @@ function DashboardPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-4">
         <div className="space-y-4">
-          <SignalCard signal={d.currentSignal} surfSummary={surfSummary} priority />
+          <SignalCard signal={d.currentSignal} surfSummary={surfSummary} tieAlert={d.currentTieAlert} priority />
           {surfAlert && <SurfAlertCard alert={surfAlert} />}
         </div>
 
