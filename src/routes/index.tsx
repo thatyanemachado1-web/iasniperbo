@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { BrainAI } from "@/components/brand/BrainAI";
+import { NeuralLines } from "@/components/brand/NeuralLines";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { Activity, Bell, Mic, Radio, Mail, Lock, ArrowRight, ShieldCheck } from "lucide-react";
@@ -81,6 +82,15 @@ function LoginPage() {
               "linear-gradient(to bottom, transparent, color-mix(in oklab, var(--neon-cyan) 10%, transparent), transparent)",
           }}
         />
+      </div>
+
+      {/* Neural data lines converging to the hero brain (desktop) */}
+      <div className="absolute inset-0 hidden lg:block pointer-events-none">
+        <NeuralLines cx={32} cy={50} count={16} opacity={0.5} reach={1.15} />
+      </div>
+      {/* Mobile: subtle lines converging to top brain */}
+      <div className="absolute inset-x-0 top-0 h-[55vh] lg:hidden pointer-events-none">
+        <NeuralLines cx={50} cy={42} count={10} opacity={0.4} reach={1.2} />
       </div>
 
       <div className="relative w-full max-w-6xl grid lg:grid-cols-[1.1fr_minmax(0,420px)] gap-10 lg:gap-16 items-center">
