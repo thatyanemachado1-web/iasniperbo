@@ -1,4 +1,5 @@
 import type { AdminSession, SignalRecipient } from "@/types/admin";
+import type { ModuleToggles } from "@/types/dashboard";
 
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
@@ -90,6 +91,22 @@ export async function deleteSignalRecipient(session: AdminSession, recipientId: 
   await request<{ ok: boolean }>(session, `/telegram-recipients/${encodeURIComponent(recipientId)}`, {
     method: "DELETE",
   });
+}
+
+export async function getModuleToggles(session: AdminSession) {
+  const data = await request<{ moduleToggles: ModuleToggles }>(session, "/module-toggles");
+  return data.moduleToggles;
+}
+
+export async function updateModuleToggles(
+  session: AdminSession,
+  payload: Partial<ModuleToggles>,
+) {
+  const data = await request<{ moduleToggles: ModuleToggles }>(session, "/module-toggles", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.moduleToggles;
 }
 
 async function request<T>(session: AdminSession, path: string, init: RequestInit = {}) {

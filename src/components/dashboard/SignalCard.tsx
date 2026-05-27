@@ -2,17 +2,20 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
-import type { MainSignal, SurfEntrySummary, TieAlert } from "@/types/dashboard";
+import { LeituraNeuralMiniCard } from "@/components/dashboard/LeituraNeuralMiniCard";
+import type { MainSignal, NeuralReading, SurfEntrySummary, TieAlert } from "@/types/dashboard";
 import { CheckCircle2, Clock3, Radio, ShieldCheck, Target, Zap } from "lucide-react";
 
 export function SignalCard({
   signal,
+  neuralReading,
   surfSummary,
   tieAlert,
   locked,
   priority = false,
 }: {
   signal: MainSignal;
+  neuralReading?: NeuralReading;
   surfSummary?: SurfEntrySummary;
   tieAlert?: TieAlert;
   locked?: boolean;
@@ -25,8 +28,8 @@ export function SignalCard({
   const isWaiting = signal.status === "waiting";
   const sideColor = isBanker ? "text-banker" : isPlayer ? "text-player" : isTieWatch ? "text-tie" : "text-muted-foreground";
   const beamColor = isBanker ? "from-banker/40" : isPlayer ? "from-player/40" : isTieWatch ? "from-tie/35" : "from-neon-cyan/15";
-  const displaySide = isTieWatch ? "POSSIVEL EMPATE" : isWaiting ? "AGUARDAR ENTRADA" : signal.side;
-  const displaySideClass = isWaiting || isTieWatch ? "text-3xl" : "text-5xl";
+  const displaySide = isTieWatch ? "POSSÍVEL EMPATE" : isWaiting ? "AGUARDAR ENTRADA" : signal.side;
+  const displaySideClass = isWaiting || isTieWatch ? "text-[1.85rem] leading-none sm:text-3xl" : "text-4xl leading-none sm:text-5xl";
   const sideCaption = isTieWatch ? "Sem entrada principal" : isWaiting ? "Sem entrada principal" : "Lado da entrada";
   const visibleProtection = isTieWatch && tieAlert ? `${tieAlert.validityRounds} casas` : signal.protection;
   const visibleStrength = isTieWatch && tieAlert ? tieAlert.confidence : signal.strength;
@@ -46,11 +49,11 @@ export function SignalCard({
       <div className="absolute inset-0 scan-grid opacity-10" />
       <div className="absolute -left-12 -top-16 size-44 rounded-full bg-neon-blue/10 blur-3xl" />
       <SectionTitle
-        title={isWaiting ? "Aguardar entrada" : isTieWatch ? "Possivel empate" : "Entrada confirmada"}
+        title={isWaiting ? "Aguardar entrada" : isTieWatch ? "Possível empate" : "Entrada confirmada"}
         right={<AppBadge tone={status.badgeTone} pulse={status.pulse}><StatusIcon className="size-3" /> {status.badge}</AppBadge>}
       />
-      <div className="relative flex items-center justify-between gap-4">
-        <div className="min-w-0">
+      <div className="relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
+        <div className="min-w-0 pt-0.5">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-neon-cyan/25 bg-background/35 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan">
             <Zap className="size-3" />
             {isWaiting ? "Monitorando mesa" : isTieWatch ? "Aviso paralelo" : "Prioridade operacional"}
@@ -67,18 +70,15 @@ export function SignalCard({
           </div>
           <div className="mt-1 text-xs text-muted-foreground">{sideCaption}</div>
         </div>
-        <div className="text-right">
-          <div className="text-xs uppercase tracking-widest text-neon-cyan/80">{status.kicker}</div>
-          <div className={`text-lg font-semibold ${status.valueClass}`}>{status.value}</div>
-        </div>
+        <LeituraNeuralMiniCard {...(neuralReading ?? { mode: "SCANNING" })} />
       </div>
       <div className="relative mt-4 grid grid-cols-3 gap-2 text-xs">
         <div className="rounded-lg bg-secondary/40 p-2">
-          <div className="text-muted-foreground">Protecao</div>
+          <div className="text-muted-foreground">Proteção</div>
           <div className="font-semibold text-foreground">{visibleProtection}</div>
         </div>
         <div className="rounded-lg bg-secondary/40 p-2">
-          <div className="text-muted-foreground">Forca</div>
+          <div className="text-muted-foreground">Força</div>
           <div className="font-semibold text-neon-cyan">{visibleStrength}%</div>
         </div>
         <div className="rounded-lg bg-secondary/40 p-2">
@@ -91,12 +91,12 @@ export function SignalCard({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex items-center gap-1.5 font-semibold text-muted-foreground">
               <CheckCircle2 className="size-3.5" />
-              Ultima entrada
+              Última entrada
             </div>
             <div className={`font-extrabold ${lastResult.className}`}>{lastResult.label}</div>
           </div>
           <div className="mt-1 text-muted-foreground">
-            {lastResult.side} com protecao {lastResult.protection}
+            {lastResult.side} com proteção {lastResult.protection}
           </div>
         </div>
       )}
@@ -108,7 +108,7 @@ export function SignalCard({
               Surf
             </div>
             <div className={`font-semibold ${riskTone}`}>
-              Risco contrario: {surfSummary.oppositeRiskLevel} ({surfSummary.oppositeRisk}%)
+              Risco contrário: {surfSummary.oppositeRiskLevel} ({surfSummary.oppositeRisk}%)
             </div>
           </div>
           <div className="mt-1 text-muted-foreground">{surfSummary.status}</div>
@@ -132,7 +132,7 @@ function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRoun
       badgeTone: "purple" as const,
       pulse: true,
       kicker: `${tieAlertRounds} casas`,
-      value: "Possivel EMPATE",
+      value: "Possível EMPATE",
       valueClass: "text-tie",
       Icon: Radio,
     };
@@ -154,7 +154,7 @@ function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRoun
       badgeTone: "purple" as const,
       pulse: true,
       kicker: "4 casas",
-      value: "Possivel EMPATE",
+      value: "Possível EMPATE",
       valueClass: "text-tie",
       Icon: Radio,
     };
@@ -164,7 +164,7 @@ function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRoun
       badge: "G1 ativo",
       badgeTone: "amber" as const,
       pulse: true,
-      kicker: "Protecao",
+      kicker: "Proteção",
       value: "Aguardando G1",
       valueClass: "text-warning",
       Icon: Radio,

@@ -91,6 +91,21 @@ export const mockDashboardData: DashboardData = {
     validityRounds: 4,
     status: "active",
   },
+  neuralReading: {
+    mode: "ACTIVE",
+    numero: 7,
+    origem: "BANKER",
+    direcao: "PLAYER",
+    validade: "G1",
+    alertas: 177,
+    acertos: 77,
+    erros: 100,
+    assertividade: 43.5,
+  },
+  moduleToggles: {
+    tieAlert: true,
+    surfAnalyzer: true,
+  },
   currentSurfAlert: {
     surf_alert: true,
     surf_phase: "CONTINUIDADE",
@@ -101,7 +116,7 @@ export const mockDashboardData: DashboardData = {
     surf_confidence: 78,
     stretched_count: 4,
     correction_count: 1,
-    reason: "Surf Banker saudavel apos correcao curta. Risco contrario baixo.",
+    reason: "Surf Banker saudável após correção curta. Risco contrário baixo.",
     panels: {
       big_road: "Continuidade Banker com coluna curta sustentada.",
       big_eye_boy: "Tendencia saudavel, sem divergencia forte.",

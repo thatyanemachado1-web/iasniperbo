@@ -29,6 +29,25 @@ export interface MainSignal {
   lastResult?: LastSignalResult | null;
 }
 
+export type NeuralReadingMode = "SCANNING" | "OBSERVING" | "ACTIVE";
+
+export interface NeuralReading {
+  mode: NeuralReadingMode;
+  numero?: number | null;
+  origem?: SignalSide | null;
+  direcao?: SignalSide | null;
+  validade?: string | null;
+  alertas?: number | null;
+  acertos?: number | null;
+  erros?: number | null;
+  assertividade?: number | null;
+}
+
+export interface ModuleToggles {
+  tieAlert: boolean;
+  surfAnalyzer: boolean;
+}
+
 export type SurfPhase =
   | "SEM_RISCO"
   | "PRE_SURF"
@@ -139,6 +158,8 @@ export interface DashboardData {
   currentSignal: MainSignal;
   currentTieAlert: TieAlert;
   currentSurfAlert?: SurfAlert;
+  neuralReading?: NeuralReading;
+  moduleToggles?: ModuleToggles;
   engineDecision: EngineDecision;
   mainScoreboard: MainScoreboard;
   tieAlertScoreboard: TieAlertScoreboard;

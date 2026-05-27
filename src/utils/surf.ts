@@ -8,9 +8,9 @@ export function clampPercent(value: number) {
 
 export function surfRiskBand(risk: number): { label: string; tone: BadgeTone; status: string } {
   const value = clampPercent(risk);
-  if (value <= 25) return { label: "BAIXO", tone: "green", status: "Quebra pouco provavel agora." };
-  if (value <= 45) return { label: "OBSERVACAO", tone: "amber", status: "Correcoes curtas possiveis." };
-  if (value <= 65) return { label: "MEDIO", tone: "amber", status: "Roads pedem cautela tecnica." };
+  if (value <= 25) return { label: "BAIXO", tone: "green", status: "Quebra pouco provável agora." };
+  if (value <= 45) return { label: "OBSERVAÇÃO", tone: "amber", status: "Correções curtas possíveis." };
+  if (value <= 65) return { label: "MÉDIO", tone: "amber", status: "Roads pedem cautela técnica." };
   if (value <= 85) return { label: "ALTO", tone: "red", status: "Quebra ou virada em monitoramento." };
   return { label: "MUITO ALTO", tone: "red", status: "Estrutura muito pressionada para quebra." };
 }
@@ -18,7 +18,7 @@ export function surfRiskBand(risk: number): { label: string; tone: BadgeTone; st
 export function surfStrengthBand(confidence: number): { label: string; tone: BadgeTone; status: string } {
   const value = clampPercent(confidence);
   if (value <= 25) return { label: "SEM RISCO", tone: "green", status: "Sem continuidade dominante." };
-  if (value <= 45) return { label: "OBSERVACAO", tone: "amber", status: "Pre-surf ou leitura inicial." };
+  if (value <= 45) return { label: "OBSERVAÇÃO", tone: "amber", status: "Pré-surf ou leitura inicial." };
   if (value <= 65) return { label: "CONTEXTO FORTE", tone: "amber", status: "Continuidade ganhando forma." };
   if (value <= 85) return { label: "SURF FORTE", tone: "red", status: "Surf respeitando lado dominante." };
   return { label: "SURF EXTREMO", tone: "red", status: "Surf muito esticado e dominante." };
@@ -39,7 +39,7 @@ export function buildSurfEntrySummary(
     return {
       oppositeRisk: 0,
       oppositeRiskLevel: "BAIXO",
-      status: "Sem leitura de surf relevante ate G1.",
+      status: "Sem leitura de surf relevante até G1.",
     };
   }
 
@@ -64,14 +64,14 @@ export function buildSurfEntrySummary(
 
   risk = clampPercent(risk);
 
-  let status = "Sem risco relevante ate G1.";
+  let status = "Sem risco relevante até G1.";
   if (alignedWithEntry) status = "Surf alinhado com a entrada.";
-  if (againstEntry && phase === "PRE_SURF") status = "Atencao: pre-surf contra a entrada.";
-  if (againstEntry && phase === "CONTINUIDADE") status = "Possivel continuidade contra a entrada.";
+  if (againstEntry && phase === "PRE_SURF") status = "Atenção: pré-surf contra a entrada.";
+  if (againstEntry && phase === "CONTINUIDADE") status = "Possível continuidade contra a entrada.";
   if (againstEntry && ["SURF_FORTE", "SURF_EXTREMO", "RISCO_QUEBRA", "VIRADA_OUTRO_LADO", "POS_MANIPULACAO"].includes(phase)) {
-    status = "Possivel virada contra a entrada.";
+    status = "Possível virada contra a entrada.";
   }
-  if (phase === "SEM_RISCO" || surfSide === "NONE") status = "Sem risco relevante ate G1.";
+  if (phase === "SEM_RISCO" || surfSide === "NONE") status = "Sem risco relevante até G1.";
 
   return {
     oppositeRisk: risk,

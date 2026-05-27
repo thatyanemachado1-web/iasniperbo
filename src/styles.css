@@ -254,6 +254,56 @@
   50% { opacity: 1; }
 }
 
+@keyframes neural-brain {
+  0%, 100% {
+    filter: drop-shadow(0 0 6px color-mix(in oklab, var(--neon-cyan) 55%, transparent));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 14px color-mix(in oklab, var(--neon-cyan) 90%, transparent));
+    transform: scale(1.06);
+  }
+}
+.animate-neural-brain { animation: neural-brain 2.4s ease-in-out infinite; }
+
+@keyframes neural-dot {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
+.animate-neural-dot { animation: neural-dot 1.15s ease-in-out infinite; }
+
+@keyframes neural-card-glow {
+  0%, 100% {
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, white 7%, transparent),
+      0 0 26px -15px color-mix(in oklab, var(--neon-cyan) 70%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, white 10%, transparent),
+      0 0 34px -13px color-mix(in oklab, var(--neon-purple) 70%, transparent);
+  }
+}
+.neural-mini-card { animation: neural-card-glow 3.4s ease-in-out infinite; }
+
+.neural-mini-grid {
+  background-image:
+    radial-gradient(circle at 18% 28%, color-mix(in oklab, var(--neon-cyan) 48%, transparent) 0 1px, transparent 2px),
+    radial-gradient(circle at 78% 62%, color-mix(in oklab, var(--neon-purple) 38%, transparent) 0 1px, transparent 2px),
+    linear-gradient(145deg, transparent 0 40%, color-mix(in oklab, var(--neon-cyan) 12%, transparent) 40% 41%, transparent 42%),
+    linear-gradient(32deg, transparent 0 54%, color-mix(in oklab, var(--neon-purple) 12%, transparent) 54% 55%, transparent 56%);
+}
+
+@keyframes neural-shimmer {
+  0% { transform: translateX(-100%); opacity: 0; }
+  35% { opacity: 1; }
+  100% { transform: translateX(100%); opacity: 0; }
+}
+.neural-mini-shimmer {
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--neon-cyan) 85%, transparent), transparent);
+  animation: neural-shimmer 2.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-brain-pulse, .animate-orbit-particle, .animate-base-pulse, .holo-scan, .scan-sweep { animation: none !important; }
+  .animate-brain-pulse, .animate-orbit-particle, .animate-base-pulse, .holo-scan, .scan-sweep, .animate-neural-brain, .animate-neural-dot, .neural-mini-card, .neural-mini-shimmer { animation: none !important; }
 }

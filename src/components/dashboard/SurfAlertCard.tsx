@@ -42,7 +42,7 @@ export function SurfAlertCard({ alert, locked }: { alert: SurfAlert; locked?: bo
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <Metric icon={<Activity className="size-3.5" />} label="Forca" value={`${confidence}%`} tone={strengthBand.tone} />
+            <Metric icon={<Activity className="size-3.5" />} label="Força" value={`${confidence}%`} tone={strengthBand.tone} />
             <Metric icon={<Gauge className="size-3.5" />} label="Risco quebra" value={`${breakRisk}%`} tone={riskBand.tone} />
             <Metric label="Casas" value={`${alert.stretched_count}`} />
             <Metric label="Janela" value={alert.surf_prediction_window ? `${alert.surf_prediction_window}` : "-"} />
@@ -78,13 +78,13 @@ export function SurfAlertCard({ alert, locked }: { alert: SurfAlert; locked?: bo
       </div>
 
       <div className="mt-3 text-[11px] text-muted-foreground">
-        Aviso paralelo: nao bloqueia e nao substitui Banker/Player.
+        Aviso paralelo: não bloqueia e não substitui Banker/Player.
       </div>
 
       {locked && (
         <PremiumLock
           title="Surf Analyzer Premium"
-          description="Leitura de surf e risco contrario em tempo real bloqueados"
+          description="Leitura de surf e risco contrário em tempo real bloqueados"
         />
       )}
     </GlassCard>

@@ -6,6 +6,7 @@ import { BrainAssistantCard } from "@/components/dashboard/BrainAssistantCard";
 import { SignalCard } from "@/components/dashboard/SignalCard";
 import { TieAlertCard } from "@/components/dashboard/TieAlertCard";
 import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
+import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
 import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
 import { ScoreboardCard } from "@/components/dashboard/ScoreboardCard";
 import { RoadmapDots } from "@/components/dashboard/RoadmapDots";
@@ -43,14 +44,14 @@ function DashboardPage() {
     tie: calculateTieFrequency(d.rounds),
     alt: calculateAlternationRate(d.rounds),
   };
-  const dataModeLabel = mode === "live" ? "Dados em tempo real" : mode === "connecting" ? "Conectando API" : "Modo demonstracao";
+  const dataModeLabel = mode === "live" ? "Dados em tempo real" : mode === "connecting" ? "Conectando API" : "Modo demonstração";
   const dataModeTone = mode === "live" ? "green" : mode === "connecting" ? "blue" : "amber";
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-xs text-muted-foreground">Ola,</div>
+          <div className="text-xs text-muted-foreground">Olá,</div>
           <div className="text-lg font-bold">
             {d.user.name} <span className="text-muted-foreground font-normal text-sm">- painel operacional</span>
           </div>
@@ -66,17 +67,18 @@ function DashboardPage() {
       <div className="rounded-2xl border border-neon-cyan/20 bg-secondary/20 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
         <div className="inline-flex items-center gap-2 text-xs font-semibold text-neon-cyan">
           <Activity className="size-4" />
-          Nucleo operacional
+          Núcleo operacional
         </div>
         <div className="flex flex-wrap gap-2">
           <AppBadge tone={dataModeTone} pulse={mode !== "mock"}>{dataModeLabel}</AppBadge>
           <AppBadge tone="blue">Entrada em prioridade</AppBadge>
+          <ModuleToggleStrip toggles={d.moduleToggles} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-4">
         <div className="space-y-4">
-          <SignalCard signal={d.currentSignal} surfSummary={surfSummary} tieAlert={d.currentTieAlert} priority />
+          <SignalCard signal={d.currentSignal} neuralReading={d.neuralReading} surfSummary={surfSummary} tieAlert={d.currentTieAlert} priority />
           {surfAlert && <SurfAlertCard alert={surfAlert} />}
         </div>
 
@@ -92,8 +94,8 @@ function DashboardPage() {
 
           <GlassCard>
             <SectionTitle
-              title="Analise estatistica da mesa"
-              subtitle="Pressao estatistica calculada pelas ultimas rodadas."
+              title="Análise estatística da mesa"
+              subtitle="Pressão estatística calculada pelas últimas rodadas."
               right={<AppBadge tone={dataModeTone} pulse={mode !== "mock"}>{dataModeLabel}</AppBadge>}
             />
             <PressureChart data={d.pressureSeries} />
@@ -103,23 +105,23 @@ function DashboardPage() {
               <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-tie" /> Tie Pressure</span>
             </div>
             <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-2 text-[11px]">
-              <Metric label="Pressao B" value={`${stats.banker.toFixed(0)}%`} tone="text-banker" />
-              <Metric label="Pressao P" value={`${stats.player.toFixed(0)}%`} tone="text-player" />
-              <Metric label="Pressao T" value={`${stats.tie.toFixed(0)}%`} tone="text-tie" />
-              <Metric label="Sequencia" value={`${streak.side ?? "-"} x${streak.count}`} />
-              <Metric label="Alternancia" value={`${stats.alt.toFixed(0)}%`} />
-              <Metric label="Padrao" value="Observacao" />
+              <Metric label="Pressão B" value={`${stats.banker.toFixed(0)}%`} tone="text-banker" />
+              <Metric label="Pressão P" value={`${stats.player.toFixed(0)}%`} tone="text-player" />
+              <Metric label="Pressão T" value={`${stats.tie.toFixed(0)}%`} tone="text-tie" />
+              <Metric label="Sequência" value={`${streak.side ?? "-"} x${streak.count}`} />
+              <Metric label="Alternância" value={`${stats.alt.toFixed(0)}%`} />
+              <Metric label="Padrão" value="Observação" />
             </div>
           </GlassCard>
 
           <GlassCard>
             <SectionTitle
               title="Bolinhas Bac Bo"
-              right={<AppBadge tone="blue">Ultimas 30 rodadas</AppBadge>}
+              right={<AppBadge tone="blue">Últimas 30 rodadas</AppBadge>}
             />
             <RoadmapDots rounds={d.rounds} compact showScore />
             <Link to="/app" className="mt-3 inline-flex items-center gap-1 text-xs text-neon-cyan hover:text-neon-blue">
-              Ver historico completo <ChevronRight className="size-3" />
+              Ver histórico completo <ChevronRight className="size-3" />
             </Link>
           </GlassCard>
         </div>
@@ -148,7 +150,7 @@ function DashboardPage() {
               { label: "Expirados", value: d.tieAlertScoreboard.expired, tone: "var(--muted-foreground)" },
               { label: "Total", value: d.tieAlertScoreboard.totalAlerts },
             ]}
-            note="Expiracao nao e RED"
+            note="Expiração não é RED"
           />
 
           <ScoreboardCard
