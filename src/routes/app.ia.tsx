@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { BrainAI } from "@/components/brand/BrainAI";
+import { NeuralLines } from "@/components/brand/NeuralLines";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { Send, Mic } from "lucide-react";
 import { useState } from "react";
@@ -96,10 +97,13 @@ function IAPage() {
         </div>
       </GlassCard>
 
-      <GlassCard className="hidden lg:flex flex-col items-center text-center">
-        <BrainAI size={140} speaking />
-        <div className="mt-3 text-sm">Estou acompanhando a mesa em tempo real.</div>
-        <div className="mt-1 text-[11px] text-muted-foreground">
+      <GlassCard className="relative hidden lg:flex flex-col items-center text-center overflow-hidden">
+        <NeuralLines cx={50} cy={32} count={12} opacity={0.5} reach={1.15} />
+        <div className="relative">
+          <BrainAI size={140} speaking />
+        </div>
+        <div className="relative mt-3 text-sm">Estou acompanhando a mesa em tempo real.</div>
+        <div className="relative mt-1 text-[11px] text-muted-foreground">
           Toque em uma pergunta rápida ou descreva sua dúvida.
         </div>
       </GlassCard>
