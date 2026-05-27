@@ -249,6 +249,11 @@
 }
 .animate-orbit-particle { animation: orbit-particle 9s linear infinite; }
 
+@keyframes nl-line-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-brain-pulse, .animate-orbit-particle, .animate-base-pulse, .holo-scan, .scan-sweep { animation: none !important; }
 }

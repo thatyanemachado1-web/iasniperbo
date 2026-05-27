@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { BrainAI } from "@/components/brand/BrainAI";
+import { NeuralLines } from "@/components/brand/NeuralLines";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { Mic, Volume2, Gauge } from "lucide-react";
@@ -13,8 +14,9 @@ export const Route = createFileRoute("/app/voz")({
 function VozPage() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <GlassCard className="relative min-h-[420px] flex flex-col items-center justify-center text-center">
-        <AppBadge tone="purple" pulse className="absolute top-3 left-3">Narrador IA</AppBadge>
+      <GlassCard className="relative min-h-[420px] flex flex-col items-center justify-center text-center overflow-hidden">
+        <NeuralLines cx={50} cy={42} count={14} opacity={0.55} reach={1.15} />
+        <AppBadge tone="purple" pulse className="absolute top-3 left-3 z-10">Narrador IA</AppBadge>
         <div className="relative">
           <BrainAI size={180} speaking />
         </div>
