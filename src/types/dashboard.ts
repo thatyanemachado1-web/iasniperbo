@@ -9,14 +9,24 @@ export interface Round {
 }
 
 export type SignalSide = "BANKER" | "PLAYER";
-export type SignalStatus = "pending" | "green" | "green_g1" | "red";
+export type CurrentSignalSide = SignalSide | "TIE" | "NONE";
+export type SignalStatus = "waiting" | "pending" | "g1" | "green" | "green_g1" | "red" | "tie_watch";
+
+export interface LastSignalResult {
+  id: string;
+  side: SignalSide;
+  status: "green" | "green_g1" | "red";
+  protection: string;
+  finishedAt?: string;
+}
 
 export interface MainSignal {
   id: string;
-  side: SignalSide;
+  side: CurrentSignalSide;
   status: SignalStatus;
-  protection: "G0" | "G1";
+  protection: string;
   strength: number; // 0-100
+  lastResult?: LastSignalResult | null;
 }
 
 export type SurfPhase =
