@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings } from "lucide-react";
+import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { MOCK_MODE } from "@/data/mockDashboardData";
@@ -9,6 +9,7 @@ const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/ia", label: "Assistente IA", icon: Brain },
   { to: "/app/voz", label: "Voz", icon: Mic },
+  { to: "/app/admin", label: "Admin", icon: ShieldCheck },
   { to: "/app/planos", label: "Planos", icon: Crown },
   { to: "/app/conta", label: "Conta", icon: User },
 ] as const;
@@ -80,7 +81,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Bottom nav mobile */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 glass-strong border-t border-border/60">
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-6">
           {navItems.map((it) => {
             const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
             return (
