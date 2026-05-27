@@ -7,8 +7,14 @@ function configuredDashboardUrl() {
   if (directUrl) return directUrl;
 
   const apiBase = import.meta.env.VITE_SNIPER_API_URL as string | undefined;
-  if (!apiBase) return "";
-  return `${apiBase.replace(/\/+$/, "")}/dashboard`;
+  if (apiBase) return `${apiBase.replace(/\/+$/, "")}/dashboard`;
+
+  if (typeof window !== "undefined") {
+    const savedAdminApi = window.localStorage.getItem("sniper_admin_api_url");
+    if (savedAdminApi) return `${savedAdminApi.replace(/\/+$/, "")}/dashboard`;
+  }
+
+  return "http://127.0.0.1:8787/dashboard";
 }
 
 async function fetchDashboardData(): Promise<DashboardData> {
@@ -37,7 +43,7 @@ export function useDashboardData() {
 
   return {
     data: query.data ?? mockDashboardData,
-    mode: !dashboardUrl ? "mock" : query.isError ? "fallback" : query.isFetching ? "connecting" : "live",
+    mode: !dashboardUrl ? "mock" : query.isError ? "fallback" : query.isLoading ? "connecting" : "live",
     error: query.error,
   } as const;
 }
