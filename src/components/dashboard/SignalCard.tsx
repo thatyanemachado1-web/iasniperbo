@@ -3,7 +3,7 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import type { MainSignal, SurfEntrySummary } from "@/types/dashboard";
-import { Radio, ShieldCheck, Target, Zap } from "lucide-react";
+import { CheckCircle2, Clock3, Radio, ShieldCheck, Target, Zap } from "lucide-react";
 
 export function SignalCard({
   signal,
@@ -16,8 +16,18 @@ export function SignalCard({
   locked?: boolean;
   priority?: boolean;
 }) {
-  const sideColor = signal.side === "BANKER" ? "text-banker" : "text-player";
-  const beamColor = signal.side === "BANKER" ? "from-banker/40" : "from-player/40";
+  const isBanker = signal.side === "BANKER";
+  const isPlayer = signal.side === "PLAYER";
+  const isTieWatch = signal.status === "tie_watch";
+  const isWaiting = signal.status === "waiting";
+  const sideColor = isBanker ? "text-banker" : isPlayer ? "text-player" : isTieWatch ? "text-tie" : "text-muted-foreground";
+  const beamColor = isBanker ? "from-banker/40" : isPlayer ? "from-player/40" : isTieWatch ? "from-tie/35" : "from-neon-cyan/15";
+  const displaySide = isWaiting ? "AGUARDAR ENTRADA" : isTieWatch ? "POSSIVEL EMPATE" : signal.side;
+  const displaySideClass = isWaiting || isTieWatch ? "text-3xl" : "text-5xl";
+  const sideCaption = isWaiting ? "Sem entrada principal" : isTieWatch ? "Tie Alert em paralelo" : "Lado da entrada";
+  const status = signalStatus(signal);
+  const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
+  const StatusIcon = status.Icon;
   const riskTone = surfSummary?.oppositeRiskLevel === "ALTO"
     ? "text-destructive"
     : surfSummary?.oppositeRiskLevel === "MEDIO"
@@ -30,23 +40,23 @@ export function SignalCard({
       <div className="absolute inset-0 scan-grid opacity-10" />
       <div className="absolute -left-12 -top-16 size-44 rounded-full bg-neon-blue/10 blur-3xl" />
       <SectionTitle
-        title="Entrada confirmada"
-        right={<AppBadge tone="amber" pulse><Radio className="size-3" /> Sinal ativo</AppBadge>}
+        title={isWaiting ? "Aguardar entrada" : isTieWatch ? "Possivel empate" : "Entrada confirmada"}
+        right={<AppBadge tone={status.badgeTone} pulse={status.pulse}><StatusIcon className="size-3" /> {status.badge}</AppBadge>}
       />
       <div className="relative flex items-center justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-neon-cyan/25 bg-background/35 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan">
             <Zap className="size-3" />
-            Prioridade operacional
+            {isWaiting ? "Monitorando mesa" : isTieWatch ? "Aviso paralelo" : "Prioridade operacional"}
           </div>
-          <div className={`text-5xl sm:text-6xl font-extrabold tracking-tight ${sideColor}`}>
-            {signal.side}
+          <div className={`${displaySideClass} font-extrabold ${sideColor}`}>
+            {displaySide}
           </div>
-          <div className="mt-1 text-xs text-muted-foreground">Lado da entrada</div>
+          <div className="mt-1 text-xs text-muted-foreground">{sideCaption}</div>
         </div>
         <div className="text-right">
-          <div className="text-xs uppercase tracking-widest text-neon-cyan/80">Start</div>
-          <div className="text-lg font-semibold">Sinal liberado</div>
+          <div className="text-xs uppercase tracking-widest text-neon-cyan/80">{status.kicker}</div>
+          <div className={`text-lg font-semibold ${status.valueClass}`}>{status.value}</div>
         </div>
       </div>
       <div className="relative mt-4 grid grid-cols-3 gap-2 text-xs">
@@ -60,9 +70,23 @@ export function SignalCard({
         </div>
         <div className="rounded-lg bg-secondary/40 p-2">
           <div className="text-muted-foreground">Status</div>
-          <div className="font-semibold text-warning">Pendente</div>
+          <div className={`font-semibold ${status.valueClass}`}>{status.value}</div>
         </div>
       </div>
+      {lastResult && (
+        <div className="relative mt-3 rounded-lg border border-success/20 bg-secondary/35 p-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex items-center gap-1.5 font-semibold text-muted-foreground">
+              <CheckCircle2 className="size-3.5" />
+              Ultima entrada
+            </div>
+            <div className={`font-extrabold ${lastResult.className}`}>{lastResult.label}</div>
+          </div>
+          <div className="mt-1 text-muted-foreground">
+            {lastResult.side} com protecao {lastResult.protection}
+          </div>
+        </div>
+      )}
       {surfSummary && (
         <div className="relative mt-3 rounded-lg border border-neon-cyan/20 bg-secondary/35 p-3 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -86,4 +110,88 @@ export function SignalCard({
       )}
     </GlassCard>
   );
+}
+
+function signalStatus(signal: MainSignal) {
+  if (signal.status === "waiting") {
+    return {
+      badge: "Aguardando",
+      badgeTone: "muted" as const,
+      pulse: false,
+      kicker: "Standby",
+      value: "Aguardar entrada",
+      valueClass: "text-muted-foreground",
+      Icon: Clock3,
+    };
+  }
+  if (signal.status === "tie_watch") {
+    return {
+      badge: "Tie ativo",
+      badgeTone: "purple" as const,
+      pulse: true,
+      kicker: "4 casas",
+      value: "Possivel EMPATE",
+      valueClass: "text-tie",
+      Icon: Radio,
+    };
+  }
+  if (signal.status === "g1") {
+    return {
+      badge: "G1 ativo",
+      badgeTone: "amber" as const,
+      pulse: true,
+      kicker: "Protecao",
+      value: "Aguardando G1",
+      valueClass: "text-warning",
+      Icon: Radio,
+    };
+  }
+  if (signal.status === "green" || signal.status === "green_g1") {
+    return {
+      badge: "Green",
+      badgeTone: "green" as const,
+      pulse: false,
+      kicker: "Resultado",
+      value: signal.status === "green_g1" ? "GREEN G1" : "GREEN",
+      valueClass: "text-success",
+      Icon: CheckCircle2,
+    };
+  }
+  if (signal.status === "red") {
+    return {
+      badge: "Red",
+      badgeTone: "red" as const,
+      pulse: false,
+      kicker: "Resultado",
+      value: "RED",
+      valueClass: "text-destructive",
+      Icon: Radio,
+    };
+  }
+  return {
+    badge: "Sinal ativo",
+    badgeTone: "amber" as const,
+    pulse: true,
+    kicker: "Start",
+    value: "Sinal liberado",
+    valueClass: "text-warning",
+    Icon: Radio,
+  };
+}
+
+function lastSignalResult(result: NonNullable<MainSignal["lastResult"]>) {
+  if (result.status === "red") {
+    return {
+      label: "RED",
+      className: "text-destructive",
+      side: result.side,
+      protection: result.protection,
+    };
+  }
+  return {
+    label: result.status === "green_g1" ? "GREEN G1" : "GREEN",
+    className: "text-success",
+    side: result.side,
+    protection: result.protection,
+  };
 }

@@ -31,7 +31,9 @@ export const Route = createFileRoute("/app/")({
 function DashboardPage() {
   const { data: d, mode } = useDashboardData();
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
-  const surfSummary = buildSurfEntrySummary(surfAlert, d.currentSignal.side);
+  const surfSummary = d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER"
+    ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
+    : undefined;
   const lastRound = d.rounds[d.rounds.length - 1];
   const streak = calculateCurrentStreak(d.rounds);
   const stats = {
