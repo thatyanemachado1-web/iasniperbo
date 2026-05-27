@@ -71,7 +71,7 @@ export type TieAlertStatus = "active" | "green" | "expired";
 
 export interface TieAlert {
   id: string;
-  level: "Baixo" | "Médio" | "Alto";
+  level: "Baixo" | "Medio" | "Médio" | "Alto";
   confidence: number; // 0-100
   validityRounds: number;
   status: TieAlertStatus;
