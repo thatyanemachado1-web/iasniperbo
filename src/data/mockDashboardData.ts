@@ -1,8 +1,6 @@
 import type { DashboardData, Round, MainSignal, TieAlert } from "@/types/dashboard";
 import {
   buildPressureSeries,
-  calculateMainAssertiveness,
-  calculateTieAlertAssertiveness,
 } from "@/utils/statistics";
 
 export const MOCK_MODE = true;
@@ -99,7 +97,10 @@ export const mockDashboardData: DashboardData = {
     validade: "G1",
     alertas: 177,
     acertos: 77,
+    greenSemGale: 52,
+    greenG1: 25,
     erros: 100,
+    reds: 100,
     assertividade: 43.5,
   },
   moduleToggles: {
@@ -134,16 +135,33 @@ export const mockDashboardData: DashboardData = {
     confidence: 74,
     debug: "alternancia=53% | streak=B x2 | tiePressure=20%",
   },
-  mainScoreboard: calculateMainAssertiveness(signals),
-  tieAlertScoreboard: calculateTieAlertAssertiveness(tieAlerts),
+  mainScoreboard: {
+    greens: 18,
+    greensG1: 5,
+    reds: 3,
+    totalGreens: 23,
+    totalEntries: 26,
+    assertiveness: 88.5,
+  },
+  tieAlertScoreboard: {
+    greenTieAlerts: 16,
+    expired: 41,
+    totalAlerts: 57,
+    assertiveness: 28.1,
+  },
   surfAnalyzerScoreboard: {
-    totalAlerts: 14,
-    hits: 9,
-    fails: 3,
-    expired: 2,
+    totalAlerts: 30,
+    hits: 22,
+    fails: 8,
+    expired: 0,
+    greenSemGale: 15,
+    greenG1: 7,
+    reds: 8,
+    blocked: 4,
+    noRisk: 12,
     bankerHits: 5,
     playerHits: 4,
-    assertiveness: 75,
+    assertiveness: 73.3,
     maxBankerSurfHit: 7,
     maxPlayerSurfHit: 6,
     maxBreakDetected: 82,

@@ -39,7 +39,10 @@ export interface NeuralReading {
   validade?: string | null;
   alertas?: number | null;
   acertos?: number | null;
+  greenSemGale?: number | null;
+  greenG1?: number | null;
   erros?: number | null;
+  reds?: number | null;
   assertividade?: number | null;
 }
 
@@ -134,6 +137,11 @@ export interface SurfAnalyzerScoreboard {
   hits: number;
   fails: number;
   expired: number;
+  greenSemGale?: number;
+  greenG1?: number;
+  reds?: number;
+  blocked?: number;
+  noRisk?: number;
   bankerHits: number;
   playerHits: number;
   assertiveness: number;
@@ -142,6 +150,40 @@ export interface SurfAnalyzerScoreboard {
   maxBreakDetected: number;
   maxRetakeDetected: number;
   currentHitStreak: number;
+}
+
+export interface MainResult {
+  greenSemGale: number;
+  greenG1: number;
+  reds: number;
+  assertiveness: number;
+}
+
+export interface TieResult {
+  greens: number;
+  expired: number;
+  total: number;
+  assertiveness: number;
+}
+
+export interface NeuralResult {
+  totalAlerts: number;
+  greens: number;
+  greenSemGale: number;
+  greenG1: number;
+  reds: number;
+  assertiveness: number;
+}
+
+export interface SurfResult {
+  totalAlerts: number;
+  greens: number;
+  greenSemGale: number;
+  greenG1: number;
+  reds: number;
+  blocked: number;
+  noRisk: number;
+  assertiveness: number;
 }
 
 export interface PressurePoint {

@@ -7,6 +7,7 @@ import { SignalCard } from "@/components/dashboard/SignalCard";
 import { TieAlertCard } from "@/components/dashboard/TieAlertCard";
 import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
 import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
+import { ModuleResultTabs } from "@/components/dashboard/ModuleResultTabs";
 import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
 import { ScoreboardCard } from "@/components/dashboard/ScoreboardCard";
 import { RoadmapDots } from "@/components/dashboard/RoadmapDots";
@@ -24,6 +25,12 @@ import {
   calculateTieFrequency,
 } from "@/utils/statistics";
 import { buildSurfEntrySummary } from "@/utils/surf";
+import {
+  calculateMainResult,
+  calculateNeuralResult,
+  calculateSurfResult,
+  calculateTieResult,
+} from "@/utils/moduleResults";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
@@ -33,6 +40,10 @@ function DashboardPage() {
   const { data: d, mode } = useDashboardData();
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;
+  const mainResult = calculateMainResult(d.mainScoreboard);
+  const tieResult = calculateTieResult(d.tieAlertScoreboard);
+  const neuralResult = calculateNeuralResult(d.neuralReading);
+  const surfResult = calculateSurfResult(surfBoard);
   const surfSummary = d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER"
     ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
     : undefined;
@@ -79,12 +90,24 @@ function DashboardPage() {
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-4">
         <div className="space-y-4">
           <SignalCard signal={d.currentSignal} neuralReading={d.neuralReading} surfSummary={surfSummary} tieAlert={d.currentTieAlert} priority />
-          {surfAlert && <SurfAlertCard alert={surfAlert} />}
+          <div className="space-y-2">
+            <ModuleResultTabs moduleType="MAIN" data={mainResult} compact />
+            <ModuleResultTabs moduleType="NEURAL" data={neuralResult} compact />
+          </div>
+          {surfAlert && (
+            <div className="space-y-2">
+              <SurfAlertCard alert={surfAlert} />
+              <ModuleResultTabs moduleType="SURF" data={surfResult} compact />
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">
           <EngineDecisionCard decision={d.engineDecision} />
-          <TieAlertCard alert={d.currentTieAlert} />
+          <div className="space-y-2">
+            <TieAlertCard alert={d.currentTieAlert} />
+            <ModuleResultTabs moduleType="TIE" data={tieResult} compact />
+          </div>
         </div>
       </div>
 
