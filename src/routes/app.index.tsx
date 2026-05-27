@@ -31,6 +31,7 @@ export const Route = createFileRoute("/app/")({
 function DashboardPage() {
   const { data: d, mode } = useDashboardData();
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
+  const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;
   const surfSummary = d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER"
     ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
     : undefined;
@@ -148,6 +149,18 @@ function DashboardPage() {
               { label: "Total", value: d.tieAlertScoreboard.totalAlerts },
             ]}
             note="Expiracao nao e RED"
+          />
+
+          <ScoreboardCard
+            title="Placar Surf Analyzer"
+            assertiveness={surfBoard.assertiveness}
+            color="oklch(0.7 0.16 215)"
+            items={[
+              { label: "Acertos", value: surfBoard.hits, tone: "var(--success)" },
+              { label: "Erros", value: surfBoard.fails, tone: "var(--destructive)" },
+              { label: "Exp.", value: surfBoard.expired, tone: "var(--muted-foreground)" },
+            ]}
+            note={`B ${surfBoard.bankerHits} | P ${surfBoard.playerHits} | streak ${surfBoard.currentHitStreak}`}
           />
 
           <GlassCard className="border-gold/40">

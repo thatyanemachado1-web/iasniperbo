@@ -3,24 +3,28 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import type { SurfAlert } from "@/types/dashboard";
-import { clampPercent, surfRiskBand } from "@/utils/surf";
-import { Activity, AlertTriangle, Gauge, Waves } from "lucide-react";
+import { clampPercent, surfRiskBand, surfStrengthBand } from "@/utils/surf";
+import { Activity, AlertTriangle, Gauge, Target, Waves } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function SurfAlertCard({ alert, locked }: { alert: SurfAlert; locked?: boolean }) {
-  const risk = clampPercent(alert.surf_risk);
+  const breakRisk = clampPercent(alert.surf_break_risk ?? alert.surf_risk);
   const confidence = clampPercent(alert.surf_confidence);
-  const band = surfRiskBand(risk);
-  const borderTone = band.tone === "red" ? "border-destructive/35" : band.tone === "amber" ? "border-warning/35" : "border-neon-cyan/30";
+  const riskBand = surfRiskBand(breakRisk);
+  const strengthBand = surfStrengthBand(confidence);
+  const dominantSide = alert.surf_prediction_side && alert.surf_prediction_side !== "NONE"
+    ? alert.surf_prediction_side
+    : alert.surf_side;
+  const borderTone = strengthBand.tone === "red" ? "border-destructive/35" : strengthBand.tone === "amber" ? "border-warning/35" : "border-neon-cyan/30";
 
   return (
     <GlassCard className={`min-h-[220px] ${borderTone}`}>
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/70 to-transparent" />
       <div className="absolute -right-10 -top-10 size-32 rounded-full bg-neon-cyan/10 blur-2xl" />
       <SectionTitle
-        title="Surf Alert Analyzer"
+        title="Surf Analyzer"
         subtitle="Leitura paralela da fase da mesa."
-        right={<AppBadge tone={band.tone} pulse={alert.surf_alert}>{alert.surf_phase}</AppBadge>}
+        right={<AppBadge tone={strengthBand.tone} pulse={alert.surf_alert}>{alert.surf_status ?? alert.surf_phase}</AppBadge>}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-3">
@@ -30,27 +34,38 @@ export function SurfAlertCard({ alert, locked }: { alert: SurfAlert; locked?: bo
 
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <AppBadge tone={alert.surf_side === "BANKER" ? "red" : alert.surf_side === "PLAYER" ? "blue" : "muted"}>
-              {alert.surf_side === "NONE" ? "SEM LADO" : alert.surf_side}
+            <AppBadge tone={dominantSide === "BANKER" ? "red" : dominantSide === "PLAYER" ? "blue" : "muted"}>
+              {dominantSide === "NONE" ? "SEM LADO" : `RESPEITA ${dominantSide}`}
             </AppBadge>
-            <AppBadge tone={band.tone}>{band.label}</AppBadge>
+            <AppBadge tone={strengthBand.tone}>{strengthBand.label}</AppBadge>
+            <AppBadge tone={riskBand.tone}>QUEBRA {riskBand.label}</AppBadge>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <Metric icon={<Gauge className="size-3.5" />} label="Risco" value={`${risk}%`} tone={band.tone} />
-            <Metric icon={<Activity className="size-3.5" />} label="Confianca" value={`${confidence}%`} tone="blue" />
+            <Metric icon={<Activity className="size-3.5" />} label="Forca" value={`${confidence}%`} tone={strengthBand.tone} />
+            <Metric icon={<Gauge className="size-3.5" />} label="Risco quebra" value={`${breakRisk}%`} tone={riskBand.tone} />
             <Metric label="Casas" value={`${alert.stretched_count}`} />
-            <Metric label="Correcoes" value={`${alert.correction_count}`} />
+            <Metric label="Janela" value={alert.surf_prediction_window ? `${alert.surf_prediction_window}` : "-"} />
           </div>
         </div>
       </div>
 
       <div className="mt-3 rounded-xl bg-secondary/35 p-3 text-xs">
         <div className="flex items-start gap-2">
+          <Target className="mt-0.5 size-3.5 text-neon-cyan" />
+          <div>
+            <div className="font-semibold text-foreground">{strengthBand.status}</div>
+            <div className="mt-1 text-muted-foreground">{alert.reason}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-2 rounded-xl bg-secondary/30 p-3 text-xs">
+        <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 size-3.5 text-warning" />
           <div>
-            <div className="font-semibold text-foreground">{band.status}</div>
-            <div className="mt-1 text-muted-foreground">{alert.reason}</div>
+            <div className="font-semibold text-foreground">Risco de quebra: {riskBand.label}</div>
+            <div className="mt-1 text-muted-foreground">{riskBand.status}</div>
           </div>
         </div>
       </div>
@@ -68,7 +83,7 @@ export function SurfAlertCard({ alert, locked }: { alert: SurfAlert; locked?: bo
 
       {locked && (
         <PremiumLock
-          title="Surf Alert Premium"
+          title="Surf Analyzer Premium"
           description="Leitura de surf e risco contrario em tempo real bloqueados"
         />
       )}

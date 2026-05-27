@@ -8,13 +8,20 @@ export function clampPercent(value: number) {
 
 export function surfRiskBand(risk: number): { label: string; tone: BadgeTone; status: string } {
   const value = clampPercent(risk);
-  if (value <= 15) return { label: "SEM RISCO", tone: "green", status: "Mesa limpa contra reversao." };
-  if (value <= 30) return { label: "RISCO BAIXO", tone: "green", status: "Pequenas correcoes possiveis." };
-  if (value <= 45) return { label: "BAIXO/MEDIO", tone: "amber", status: "Pre-surf contrario com atencao leve." };
-  if (value <= 60) return { label: "RISCO MEDIO", tone: "amber", status: "Roads comecam a divergir." };
-  if (value <= 75) return { label: "RISCO ALTO", tone: "red", status: "Surf contrario pode nascer." };
-  if (value <= 90) return { label: "RISCO MUITO ALTO", tone: "red", status: "Possivel quebra de surf." };
-  return { label: "QUEBRA IMINENTE", tone: "red", status: "Alta chance de virada ou correcao forte." };
+  if (value <= 25) return { label: "BAIXO", tone: "green", status: "Quebra pouco provavel agora." };
+  if (value <= 45) return { label: "OBSERVACAO", tone: "amber", status: "Correcoes curtas possiveis." };
+  if (value <= 65) return { label: "MEDIO", tone: "amber", status: "Roads pedem cautela tecnica." };
+  if (value <= 85) return { label: "ALTO", tone: "red", status: "Quebra ou virada em monitoramento." };
+  return { label: "MUITO ALTO", tone: "red", status: "Estrutura muito pressionada para quebra." };
+}
+
+export function surfStrengthBand(confidence: number): { label: string; tone: BadgeTone; status: string } {
+  const value = clampPercent(confidence);
+  if (value <= 25) return { label: "SEM RISCO", tone: "green", status: "Sem continuidade dominante." };
+  if (value <= 45) return { label: "OBSERVACAO", tone: "amber", status: "Pre-surf ou leitura inicial." };
+  if (value <= 65) return { label: "CONTEXTO FORTE", tone: "amber", status: "Continuidade ganhando forma." };
+  if (value <= 85) return { label: "SURF FORTE", tone: "red", status: "Surf respeitando lado dominante." };
+  return { label: "SURF EXTREMO", tone: "red", status: "Surf muito esticado e dominante." };
 }
 
 export function surfOppositeRiskLevel(risk: number): SurfEntrySummary["oppositeRiskLevel"] {
@@ -41,13 +48,17 @@ export function buildSurfEntrySummary(
   const phase = alert.surf_phase;
   const alignedWithEntry = surfSide === entrySide;
   const againstEntry = surfSide === oppositeSide;
-  let risk = againstEntry ? alert.surf_risk : Math.min(alert.surf_risk, 30);
+  const breakRisk = alert.surf_break_risk ?? alert.surf_risk;
+  let risk = againstEntry ? breakRisk : Math.min(breakRisk, 30);
 
   if (againstEntry && phase === "PRE_SURF") risk = Math.max(risk, 46);
-  if (againstEntry && ["SURF_ATIVO", "SURF_ESTICADO", "VIRADA_OUTRO_LADO"].includes(phase)) {
+  if (againstEntry && ["CONTINUIDADE", "SURF_FORTE", "SURF_EXTREMO", "VIRADA_OUTRO_LADO", "POS_MANIPULACAO"].includes(phase)) {
     risk = Math.max(risk, 61);
   }
-  if (alignedWithEntry && ["QUEBRA_SURF", "RETOMADA_MESMA_COR"].includes(phase)) {
+  if (againstEntry && ["EXAUSTAO", "RISCO_QUEBRA"].includes(phase)) {
+    risk = Math.max(risk, 61);
+  }
+  if (alignedWithEntry && ["QUEBRA_SURF", "RETOMADA_MESMA_COR", "CONTINUIDADE", "SURF_FORTE"].includes(phase)) {
     risk = Math.min(risk, 25);
   }
 
@@ -56,9 +67,9 @@ export function buildSurfEntrySummary(
   let status = "Sem risco relevante ate G1.";
   if (alignedWithEntry) status = "Surf alinhado com a entrada.";
   if (againstEntry && phase === "PRE_SURF") status = "Atencao: pre-surf contra a entrada.";
-  if (againstEntry && phase === "SURF_ATIVO") status = "Risco de surf ativo contra a entrada.";
-  if (againstEntry && ["SURF_ESTICADO", "RISCO_QUEBRA", "VIRADA_OUTRO_LADO"].includes(phase)) {
-    status = "Risco de surf virar contra a entrada.";
+  if (againstEntry && phase === "CONTINUIDADE") status = "Possivel continuidade contra a entrada.";
+  if (againstEntry && ["SURF_FORTE", "SURF_EXTREMO", "RISCO_QUEBRA", "VIRADA_OUTRO_LADO", "POS_MANIPULACAO"].includes(phase)) {
+    status = "Possivel virada contra a entrada.";
   }
   if (phase === "SEM_RISCO" || surfSide === "NONE") status = "Sem risco relevante ate G1.";
 
