@@ -16,6 +16,7 @@ import { Route as AppVozRouteImport } from './routes/app.voz'
 import { Route as AppPlanosRouteImport } from './routes/app.planos'
 import { Route as AppIaRouteImport } from './routes/app.ia'
 import { Route as AppContaRouteImport } from './routes/app.conta'
+import { Route as AppAdminRouteImport } from './routes/app.admin'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -52,10 +53,16 @@ const AppContaRoute = AppContaRouteImport.update({
   path: '/conta',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/app/admin': typeof AppAdminRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
   '/app/planos': typeof AppPlanosRoute
@@ -64,6 +71,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/app/admin': typeof AppAdminRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
   '/app/planos': typeof AppPlanosRoute
@@ -74,6 +82,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/app/admin': typeof AppAdminRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
   '/app/planos': typeof AppPlanosRoute
@@ -85,17 +94,26 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/app/admin'
     | '/app/conta'
     | '/app/ia'
     | '/app/planos'
     | '/app/voz'
     | '/app/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/app/conta' | '/app/ia' | '/app/planos' | '/app/voz' | '/app'
+  to:
+    | '/'
+    | '/app/admin'
+    | '/app/conta'
+    | '/app/ia'
+    | '/app/planos'
+    | '/app/voz'
+    | '/app'
   id:
     | '__root__'
     | '/'
     | '/app'
+    | '/app/admin'
     | '/app/conta'
     | '/app/ia'
     | '/app/planos'
@@ -159,10 +177,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppContaRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/admin': {
+      id: '/app/admin'
+      path: '/admin'
+      fullPath: '/app/admin'
+      preLoaderRoute: typeof AppAdminRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
+  AppAdminRoute: typeof AppAdminRoute
   AppContaRoute: typeof AppContaRoute
   AppIaRoute: typeof AppIaRoute
   AppPlanosRoute: typeof AppPlanosRoute
@@ -171,6 +197,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAdminRoute: AppAdminRoute,
   AppContaRoute: AppContaRoute,
   AppIaRoute: AppIaRoute,
   AppPlanosRoute: AppPlanosRoute,
