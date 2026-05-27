@@ -12,6 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as AppVozRouteImport } from './routes/app.voz'
+import { Route as AppPlanosRouteImport } from './routes/app.planos'
+import { Route as AppIaRouteImport } from './routes/app.ia'
+import { Route as AppContaRouteImport } from './routes/app.conta'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -28,28 +32,75 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppVozRoute = AppVozRouteImport.update({
+  id: '/voz',
+  path: '/voz',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPlanosRoute = AppPlanosRouteImport.update({
+  id: '/planos',
+  path: '/planos',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIaRoute = AppIaRouteImport.update({
+  id: '/ia',
+  path: '/ia',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppContaRoute = AppContaRouteImport.update({
+  id: '/conta',
+  path: '/conta',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/app/conta': typeof AppContaRoute
+  '/app/ia': typeof AppIaRoute
+  '/app/planos': typeof AppPlanosRoute
+  '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/app/conta': typeof AppContaRoute
+  '/app/ia': typeof AppIaRoute
+  '/app/planos': typeof AppPlanosRoute
+  '/app/voz': typeof AppVozRoute
   '/app': typeof AppIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/app/conta': typeof AppContaRoute
+  '/app/ia': typeof AppIaRoute
+  '/app/planos': typeof AppPlanosRoute
+  '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/app' | '/app/'
+  fullPaths:
+    | '/'
+    | '/app'
+    | '/app/conta'
+    | '/app/ia'
+    | '/app/planos'
+    | '/app/voz'
+    | '/app/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/app'
-  id: '__root__' | '/' | '/app' | '/app/'
+  to: '/' | '/app/conta' | '/app/ia' | '/app/planos' | '/app/voz' | '/app'
+  id:
+    | '__root__'
+    | '/'
+    | '/app'
+    | '/app/conta'
+    | '/app/ia'
+    | '/app/planos'
+    | '/app/voz'
+    | '/app/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -80,14 +131,50 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/voz': {
+      id: '/app/voz'
+      path: '/voz'
+      fullPath: '/app/voz'
+      preLoaderRoute: typeof AppVozRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/planos': {
+      id: '/app/planos'
+      path: '/planos'
+      fullPath: '/app/planos'
+      preLoaderRoute: typeof AppPlanosRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/ia': {
+      id: '/app/ia'
+      path: '/ia'
+      fullPath: '/app/ia'
+      preLoaderRoute: typeof AppIaRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/conta': {
+      id: '/app/conta'
+      path: '/conta'
+      fullPath: '/app/conta'
+      preLoaderRoute: typeof AppContaRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
+  AppContaRoute: typeof AppContaRoute
+  AppIaRoute: typeof AppIaRoute
+  AppPlanosRoute: typeof AppPlanosRoute
+  AppVozRoute: typeof AppVozRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppContaRoute: AppContaRoute,
+  AppIaRoute: AppIaRoute,
+  AppPlanosRoute: AppPlanosRoute,
+  AppVozRoute: AppVozRoute,
   AppIndexRoute: AppIndexRoute,
 }
 
