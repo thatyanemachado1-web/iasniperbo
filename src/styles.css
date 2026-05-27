@@ -201,3 +201,31 @@
   background-size: 200% 100%;
   animation: shine 3s linear infinite;
 }
+
+@keyframes float-particle {
+  0% { transform: translateY(0) translateX(0); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(-120vh) translateX(20px); opacity: 0; }
+}
+.particle {
+  position: absolute;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--neon-cyan) 80%, transparent);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--neon-blue) 80%, transparent);
+  animation: float-particle linear infinite;
+}
+
+@keyframes orbit-slow {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.animate-orbit-slow { animation: orbit-slow 28s linear infinite; }
+.animate-orbit-reverse { animation: orbit-slow 40s linear infinite reverse; }
+
+@keyframes sweep {
+  0% { transform: translateY(-100%); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+.scan-sweep { animation: sweep 6s ease-in-out infinite; }
