@@ -229,3 +229,26 @@
   100% { transform: translateY(100%); opacity: 0; }
 }
 .scan-sweep { animation: sweep 6s ease-in-out infinite; }
+
+@keyframes base-pulse {
+  0%, 100% { opacity: 0.6; transform: translateX(-50%) scaleX(1); }
+  50% { opacity: 1; transform: translateX(-50%) scaleX(1.1); }
+}
+.animate-base-pulse { animation: base-pulse 3s ease-in-out infinite; }
+
+@keyframes holo-scan {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 20px; }
+}
+.holo-scan { animation: holo-scan 2.5s linear infinite; }
+
+@keyframes orbit-particle {
+  from { transform: rotate(var(--angle)) translateX(var(--radius)) rotate(calc(-1 * var(--angle))); opacity: 0.7; }
+  50%  { opacity: 1; }
+  to   { transform: rotate(calc(var(--angle) + 360deg)) translateX(var(--radius)) rotate(calc(-1 * var(--angle) - 360deg)); opacity: 0.7; }
+}
+.animate-orbit-particle { animation: orbit-particle 9s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-brain-pulse, .animate-orbit-particle, .animate-base-pulse, .holo-scan, .scan-sweep { animation: none !important; }
+}
