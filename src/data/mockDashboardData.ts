@@ -91,6 +91,22 @@ export const mockDashboardData: DashboardData = {
     validityRounds: 4,
     status: "active",
   },
+  currentSurfAlert: {
+    surf_alert: true,
+    surf_phase: "SURF_ATIVO",
+    surf_side: "BANKER",
+    surf_risk: 18,
+    surf_confidence: 82,
+    stretched_count: 4,
+    correction_count: 1,
+    reason: "Surf Banker saudavel apos correcao curta. Risco contrario baixo.",
+    panels: {
+      big_road: "Continuidade Banker com coluna curta sustentada.",
+      big_eye_boy: "Tendencia saudavel, sem divergencia forte.",
+      small_road: "Organizacao favoravel e alternancia controlada.",
+      cockroach_pig: "Sem reversao tardia relevante no momento.",
+    },
+  },
   engineDecision: {
     state: "ATENCAO",
     reason: "Tie Alert ativo em paralelo. Nenhuma entrada principal confirmada.",

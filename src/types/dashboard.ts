@@ -19,6 +19,44 @@ export interface MainSignal {
   strength: number; // 0-100
 }
 
+export type SurfPhase =
+  | "SEM_RISCO"
+  | "PRE_SURF"
+  | "SURF_ATIVO"
+  | "SURF_ESTICADO"
+  | "RISCO_QUEBRA"
+  | "QUEBRA_SURF"
+  | "RETOMADA_MESMA_COR"
+  | "VIRADA_OUTRO_LADO"
+  | "POS_MANIPULACAO"
+  | "CORRECAO"
+  | "EXAUSTAO";
+
+export type SurfSide = SignalSide | "NONE";
+
+export interface SurfAlert {
+  surf_alert: boolean;
+  surf_phase: SurfPhase;
+  surf_side: SurfSide;
+  surf_risk: number; // 0-100
+  surf_confidence: number; // 0-100
+  stretched_count: number;
+  correction_count: number;
+  reason: string;
+  panels: {
+    big_road: string;
+    big_eye_boy: string;
+    small_road: string;
+    cockroach_pig: string;
+  };
+}
+
+export interface SurfEntrySummary {
+  oppositeRisk: number;
+  oppositeRiskLevel: "BAIXO" | "MEDIO" | "ALTO";
+  status: string;
+}
+
 export type TieAlertStatus = "active" | "green" | "expired";
 
 export interface TieAlert {
@@ -67,6 +105,7 @@ export interface DashboardData {
   rounds: Round[];
   currentSignal: MainSignal;
   currentTieAlert: TieAlert;
+  currentSurfAlert?: SurfAlert;
   engineDecision: EngineDecision;
   mainScoreboard: MainScoreboard;
   tieAlertScoreboard: TieAlertScoreboard;
