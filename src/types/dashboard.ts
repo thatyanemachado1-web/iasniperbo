@@ -32,23 +32,27 @@ export interface MainSignal {
 export type SurfPhase =
   | "SEM_RISCO"
   | "PRE_SURF"
-  | "SURF_ATIVO"
-  | "SURF_ESTICADO"
+  | "CONTINUIDADE"
+  | "SURF_FORTE"
+  | "SURF_EXTREMO"
+  | "EXAUSTAO"
   | "RISCO_QUEBRA"
   | "QUEBRA_SURF"
+  | "CORRECAO"
   | "RETOMADA_MESMA_COR"
   | "VIRADA_OUTRO_LADO"
-  | "POS_MANIPULACAO"
-  | "CORRECAO"
-  | "EXAUSTAO";
+  | "POS_MANIPULACAO";
 
 export type SurfSide = SignalSide | "NONE";
+export type SurfPredictionStatus = "ACTIVE" | "HIT" | "FAILED" | "EXPIRED";
 
 export interface SurfAlert {
   surf_alert: boolean;
   surf_phase: SurfPhase;
   surf_side: SurfSide;
+  surf_status?: string;
   surf_risk: number; // 0-100
+  surf_break_risk?: number; // 0-100
   surf_confidence: number; // 0-100
   stretched_count: number;
   correction_count: number;
@@ -59,6 +63,10 @@ export interface SurfAlert {
     small_road: string;
     cockroach_pig: string;
   };
+  surf_prediction_side?: SurfSide;
+  surf_prediction_status?: SurfPredictionStatus;
+  surf_prediction_confidence?: number;
+  surf_prediction_window?: number;
 }
 
 export interface SurfEntrySummary {
@@ -102,6 +110,21 @@ export interface TieAlertScoreboard {
   assertiveness: number;
 }
 
+export interface SurfAnalyzerScoreboard {
+  totalAlerts: number;
+  hits: number;
+  fails: number;
+  expired: number;
+  bankerHits: number;
+  playerHits: number;
+  assertiveness: number;
+  maxBankerSurfHit: number;
+  maxPlayerSurfHit: number;
+  maxBreakDetected: number;
+  maxRetakeDetected: number;
+  currentHitStreak: number;
+}
+
 export interface PressurePoint {
   index: number;
   banker: number;
@@ -119,5 +142,6 @@ export interface DashboardData {
   engineDecision: EngineDecision;
   mainScoreboard: MainScoreboard;
   tieAlertScoreboard: TieAlertScoreboard;
+  surfAnalyzerScoreboard: SurfAnalyzerScoreboard;
   pressureSeries: PressurePoint[];
 }
