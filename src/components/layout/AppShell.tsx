@@ -2,7 +2,6 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { MOCK_MODE } from "@/data/mockDashboardData";
 import type { ReactNode } from "react";
 
 const navItems = [
@@ -28,7 +27,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="hidden md:flex items-center gap-2">
             <AppBadge tone="green" pulse>Mesa online</AppBadge>
             <AppBadge tone="blue" pulse>Engine operacional</AppBadge>
-            {MOCK_MODE && <AppBadge tone="amber">Modo demonstração</AppBadge>}
+            <AppBadge tone="green">App operacional</AppBadge>
           </div>
           <div className="flex items-center gap-2">
             <button className="size-9 rounded-xl glass flex items-center justify-center hover:glow-blue">
@@ -43,7 +42,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="md:hidden flex items-center gap-2 px-3 pb-2 overflow-x-auto">
           <AppBadge tone="green" pulse>Mesa online</AppBadge>
           <AppBadge tone="blue" pulse>Engine operacional</AppBadge>
-          {MOCK_MODE && <AppBadge tone="amber">Demonstração</AppBadge>}
+          <AppBadge tone="green">App operacional</AppBadge>
         </div>
       </header>
 
