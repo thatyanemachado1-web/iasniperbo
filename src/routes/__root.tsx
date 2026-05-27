@@ -74,11 +74,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "SNIPER BO IA — Painel operacional com IA" },
       { name: "description", content: "Painel operacional com leitura estatística e assistente IA em tempo real." },
-      { property: "og:title", content: "SNIPER BO IA" },
-      { property: "og:description", content: "Leitura estatística em tempo real, Tie Alert paralelo e narrador IA." },
+      { property: "og:title", content: "SNIPER BO IA — Painel operacional com IA" },
+      { property: "og:description", content: "Painel operacional com leitura estatística e assistente IA em tempo real." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "SNIPER BO IA — Painel operacional com IA" },
+      { name: "twitter:description", content: "Painel operacional com leitura estatística e assistente IA em tempo real." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/9266a2b8-dbcf-4a30-81f3-6b4924702bd5/id-preview-92770732--79c02c6b-7ac1-4dd0-998d-0b74ad7ba219.lovable.app-1779845552106.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/9266a2b8-dbcf-4a30-81f3-6b4924702bd5/id-preview-92770732--79c02c6b-7ac1-4dd0-998d-0b74ad7ba219.lovable.app-1779845552106.png" },
     ],
     links: [
       {
