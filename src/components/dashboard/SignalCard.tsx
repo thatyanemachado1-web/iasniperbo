@@ -2,30 +2,35 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
-import type { MainSignal, SurfEntrySummary } from "@/types/dashboard";
+import type { MainSignal, SurfEntrySummary, TieAlert } from "@/types/dashboard";
 import { CheckCircle2, Clock3, Radio, ShieldCheck, Target, Zap } from "lucide-react";
 
 export function SignalCard({
   signal,
   surfSummary,
+  tieAlert,
   locked,
   priority = false,
 }: {
   signal: MainSignal;
   surfSummary?: SurfEntrySummary;
+  tieAlert?: TieAlert;
   locked?: boolean;
   priority?: boolean;
 }) {
   const isBanker = signal.side === "BANKER";
   const isPlayer = signal.side === "PLAYER";
-  const isTieWatch = signal.status === "tie_watch";
+  const tieAlertIsActive = tieAlert?.status === "active";
+  const isTieWatch = signal.status === "tie_watch" || (signal.status === "waiting" && tieAlertIsActive);
   const isWaiting = signal.status === "waiting";
   const sideColor = isBanker ? "text-banker" : isPlayer ? "text-player" : isTieWatch ? "text-tie" : "text-muted-foreground";
   const beamColor = isBanker ? "from-banker/40" : isPlayer ? "from-player/40" : isTieWatch ? "from-tie/35" : "from-neon-cyan/15";
-  const displaySide = isWaiting ? "AGUARDAR ENTRADA" : isTieWatch ? "POSSIVEL EMPATE" : signal.side;
+  const displaySide = isTieWatch ? "POSSIVEL EMPATE" : isWaiting ? "AGUARDAR ENTRADA" : signal.side;
   const displaySideClass = isWaiting || isTieWatch ? "text-3xl" : "text-5xl";
-  const sideCaption = isWaiting ? "Sem entrada principal" : isTieWatch ? "Tie Alert em paralelo" : "Lado da entrada";
-  const status = signalStatus(signal);
+  const sideCaption = isTieWatch ? "Sem entrada principal" : isWaiting ? "Sem entrada principal" : "Lado da entrada";
+  const visibleProtection = isTieWatch && tieAlert ? `${tieAlert.validityRounds} casas` : signal.protection;
+  const visibleStrength = isTieWatch && tieAlert ? tieAlert.confidence : signal.strength;
+  const status = signalStatus(signal, tieAlertIsActive, tieAlert?.validityRounds);
   const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
   const StatusIcon = status.Icon;
   const riskTone = surfSummary?.oppositeRiskLevel === "ALTO"
@@ -62,11 +67,11 @@ export function SignalCard({
       <div className="relative mt-4 grid grid-cols-3 gap-2 text-xs">
         <div className="rounded-lg bg-secondary/40 p-2">
           <div className="text-muted-foreground">Protecao</div>
-          <div className="font-semibold text-foreground">{signal.protection}</div>
+          <div className="font-semibold text-foreground">{visibleProtection}</div>
         </div>
         <div className="rounded-lg bg-secondary/40 p-2">
           <div className="text-muted-foreground">Forca</div>
-          <div className="font-semibold text-neon-cyan">{signal.strength}%</div>
+          <div className="font-semibold text-neon-cyan">{visibleStrength}%</div>
         </div>
         <div className="rounded-lg bg-secondary/40 p-2">
           <div className="text-muted-foreground">Status</div>
@@ -112,7 +117,18 @@ export function SignalCard({
   );
 }
 
-function signalStatus(signal: MainSignal) {
+function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRounds = 4) {
+  if (signal.status === "waiting" && tieAlertIsActive) {
+    return {
+      badge: "Tie ativo",
+      badgeTone: "purple" as const,
+      pulse: true,
+      kicker: `${tieAlertRounds} casas`,
+      value: "Possivel EMPATE",
+      valueClass: "text-tie",
+      Icon: Radio,
+    };
+  }
   if (signal.status === "waiting") {
     return {
       badge: "Aguardando",
