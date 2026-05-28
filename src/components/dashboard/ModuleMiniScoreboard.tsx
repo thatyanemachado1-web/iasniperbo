@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -130,17 +131,84 @@ function MiniCircularProgress({
   value: number;
   color: string;
 }) {
-  const pct = clampPercent(value);
+  const targetPct = clampPercent(value);
+  const [animatedPct, setAnimatedPct] = useState(0);
+  const currentPctRef = useRef(0);
+  const radius = 22;
+  const circumference = 2 * Math.PI * radius;
+  const strokeOffset = circumference - (animatedPct / 100) * circumference;
+
+  useEffect(() => {
+    const from = currentPctRef.current;
+    const to = targetPct;
+
+    if (typeof window === "undefined") {
+      currentPctRef.current = to;
+      setAnimatedPct(to);
+      return;
+    }
+
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReducedMotion || Math.abs(to - from) < 0.1) {
+      currentPctRef.current = to;
+      setAnimatedPct(to);
+      return;
+    }
+
+    let frame = 0;
+    const duration = Math.min(1200, Math.max(650, Math.abs(to - from) * 9));
+    const startedAt = performance.now();
+    const easeOutCubic = (progress: number) => 1 - Math.pow(1 - progress, 3);
+
+    const animate = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const next = from + (to - from) * easeOutCubic(progress);
+      currentPctRef.current = next;
+      setAnimatedPct(next);
+
+      if (progress < 1) {
+        frame = window.requestAnimationFrame(animate);
+      } else {
+        currentPctRef.current = to;
+        setAnimatedPct(to);
+      }
+    };
+
+    frame = window.requestAnimationFrame(animate);
+    return () => window.cancelAnimationFrame(frame);
+  }, [targetPct]);
+
   return (
     <div
-      className="grid size-12 shrink-0 place-items-center rounded-full border border-white/10 bg-background/55 sm:size-14"
-      style={{
-        background: `conic-gradient(${color} ${pct * 3.6}deg, rgba(255,255,255,0.08) 0deg)`,
-      }}
-      aria-label={`Assertividade ${formatPercent(pct)}`}
+      className="relative grid size-12 shrink-0 place-items-center rounded-full border border-white/10 bg-background/55 sm:size-14"
+      aria-label={`Assertividade ${formatPercent(targetPct)}`}
     >
-      <div className="grid size-9 place-items-center rounded-full bg-background/90 text-[10px] font-black text-foreground sm:size-10">
-        {formatPercent(pct)}
+      <svg className="absolute inset-0 size-full -rotate-90" viewBox="0 0 56 56" aria-hidden="true">
+        <circle
+          cx="28"
+          cy="28"
+          r={radius}
+          fill="none"
+          stroke="rgba(255,255,255,0.08)"
+          strokeWidth="5"
+        />
+        <circle
+          cx="28"
+          cy="28"
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth="5"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeOffset}
+          style={{
+            filter: `drop-shadow(0 0 7px ${color})`,
+          }}
+        />
+      </svg>
+      <div className="relative grid size-9 place-items-center rounded-full bg-background/90 text-[10px] font-black text-foreground sm:size-10">
+        {formatPercent(animatedPct)}
       </div>
     </div>
   );
