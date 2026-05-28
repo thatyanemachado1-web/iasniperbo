@@ -12,7 +12,7 @@ import {
   saveAdminSession,
   updateSignalRecipient,
 } from "@/lib/adminApi";
-import { isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
+import { isAdminOwnerEmail, readUserSession, saveUserSession } from "@/lib/userSession";
 import type { AdminSession, RecipientKind, RecipientPlan, SignalRecipient } from "@/types/admin";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
@@ -56,8 +56,12 @@ const planLabels: Record<RecipientPlan, string> = {
 
 function AdminPage() {
   const userSession = readUserSession();
-  const canUseAdmin = isAdminOwnerEmail(userSession.email);
-  const [session, setSession] = useState<AdminSession | null>(() => readAdminSession());
+  const [ownerEmail, setOwnerEmail] = useState(userSession.email);
+  const canUseAdmin = isAdminOwnerEmail(ownerEmail);
+  const canAttemptAdminLogin = canUseAdmin || !ownerEmail;
+  const [session, setSession] = useState<AdminSession | null>(() =>
+    isAdminOwnerEmail(userSession.email) ? readAdminSession() : null,
+  );
   const [apiUrl, setApiUrl] = useState(() => readAdminSession()?.apiUrl || getInitialApiUrl());
   const [email, setEmail] = useState(() => readAdminSession()?.email || "gabrielmendespromove@gmail.com");
   const [password, setPassword] = useState("");
@@ -82,11 +86,11 @@ function AdminPage() {
   });
 
   useEffect(() => {
-    if (!canUseAdmin) {
+    if (!canAttemptAdminLogin) {
       clearAdminSession();
       setSession(null);
     }
-  }, [canUseAdmin]);
+  }, [canAttemptAdminLogin]);
 
   const activeRecipients = useMemo(
     () => recipients.filter((recipient) => recipient.enabled),
@@ -131,7 +135,7 @@ function AdminPage() {
     if (canUseAdmin) refreshRecipients();
   }, [canUseAdmin]);
 
-  if (!canUseAdmin) {
+  if (!canAttemptAdminLogin) {
     return (
       <div className="mx-auto max-w-2xl space-y-4">
         <GlassCard className="border-destructive/35">
@@ -166,7 +170,16 @@ function AdminPage() {
     setError("");
     try {
       const logged = await adminLogin(apiUrl, email, password);
+      saveUserSession(logged.email, {
+        name: "Gabriel Mendes",
+        accessMode: "full",
+        accessStatus: "owner",
+        plan: "vip",
+        registered: true,
+        approved: true,
+      });
       saveAdminSession(logged);
+      setOwnerEmail(logged.email);
       setSession(logged);
       setApiUrl(logged.apiUrl);
       setEmail(logged.email);
