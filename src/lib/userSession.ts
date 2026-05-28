@@ -24,6 +24,7 @@ export function readUserSession(): UserSession {
     const name = String(session.name || "").trim() || nameFromEmail(email);
     const accessMode = normalizeAccessMode(session.accessMode);
     const plan = normalizePlan(session.plan);
+    const owner = isAdminOwnerEmail(email);
     return {
       email,
       name,
@@ -31,8 +32,8 @@ export function readUserSession(): UserSession {
       accessStatus: String(session.accessStatus || accessMode),
       plan,
       expiresAt: String(session.expiresAt || ""),
-      registered: Boolean(session.registered || email),
-      approved: Boolean(session.approved || accessMode === "full"),
+      registered: owner || session.registered === true,
+      approved: owner || session.approved === true || accessMode === "full",
     };
   } catch {
     return emptyUserSession();
@@ -42,8 +43,9 @@ export function readUserSession(): UserSession {
 export function saveUserSession(email: string, partial: Partial<UserSession> = {}) {
   if (typeof window === "undefined") return;
   const cleanEmail = email.trim();
+  const owner = isAdminOwnerEmail(cleanEmail);
   const accessMode = normalizeAccessMode(
-    partial.accessMode || (isAdminOwnerEmail(cleanEmail) ? "full" : "demo"),
+    partial.accessMode || (owner ? "full" : "none"),
   );
   const plan = normalizePlan(partial.plan || (accessMode === "full" ? "vip" : "free"));
   window.localStorage.setItem(
@@ -55,8 +57,8 @@ export function saveUserSession(email: string, partial: Partial<UserSession> = {
       accessStatus: partial.accessStatus || accessMode,
       plan,
       expiresAt: partial.expiresAt || "",
-      registered: partial.registered ?? Boolean(cleanEmail),
-      approved: partial.approved ?? accessMode === "full",
+      registered: partial.registered ?? owner,
+      approved: partial.approved ?? (owner || accessMode === "full"),
     }),
   );
 }

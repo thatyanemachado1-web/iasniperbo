@@ -77,13 +77,13 @@ function LoginPage() {
         setNotice("Email ainda nao cadastrado. Faca seu cadastro para continuar.");
         return;
       }
-      saveAccessSession(access, email);
       if (access.approved || access.access_mode === "full") {
+        saveAccessSession(access, email);
         window.location.href = "/app";
         return;
       }
-      setPendingAccess(access);
-      setNotice(access.reason || "Cadastro encontrado. Aguardando liberacao do administrador.");
+      saveDemoSession(access.email || email, access.full_name);
+      window.location.href = "/app";
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Nao foi possivel validar seu acesso.");
     } finally {
@@ -97,17 +97,18 @@ function LoginPage() {
     setNotice("");
     setPendingAccess(null);
     const data = new FormData(event.currentTarget);
+    const fullName = String(data.get("full_name") || "").trim();
+    const email = String(data.get("email") || "").trim();
     try {
       const access = await registerClient({
-        full_name: String(data.get("full_name") || "").trim(),
-        email: String(data.get("email") || "").trim(),
+        full_name: fullName,
+        email,
         phone: String(data.get("phone") || "").trim(),
         city: String(data.get("city") || "").trim(),
         country: String(data.get("country") || "").trim(),
       });
-      saveAccessSession(access);
-      setPendingAccess(access);
-      setNotice("Cadastro recebido. Voce pode ir para o checkout ou entrar no modo demo limitado.");
+      saveDemoSession(access.email || email, access.full_name || fullName);
+      window.location.href = "/app";
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Nao foi possivel concluir o cadastro.");
     } finally {
