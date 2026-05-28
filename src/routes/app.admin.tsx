@@ -59,7 +59,7 @@ function AdminPage() {
   const userSession = readUserSession();
   const [ownerEmail, setOwnerEmail] = useState(userSession.email);
   const canUseAdmin = isAdminOwnerEmail(ownerEmail);
-  const canAttemptAdminLogin = canUseAdmin || !ownerEmail;
+  const canAttemptAdminLogin = true;
   const [session, setSession] = useState<AdminSession | null>(() =>
     isAdminOwnerEmail(userSession.email) ? readAdminSession() : null,
   );

@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Bell,
   Crown,
+  KeyRound,
   Loader2,
   Mail,
   MapPin,
@@ -70,8 +71,9 @@ function LoginPage() {
     setPendingAccess(null);
     const data = new FormData(event.currentTarget);
     const email = String(data.get("email") || "").trim();
+    const password = String(data.get("password") || "");
     try {
-      const access = await checkClientAccess(email);
+      const access = await checkClientAccess(email, password);
       if (!access.registered) {
         setMode("register");
         setNotice("Email ainda nao cadastrado. Faca seu cadastro para continuar.");
@@ -99,10 +101,23 @@ function LoginPage() {
     const data = new FormData(event.currentTarget);
     const fullName = String(data.get("full_name") || "").trim();
     const email = String(data.get("email") || "").trim();
+    const password = String(data.get("password") || "");
+    const passwordConfirm = String(data.get("password_confirm") || "");
+    if (password.length < 4) {
+      setNotice("A senha precisa ter pelo menos 4 caracteres.");
+      setLoading(false);
+      return;
+    }
+    if (password !== passwordConfirm) {
+      setNotice("As senhas nao conferem.");
+      setLoading(false);
+      return;
+    }
     try {
       const access = await registerClient({
         full_name: fullName,
         email,
+        password,
         phone: String(data.get("phone") || "").trim(),
         city: String(data.get("city") || "").trim(),
         country: String(data.get("country") || "").trim(),
@@ -264,6 +279,8 @@ function LoginPage() {
               <form onSubmit={handleRegister} className="space-y-3">
                 <LoginField icon={<UserPlus className="size-4" />} label="Nome completo" name="full_name" placeholder="Nome completo" />
                 <LoginField icon={<Mail className="size-4" />} label="Email" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
+                <LoginField icon={<KeyRound className="size-4" />} label="Criar senha" name="password" type="password" placeholder="minimo 4 caracteres" />
+                <LoginField icon={<ShieldCheck className="size-4" />} label="Confirmar senha" name="password_confirm" type="password" placeholder="repita sua senha" />
                 <LoginField icon={<Phone className="size-4" />} label="Telefone" name="phone" placeholder="+55 11 99999-9999" />
                 <div className="grid grid-cols-2 gap-2">
                   <LoginField icon={<MapPin className="size-4" />} label="Cidade" name="city" placeholder="Cidade" />

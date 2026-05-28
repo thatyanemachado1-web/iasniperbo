@@ -16,6 +16,7 @@ export interface ClientAccess {
 export interface ClientRegistrationPayload {
   full_name: string;
   email: string;
+  password: string;
   phone: string;
   city: string;
   country: string;
@@ -33,8 +34,8 @@ export function saveAccessSession(access: ClientAccess, fallbackEmail = "") {
   });
 }
 
-export async function checkClientAccess(email: string) {
-  const data = await publicRequest<{ access: ClientAccess }>("/auth/check", { email });
+export async function checkClientAccess(email: string, password: string) {
+  const data = await publicRequest<{ access: ClientAccess }>("/auth/check", { email, password });
   return data.access;
 }
 
