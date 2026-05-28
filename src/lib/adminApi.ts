@@ -4,11 +4,12 @@ import type { ModuleToggles } from "@/types/dashboard";
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
 export const LOCAL_ADMIN_API_URL = "http://127.0.0.1:8787";
+export const PUBLIC_ADMIN_API_URL = "https://courts-slides-pretty-escape.trycloudflare.com";
 
 const defaultApiUrl = () =>
   (import.meta.env.VITE_SNIPER_API_URL as string | undefined) ||
   (import.meta.env.VITE_SNIPER_DASHBOARD_URL as string | undefined)?.replace(/\/dashboard\/?$/, "") ||
-  LOCAL_ADMIN_API_URL;
+  (typeof window !== "undefined" && !isLocalFrontend() ? PUBLIC_ADMIN_API_URL : LOCAL_ADMIN_API_URL);
 
 export function getInitialApiUrl() {
   if (typeof window === "undefined") return defaultApiUrl();
@@ -16,6 +17,10 @@ export function getInitialApiUrl() {
   if (isLocalFrontend() && (!saved || !isLocalApiUrl(saved))) {
     window.localStorage.setItem(API_URL_KEY, LOCAL_ADMIN_API_URL);
     return LOCAL_ADMIN_API_URL;
+  }
+  if (!isLocalFrontend() && (!saved || isLocalApiUrl(saved))) {
+    window.localStorage.setItem(API_URL_KEY, PUBLIC_ADMIN_API_URL);
+    return PUBLIC_ADMIN_API_URL;
   }
   return saved || defaultApiUrl();
 }
