@@ -5,6 +5,7 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { LogOut, ShieldCheck, Users } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { readAdminSession } from "@/lib/adminApi";
+import { clearUserSession, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app/conta")({
   component: ContaPage,
@@ -12,6 +13,7 @@ export const Route = createFileRoute("/app/conta")({
 
 function ContaPage() {
   const adminSession = readAdminSession();
+  const userSession = readUserSession();
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -44,8 +46,8 @@ function ContaPage() {
 
       <GlassCard>
         <SectionTitle title="Conta" />
-        <Field label="Nome" value="Gabriel" />
-        <Field label="Email" value="gabriel@sniperbo.ia" />
+        <Field label="Nome" value={userSession.name} />
+        <Field label="Email" value={userSession.email || "Não informado"} />
         <Field label="Plano atual" value={<AppBadge tone="amber">Demonstração</AppBadge>} />
         <Field label="Status da assinatura" value={<AppBadge tone="muted">Não assinante</AppBadge>} />
       </GlassCard>
@@ -69,7 +71,11 @@ function ContaPage() {
         <Toggle label="Modo escuro" defaultOn />
         <Toggle label="Glow intenso" defaultOn />
         <Toggle label="Animações" defaultOn />
-        <Link to="/" className="mt-4 inline-flex items-center gap-2 text-sm text-destructive hover:opacity-80">
+        <Link
+          to="/"
+          onClick={() => clearUserSession()}
+          className="mt-4 inline-flex items-center gap-2 text-sm text-destructive hover:opacity-80"
+        >
           <LogOut className="size-4" /> Sair
         </Link>
       </GlassCard>

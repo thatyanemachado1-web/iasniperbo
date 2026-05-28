@@ -30,6 +30,7 @@ import {
   calculateSurfResult,
   calculateTieResult,
 } from "@/utils/moduleResults";
+import { readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
@@ -37,6 +38,7 @@ export const Route = createFileRoute("/app/")({
 
 function DashboardPage() {
   const { data: d, mode } = useDashboardData();
+  const userSession = readUserSession();
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;
   const mainResult = calculateMainResult(d.mainScoreboard);
@@ -63,7 +65,7 @@ function DashboardPage() {
         <div>
           <div className="text-xs text-muted-foreground">Olá,</div>
           <div className="text-lg font-bold">
-            {d.user.name} <span className="text-muted-foreground font-normal text-sm">- painel operacional</span>
+            {userSession.name || d.user.name} <span className="text-muted-foreground font-normal text-sm">- painel operacional</span>
           </div>
         </div>
         <Link

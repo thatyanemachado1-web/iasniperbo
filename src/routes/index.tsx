@@ -5,6 +5,7 @@ import { NeuralLines } from "@/components/brand/NeuralLines";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { Activity, Bell, Mic, Radio, Mail, Lock, ArrowRight, ShieldCheck } from "lucide-react";
+import { saveUserSession, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/")({
   component: LoginPage,
@@ -41,6 +42,8 @@ const PARTICLES = Array.from({ length: 28 }, (_, i) => {
 });
 
 function LoginPage() {
+  const savedUser = readUserSession();
+
   return (
     <div className="min-h-screen bg-app relative overflow-hidden flex items-center justify-center px-4 py-10 lg:py-0">
       {/* Backdrop layers */}
@@ -146,6 +149,8 @@ function LoginPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              const data = new FormData(e.currentTarget);
+              saveUserSession(String(data.get("email") || ""));
               window.location.href = "/app";
             }}
               className="space-y-4"
@@ -155,9 +160,10 @@ function LoginPage() {
                 <div className="mt-1.5 flex items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
                 <Mail className="size-4 text-neon-cyan/70" />
                 <input
+                  name="email"
                   type="email"
                   required
-                  defaultValue="gabriel@sniperbo.ia"
+                  defaultValue={savedUser.email}
                   className="bg-transparent flex-1 outline-none text-sm"
                   placeholder="seu@email.com"
                 />
