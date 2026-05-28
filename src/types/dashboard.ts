@@ -46,6 +46,11 @@ export interface NeuralReading {
   assertividade?: number | null;
   sequencePositive?: number | null;
   sequenceNegative?: number | null;
+  paganteStatus?: string | null;
+  paganteAlert?: string | null;
+  paganteWindow?: number | null;
+  isSaturated?: boolean | null;
+  isRedAlert?: boolean | null;
 }
 
 export interface ModuleToggles {

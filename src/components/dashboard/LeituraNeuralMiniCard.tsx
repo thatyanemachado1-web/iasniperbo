@@ -33,6 +33,7 @@ export function LeituraNeuralMiniCard({
   const g1 = numberFrom(data.greenG1);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
   const showPayingStats = totalGreens > 0 || accuracy !== null || totalAlerts !== null;
+  const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
 
   return (
     <aside
@@ -110,6 +111,24 @@ export function LeituraNeuralMiniCard({
               <div className="truncate text-[8px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[9px]">
                 Total: {totalGreens} Greens
               </div>
+              {data.paganteWindow ? (
+                <div className="truncate text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                  Janela: {data.paganteWindow} rodadas
+                </div>
+              ) : null}
+              {data.paganteStatus && data.paganteStatus !== "VALIDO" ? (
+                <div
+                  className={cn(
+                    "mt-1 truncate rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em]",
+                    alertTone === "red" && "border-destructive/35 bg-destructive/10 text-destructive",
+                    alertTone === "yellow" && "border-warning/35 bg-warning/10 text-warning",
+                    alertTone === "cyan" && "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
+                  )}
+                  title={data.paganteAlert ?? undefined}
+                >
+                  {data.paganteStatus}
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="inline-flex items-center gap-1 text-[9px] font-semibold text-neon-cyan/85">
