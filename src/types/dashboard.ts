@@ -34,8 +34,8 @@ export type NeuralReadingMode = "SCANNING" | "OBSERVING" | "ACTIVE";
 export interface NeuralReading {
   mode: NeuralReadingMode;
   numero?: number | null;
-  origem?: SignalSide | null;
-  direcao?: SignalSide | null;
+  origem?: SignalSide | "TIE" | null;
+  direcao?: SignalSide | "TIE" | null;
   validade?: string | null;
   alertas?: number | null;
   acertos?: number | null;

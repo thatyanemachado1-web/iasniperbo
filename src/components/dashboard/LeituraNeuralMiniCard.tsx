@@ -2,6 +2,8 @@ import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NeuralReading, SignalSide } from "@/types/dashboard";
 
+type NeuralSide = SignalSide | "TIE";
+
 type LeituraNeuralMiniCardProps = NeuralReading & {
   className?: string;
 };
@@ -76,7 +78,7 @@ export function LeituraNeuralMiniCard({
         <div className="relative mt-2 space-y-1">
           <div className="flex items-baseline gap-1">
             <span className="text-lg font-black leading-none text-foreground sm:text-xl">
-              {data.numero}
+              {data.origem === "TIE" ? `${data.numero}x${data.numero}` : data.numero}
             </span>
             <span className={cn("truncate text-[11px] font-extrabold", sideClass(data.origem))}>
               {sideLabel(data.origem)}
@@ -85,7 +87,7 @@ export function LeituraNeuralMiniCard({
 
           {data.direcao ? (
             <div className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]">
-              <span className="text-neon-cyan">→</span>{" "}
+              <span className="text-neon-cyan">Puxando --&gt;</span>{" "}
               <span className={sideClass(data.direcao)}>{sideLabel(data.direcao)}</span>{" "}
               {data.validade ?? "G1"}
             </div>
@@ -209,14 +211,16 @@ function formatPercent(value: number | null) {
   return `${value.toFixed(1).replace(".", ",")}%`;
 }
 
-function sideLabel(side?: SignalSide | null) {
+function sideLabel(side?: NeuralSide | null) {
   if (side === "BANKER") return "Banker";
   if (side === "PLAYER") return "Player";
+  if (side === "TIE") return "Empate";
   return "";
 }
 
-function sideClass(side?: SignalSide | null) {
+function sideClass(side?: NeuralSide | null) {
   if (side === "BANKER") return "text-banker";
   if (side === "PLAYER") return "text-player";
+  if (side === "TIE") return "text-tie";
   return "text-muted-foreground";
 }
