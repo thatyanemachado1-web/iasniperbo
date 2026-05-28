@@ -17,17 +17,21 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import {
-  CheckCircle2,
+  CalendarDays,
   Copy,
+  Globe2,
   KeyRound,
   Loader2,
-  Plus,
+  Mail,
+  MapPin,
+  Phone,
   Power,
   Radio,
   RefreshCw,
   Server,
   ShieldCheck,
   Trash2,
+  UserCheck,
   UserPlus,
   Users,
   WifiOff,
@@ -40,7 +44,7 @@ export const Route = createFileRoute("/app/admin")({
 const kindLabels: Record<RecipientKind, string> = {
   group: "Grupo",
   channel: "Canal",
-  user: "Usuario",
+  user: "Cliente",
 };
 
 const planLabels: Record<RecipientPlan, string> = {
@@ -60,10 +64,16 @@ function AdminPage() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [form, setForm] = useState({
-    name: "",
+    full_name: "",
+    email: "",
+    phone: "",
+    city: "",
+    country: "",
     chat_id: "",
-    kind: "group" as RecipientKind,
+    kind: "user" as RecipientKind,
     plan: "vip" as RecipientPlan,
+    starts_at: "",
+    validity_days: "30",
     expires_at: "",
     notes: "",
   });
@@ -73,8 +83,20 @@ function AdminPage() {
     [recipients],
   );
   const activeChatIds = useMemo(
-    () => activeRecipients.map((recipient) => recipient.chat_id).join(","),
+    () => activeRecipients.map((recipient) => recipient.chat_id).filter(Boolean).join(","),
     [activeRecipients],
+  );
+  const vipClients = useMemo(
+    () => recipients.filter((recipient) => recipient.plan === "vip" && recipient.enabled),
+    [recipients],
+  );
+  const premiumClients = useMemo(
+    () => recipients.filter((recipient) => recipient.plan === "premium" && recipient.enabled),
+    [recipients],
+  );
+  const calculatedExpiresAt = useMemo(
+    () => calculateExpiryDate(form.starts_at, form.validity_days),
+    [form.starts_at, form.validity_days],
   );
 
   async function refreshRecipients(currentSession = session) {
@@ -122,14 +144,24 @@ function AdminPage() {
     try {
       const recipient = await createSignalRecipient(session, {
         ...form,
+        name: form.full_name,
+        validity_days: Number(form.validity_days) || 0,
+        expires_at: calculatedExpiresAt || form.expires_at,
         enabled: true,
+        access_status: "approved",
       });
       setRecipients((current) => [...current, recipient]);
       setForm({
-        name: "",
+        full_name: "",
+        email: "",
+        phone: "",
+        city: "",
+        country: "",
         chat_id: "",
-        kind: "group",
+        kind: "user",
         plan: "vip",
+        starts_at: "",
+        validity_days: "30",
         expires_at: "",
         notes: "",
       });
@@ -148,7 +180,10 @@ function AdminPage() {
       current.map((item) => (item.id === recipient.id ? { ...item, enabled: nextEnabled } : item)),
     );
     try {
-      const updated = await updateSignalRecipient(session, recipient.id, { enabled: nextEnabled });
+      const updated = await updateSignalRecipient(session, recipient.id, {
+        enabled: nextEnabled,
+        access_status: nextEnabled ? "approved" : "paused",
+      });
       setRecipients((current) =>
         current.map((item) => (item.id === recipient.id ? updated : item)),
       );
@@ -196,11 +231,11 @@ function AdminPage() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-[11px] uppercase tracking-[0.22em] text-neon-cyan/80">
-                Admin operacional
+                Acesso restrito
               </div>
-              <h1 className="mt-1 text-2xl font-black">Controle de quem recebe sinais</h1>
+              <h1 className="mt-1 text-2xl font-black">Área do administrador</h1>
               <p className="mt-2 text-sm text-muted-foreground">
-                Entre com o admin do bot para cadastrar grupos, canais ou usuarios autorizados.
+                Entre para liberar clientes VIP/Premium e controlar quem recebe os sinais.
               </p>
             </div>
           </div>
@@ -209,7 +244,7 @@ function AdminPage() {
         <GlassCard>
           <SectionTitle
             title="Login admin"
-            subtitle="Conecta no servidor local do SNIPER BO."
+            subtitle="Painel privado do dono do SNIPER BO."
             right={<AppBadge tone="blue">API local</AppBadge>}
           />
           <form className="space-y-3" onSubmit={handleLogin}>
@@ -255,11 +290,13 @@ function AdminPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-xs text-muted-foreground">Admin conectado</div>
-          <div className="text-xl font-black">Destinatarios dos sinais</div>
+          <div className="text-xl font-black">Clientes VIP/Premium</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <AppBadge tone="green" pulse>{activeRecipients.length} ativos</AppBadge>
-          <AppBadge tone="muted">{recipients.length} cadastrados</AppBadge>
+          <AppBadge tone="green" pulse>{activeRecipients.length} liberados</AppBadge>
+          <AppBadge tone="gold">{vipClients.length} VIP</AppBadge>
+          <AppBadge tone="purple">{premiumClients.length} Premium</AppBadge>
+          <AppBadge tone="muted">{recipients.length} cadastros</AppBadge>
           <button
             type="button"
             onClick={() => refreshRecipients()}
@@ -284,24 +321,55 @@ function AdminPage() {
       <div className="grid grid-cols-1 xl:grid-cols-[0.78fr_1.22fr] gap-4">
         <GlassCard>
           <SectionTitle
-            title="Novo acesso"
-            subtitle="Cadastre o grupo, canal ou usuario que vai receber os sinais."
+            title="Novo cliente"
+            subtitle="Cadastre quem comprou e libere o acesso manualmente."
             right={<UserPlus className="size-4 text-neon-cyan" />}
           />
           <form className="space-y-3" onSubmit={handleAddRecipient}>
             <AdminInput
               icon={<Users className="size-4" />}
-              label="Nome"
-              value={form.name}
-              onChange={(value) => setForm((current) => ({ ...current, name: value }))}
-              placeholder="Grupo VIP Bac Bo"
+              label="Nome completo"
+              value={form.full_name}
+              onChange={(value) => setForm((current) => ({ ...current, full_name: value }))}
+              placeholder="Nome do cliente"
             />
             <AdminInput
+              icon={<Mail className="size-4" />}
+              label="Email"
+              type="email"
+              value={form.email}
+              onChange={(value) => setForm((current) => ({ ...current, email: value }))}
+              placeholder="cliente@email.com"
+            />
+            <AdminInput
+              icon={<Phone className="size-4" />}
+              label="Telefone"
+              value={form.phone}
+              onChange={(value) => setForm((current) => ({ ...current, phone: value }))}
+              placeholder="+55 11 99999-9999"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <AdminInput
+                icon={<MapPin className="size-4" />}
+                label="Cidade"
+                value={form.city}
+                onChange={(value) => setForm((current) => ({ ...current, city: value }))}
+                placeholder="São Paulo"
+              />
+              <AdminInput
+                icon={<Globe2 className="size-4" />}
+                label="País"
+                value={form.country}
+                onChange={(value) => setForm((current) => ({ ...current, country: value }))}
+                placeholder="Brasil"
+              />
+            </div>
+            <AdminInput
               icon={<Radio className="size-4" />}
-              label="Chat ID Telegram"
+              label="Chat ID Telegram opcional"
               value={form.chat_id}
               onChange={(value) => setForm((current) => ({ ...current, chat_id: value }))}
-              placeholder="-1001234567890"
+              placeholder="-1001234567890 para receber sinais"
             />
             <div className="grid grid-cols-2 gap-2">
               <AdminSelect
@@ -317,13 +385,29 @@ function AdminPage() {
                 options={planLabels}
               />
             </div>
-            <AdminInput
-              icon={<CheckCircle2 className="size-4" />}
-              label="Validade"
-              type="date"
-              value={form.expires_at}
-              onChange={(value) => setForm((current) => ({ ...current, expires_at: value }))}
-            />
+            <div className="grid grid-cols-[1fr_0.72fr] gap-2">
+              <AdminInput
+                icon={<CalendarDays className="size-4" />}
+                label="Data início"
+                type="date"
+                value={form.starts_at}
+                onChange={(value) => setForm((current) => ({ ...current, starts_at: value }))}
+              />
+              <AdminInput
+                icon={<CalendarDays className="size-4" />}
+                label="Dias"
+                type="number"
+                value={form.validity_days}
+                onChange={(value) => setForm((current) => ({ ...current, validity_days: value }))}
+                placeholder="30"
+              />
+            </div>
+            <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
+              Vencimento calculado:{" "}
+              <span className="font-bold text-neon-cyan">
+                {calculatedExpiresAt ? formatDateBR(calculatedExpiresAt) : "informe início e dias"}
+              </span>
+            </div>
             <label className="block">
               <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                 Observacao
@@ -333,24 +417,24 @@ function AdminPage() {
                 onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
                 rows={3}
                 className="w-full resize-none rounded-xl border border-border/60 bg-secondary/35 px-3 py-2 text-sm outline-none focus:border-neon-cyan/70"
-                placeholder="Origem, dono do grupo, plano, observacoes internas"
+                placeholder="Origem da compra, observações internas, renovação, suporte"
               />
             </label>
             <button
               type="submit"
-              disabled={saving || !form.chat_id.trim()}
+              disabled={saving || ![form.full_name, form.email, form.phone, form.chat_id].some((value) => value.trim())}
               className="btn-primary-grad inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold disabled:opacity-60"
             >
-              {saving ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-              Cadastrar recebedor
+              {saving ? <Loader2 className="size-4 animate-spin" /> : <UserCheck className="size-4" />}
+              Cadastrar e liberar acesso
             </button>
           </form>
         </GlassCard>
 
         <GlassCard>
           <SectionTitle
-            title="Lista autorizada"
-            subtitle="O bot usa esta lista ativa antes de enviar qualquer mensagem."
+            title="Cadastros liberados"
+            subtitle="Clientes aprovados aqui ficam com acesso VIP/Premium controlado por você."
             right={
               <button
                 type="button"
@@ -358,7 +442,7 @@ function AdminPage() {
                 disabled={!activeChatIds}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-neon-cyan/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan disabled:opacity-50"
               >
-                <Copy className="size-3" /> {copied ? "Copiado" : "Copiar ativos"}
+                <Copy className="size-3" /> {copied ? "Copiado" : "Copiar chats"}
               </button>
             }
           />
@@ -366,7 +450,7 @@ function AdminPage() {
           <div className="space-y-2">
             {recipients.length === 0 && (
               <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
-                Nenhum recebedor cadastrado ainda.
+                Nenhum cliente cadastrado ainda.
               </div>
             )}
             {recipients.map((recipient) => (
@@ -398,18 +482,24 @@ function RecipientRow({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-sm font-bold">{recipient.name}</span>
+            <span className="truncate text-sm font-bold">{recipient.full_name || recipient.name}</span>
             <AppBadge tone={recipient.enabled ? "green" : "muted"}>
-              {recipient.enabled ? "Ativo" : "Pausado"}
+              {recipient.enabled ? "Liberado" : "Bloqueado"}
             </AppBadge>
             <AppBadge tone={recipient.plan === "vip" ? "gold" : recipient.plan === "premium" ? "purple" : "muted"}>
               {planLabels[recipient.plan] ?? recipient.plan}
             </AppBadge>
           </div>
           <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-            <span>{kindLabels[recipient.kind] ?? recipient.kind}</span>
-            <span>{recipient.chat_id}</span>
-            {recipient.expires_at && <span>Validade {recipient.expires_at}</span>}
+            {recipient.email && <span>{recipient.email}</span>}
+            {recipient.phone && <span>{recipient.phone}</span>}
+            {(recipient.city || recipient.country) && (
+              <span>{[recipient.city, recipient.country].filter(Boolean).join(" / ")}</span>
+            )}
+            {recipient.chat_id && <span>Telegram {recipient.chat_id}</span>}
+            {recipient.starts_at && <span>Início {formatDateBR(recipient.starts_at)}</span>}
+            {recipient.validity_days ? <span>{recipient.validity_days} dias</span> : null}
+            {recipient.expires_at && <span>Expira {formatDateBR(recipient.expires_at)}</span>}
           </div>
           {recipient.notes && <div className="mt-2 text-xs text-muted-foreground">{recipient.notes}</div>}
         </div>
@@ -422,7 +512,7 @@ function RecipientRow({
                 ? "border-success/40 bg-success/15 text-success"
                 : "border-border bg-secondary/40 text-muted-foreground"
             }`}
-            aria-label={recipient.enabled ? "Pausar envio" : "Ativar envio"}
+            aria-label={recipient.enabled ? "Bloquear acesso" : "Liberar acesso"}
           >
             <Power className="size-4" />
           </button>
@@ -499,6 +589,21 @@ function AdminSelect({
       </select>
     </label>
   );
+}
+
+function calculateExpiryDate(startsAt: string, daysText: string) {
+  const days = Number(daysText);
+  if (!startsAt || !Number.isFinite(days) || days <= 0) return "";
+  const date = new Date(`${startsAt}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setDate(date.getDate() + Math.floor(days));
+  return date.toISOString().slice(0, 10);
+}
+
+function formatDateBR(value: string) {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+  return `${day}/${month}/${year}`;
 }
 
 function StatusMessage({

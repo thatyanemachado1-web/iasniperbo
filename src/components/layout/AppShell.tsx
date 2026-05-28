@@ -1,20 +1,21 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
+import { readAdminSession } from "@/lib/adminApi";
 import type { ReactNode } from "react";
 
 const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/ia", label: "Assistente IA", icon: Brain },
   { to: "/app/voz", label: "Voz", icon: Mic },
-  { to: "/app/admin", label: "Admin", icon: ShieldCheck },
   { to: "/app/planos", label: "Planos", icon: Crown },
   { to: "/app/conta", label: "Conta", icon: User },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const adminSession = readAdminSession();
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -33,9 +34,31 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button className="size-9 rounded-xl glass flex items-center justify-center hover:glow-blue">
               <Bell className="size-4 text-neon-cyan" />
             </button>
-            <Link to="/app/conta" className="size-9 rounded-xl btn-primary-grad flex items-center justify-center">
-              <User className="size-4" />
-            </Link>
+            <div className="group relative">
+              <button
+                type="button"
+                className="size-9 rounded-xl btn-primary-grad flex items-center justify-center"
+                aria-label="Abrir opções da conta"
+              >
+                <User className="size-4" />
+              </button>
+              <div className="invisible absolute right-0 top-11 z-40 w-44 translate-y-1 rounded-xl border border-border/70 bg-background/95 p-1.5 opacity-0 shadow-2xl backdrop-blur-xl transition group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
+                <Link
+                  to="/app/conta"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                >
+                  <User className="size-4" /> Conta
+                </Link>
+                {adminSession && (
+                  <Link
+                    to="/app/admin"
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-neon-cyan hover:bg-neon-cyan/10"
+                  >
+                    <Settings className="size-4" /> ADM
+                  </Link>
+                )}
+              </div>
+            </div>
           </div>
         </div>
         {/* mobile status row */}
@@ -80,7 +103,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Bottom nav mobile */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 glass-strong border-t border-border/60">
-        <div className="grid grid-cols-6">
+        <div className="grid grid-cols-5">
           {navItems.map((it) => {
             const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
             return (

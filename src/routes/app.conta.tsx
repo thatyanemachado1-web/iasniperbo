@@ -2,16 +2,46 @@ import { createFileRoute } from "@tanstack/react-router";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { LogOut } from "lucide-react";
+import { LogOut, ShieldCheck, Users } from "lucide-react";
 import { Link } from "@tanstack/react-router";
+import { readAdminSession } from "@/lib/adminApi";
 
 export const Route = createFileRoute("/app/conta")({
   component: ContaPage,
 });
 
 function ContaPage() {
+  const adminSession = readAdminSession();
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {adminSession && (
+        <GlassCard className="md:col-span-2 border-neon-cyan/35">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="size-11 rounded-2xl btn-primary-grad flex items-center justify-center glow-blue">
+                <ShieldCheck className="size-5" />
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-neon-cyan/80">
+                  Espaço privado do administrador
+                </div>
+                <h2 className="mt-1 text-xl font-black">Cadastros VIP/Premium</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Gerencie clientes, libere acesso e controle quem recebe os sinais.
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/app/admin"
+              className="btn-primary-grad inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold"
+            >
+              <Users className="size-4" /> Abrir cadastros
+            </Link>
+          </div>
+        </GlassCard>
+      )}
+
       <GlassCard>
         <SectionTitle title="Conta" />
         <Field label="Nome" value="Gabriel" />
