@@ -5,7 +5,7 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { LogOut, ShieldCheck, Users } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { readAdminSession } from "@/lib/adminApi";
-import { clearUserSession, readUserSession } from "@/lib/userSession";
+import { clearUserSession, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app/conta")({
   component: ContaPage,
@@ -14,10 +14,11 @@ export const Route = createFileRoute("/app/conta")({
 function ContaPage() {
   const adminSession = readAdminSession();
   const userSession = readUserSession();
+  const canSeeAdmin = isAdminOwnerEmail(userSession.email);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {adminSession && (
+      {adminSession && canSeeAdmin && (
         <GlassCard className="md:col-span-2 border-neon-cyan/35">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">

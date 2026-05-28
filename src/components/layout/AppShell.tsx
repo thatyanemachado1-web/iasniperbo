@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { readAdminSession } from "@/lib/adminApi";
+import { isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 import type { ReactNode } from "react";
 
 const navItems = [
@@ -15,7 +15,8 @@ const navItems = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const adminSession = readAdminSession();
+  const userSession = readUserSession();
+  const canSeeAdmin = isAdminOwnerEmail(userSession.email);
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -49,7 +50,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 >
                   <User className="size-4" /> Conta
                 </Link>
-                {adminSession && (
+                {canSeeAdmin && (
                   <Link
                     to="/app/admin"
                     className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-neon-cyan hover:bg-neon-cyan/10"

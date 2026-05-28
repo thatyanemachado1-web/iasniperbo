@@ -4,6 +4,7 @@ export interface UserSession {
 }
 
 const USER_SESSION_KEY = "sniper_user_session";
+export const ADMIN_OWNER_EMAIL = "gabrielmendespromove@gmail.com";
 
 export function readUserSession(): UserSession {
   if (typeof window === "undefined") {
@@ -36,6 +37,10 @@ export function saveUserSession(email: string) {
 export function clearUserSession() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(USER_SESSION_KEY);
+}
+
+export function isAdminOwnerEmail(email?: string | null) {
+  return String(email || "").trim().toLowerCase() === ADMIN_OWNER_EMAIL;
 }
 
 function nameFromEmail(email: string) {

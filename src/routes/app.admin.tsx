@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
@@ -12,6 +12,7 @@ import {
   saveAdminSession,
   updateSignalRecipient,
 } from "@/lib/adminApi";
+import { isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 import type { AdminSession, RecipientKind, RecipientPlan, SignalRecipient } from "@/types/admin";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
@@ -54,6 +55,8 @@ const planLabels: Record<RecipientPlan, string> = {
 };
 
 function AdminPage() {
+  const userSession = readUserSession();
+  const canUseAdmin = isAdminOwnerEmail(userSession.email);
   const [session, setSession] = useState<AdminSession | null>(() => readAdminSession());
   const [apiUrl, setApiUrl] = useState(() => readAdminSession()?.apiUrl || getInitialApiUrl());
   const [email, setEmail] = useState(() => readAdminSession()?.email || "gabrielmendespromove@gmail.com");
@@ -77,6 +80,13 @@ function AdminPage() {
     expires_at: "",
     notes: "",
   });
+
+  useEffect(() => {
+    if (!canUseAdmin) {
+      clearAdminSession();
+      setSession(null);
+    }
+  }, [canUseAdmin]);
 
   const activeRecipients = useMemo(
     () => recipients.filter((recipient) => recipient.enabled),
@@ -114,8 +124,37 @@ function AdminPage() {
   }
 
   useEffect(() => {
-    refreshRecipients();
-  }, []);
+    if (canUseAdmin) refreshRecipients();
+  }, [canUseAdmin]);
+
+  if (!canUseAdmin) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <GlassCard className="border-destructive/35">
+          <div className="flex items-start gap-4">
+            <div className="size-12 rounded-2xl border border-destructive/40 bg-destructive/10 flex items-center justify-center">
+              <ShieldCheck className="size-6 text-destructive" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-destructive/80">
+                ADM restrito
+              </div>
+              <h1 className="mt-1 text-2xl font-black">Acesso permitido somente ao dono</h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Esta área aparece apenas para o email administrador autorizado.
+              </p>
+              <Link
+                to="/"
+                className="mt-4 inline-flex items-center justify-center rounded-xl border border-neon-cyan/30 px-4 py-2 text-sm font-bold text-neon-cyan hover:bg-neon-cyan/10"
+              >
+                Entrar com email autorizado
+              </Link>
+            </div>
+          </div>
+        </GlassCard>
+      </div>
+    );
+  }
 
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
