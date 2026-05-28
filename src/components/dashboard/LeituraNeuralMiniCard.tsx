@@ -1,6 +1,6 @@
+import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NeuralReading, SignalSide } from "@/types/dashboard";
-import { BrainCircuit, Sparkles } from "lucide-react";
 
 type LeituraNeuralMiniCardProps = NeuralReading & {
   className?: string;
@@ -14,6 +14,8 @@ const SCANNING_READING: NeuralReading = {
   validade: null,
   alertas: null,
   acertos: null,
+  greenSemGale: null,
+  greenG1: null,
   erros: null,
   assertividade: null,
 };
@@ -27,6 +29,10 @@ export function LeituraNeuralMiniCard({
   const hasNumber = typeof data.numero === "number" && data.origem;
   const totalAlerts = totalFrom(data.alertas, data.acertos, data.erros);
   const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
+  const sg = numberFrom(data.greenSemGale);
+  const g1 = numberFrom(data.greenG1);
+  const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
+  const showPayingStats = totalGreens > 0 || accuracy !== null || totalAlerts !== null;
 
   return (
     <aside
@@ -35,7 +41,7 @@ export function LeituraNeuralMiniCard({
         mode === "ACTIVE" && "border-neon-purple/45 shadow-[0_0_32px_-14px_var(--neon-purple)]",
         className,
       )}
-      aria-label="Leitura neural"
+      aria-label="Leitura neural de numeros pagantes"
     >
       <div className="absolute inset-0 neural-mini-grid opacity-40" />
       <div className="absolute -right-5 -top-6 size-16 rounded-full bg-neon-purple/15 blur-2xl" />
@@ -44,16 +50,13 @@ export function LeituraNeuralMiniCard({
       <span className="absolute inset-x-0 top-0 h-px neural-mini-shimmer" />
 
       <div className="relative flex items-center gap-1.5">
-        <div className="relative grid size-6 place-items-center rounded-lg border border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan">
-          <BrainCircuit className="size-3.5 animate-neural-brain" />
-          <span className="absolute -right-0.5 -top-0.5 size-1 rounded-full bg-neon-purple" />
-        </div>
+        <AssistantOrb />
         <div className="min-w-0">
-          <div className="truncate text-[9px] font-black uppercase tracking-[0.16em] text-gradient-brand sm:text-[10px]">
+          <div className="truncate text-[8px] font-black uppercase tracking-[0.14em] text-gradient-brand sm:text-[9px]">
             Leitura Neural
           </div>
-          <div className="text-[8px] uppercase tracking-[0.12em] text-muted-foreground">
-            IA contextual
+          <div className="truncate text-[7px] font-bold uppercase tracking-[0.1em] text-neon-cyan/75 sm:text-[8px]">
+            de números pagantes
           </div>
         </div>
       </div>
@@ -78,6 +81,7 @@ export function LeituraNeuralMiniCard({
               {sideLabel(data.origem)}
             </span>
           </div>
+
           {data.direcao ? (
             <div className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]">
               <span className="text-neon-cyan">→</span>{" "}
@@ -86,19 +90,27 @@ export function LeituraNeuralMiniCard({
             </div>
           ) : (
             <div className="truncate text-[10px] font-semibold text-muted-foreground">
-              Em observação neural
+              Em observação pagante
             </div>
           )}
-          {mode === "ACTIVE" && totalAlerts !== null ? (
-            <>
-              <div className="h-px border-t border-dashed border-neon-cyan/25" />
-              <div className="truncate text-[9px] text-muted-foreground">
-                {totalAlerts} • {data.acertos ?? 0} • {data.erros ?? 0}
+
+          {showPayingStats ? (
+            <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
+              <div className="flex items-baseline justify-between gap-1">
+                <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
+                  Pagando
+                </span>
+                <span className="text-[11px] font-black text-neon-cyan">
+                  {formatPercent(accuracy)}
+                </span>
               </div>
-              <div className="text-[11px] font-black text-neon-cyan">
-                {formatPercent(accuracy)}
+              <div className="truncate text-[8px] font-semibold text-muted-foreground sm:text-[9px]">
+                SG:{sg} * G1:{g1}
               </div>
-            </>
+              <div className="truncate text-[8px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[9px]">
+                Total: {totalGreens} Greens
+              </div>
+            </div>
           ) : (
             <div className="inline-flex items-center gap-1 text-[9px] font-semibold text-neon-cyan/85">
               <Sparkles className="size-2.5" />
@@ -108,6 +120,17 @@ export function LeituraNeuralMiniCard({
         </div>
       )}
     </aside>
+  );
+}
+
+function AssistantOrb() {
+  return (
+    <div className="relative grid size-6 shrink-0 place-items-center overflow-hidden rounded-full border border-neon-cyan/35 bg-[#020817] shadow-[0_0_18px_-6px_var(--neon-cyan)]">
+      <span className="absolute inset-0 rounded-full bg-[conic-gradient(from_180deg,var(--neon-cyan),var(--neon-purple),var(--neon-blue),var(--neon-cyan))] opacity-85 animate-spin [animation-duration:5.5s]" />
+      <span className="absolute inset-[3px] rounded-full bg-background/90" />
+      <span className="absolute size-3.5 rounded-full bg-[radial-gradient(circle_at_35%_25%,white_0%,var(--neon-cyan)_34%,var(--neon-purple)_70%,transparent_100%)] shadow-[0_0_14px_var(--neon-cyan)] animate-neural-brain" />
+      <span className="absolute left-1 top-1 size-1 rounded-full bg-white/90 blur-[1px]" />
+    </div>
   );
 }
 
@@ -141,11 +164,25 @@ function accuracyFrom(
   acertos?: number | null,
   erros?: number | null,
 ) {
+  if (typeof assertividade === "number") return assertividade;
   if (typeof acertos === "number" || typeof erros === "number") {
     const total = (acertos ?? 0) + (erros ?? 0);
     return total > 0 ? ((acertos ?? 0) / total) * 100 : null;
   }
-  return typeof assertividade === "number" ? assertividade : null;
+  return null;
+}
+
+function totalGreensFrom(
+  acertos?: number | null,
+  greenSemGale?: number | null,
+  greenG1?: number | null,
+) {
+  if (typeof acertos === "number" && Number.isFinite(acertos)) return acertos;
+  return numberFrom(greenSemGale) + numberFrom(greenG1);
+}
+
+function numberFrom(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function formatPercent(value: number | null) {

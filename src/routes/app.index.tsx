@@ -106,7 +106,7 @@ function DashboardPage() {
             />
             <ModuleMiniScoreboard
               moduleType="NEURAL"
-              title="Resultado Neural"
+              title="Resultado Pagante"
               assertiveness={neuralResult.assertiveness}
               chips={[
                 { label: "Alertas", value: neuralResult.totalAlerts, variant: "neutral" },

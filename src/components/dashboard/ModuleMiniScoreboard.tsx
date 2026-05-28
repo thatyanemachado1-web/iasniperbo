@@ -48,7 +48,7 @@ const moduleTone = {
     title: "text-gradient-brand",
     glow: "shadow-[0_0_34px_-26px_var(--neon-purple)]",
     progress: "var(--neon-purple)",
-    description: "Números pagantes e leitura neural contextual da mesa.",
+    description: "Leitura neural de números pagantes, separada da entrada principal.",
   },
   SURF: {
     border: "border-neon-blue/20",
