@@ -44,6 +44,8 @@ export interface NeuralReading {
   erros?: number | null;
   reds?: number | null;
   assertividade?: number | null;
+  sequencePositive?: number | null;
+  sequenceNegative?: number | null;
 }
 
 export interface ModuleToggles {
@@ -123,6 +125,8 @@ export interface MainScoreboard {
   totalGreens: number;
   totalEntries: number;
   assertiveness: number;
+  sequencePositive?: number;
+  sequenceNegative?: number;
 }
 
 export interface TieAlertScoreboard {
@@ -130,6 +134,8 @@ export interface TieAlertScoreboard {
   expired: number;
   totalAlerts: number;
   assertiveness: number;
+  sequencePositive?: number;
+  sequenceExpired?: number;
 }
 
 export interface SurfAnalyzerScoreboard {
@@ -145,6 +151,8 @@ export interface SurfAnalyzerScoreboard {
   bankerHits: number;
   playerHits: number;
   assertiveness: number;
+  sequencePositive?: number;
+  sequenceNegative?: number;
   maxBankerSurfHit: number;
   maxPlayerSurfHit: number;
   maxBreakDetected: number;
@@ -156,7 +164,11 @@ export interface MainResult {
   greenSemGale: number;
   greenG1: number;
   reds: number;
+  total: number;
   assertiveness: number;
+  sequencePositive: number;
+  sequenceNegative: number;
+  breakdown: string;
 }
 
 export interface TieResult {
@@ -164,6 +176,9 @@ export interface TieResult {
   expired: number;
   total: number;
   assertiveness: number;
+  sequencePositive: number;
+  sequenceExpired: number;
+  breakdown: string;
 }
 
 export interface NeuralResult {
@@ -172,7 +187,11 @@ export interface NeuralResult {
   greenSemGale: number;
   greenG1: number;
   reds: number;
+  total: number;
   assertiveness: number;
+  sequencePositive: number;
+  sequenceNegative: number;
+  breakdown: string;
 }
 
 export interface SurfResult {
@@ -181,9 +200,13 @@ export interface SurfResult {
   greenSemGale: number;
   greenG1: number;
   reds: number;
+  total: number;
   blocked: number;
   noRisk: number;
   assertiveness: number;
+  sequencePositive: number;
+  sequenceNegative: number;
+  breakdown: string;
 }
 
 export interface PressurePoint {

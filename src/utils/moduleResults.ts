@@ -14,12 +14,17 @@ export function calculateMainResult(scoreboard: MainScoreboard): MainResult {
   const greenG1 = safeNumber(scoreboard.greensG1);
   const reds = safeNumber(scoreboard.reds);
   const greens = greenSemGale + greenG1;
+  const total = greens + reds;
 
   return {
     greenSemGale,
     greenG1,
     reds,
-    assertiveness: percentage(greens, greens + reds),
+    total,
+    assertiveness: calculateAssertiveness(greens, total),
+    sequencePositive: safeNumber(scoreboard.sequencePositive),
+    sequenceNegative: safeNumber(scoreboard.sequenceNegative),
+    breakdown: `SG ${greenSemGale} / G1 ${greenG1} / RED ${reds}`,
   };
 }
 
@@ -33,7 +38,10 @@ export function calculateTieResult(scoreboard: TieAlertScoreboard): TieResult {
     greens,
     expired,
     total,
-    assertiveness: percentage(greens, total),
+    assertiveness: calculateAssertiveness(greens, total),
+    sequencePositive: safeNumber(scoreboard.sequencePositive),
+    sequenceExpired: safeNumber(scoreboard.sequenceExpired),
+    breakdown: `Green ${greens} / Exp. ${expired}`,
   };
 }
 
@@ -43,7 +51,8 @@ export function calculateNeuralResult(reading?: NeuralReading): NeuralResult {
   const greenG1 = safeNumber(reading?.greenG1 ?? Math.max(0, hitFallback - greenSemGale));
   const reds = safeNumber(reading?.reds ?? reading?.erros);
   const greens = greenSemGale + greenG1;
-  const totalAlerts = safeNumber(reading?.alertas ?? greens + reds);
+  const total = greens + reds;
+  const totalAlerts = safeNumber(reading?.alertas ?? total);
 
   return {
     totalAlerts,
@@ -51,7 +60,11 @@ export function calculateNeuralResult(reading?: NeuralReading): NeuralResult {
     greenSemGale,
     greenG1,
     reds,
-    assertiveness: percentage(greens, greens + reds),
+    total,
+    assertiveness: calculateAssertiveness(greens, total),
+    sequencePositive: safeNumber(reading?.sequencePositive),
+    sequenceNegative: safeNumber(reading?.sequenceNegative),
+    breakdown: `SG ${greenSemGale} / G1 ${greenG1} / RED ${reds}`,
   };
 }
 
@@ -64,7 +77,8 @@ export function calculateSurfResult(scoreboard?: SurfAnalyzerScoreboard): SurfRe
   const greenG1 = hasSplitGreens ? safeNumber(scoreboard?.greenG1) : 0;
   const greens = greenSemGale + greenG1;
   const reds = safeNumber(scoreboard?.reds ?? scoreboard?.fails);
-  const totalAlerts = safeNumber(scoreboard?.totalAlerts ?? greens + reds);
+  const total = greens + reds;
+  const totalAlerts = safeNumber(scoreboard?.totalAlerts ?? total);
 
   return {
     totalAlerts,
@@ -72,9 +86,13 @@ export function calculateSurfResult(scoreboard?: SurfAnalyzerScoreboard): SurfRe
     greenSemGale,
     greenG1,
     reds,
+    total,
     blocked: safeNumber(scoreboard?.blocked),
     noRisk: safeNumber(scoreboard?.noRisk),
-    assertiveness: percentage(greens, greens + reds),
+    assertiveness: calculateAssertiveness(greens, total),
+    sequencePositive: safeNumber(scoreboard?.sequencePositive ?? scoreboard?.currentHitStreak),
+    sequenceNegative: safeNumber(scoreboard?.sequenceNegative),
+    breakdown: `SG ${greenSemGale} / G1 ${greenG1} / RED ${reds}`,
   };
 }
 
@@ -83,7 +101,7 @@ function safeNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function percentage(part: number, total: number) {
+export function calculateAssertiveness(part: number, total: number) {
   if (total <= 0) return 0;
   return Math.round((part / total) * 1000) / 10;
 }

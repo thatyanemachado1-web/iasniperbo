@@ -1,4 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
+import { Activity, ChevronRight, Crown } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { LiveTableView } from "@/components/dashboard/LiveTableView";
@@ -7,16 +9,13 @@ import { SignalCard } from "@/components/dashboard/SignalCard";
 import { TieAlertCard } from "@/components/dashboard/TieAlertCard";
 import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
 import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
-import { ModuleResultTabs } from "@/components/dashboard/ModuleResultTabs";
+import { ModuleMiniScoreboard } from "@/components/dashboard/ModuleMiniScoreboard";
 import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
-import { ScoreboardCard } from "@/components/dashboard/ScoreboardCard";
 import { RoadmapDots } from "@/components/dashboard/RoadmapDots";
 import { PressureChart } from "@/components/dashboard/PressureChart";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { Activity, ChevronRight, Crown } from "lucide-react";
-import { Link } from "@tanstack/react-router";
 import {
   calculateAlternationRate,
   calculateBankerFrequency,
@@ -48,7 +47,7 @@ function DashboardPage() {
     ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
     : undefined;
   const lastRound = d.rounds[d.rounds.length - 1];
-  const streak = calculateCurrentStreak(d.rounds);
+  const sequence = calculateCurrentStreak(d.rounds);
   const stats = {
     banker: calculateBankerFrequency(d.rounds),
     player: calculatePlayerFrequency(d.rounds),
@@ -91,13 +90,57 @@ function DashboardPage() {
         <div className="space-y-4">
           <SignalCard signal={d.currentSignal} neuralReading={d.neuralReading} surfSummary={surfSummary} tieAlert={d.currentTieAlert} priority />
           <div className="space-y-2">
-            <ModuleResultTabs moduleType="MAIN" data={mainResult} compact />
-            <ModuleResultTabs moduleType="NEURAL" data={neuralResult} compact />
+            <ModuleMiniScoreboard
+              moduleType="MAIN"
+              title="Resultado Principal"
+              assertiveness={mainResult.assertiveness}
+              chips={[
+                { label: "SG", value: mainResult.greenSemGale, variant: "green" },
+                { label: "G1", value: mainResult.greenG1, variant: "green" },
+                { label: "RED", value: mainResult.reds, variant: "red" },
+                { label: "Total", value: mainResult.total, variant: "neutral" },
+              ]}
+              sequencePositive={mainResult.sequencePositive}
+              sequenceNegative={mainResult.sequenceNegative}
+              breakdown={mainResult.breakdown}
+            />
+            <ModuleMiniScoreboard
+              moduleType="NEURAL"
+              title="Resultado Neural"
+              assertiveness={neuralResult.assertiveness}
+              chips={[
+                { label: "Alertas", value: neuralResult.totalAlerts, variant: "neutral" },
+                { label: "Green", value: neuralResult.greens, variant: "green" },
+                { label: "SG", value: neuralResult.greenSemGale, variant: "green" },
+                { label: "G1", value: neuralResult.greenG1, variant: "cyan" },
+                { label: "RED", value: neuralResult.reds, variant: "red" },
+                { label: "Total", value: neuralResult.total, variant: "neutral" },
+              ]}
+              sequencePositive={neuralResult.sequencePositive}
+              sequenceNegative={neuralResult.sequenceNegative}
+              breakdown={neuralResult.breakdown}
+            />
           </div>
           {surfAlert && (
             <div className="space-y-2">
               <SurfAlertCard alert={surfAlert} />
-              <ModuleResultTabs moduleType="SURF" data={surfResult} compact />
+              <ModuleMiniScoreboard
+                moduleType="SURF"
+                title="Resultado Surf"
+                assertiveness={surfResult.assertiveness}
+                chips={[
+                  { label: "Green", value: surfResult.greens, variant: "green" },
+                  { label: "SG", value: surfResult.greenSemGale, variant: "green" },
+                  { label: "G1", value: surfResult.greenG1, variant: "cyan" },
+                  { label: "RED", value: surfResult.reds, variant: "red" },
+                  { label: "Total", value: surfResult.total, variant: "neutral" },
+                  { label: "Bloq.", value: surfResult.blocked, variant: "yellow" },
+                  { label: "Sem risco", value: surfResult.noRisk, variant: "neutral" },
+                ]}
+                sequencePositive={surfResult.sequencePositive}
+                sequenceNegative={surfResult.sequenceNegative}
+                breakdown={surfResult.breakdown}
+              />
             </div>
           )}
         </div>
@@ -106,7 +149,19 @@ function DashboardPage() {
           <EngineDecisionCard decision={d.engineDecision} />
           <div className="space-y-2">
             <TieAlertCard alert={d.currentTieAlert} />
-            <ModuleResultTabs moduleType="TIE" data={tieResult} compact />
+            <ModuleMiniScoreboard
+              moduleType="TIE"
+              title="Resultado Tie"
+              assertiveness={tieResult.assertiveness}
+              chips={[
+                { label: "Green", value: tieResult.greens, variant: "green" },
+                { label: "Exp.", value: tieResult.expired, variant: "purple" },
+                { label: "Total", value: tieResult.total, variant: "neutral" },
+              ]}
+              sequencePositive={tieResult.sequencePositive}
+              sequenceExpired={tieResult.sequenceExpired}
+              breakdown={tieResult.breakdown}
+            />
           </div>
         </div>
       </div>
@@ -131,7 +186,7 @@ function DashboardPage() {
               <Metric label="Pressão B" value={`${stats.banker.toFixed(0)}%`} tone="text-banker" />
               <Metric label="Pressão P" value={`${stats.player.toFixed(0)}%`} tone="text-player" />
               <Metric label="Pressão T" value={`${stats.tie.toFixed(0)}%`} tone="text-tie" />
-              <Metric label="Sequência" value={`${streak.side ?? "-"} x${streak.count}`} />
+              <Metric label="Sequência" value={`${sequence.side ?? "-"} x${sequence.count}`} />
               <Metric label="Alternância" value={`${stats.alt.toFixed(0)}%`} />
               <Metric label="Padrão" value="Observação" />
             </div>
@@ -151,42 +206,6 @@ function DashboardPage() {
 
         <div className="space-y-4">
           <BrainAssistantCard />
-
-          <ScoreboardCard
-            title="Placar principal"
-            assertiveness={d.mainScoreboard.assertiveness}
-            color="oklch(0.72 0.18 145)"
-            items={[
-              { label: "Greens", value: d.mainScoreboard.greens, tone: "var(--success)" },
-              { label: "G1", value: d.mainScoreboard.greensG1, tone: "var(--warning)" },
-              { label: "Reds", value: d.mainScoreboard.reds, tone: "var(--destructive)" },
-            ]}
-            note="Entradas Banker/Player"
-          />
-
-          <ScoreboardCard
-            title="Placar Tie Alert"
-            assertiveness={d.tieAlertScoreboard.assertiveness}
-            color="oklch(0.65 0.25 295)"
-            items={[
-              { label: "Greens", value: d.tieAlertScoreboard.greenTieAlerts, tone: "var(--success)" },
-              { label: "Expirados", value: d.tieAlertScoreboard.expired, tone: "var(--muted-foreground)" },
-              { label: "Total", value: d.tieAlertScoreboard.totalAlerts },
-            ]}
-            note="Expiração não é RED"
-          />
-
-          <ScoreboardCard
-            title="Placar Surf Analyzer"
-            assertiveness={surfBoard.assertiveness}
-            color="oklch(0.7 0.16 215)"
-            items={[
-              { label: "Acertos", value: surfBoard.hits, tone: "var(--success)" },
-              { label: "Erros", value: surfBoard.fails, tone: "var(--destructive)" },
-              { label: "Exp.", value: surfBoard.expired, tone: "var(--muted-foreground)" },
-            ]}
-            note={`B ${surfBoard.bankerHits} | P ${surfBoard.playerHits} | streak ${surfBoard.currentHitStreak}`}
-          />
 
           <GlassCard className="border-gold/40">
             <div className="flex items-center gap-3">

@@ -102,6 +102,8 @@ export const mockDashboardData: DashboardData = {
     erros: 100,
     reds: 100,
     assertividade: 43.5,
+    sequencePositive: 2,
+    sequenceNegative: 1,
   },
   moduleToggles: {
     tieAlert: true,
@@ -133,7 +135,7 @@ export const mockDashboardData: DashboardData = {
     state: "ATENCAO",
     reason: "Tie Alert ativo em paralelo. Nenhuma entrada principal confirmada.",
     confidence: 74,
-    debug: "alternancia=53% | streak=B x2 | tiePressure=20%",
+    debug: "alternancia=53% | seq=B x2 | tiePressure=20%",
   },
   mainScoreboard: {
     greens: 18,
@@ -142,12 +144,16 @@ export const mockDashboardData: DashboardData = {
     totalGreens: 23,
     totalEntries: 26,
     assertiveness: 88.5,
+    sequencePositive: 6,
+    sequenceNegative: 0,
   },
   tieAlertScoreboard: {
     greenTieAlerts: 16,
     expired: 41,
     totalAlerts: 57,
     assertiveness: 28.1,
+    sequencePositive: 1,
+    sequenceExpired: 3,
   },
   surfAnalyzerScoreboard: {
     totalAlerts: 30,
@@ -162,6 +168,8 @@ export const mockDashboardData: DashboardData = {
     bankerHits: 5,
     playerHits: 4,
     assertiveness: 73.3,
+    sequencePositive: 4,
+    sequenceNegative: 0,
     maxBankerSurfHit: 7,
     maxPlayerSurfHit: 6,
     maxBreakDetected: 82,
