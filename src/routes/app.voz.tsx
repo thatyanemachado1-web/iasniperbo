@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { BrainAI } from "@/components/brand/BrainAI";
 import { NeuralLines } from "@/components/brand/NeuralLines";
@@ -6,12 +7,15 @@ import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { Mic, Volume2, Gauge } from "lucide-react";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
+import { hasFullAccess, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app/voz")({
   component: VozPage,
 });
 
 function VozPage() {
+  const fullAccess = hasFullAccess(readUserSession());
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <GlassCard className="relative min-h-[420px] flex flex-col items-center justify-center text-center overflow-hidden">
@@ -29,16 +33,18 @@ function VozPage() {
             />
           ))}
         </div>
-        <div className="mt-3 text-sm">"Alerta estatístico de Tie ativo em paralelo."</div>
+        <div className="mt-3 text-sm">"Alerta estatistico de Tie ativo em paralelo."</div>
         <button className="mt-5 size-16 rounded-full btn-primary-grad flex items-center justify-center glow-blue">
           <Mic className="size-7" />
         </button>
         <div className="mt-2 text-[11px] uppercase tracking-widest text-neon-cyan/80">Voz ativada</div>
-        <PremiumLock
-          title="Narrador IA Premium"
-          description="Narrador IA disponível no plano Premium"
-          intensity="light"
-        />
+        {!fullAccess && (
+          <PremiumLock
+            title="Narrador IA Premium"
+            description="Narrador IA disponivel no plano Premium"
+            intensity="light"
+          />
+        )}
       </GlassCard>
 
       <GlassCard>
@@ -48,14 +54,14 @@ function VozPage() {
           <Control icon={<Gauge className="size-4" />} label="Velocidade" value="1.0x" />
           <Toggle label="Narrar apenas entradas" />
           <Toggle label="Narrar Tie Alert" defaultOn />
-          <Toggle label="Falar última decisão" />
+          <Toggle label="Falar ultima decisao" />
         </div>
       </GlassCard>
     </div>
   );
 }
 
-function Control({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Control({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">{icon}{label}</div>
@@ -68,6 +74,7 @@ function Control({ icon, label, value }: { icon: React.ReactNode; label: string;
     </div>
   );
 }
+
 function Toggle({ label, defaultOn }: { label: string; defaultOn?: boolean }) {
   return (
     <label className="flex items-center justify-between text-sm cursor-pointer">

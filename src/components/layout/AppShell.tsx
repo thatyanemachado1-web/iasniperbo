@@ -2,7 +2,8 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
+import { accessLabel } from "@/lib/accessApi";
+import { hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 import type { ReactNode } from "react";
 
 const navItems = [
@@ -17,6 +18,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const userSession = readUserSession();
   const canSeeAdmin = isAdminOwnerEmail(userSession.email);
+  const fullAccess = hasFullAccess(userSession);
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -29,7 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="hidden md:flex items-center gap-2">
             <AppBadge tone="green" pulse>Mesa online</AppBadge>
             <AppBadge tone="blue" pulse>Engine operacional</AppBadge>
-            <AppBadge tone="green">App operacional</AppBadge>
+            <AppBadge tone={fullAccess ? "green" : "amber"}>{accessLabel(userSession)}</AppBadge>
           </div>
           <div className="flex items-center gap-2">
             <button className="size-9 rounded-xl glass flex items-center justify-center hover:glow-blue">
@@ -66,7 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="md:hidden flex items-center gap-2 px-3 pb-2 overflow-x-auto">
           <AppBadge tone="green" pulse>Mesa online</AppBadge>
           <AppBadge tone="blue" pulse>Engine operacional</AppBadge>
-          <AppBadge tone="green">App operacional</AppBadge>
+          <AppBadge tone={fullAccess ? "green" : "amber"}>{accessLabel(userSession)}</AppBadge>
         </div>
       </header>
 

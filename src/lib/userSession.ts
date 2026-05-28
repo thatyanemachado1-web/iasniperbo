@@ -1,6 +1,12 @@
 export interface UserSession {
   email: string;
   name: string;
+  accessMode: "none" | "demo" | "pending" | "full" | "expired";
+  accessStatus: string;
+  plan: "free" | "premium" | "vip";
+  expiresAt: string;
+  registered: boolean;
+  approved: boolean;
 }
 
 const USER_SESSION_KEY = "sniper_user_session";
@@ -8,30 +14,62 @@ export const ADMIN_OWNER_EMAIL = "gabrielmendespromove@gmail.com";
 
 export function readUserSession(): UserSession {
   if (typeof window === "undefined") {
-    return { email: "", name: "Usuário" };
+    return emptyUserSession();
   }
   const raw = window.localStorage.getItem(USER_SESSION_KEY);
-  if (!raw) return { email: "", name: "Usuário" };
+  if (!raw) return emptyUserSession();
   try {
     const session = JSON.parse(raw) as Partial<UserSession>;
     const email = String(session.email || "").trim();
     const name = String(session.name || "").trim() || nameFromEmail(email);
-    return { email, name };
+    const accessMode = normalizeAccessMode(session.accessMode);
+    const plan = normalizePlan(session.plan);
+    return {
+      email,
+      name,
+      accessMode,
+      accessStatus: String(session.accessStatus || accessMode),
+      plan,
+      expiresAt: String(session.expiresAt || ""),
+      registered: Boolean(session.registered || email),
+      approved: Boolean(session.approved || accessMode === "full"),
+    };
   } catch {
-    return { email: "", name: "Usuário" };
+    return emptyUserSession();
   }
 }
 
-export function saveUserSession(email: string) {
+export function saveUserSession(email: string, partial: Partial<UserSession> = {}) {
   if (typeof window === "undefined") return;
   const cleanEmail = email.trim();
+  const accessMode = normalizeAccessMode(
+    partial.accessMode || (isAdminOwnerEmail(cleanEmail) ? "full" : "demo"),
+  );
+  const plan = normalizePlan(partial.plan || (accessMode === "full" ? "vip" : "free"));
   window.localStorage.setItem(
     USER_SESSION_KEY,
     JSON.stringify({
       email: cleanEmail,
-      name: nameFromEmail(cleanEmail),
+      name: partial.name || nameFromEmail(cleanEmail),
+      accessMode,
+      accessStatus: partial.accessStatus || accessMode,
+      plan,
+      expiresAt: partial.expiresAt || "",
+      registered: partial.registered ?? Boolean(cleanEmail),
+      approved: partial.approved ?? accessMode === "full",
     }),
   );
+}
+
+export function saveDemoSession(email: string, name?: string) {
+  saveUserSession(email, {
+    name: name || nameFromEmail(email),
+    accessMode: "demo",
+    accessStatus: "demo",
+    plan: "free",
+    registered: true,
+    approved: false,
+  });
 }
 
 export function clearUserSession() {
@@ -43,9 +81,44 @@ export function isAdminOwnerEmail(email?: string | null) {
   return String(email || "").trim().toLowerCase() === ADMIN_OWNER_EMAIL;
 }
 
+export function hasFullAccess(session: UserSession = readUserSession()) {
+  return session.approved || session.accessMode === "full" || isAdminOwnerEmail(session.email);
+}
+
+export function isLimitedAccess(session: UserSession = readUserSession()) {
+  return !hasFullAccess(session);
+}
+
+function emptyUserSession(): UserSession {
+  return {
+    email: "",
+    name: "Usuario",
+    accessMode: "none",
+    accessStatus: "none",
+    plan: "free",
+    expiresAt: "",
+    registered: false,
+    approved: false,
+  };
+}
+
+function normalizeAccessMode(value: unknown): UserSession["accessMode"] {
+  const text = String(value || "none").trim().toLowerCase();
+  if (text === "demo" || text === "pending" || text === "full" || text === "expired") {
+    return text;
+  }
+  return "none";
+}
+
+function normalizePlan(value: unknown): UserSession["plan"] {
+  const text = String(value || "free").trim().toLowerCase();
+  if (text === "premium" || text === "vip") return text;
+  return "free";
+}
+
 function nameFromEmail(email: string) {
   const localPart = email.split("@")[0]?.trim();
-  if (!localPart) return "Usuário";
+  if (!localPart) return "Usuario";
   return localPart
     .replace(/[._-]+/g, " ")
     .split(" ")

@@ -1,10 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { LogOut, ShieldCheck, Users } from "lucide-react";
-import { Link } from "@tanstack/react-router";
 import { readAdminSession } from "@/lib/adminApi";
+import { accessLabel } from "@/lib/accessApi";
 import { clearUserSession, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app/conta")({
@@ -27,7 +28,7 @@ function ContaPage() {
               </div>
               <div>
                 <div className="text-[11px] uppercase tracking-[0.22em] text-neon-cyan/80">
-                  Espaço privado do administrador
+                  Espaco privado do administrador
                 </div>
                 <h2 className="mt-1 text-xl font-black">Cadastros VIP/Premium</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -48,30 +49,37 @@ function ContaPage() {
       <GlassCard>
         <SectionTitle title="Conta" />
         <Field label="Nome" value={userSession.name} />
-        <Field label="Email" value={userSession.email || "Não informado"} />
-        <Field label="Plano atual" value={<AppBadge tone="amber">Demonstração</AppBadge>} />
-        <Field label="Status da assinatura" value={<AppBadge tone="muted">Não assinante</AppBadge>} />
+        <Field label="Email" value={userSession.email || "Nao informado"} />
+        <Field
+          label="Plano atual"
+          value={<AppBadge tone={userSession.approved ? "green" : "amber"}>{accessLabel(userSession)}</AppBadge>}
+        />
+        <Field
+          label="Status da assinatura"
+          value={<AppBadge tone={userSession.approved ? "green" : "muted"}>{userSession.accessStatus}</AppBadge>}
+        />
+        {userSession.expiresAt && <Field label="Validade" value={formatDateBR(userSession.expiresAt)} />}
       </GlassCard>
 
       <GlassCard>
-        <SectionTitle title="Preferências da IA" />
+        <SectionTitle title="Preferencias da IA" />
         <Toggle label="Respostas curtas" defaultOn />
         <Toggle label="Respostas detalhadas" />
         <Toggle label="Linguagem operacional" defaultOn />
       </GlassCard>
 
       <GlassCard>
-        <SectionTitle title="Preferências de voz" />
+        <SectionTitle title="Preferencias de voz" />
         <Toggle label="Narrar entradas" defaultOn />
         <Toggle label="Narrar Tie Alert" defaultOn />
-        <Toggle label="Falar última decisão" />
+        <Toggle label="Falar ultima decisao" />
       </GlassCard>
 
       <GlassCard>
         <SectionTitle title="Tema" />
         <Toggle label="Modo escuro" defaultOn />
         <Toggle label="Glow intenso" defaultOn />
-        <Toggle label="Animações" defaultOn />
+        <Toggle label="Animacoes" defaultOn />
         <Link
           to="/"
           onClick={() => clearUserSession()}
@@ -84,11 +92,11 @@ function ContaPage() {
   );
 }
 
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
+function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-border/60 last:border-0">
+    <div className="flex items-center justify-between gap-3 py-2 border-b border-border/60 last:border-0">
       <div className="text-xs text-muted-foreground uppercase tracking-widest">{label}</div>
-      <div className="text-sm font-semibold">{value}</div>
+      <div className="text-sm font-semibold text-right">{value}</div>
     </div>
   );
 }
@@ -102,4 +110,10 @@ function Toggle({ label, defaultOn }: { label: string; defaultOn?: boolean }) {
       </span>
     </label>
   );
+}
+
+function formatDateBR(value: string) {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+  return `${day}/${month}/${year}`;
 }

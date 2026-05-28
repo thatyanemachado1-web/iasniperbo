@@ -16,6 +16,7 @@ import { PressureChart } from "@/components/dashboard/PressureChart";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
+import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
 import {
   calculateAlternationRate,
   calculateBankerFrequency,
@@ -30,7 +31,8 @@ import {
   calculateSurfResult,
   calculateTieResult,
 } from "@/utils/moduleResults";
-import { readUserSession } from "@/lib/userSession";
+import { accessLabel } from "@/lib/accessApi";
+import { hasFullAccess, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
@@ -39,6 +41,7 @@ export const Route = createFileRoute("/app/")({
 function DashboardPage() {
   const { data: d, mode } = useDashboardData();
   const userSession = readUserSession();
+  const fullAccess = hasFullAccess(userSession);
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;
   const mainResult = calculateMainResult(d.mainScoreboard);
@@ -83,6 +86,7 @@ function DashboardPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <AppBadge tone={dataModeTone} pulse={mode !== "mock"}>{dataModeLabel}</AppBadge>
+          <AppBadge tone={fullAccess ? "green" : "amber"}>{accessLabel(userSession)}</AppBadge>
           <AppBadge tone="blue">Entrada em prioridade</AppBadge>
           <ModuleToggleStrip toggles={d.moduleToggles} />
         </div>
@@ -90,8 +94,10 @@ function DashboardPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-4">
         <div className="space-y-4">
-          <SignalCard signal={d.currentSignal} neuralReading={d.neuralReading} surfSummary={surfSummary} tieAlert={d.currentTieAlert} priority />
-          <div className="space-y-2">
+          <PremiumFeature title="Entrada principal VIP" description="A entrada confirmada completa so aparece para clientes liberados.">
+            <SignalCard signal={d.currentSignal} neuralReading={d.neuralReading} surfSummary={surfSummary} tieAlert={d.currentTieAlert} priority />
+          </PremiumFeature>
+          <PremiumFeature title="Placares VIP" description="Os resultados completos ficam liberados apos aprovacao do ADM." className="space-y-2">
             <ModuleMiniScoreboard
               moduleType="MAIN"
               title="Resultado Principal"
@@ -122,9 +128,9 @@ function DashboardPage() {
               sequenceNegative={neuralResult.sequenceNegative}
               breakdown={neuralResult.breakdown}
             />
-          </div>
+          </PremiumFeature>
           {surfAlert && (
-            <div className="space-y-2">
+            <PremiumFeature title="Surf Analyzer VIP" description="Leitura completa de surf fica bloqueada no demo." className="space-y-2">
               <SurfAlertCard alert={surfAlert} />
               <ModuleMiniScoreboard
                 moduleType="SURF"
@@ -143,13 +149,15 @@ function DashboardPage() {
                 sequenceNegative={surfResult.sequenceNegative}
                 breakdown={surfResult.breakdown}
               />
-            </div>
+            </PremiumFeature>
           )}
         </div>
 
         <div className="space-y-4">
-          <EngineDecisionCard decision={d.engineDecision} />
-          <div className="space-y-2">
+          <PremiumFeature title="Decisao da engine VIP" description="A decisao tecnica fica completa apenas no acesso liberado.">
+            <EngineDecisionCard decision={d.engineDecision} />
+          </PremiumFeature>
+          <PremiumFeature title="Tie Alert VIP" description="Leitura completa de empate fica bloqueada no demo." className="space-y-2">
             <TieAlertCard alert={d.currentTieAlert} />
             <ModuleMiniScoreboard
               moduleType="TIE"
@@ -164,7 +172,7 @@ function DashboardPage() {
               sequenceExpired={tieResult.sequenceExpired}
               breakdown={tieResult.breakdown}
             />
-          </div>
+          </PremiumFeature>
         </div>
       </div>
 
@@ -172,7 +180,8 @@ function DashboardPage() {
         <div className="lg:col-span-2 space-y-4">
           <LiveTableView lastRound={lastRound} roundId={lastRound.id} />
 
-          <GlassCard>
+          <PremiumFeature title="Analise estatistica VIP" description="O demo mostra a estrutura, mas bloqueia a leitura completa.">
+            <GlassCard>
             <SectionTitle
               title="Análise estatística da mesa"
               subtitle="Pressão estatística calculada pelas últimas rodadas."
@@ -192,7 +201,8 @@ function DashboardPage() {
               <Metric label="Alternância" value={`${stats.alt.toFixed(0)}%`} />
               <Metric label="Padrão" value="Observação" />
             </div>
-          </GlassCard>
+            </GlassCard>
+          </PremiumFeature>
 
           <GlassCard>
             <SectionTitle
@@ -207,7 +217,9 @@ function DashboardPage() {
         </div>
 
         <div className="space-y-4">
-          <BrainAssistantCard />
+          <PremiumFeature title="IA completa VIP" description="A IA operacional completa fica liberada para VIP/Premium.">
+            <BrainAssistantCard />
+          </PremiumFeature>
 
           <GlassCard className="border-gold/40">
             <div className="flex items-center gap-3">

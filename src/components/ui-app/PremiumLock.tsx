@@ -36,7 +36,7 @@ export function PremiumLock({
         <div className="mt-1 text-sm text-foreground">{description}</div>
       </div>
       <button
-        onClick={() => navigate({ to: "/planos" })}
+        onClick={() => navigate({ to: "/app/planos" })}
         className="btn-primary-grad inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold"
       >
         <Sparkles className="size-4" />

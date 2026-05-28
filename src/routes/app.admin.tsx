@@ -104,6 +104,10 @@ function AdminPage() {
     () => recipients.filter((recipient) => recipient.plan === "premium" && recipient.enabled),
     [recipients],
   );
+  const pendingClients = useMemo(
+    () => recipients.filter((recipient) => recipient.access_status === "pending"),
+    [recipients],
+  );
   const calculatedExpiresAt = useMemo(
     () => calculateExpiryDate(form.starts_at, form.validity_days),
     [form.starts_at, form.validity_days],
@@ -222,6 +226,9 @@ function AdminPage() {
       const updated = await updateSignalRecipient(session, recipient.id, {
         enabled: nextEnabled,
         access_status: nextEnabled ? "approved" : "paused",
+        plan: nextEnabled && recipient.plan === "free" ? "premium" : recipient.plan,
+        starts_at: nextEnabled ? recipient.starts_at || todayIso() : recipient.starts_at,
+        validity_days: nextEnabled ? recipient.validity_days || 30 : recipient.validity_days,
       });
       setRecipients((current) =>
         current.map((item) => (item.id === recipient.id ? updated : item)),
@@ -335,6 +342,7 @@ function AdminPage() {
           <AppBadge tone="green" pulse>{activeRecipients.length} liberados</AppBadge>
           <AppBadge tone="gold">{vipClients.length} VIP</AppBadge>
           <AppBadge tone="purple">{premiumClients.length} Premium</AppBadge>
+          <AppBadge tone="amber">{pendingClients.length} pendentes</AppBadge>
           <AppBadge tone="muted">{recipients.length} cadastros</AppBadge>
           <button
             type="button"
@@ -516,15 +524,17 @@ function RecipientRow({
   onToggle: () => void;
   onDelete: () => void;
 }) {
+  const isPending = recipient.access_status === "pending";
+  const statusLabel = isPending ? "Pendente" : recipient.enabled ? "Liberado" : "Bloqueado";
+  const statusTone = isPending ? "amber" : recipient.enabled ? "green" : "muted";
+
   return (
     <div className="rounded-xl border border-border/60 bg-secondary/25 p-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm font-bold">{recipient.full_name || recipient.name}</span>
-            <AppBadge tone={recipient.enabled ? "green" : "muted"}>
-              {recipient.enabled ? "Liberado" : "Bloqueado"}
-            </AppBadge>
+            <AppBadge tone={statusTone}>{statusLabel}</AppBadge>
             <AppBadge tone={recipient.plan === "vip" ? "gold" : recipient.plan === "premium" ? "purple" : "muted"}>
               {planLabels[recipient.plan] ?? recipient.plan}
             </AppBadge>
@@ -637,6 +647,10 @@ function calculateExpiryDate(startsAt: string, daysText: string) {
   if (Number.isNaN(date.getTime())) return "";
   date.setDate(date.getDate() + Math.floor(days));
   return date.toISOString().slice(0, 10);
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function formatDateBR(value: string) {
