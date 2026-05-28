@@ -11,6 +11,7 @@ import {
   readAdminSession,
   saveAdminSession,
   updateSignalRecipient,
+  useLocalAdminApiUrl,
 } from "@/lib/adminApi";
 import { isAdminOwnerEmail, readUserSession, saveUserSession } from "@/lib/userSession";
 import type { AdminSession, RecipientKind, RecipientPlan, SignalRecipient } from "@/types/admin";
@@ -314,6 +315,18 @@ function AdminPage() {
               onChange={setApiUrl}
               placeholder="http://127.0.0.1:8787"
             />
+            <button
+              type="button"
+              onClick={() => {
+                clearAdminSession();
+                setSession(null);
+                setApiUrl(useLocalAdminApiUrl());
+                setError("");
+              }}
+              className="inline-flex w-full items-center justify-center rounded-xl border border-neon-cyan/30 px-3 py-2 text-xs font-bold text-neon-cyan hover:bg-neon-cyan/10"
+            >
+              Usar API local do bot
+            </button>
             <AdminInput
               icon={<ShieldCheck className="size-4" />}
               label="Email admin"

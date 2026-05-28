@@ -3,15 +3,21 @@ import type { ModuleToggles } from "@/types/dashboard";
 
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
+export const LOCAL_ADMIN_API_URL = "http://127.0.0.1:8787";
 
 const defaultApiUrl = () =>
   (import.meta.env.VITE_SNIPER_API_URL as string | undefined) ||
   (import.meta.env.VITE_SNIPER_DASHBOARD_URL as string | undefined)?.replace(/\/dashboard\/?$/, "") ||
-  "http://127.0.0.1:8787";
+  LOCAL_ADMIN_API_URL;
 
 export function getInitialApiUrl() {
   if (typeof window === "undefined") return defaultApiUrl();
-  return window.localStorage.getItem(API_URL_KEY) || defaultApiUrl();
+  const saved = normalizeMaybeUrl(window.localStorage.getItem(API_URL_KEY) || "");
+  if (isLocalFrontend() && (!saved || !isLocalApiUrl(saved))) {
+    window.localStorage.setItem(API_URL_KEY, LOCAL_ADMIN_API_URL);
+    return LOCAL_ADMIN_API_URL;
+  }
+  return saved || defaultApiUrl();
 }
 
 export function readAdminSession(): AdminSession | null {
@@ -31,25 +37,32 @@ export function saveAdminSession(session: AdminSession) {
   window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
+export function useLocalAdminApiUrl() {
+  if (typeof window === "undefined") return LOCAL_ADMIN_API_URL;
+  window.localStorage.setItem(API_URL_KEY, LOCAL_ADMIN_API_URL);
+  return LOCAL_ADMIN_API_URL;
+}
+
 export function clearAdminSession() {
   window.sessionStorage.removeItem(SESSION_KEY);
 }
 
 export async function adminLogin(apiUrl: string, email: string, password: string) {
-  const response = await fetch(`${normalizeBaseUrl(apiUrl)}/admin/login`, {
+  const normalizedApiUrl = normalizeBaseUrl(apiUrl || getInitialApiUrl());
+  const response = await fetch(`${normalizedApiUrl}/admin/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
   if (!response.ok) {
-    throw new Error("Email ou senha admin invalidos.");
+    throw new Error(`Email ou senha admin invalidos na API ${normalizedApiUrl}.`);
   }
   const data = (await response.json()) as { token?: string; email?: string };
   if (!data.token) {
     throw new Error("A API nao retornou uma chave de sessao.");
   }
   return {
-    apiUrl: normalizeBaseUrl(apiUrl),
+    apiUrl: normalizedApiUrl,
     email: data.email || email,
     token: data.token,
   };
@@ -131,4 +144,22 @@ async function request<T>(session: AdminSession, path: string, init: RequestInit
 
 function normalizeBaseUrl(apiUrl: string) {
   return apiUrl.trim().replace(/\/+$/, "");
+}
+
+function normalizeMaybeUrl(apiUrl: string) {
+  return normalizeBaseUrl(apiUrl).replace(/\/dashboard\/?$/, "");
+}
+
+function isLocalFrontend() {
+  if (typeof window === "undefined") return false;
+  return ["127.0.0.1", "localhost"].includes(window.location.hostname);
+}
+
+function isLocalApiUrl(apiUrl: string) {
+  try {
+    const parsed = new URL(apiUrl);
+    return ["127.0.0.1", "localhost"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
