@@ -57,7 +57,7 @@ export function clearAdminSession() {
 }
 
 export async function adminLogin(apiUrl: string, email: string, password: string) {
-  const normalizedApiUrl = normalizeBaseUrl(apiUrl || getInitialApiUrl());
+  const normalizedApiUrl = normalizeMaybeUrl(apiUrl || getInitialApiUrl());
   const response = await fetch(`${normalizedApiUrl}/admin/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -141,7 +141,7 @@ export async function updateModuleToggles(
 }
 
 async function request<T>(session: AdminSession, path: string, init: RequestInit = {}) {
-  const response = await fetch(`${normalizeBaseUrl(session.apiUrl)}${path}`, {
+  const response = await fetch(`${normalizeMaybeUrl(session.apiUrl)}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -161,7 +161,20 @@ async function request<T>(session: AdminSession, path: string, init: RequestInit
 }
 
 function normalizeBaseUrl(apiUrl: string) {
-  return apiUrl.trim().replace(/\/+$/, "");
+  const cleaned = apiUrl.trim();
+  try {
+    const parsed = new URL(cleaned);
+    if (
+      ["http:", "https:"].includes(parsed.protocol) &&
+      (["127.0.0.1", "localhost"].includes(parsed.hostname) ||
+        ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname))
+    ) {
+      return parsed.origin;
+    }
+  } catch {
+    // Keep the original value below so invalid input still fails visibly.
+  }
+  return cleaned.replace(/\/+$/, "");
 }
 
 function normalizeMaybeUrl(apiUrl: string) {
