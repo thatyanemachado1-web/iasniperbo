@@ -15,6 +15,11 @@ let liveDashboardData: DashboardData & { updatedAt?: string } = {
   mockMode: false,
   updatedAt: new Date().toISOString(),
 };
+let liveRecipients: Array<Record<string, unknown>> = [];
+let liveModuleToggles = {
+  tieAlert: true,
+  surfAnalyzer: true,
+};
 
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
@@ -95,6 +100,9 @@ export default {
       const adminRedirect = redirectLegacyAdminRoute(request);
       if (adminRedirect) return withSecurityHeaders(adminRedirect);
 
+      const adminApiResponse = await handleAdminApiRequest(request, env);
+      if (adminApiResponse) return withSecurityHeaders(adminApiResponse);
+
       const dashboardResponse = await handleDashboardRequest(request, env);
       if (dashboardResponse) return withSecurityHeaders(dashboardResponse);
 
@@ -116,6 +124,122 @@ function redirectLegacyAdminRoute(request: Request) {
   url.pathname = "/app/admin";
   url.search = "";
   return Response.redirect(url.toString(), 302);
+}
+
+async function handleAdminApiRequest(request: Request, env: unknown) {
+  const url = new URL(request.url);
+  const isAdminApiPath =
+    url.pathname === "/admin/login" ||
+    url.pathname === "/telegram-recipients" ||
+    url.pathname.startsWith("/telegram-recipients/") ||
+    url.pathname === "/module-toggles" ||
+    url.pathname === "/security-events";
+
+  if (!isAdminApiPath) return null;
+
+  if (request.method === "OPTIONS") {
+    return json(null, 204);
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/login") {
+    const body = await request.json().catch(() => ({}));
+    const envRecord = readRecord(env);
+    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "gabrielmendespromove@gmail.com");
+    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "admin123");
+    const adminToken = getAdminToken(env);
+
+    if (readString(body, "email") === adminEmail && readString(body, "password") === adminPassword) {
+      return json({ token: adminToken, email: adminEmail });
+    }
+
+    return json({ error: "Email ou senha admin invalidos." }, 401);
+  }
+
+  if (!isAdminAuthorized(request, env)) {
+    return json({ error: "Nao autorizado." }, 401);
+  }
+
+  if (url.pathname === "/telegram-recipients") {
+    if (request.method === "GET") {
+      return json({ recipients: liveRecipients });
+    }
+
+    if (request.method === "POST") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const now = new Date().toISOString();
+      const recipient = normalizeRecipient({
+        ...body,
+        id: crypto.randomUUID(),
+        created_at: now,
+        updated_at: now,
+      });
+      liveRecipients = [...liveRecipients, recipient];
+      return json({ recipient }, 201);
+    }
+  }
+
+  const recipientMatch = url.pathname.match(/^\/telegram-recipients\/([^/]+)$/);
+  if (recipientMatch) {
+    const recipientId = decodeURIComponent(recipientMatch[1]);
+    const index = liveRecipients.findIndex((recipient) => recipient.id === recipientId);
+
+    if (index === -1) {
+      return json({ error: "Destinatario nao encontrado." }, 404);
+    }
+
+    if (request.method === "PATCH") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const updated = normalizeRecipient({
+        ...liveRecipients[index],
+        ...body,
+        id: liveRecipients[index].id,
+        created_at: liveRecipients[index].created_at,
+        updated_at: new Date().toISOString(),
+      });
+      liveRecipients = liveRecipients.map((recipient, recipientIndex) => (recipientIndex === index ? updated : recipient));
+      return json({ recipient: updated });
+    }
+
+    if (request.method === "DELETE") {
+      liveRecipients = liveRecipients.filter((recipient) => recipient.id !== recipientId);
+      return json({ ok: true });
+    }
+  }
+
+  if (url.pathname === "/module-toggles") {
+    if (request.method === "GET") {
+      return json({ moduleToggles: liveModuleToggles });
+    }
+
+    if (request.method === "POST") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      liveModuleToggles = {
+        tieAlert: typeof body.tieAlert === "boolean" ? body.tieAlert : liveModuleToggles.tieAlert,
+        surfAnalyzer: typeof body.surfAnalyzer === "boolean" ? body.surfAnalyzer : liveModuleToggles.surfAnalyzer,
+      };
+      liveDashboardData = {
+        ...liveDashboardData,
+        moduleToggles: liveModuleToggles,
+        updatedAt: new Date().toISOString(),
+      };
+      return json({ moduleToggles: liveModuleToggles });
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/security-events") {
+    return json({
+      events: [],
+      summary: {
+        total: 0,
+        low: 0,
+        medium: 0,
+        high: 0,
+        critical: 0,
+      },
+    });
+  }
+
+  return json({ error: "Rota nao encontrada." }, 404);
 }
 
 async function handleDashboardRequest(request: Request, env: unknown) {
@@ -285,6 +409,61 @@ function isDashboardAuthorized(request: Request, url: URL, env: unknown) {
   const headerToken =
     request.headers.get("x-sniper-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   return Boolean(token) && (headerToken === token || url.searchParams.get("token") === token);
+}
+
+function isAdminAuthorized(request: Request, env: unknown) {
+  const headerToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  return Boolean(headerToken) && headerToken === getAdminToken(env);
+}
+
+function getAdminToken(env: unknown) {
+  const envRecord = readRecord(env);
+  return String(envRecord.SNIPER_ADMIN_TOKEN || "sniper-local-admin-token");
+}
+
+function normalizeRecipient(recipient: Record<string, unknown>) {
+  const startsAt = readString(recipient, "starts_at") || todayIso();
+  const validityDays = Number(recipient.validity_days || 30);
+  const enabled = Boolean(recipient.enabled);
+
+  return {
+    id: readString(recipient, "id") || crypto.randomUUID(),
+    name: readString(recipient, "name") || readString(recipient, "full_name") || "Cliente",
+    full_name: readString(recipient, "full_name") || readString(recipient, "name"),
+    email: readString(recipient, "email"),
+    phone: readString(recipient, "phone"),
+    city: readString(recipient, "city"),
+    country: readString(recipient, "country"),
+    chat_id: readString(recipient, "chat_id"),
+    kind: ["group", "channel", "user"].includes(readString(recipient, "kind")) ? readString(recipient, "kind") : "user",
+    enabled,
+    plan: ["free", "premium", "vip"].includes(readString(recipient, "plan")) ? readString(recipient, "plan") : "vip",
+    access_status: ["approved", "paused", "pending"].includes(readString(recipient, "access_status"))
+      ? readString(recipient, "access_status")
+      : enabled
+        ? "approved"
+        : "pending",
+    starts_at: startsAt,
+    validity_days: Number.isFinite(validityDays) ? validityDays : 30,
+    expires_at: readString(recipient, "expires_at") || addDaysIso(startsAt, validityDays || 30),
+    notes: readString(recipient, "notes"),
+    created_at: readString(recipient, "created_at") || new Date().toISOString(),
+    updated_at: readString(recipient, "updated_at") || new Date().toISOString(),
+  };
+}
+
+function readString(record: Record<string, unknown>, key: string) {
+  return String(record[key] || "").trim();
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysIso(startIso: string, days: number) {
+  const date = new Date(`${startIso}T00:00:00`);
+  date.setDate(date.getDate() + Math.max(0, Math.floor(Number(days) || 0)));
+  return date.toISOString().slice(0, 10);
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
