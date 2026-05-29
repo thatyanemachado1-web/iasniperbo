@@ -16,6 +16,7 @@ let liveDashboardData: DashboardData & { updatedAt?: string } = {
   updatedAt: new Date().toISOString(),
 };
 let liveRecipients: Array<Record<string, unknown>> = [];
+let liveClients: Array<Record<string, unknown>> = [];
 let liveModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -130,6 +131,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   const url = new URL(request.url);
   const isAdminApiPath =
     url.pathname === "/admin/login" ||
+    url.pathname === "/auth/check" ||
+    url.pathname === "/auth/register" ||
     url.pathname === "/telegram-recipients" ||
     url.pathname.startsWith("/telegram-recipients/") ||
     url.pathname === "/module-toggles" ||
@@ -145,7 +148,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = await request.json().catch(() => ({}));
     const envRecord = readRecord(env);
     const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "gabrielmendespromove@gmail.com");
-    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "admin123");
+    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "12346");
     const adminToken = getAdminToken(env);
 
     if (readString(body, "email") === adminEmail && readString(body, "password") === adminPassword) {
@@ -153,6 +156,79 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
 
     return json({ error: "Email ou senha admin invalidos." }, 401);
+  }
+
+  if (request.method === "POST" && url.pathname === "/auth/check") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const email = readString(body, "email").toLowerCase();
+    const password = readString(body, "password");
+    const envRecord = readRecord(env);
+    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "gabrielmendespromove@gmail.com").toLowerCase();
+    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "12346");
+
+    if (email === adminEmail && password === adminPassword) {
+      return json({ access: ownerAccess(email, getAdminToken(env)) });
+    }
+
+    const client = liveClients.find((item) => readString(item, "email").toLowerCase() === email);
+    if (!client) {
+      return json({
+        access: {
+          registered: false,
+          approved: false,
+          access_mode: "none",
+          access_status: "none",
+          plan: "free",
+          email,
+          full_name: "",
+          expires_at: "",
+          reason: "Email ainda nao cadastrado.",
+        },
+      });
+    }
+
+    if (readString(client, "password") !== password) {
+      return json({ error: "Senha invalida." }, 401);
+    }
+
+    return json({ access: clientAccess(client, getAdminToken(env)) });
+  }
+
+  if (request.method === "POST" && url.pathname === "/auth/register") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const email = readString(body, "email").toLowerCase();
+    const password = readString(body, "password");
+    if (!email || !password) {
+      return json({ error: "Email e senha sao obrigatorios." }, 400);
+    }
+
+    const existingIndex = liveClients.findIndex((item) => readString(item, "email").toLowerCase() === email);
+    const now = new Date().toISOString();
+    const client = {
+      id: existingIndex >= 0 ? liveClients[existingIndex].id : crypto.randomUUID(),
+      full_name: readString(body, "full_name") || email,
+      email,
+      password,
+      phone: readString(body, "phone"),
+      city: readString(body, "city"),
+      country: readString(body, "country"),
+      plan: existingIndex >= 0 ? liveClients[existingIndex].plan || "free" : "free",
+      access_status: existingIndex >= 0 ? liveClients[existingIndex].access_status || "pending" : "pending",
+      enabled: existingIndex >= 0 ? Boolean(liveClients[existingIndex].enabled) : false,
+      starts_at: existingIndex >= 0 ? liveClients[existingIndex].starts_at || todayIso() : todayIso(),
+      validity_days: existingIndex >= 0 ? liveClients[existingIndex].validity_days || 30 : 30,
+      expires_at: existingIndex >= 0 ? liveClients[existingIndex].expires_at || "" : "",
+      created_at: existingIndex >= 0 ? liveClients[existingIndex].created_at || now : now,
+      updated_at: now,
+    };
+
+    liveClients =
+      existingIndex >= 0
+        ? liveClients.map((item, index) => (index === existingIndex ? client : item))
+        : [...liveClients, client];
+
+    upsertRecipientFromClient(client);
+    return json({ access: clientAccess(client, getAdminToken(env)) }, existingIndex >= 0 ? 200 : 201);
   }
 
   if (!isAdminAuthorized(request, env)) {
@@ -174,6 +250,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         updated_at: now,
       });
       liveRecipients = [...liveRecipients, recipient];
+      upsertClientFromRecipient(recipient);
       return json({ recipient }, 201);
     }
   }
@@ -197,6 +274,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         updated_at: new Date().toISOString(),
       });
       liveRecipients = liveRecipients.map((recipient, recipientIndex) => (recipientIndex === index ? updated : recipient));
+      upsertClientFromRecipient(updated);
       return json({ recipient: updated });
     }
 
@@ -450,6 +528,93 @@ function normalizeRecipient(recipient: Record<string, unknown>) {
     created_at: readString(recipient, "created_at") || new Date().toISOString(),
     updated_at: readString(recipient, "updated_at") || new Date().toISOString(),
   };
+}
+
+function ownerAccess(email: string, token: string) {
+  return {
+    registered: true,
+    approved: true,
+    access_mode: "full",
+    access_status: "owner",
+    plan: "vip",
+    email,
+    full_name: "Gabriel Mendes",
+    expires_at: "",
+    reason: "Acesso do administrador.",
+    client_token: token,
+  };
+}
+
+function clientAccess(client: Record<string, unknown>, token: string) {
+  const enabled = Boolean(client.enabled) || readString(client, "access_status") === "approved";
+  const accessStatus = readString(client, "access_status") || (enabled ? "approved" : "pending");
+  const plan = ["premium", "vip"].includes(readString(client, "plan")) ? readString(client, "plan") : "free";
+
+  return {
+    registered: true,
+    approved: enabled,
+    access_mode: enabled ? "full" : "pending",
+    access_status: accessStatus,
+    plan,
+    email: readString(client, "email"),
+    full_name: readString(client, "full_name") || readString(client, "name") || readString(client, "email"),
+    expires_at: readString(client, "expires_at"),
+    reason: enabled ? "Acesso liberado pelo administrador." : "Aguardando liberacao do administrador.",
+    client_token: enabled ? token : "",
+  };
+}
+
+function upsertRecipientFromClient(client: Record<string, unknown>) {
+  const email = readString(client, "email").toLowerCase();
+  if (!email) return;
+  const existingIndex = liveRecipients.findIndex((recipient) => readString(recipient, "email").toLowerCase() === email);
+  const recipient = normalizeRecipient({
+    ...(existingIndex >= 0 ? liveRecipients[existingIndex] : {}),
+    name: readString(client, "full_name") || email,
+    full_name: readString(client, "full_name") || email,
+    email,
+    phone: readString(client, "phone"),
+    city: readString(client, "city"),
+    country: readString(client, "country"),
+    enabled: Boolean(client.enabled),
+    plan: readString(client, "plan") || "free",
+    access_status: readString(client, "access_status") || "pending",
+    starts_at: readString(client, "starts_at") || todayIso(),
+    validity_days: Number(client.validity_days || 30),
+    expires_at: readString(client, "expires_at"),
+  });
+
+  liveRecipients =
+    existingIndex >= 0
+      ? liveRecipients.map((item, index) => (index === existingIndex ? recipient : item))
+      : [...liveRecipients, recipient];
+}
+
+function upsertClientFromRecipient(recipient: Record<string, unknown>) {
+  const email = readString(recipient, "email").toLowerCase();
+  if (!email) return;
+  const existingIndex = liveClients.findIndex((client) => readString(client, "email").toLowerCase() === email);
+  const client = {
+    ...(existingIndex >= 0 ? liveClients[existingIndex] : {}),
+    full_name: readString(recipient, "full_name") || readString(recipient, "name") || email,
+    email,
+    phone: readString(recipient, "phone"),
+    city: readString(recipient, "city"),
+    country: readString(recipient, "country"),
+    plan: readString(recipient, "plan") || "free",
+    access_status: readString(recipient, "access_status") || "pending",
+    enabled: Boolean(recipient.enabled),
+    starts_at: readString(recipient, "starts_at"),
+    validity_days: Number(recipient.validity_days || 30),
+    expires_at: readString(recipient, "expires_at"),
+    created_at: readString(recipient, "created_at") || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  liveClients =
+    existingIndex >= 0
+      ? liveClients.map((item, index) => (index === existingIndex ? client : item))
+      : [...liveClients, client];
 }
 
 function readString(record: Record<string, unknown>, key: string) {
