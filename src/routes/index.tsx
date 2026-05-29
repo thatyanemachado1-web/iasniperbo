@@ -321,7 +321,7 @@ function LoginPage() {
 
             <div className="mt-5 pt-4 border-t border-border/60 text-[11px] text-center text-muted-foreground flex items-center justify-center gap-1.5">
               <ShieldCheck className="size-3 text-neon-cyan" />
-              A partir de <span className="text-gold font-semibold">R$ 59,90/mes</span>. Demo limitado.
+              A partir de <span className="text-gold font-semibold">R$ 297/mes</span>. Demo limitado.
             </div>
           </GlassCard>
 

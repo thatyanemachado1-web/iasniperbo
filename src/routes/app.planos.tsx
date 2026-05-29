@@ -23,7 +23,7 @@ const plans = [
   },
   {
     name: "MENSAL",
-    price: "R$ 59,90",
+    price: "R$ 297",
     suffix: "/mês",
     items: [
       "Acesso completo ao painel",
@@ -37,7 +37,7 @@ const plans = [
   },
   {
     name: "PREMIUM",
-    price: "R$ 119,90",
+    price: "R$ 497",
     suffix: "/mês",
     badge: "Mais completo",
     items: [
