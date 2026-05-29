@@ -120,6 +120,15 @@
   * {
     border-color: var(--color-border);
   }
+  a[href*="lovable" i],
+  iframe[src*="lovable" i],
+  [aria-label*="lovable" i],
+  [data-lovable],
+  [data-testid*="lovable" i] {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
 }
 
 @layer utilities {

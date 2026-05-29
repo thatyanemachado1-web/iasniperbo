@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 
 import appCss from "../styles.css?url";
+import { InstallAppPrompt } from "@/components/install/InstallAppPrompt";
 
 function NotFoundComponent() {
   return (
@@ -72,6 +73,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { name: "theme-color", content: "#030712" },
       { title: "SNIPER BO IA — Painel operacional com IA" },
       { name: "description", content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real." },
       { property: "og:title", content: "SNIPER BO IA — Painel operacional com IA" },
@@ -85,6 +87,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         rel: "stylesheet",
         href: appCss,
+      },
+      {
+        rel: "manifest",
+        href: "/manifest.webmanifest",
+      },
+      {
+        rel: "apple-touch-icon",
+        href: "/sniper-icon.svg",
       },
     ],
   }),
@@ -114,6 +124,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
+      <InstallAppPrompt />
     </QueryClientProvider>
   );
 }
