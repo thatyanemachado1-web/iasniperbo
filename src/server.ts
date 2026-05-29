@@ -9,8 +9,13 @@ type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
 
+type LiveDashboardData = DashboardData & { updatedAt?: string };
+type WorkerCacheStorage = CacheStorage & { default?: Cache };
+
+const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
+
 let serverEntryPromise: Promise<ServerEntry> | undefined;
-let liveDashboardData: DashboardData & { updatedAt?: string } = {
+let liveDashboardData: LiveDashboardData = {
   ...mockDashboardData,
   mockMode: false,
   updatedAt: new Date().toISOString(),
@@ -102,6 +107,8 @@ export default {
       const adminRedirect = redirectLegacyAdminRoute(request);
       if (adminRedirect) return withSecurityHeaders(adminRedirect);
 
+      await loadLiveState();
+
       const adminApiResponse = await handleAdminApiRequest(request, env);
       if (adminApiResponse) return withSecurityHeaders(adminApiResponse);
 
@@ -160,6 +167,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
+      await saveLiveState();
       return json({ token: adminToken, email: adminEmail });
     }
 
@@ -181,6 +189,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
+      await saveLiveState();
       return json({ access: ownerAccess(email, getAdminToken(env)) });
     }
 
@@ -206,6 +215,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
 
     recordAccessEvent(Boolean(client.enabled) ? "client_login" : "client_pending_login", client);
+    await saveLiveState();
     return json({ access: clientAccess(client, getAdminToken(env)) });
   }
 
@@ -244,6 +254,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     upsertRecipientFromClient(client);
     recordAccessEvent(existingIndex >= 0 ? "client_update" : "client_register", client);
+    await saveLiveState();
     return json({ access: clientAccess(client, getAdminToken(env)) }, existingIndex >= 0 ? 200 : 201);
   }
 
@@ -271,6 +282,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       });
       liveRecipients = [...liveRecipients, recipient];
       upsertClientFromRecipient(recipient);
+      await saveLiveState();
       return json({ recipient }, 201);
     }
   }
@@ -295,11 +307,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       });
       liveRecipients = liveRecipients.map((recipient, recipientIndex) => (recipientIndex === index ? updated : recipient));
       upsertClientFromRecipient(updated);
+      await saveLiveState();
       return json({ recipient: updated });
     }
 
     if (request.method === "DELETE") {
       liveRecipients = liveRecipients.filter((recipient) => recipient.id !== recipientId);
+      await saveLiveState();
       return json({ ok: true });
     }
   }
@@ -320,16 +334,17 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         moduleToggles: liveModuleToggles,
         updatedAt: new Date().toISOString(),
       };
+      await saveLiveState();
       return json({ moduleToggles: liveModuleToggles });
     }
   }
 
   if (request.method === "GET" && url.pathname === "/security-events") {
     return json({
-      events: [],
+      events: liveAccessEvents,
       summary: {
-        total: 0,
-        low: 0,
+        total: liveAccessEvents.length,
+        low: liveAccessEvents.length,
         medium: 0,
         high: 0,
         critical: 0,
@@ -358,6 +373,7 @@ async function handleDashboardRequest(request: Request, env: unknown) {
 
     const body = await request.json().catch(() => ({}));
     liveDashboardData = updateDashboardData(liveDashboardData, body);
+    await saveLiveState();
     return json({ ok: true, dashboard: liveDashboardData });
   }
 
@@ -712,6 +728,93 @@ function addDaysIso(startIso: string, days: number) {
   const date = new Date(`${startIso}T00:00:00`);
   date.setDate(date.getDate() + Math.max(0, Math.floor(Number(days) || 0)));
   return date.toISOString().slice(0, 10);
+}
+
+function getLiveStateCache() {
+  return (globalThis as { caches?: WorkerCacheStorage }).caches?.default || null;
+}
+
+function liveStateCacheRequest() {
+  return new Request(LIVE_STATE_CACHE_URL, { method: "GET" });
+}
+
+async function loadLiveState() {
+  const cache = getLiveStateCache();
+  if (!cache) return;
+
+  try {
+    const response = await cache.match(liveStateCacheRequest());
+    if (!response) return;
+
+    const state = readRecord(await response.json().catch(() => null));
+    const dashboard = readRecord(state.dashboard);
+    if (Object.keys(dashboard).length > 0) {
+      liveDashboardData = restoreDashboardData(dashboard);
+    }
+
+    if (Array.isArray(state.recipients)) {
+      liveRecipients = state.recipients.map(readRecord).filter((recipient) => Object.keys(recipient).length > 0);
+    }
+
+    if (Array.isArray(state.clients)) {
+      liveClients = state.clients.map(readRecord).filter((client) => Object.keys(client).length > 0);
+    }
+
+    if (Array.isArray(state.accessEvents)) {
+      liveAccessEvents = state.accessEvents.map(readRecord).filter((event) => Object.keys(event).length > 0).slice(0, 200);
+    }
+
+    const moduleToggles = readRecord(state.moduleToggles);
+    if (Object.keys(moduleToggles).length > 0) {
+      liveModuleToggles = restoreModuleToggles(moduleToggles);
+      liveDashboardData = { ...liveDashboardData, moduleToggles: liveModuleToggles };
+    }
+  } catch (error) {
+    console.warn("Nao foi possivel carregar estado vivo do cache.", error);
+  }
+}
+
+async function saveLiveState() {
+  const cache = getLiveStateCache();
+  if (!cache) return;
+
+  const state = {
+    dashboard: liveDashboardData,
+    recipients: liveRecipients,
+    clients: liveClients,
+    accessEvents: liveAccessEvents,
+    moduleToggles: liveModuleToggles,
+    savedAt: new Date().toISOString(),
+  };
+
+  try {
+    await cache.put(
+      liveStateCacheRequest(),
+      new Response(JSON.stringify(state), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "public, max-age=31536000",
+        },
+      }),
+    );
+  } catch (error) {
+    console.warn("Nao foi possivel salvar estado vivo no cache.", error);
+  }
+}
+
+function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData {
+  const restored = updateDashboardData(liveDashboardData, value);
+  return {
+    ...restored,
+    updatedAt: readString(value, "updatedAt") || restored.updatedAt,
+  };
+}
+
+function restoreModuleToggles(value: Record<string, unknown>) {
+  return {
+    tieAlert: typeof value.tieAlert === "boolean" ? value.tieAlert : liveModuleToggles.tieAlert,
+    surfAnalyzer: typeof value.surfAnalyzer === "boolean" ? value.surfAnalyzer : liveModuleToggles.surfAnalyzer,
+  };
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
