@@ -17,6 +17,7 @@ let liveDashboardData: DashboardData & { updatedAt?: string } = {
 };
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
+let liveAccessEvents: Array<Record<string, unknown>> = [];
 let liveModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -133,6 +134,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     url.pathname === "/admin/login" ||
     url.pathname === "/auth/check" ||
     url.pathname === "/auth/register" ||
+    url.pathname === "/admin/summary" ||
     url.pathname === "/telegram-recipients" ||
     url.pathname.startsWith("/telegram-recipients/") ||
     url.pathname === "/module-toggles" ||
@@ -152,6 +154,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const adminToken = getAdminToken(env);
 
     if (readString(body, "email") === adminEmail && readString(body, "password") === adminPassword) {
+      recordAccessEvent("admin_login", {
+        email: adminEmail,
+        full_name: "Gabriel Mendes",
+        city: "",
+        country: "",
+      });
       return json({ token: adminToken, email: adminEmail });
     }
 
@@ -167,6 +175,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "12346");
 
     if (email === adminEmail && password === adminPassword) {
+      recordAccessEvent("owner_login", {
+        email,
+        full_name: "Gabriel Mendes",
+        city: "",
+        country: "",
+      });
       return json({ access: ownerAccess(email, getAdminToken(env)) });
     }
 
@@ -191,6 +205,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ error: "Senha invalida." }, 401);
     }
 
+    recordAccessEvent(Boolean(client.enabled) ? "client_login" : "client_pending_login", client);
     return json({ access: clientAccess(client, getAdminToken(env)) });
   }
 
@@ -228,11 +243,16 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         : [...liveClients, client];
 
     upsertRecipientFromClient(client);
+    recordAccessEvent(existingIndex >= 0 ? "client_update" : "client_register", client);
     return json({ access: clientAccess(client, getAdminToken(env)) }, existingIndex >= 0 ? 200 : 201);
   }
 
   if (!isAdminAuthorized(request, env)) {
     return json({ error: "Nao autorizado." }, 401);
+  }
+
+  if (request.method === "GET" && url.pathname === "/admin/summary") {
+    return json({ summary: buildAdminSummary() });
   }
 
   if (url.pathname === "/telegram-recipients") {
@@ -562,6 +582,69 @@ function clientAccess(client: Record<string, unknown>, token: string) {
     reason: enabled ? "Acesso liberado pelo administrador." : "Aguardando liberacao do administrador.",
     client_token: enabled ? token : "",
   };
+}
+
+function recordAccessEvent(type: string, source: Record<string, unknown>) {
+  const event = {
+    id: crypto.randomUUID(),
+    created_at: new Date().toISOString(),
+    type,
+    email: readString(source, "email"),
+    full_name: readString(source, "full_name") || readString(source, "name"),
+    city: readString(source, "city"),
+    country: readString(source, "country"),
+  };
+  liveAccessEvents = [event, ...liveAccessEvents].slice(0, 200);
+}
+
+function buildAdminSummary() {
+  const people = uniquePeople([...liveClients, ...liveRecipients]);
+  const approved = people.filter((person) => Boolean(person.enabled) || readString(person, "access_status") === "approved");
+  const pending = people.filter((person) => readString(person, "access_status") === "pending");
+  const paused = people.filter((person) => readString(person, "access_status") === "paused");
+  const uniqueAccesses = new Set(liveAccessEvents.map((event) => readString(event, "email")).filter(Boolean)).size;
+
+  return {
+    totalRegistrations: people.length,
+    approved: approved.length,
+    pending: pending.length,
+    paused: paused.length,
+    totalAccesses: liveAccessEvents.length,
+    uniqueAccesses,
+    cityBreakdown: buildLocationBreakdown(people, "city"),
+    countryBreakdown: buildLocationBreakdown(people, "country"),
+    recentAccesses: liveAccessEvents.slice(0, 8).map((event) => ({
+      id: readString(event, "id"),
+      created_at: readString(event, "created_at"),
+      type: readString(event, "type"),
+      email: readString(event, "email"),
+      full_name: readString(event, "full_name"),
+      city: readString(event, "city"),
+      country: readString(event, "country"),
+    })),
+  };
+}
+
+function uniquePeople(records: Array<Record<string, unknown>>) {
+  const byKey = new Map<string, Record<string, unknown>>();
+  for (const record of records) {
+    const key = readString(record, "email").toLowerCase() || readString(record, "id");
+    if (!key) continue;
+    byKey.set(key, { ...(byKey.get(key) || {}), ...record });
+  }
+  return [...byKey.values()];
+}
+
+function buildLocationBreakdown(records: Array<Record<string, unknown>>, field: "city" | "country") {
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    const label = readString(record, field) || "Nao informado";
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 8);
 }
 
 function upsertRecipientFromClient(client: Record<string, unknown>) {

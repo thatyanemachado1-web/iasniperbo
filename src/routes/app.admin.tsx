@@ -6,6 +6,7 @@ import {
   adminLogin,
   createSignalRecipient,
   deleteSignalRecipient,
+  getAdminSummary,
   getInitialApiUrl,
   listSecurityEvents,
   listSignalRecipients,
@@ -15,7 +16,7 @@ import {
   useLocalAdminApiUrl,
 } from "@/lib/adminApi";
 import { isAdminOwnerEmail, readUserSession, saveUserSession } from "@/lib/userSession";
-import type { AdminSession, RecipientKind, RecipientPlan, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
+import type { AdminSession, AdminSummary, RecipientKind, RecipientPlan, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -84,6 +85,8 @@ type RecipientEditForm = {
   notes: string;
 };
 
+type AdminView = "resumo" | "clientes" | "seguranca";
+
 function AdminPage() {
   const userSession = readUserSession();
   const [ownerEmail, setOwnerEmail] = useState(userSession.email);
@@ -104,6 +107,8 @@ function AdminPage() {
     high: 0,
     critical: 0,
   });
+  const [adminSummary, setAdminSummary] = useState<AdminSummary>(() => emptyAdminSummary());
+  const [adminView, setAdminView] = useState<AdminView>("resumo");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -191,10 +196,20 @@ function AdminPage() {
     }
   }
 
+  async function refreshAdminSummary(currentSession = session) {
+    if (!currentSession) return;
+    try {
+      setAdminSummary(await getAdminSummary(currentSession));
+    } catch {
+      setAdminSummary(summaryFromRecipients(recipients, securitySummary));
+    }
+  }
+
   useEffect(() => {
     if (canUseAdmin) {
       refreshRecipients();
       refreshSecurityEvents();
+      refreshAdminSummary();
     }
   }, [canUseAdmin]);
 
@@ -249,6 +264,7 @@ function AdminPage() {
       setPassword("");
       await refreshRecipients(logged);
       await refreshSecurityEvents(logged);
+      await refreshAdminSummary(logged);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel entrar no admin.");
     } finally {
@@ -285,6 +301,7 @@ function AdminPage() {
         expires_at: "",
         notes: "",
       });
+      await refreshAdminSummary(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel cadastrar.");
     } finally {
@@ -310,6 +327,7 @@ function AdminPage() {
       setRecipients((current) =>
         current.map((item) => (item.id === recipient.id ? updated : item)),
       );
+      await refreshAdminSummary(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel atualizar.");
       setRecipients((current) =>
@@ -325,6 +343,7 @@ function AdminPage() {
     setRecipients((current) => current.filter((item) => item.id !== recipient.id));
     try {
       await deleteSignalRecipient(session, recipient.id);
+      await refreshAdminSummary(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel remover.");
       setRecipients(previous);
@@ -392,6 +411,7 @@ function AdminPage() {
         current.map((item) => (item.id === recipient.id ? updated : item)),
       );
       cancelEdit();
+      await refreshAdminSummary(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel salvar edicao.");
     } finally {
@@ -417,6 +437,7 @@ function AdminPage() {
       setRecipients((current) =>
         current.map((item) => (item.id === recipient.id ? updated : item)),
       );
+      await refreshAdminSummary(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel liberar acesso.");
     } finally {
@@ -430,6 +451,7 @@ function AdminPage() {
     setRecipients([]);
     setSecurityEvents([]);
     setSecuritySummary({ total: 0, low: 0, medium: 0, high: 0, critical: 0 });
+    setAdminSummary(emptyAdminSummary());
   }
 
   if (!session) {
@@ -513,7 +535,7 @@ function AdminPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-xs text-muted-foreground">Admin conectado</div>
-          <div className="text-xl font-black">Clientes VIP/Premium</div>
+          <div className="text-xl font-black">Cantinho do administrador</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <AppBadge tone="green" pulse>{activeRecipients.length} liberados</AppBadge>
@@ -526,6 +548,7 @@ function AdminPage() {
             onClick={() => {
               refreshRecipients();
               refreshSecurityEvents();
+              refreshAdminSummary();
             }}
             className="glass inline-flex size-10 items-center justify-center rounded-xl hover:glow-blue"
             aria-label="Atualizar lista"
@@ -546,6 +569,21 @@ function AdminPage() {
       {error && <StatusMessage tone="red" icon={<WifiOff className="size-4" />} text={error} />}
       {exported && <StatusMessage tone="green" icon={<Check className="size-4" />} text={exported} />}
 
+      <div className="grid grid-cols-3 rounded-2xl border border-border/70 bg-secondary/30 p-1">
+        <AdminTabButton active={adminView === "resumo"} onClick={() => setAdminView("resumo")}>
+          Resumo
+        </AdminTabButton>
+        <AdminTabButton active={adminView === "clientes"} onClick={() => setAdminView("clientes")}>
+          Aprovar
+        </AdminTabButton>
+        <AdminTabButton active={adminView === "seguranca"} onClick={() => setAdminView("seguranca")}>
+          Seguranca
+        </AdminTabButton>
+      </div>
+
+      {adminView === "resumo" && <AdminSummaryPanel summary={adminSummary} />}
+
+      {adminView === "seguranca" && (
       <GlassCard className="py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
@@ -600,7 +638,10 @@ function AdminPage() {
           ))}
         </div>
       </GlassCard>
+      )}
 
+      {adminView === "clientes" && (
+        <>
       <GlassCard className="py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -791,6 +832,118 @@ function AdminPage() {
           </div>
         </GlassCard>
       </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AdminTabButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl px-3 py-2 text-xs font-black transition ${
+        active ? "btn-primary-grad glow-blue" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function AdminSummaryPanel({ summary }: { summary: AdminSummary }) {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        <SummaryMetric label="Cadastros" value={summary.totalRegistrations} tone="text-neon-cyan" />
+        <SummaryMetric label="Acessos" value={summary.totalAccesses} tone="text-success" />
+        <SummaryMetric label="Unicos" value={summary.uniqueAccesses} tone="text-gold" />
+        <SummaryMetric label="Aprovados" value={summary.approved} tone="text-success" />
+        <SummaryMetric label="Pendentes" value={summary.pending} tone="text-warning" />
+        <SummaryMetric label="Pausados" value={summary.paused} tone="text-muted-foreground" />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <GlassCard>
+          <SectionTitle title="Cidades" subtitle="Onde os cadastros informaram origem." right={<MapPin className="size-4 text-neon-cyan" />} />
+          <LocationList items={summary.cityBreakdown} emptyText="Nenhuma cidade informada ainda." />
+        </GlassCard>
+        <GlassCard>
+          <SectionTitle title="Paises" subtitle="Resumo por pais informado." right={<Globe2 className="size-4 text-neon-cyan" />} />
+          <LocationList items={summary.countryBreakdown} emptyText="Nenhum pais informado ainda." />
+        </GlassCard>
+        <GlassCard>
+          <SectionTitle title="Ultimos acessos" subtitle="Log simples desta execucao." right={<Users className="size-4 text-neon-cyan" />} />
+          <div className="space-y-2">
+            {summary.recentAccesses.length === 0 && (
+              <div className="rounded-xl border border-dashed border-border/70 p-5 text-center text-xs text-muted-foreground">
+                Nenhum acesso registrado ainda.
+              </div>
+            )}
+            {summary.recentAccesses.map((event) => (
+              <div key={event.id} className="rounded-xl border border-border/60 bg-secondary/25 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 truncate text-xs font-bold">{event.full_name || event.email || "Visitante"}</div>
+                  <AppBadge tone={event.type.includes("register") ? "blue" : "green"}>{event.type.includes("register") ? "cadastro" : "acesso"}</AppBadge>
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                  {event.email && <span>{event.email}</span>}
+                  {(event.city || event.country) && <span>{[event.city, event.country].filter(Boolean).join(" / ")}</span>}
+                  {event.created_at && <span>{formatDateTimeBR(event.created_at)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      </div>
+    </div>
+  );
+}
+
+function SummaryMetric({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <GlassCard className="py-3">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
+      <div className={`mt-1 text-2xl font-black ${tone}`}>{value}</div>
+    </GlassCard>
+  );
+}
+
+function LocationList({
+  items,
+  emptyText,
+}: {
+  items: AdminSummary["cityBreakdown"];
+  emptyText: string;
+}) {
+  const max = Math.max(1, ...items.map((item) => item.count));
+  return (
+    <div className="space-y-2">
+      {items.length === 0 && (
+        <div className="rounded-xl border border-dashed border-border/70 p-5 text-center text-xs text-muted-foreground">
+          {emptyText}
+        </div>
+      )}
+      {items.map((item) => (
+        <div key={item.label} className="rounded-xl border border-border/60 bg-secondary/25 p-3">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="font-bold">{item.label}</span>
+            <span className="text-neon-cyan font-black">{item.count}</span>
+          </div>
+          <div className="mt-2 h-1.5 rounded-full bg-secondary/70">
+            <div className="h-full rounded-full bg-neon-cyan" style={{ width: `${Math.max(8, (item.count / max) * 100)}%` }} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1105,6 +1258,46 @@ function AdminSelect({
       </select>
     </label>
   );
+}
+
+function emptyAdminSummary(): AdminSummary {
+  return {
+    totalRegistrations: 0,
+    approved: 0,
+    pending: 0,
+    paused: 0,
+    totalAccesses: 0,
+    uniqueAccesses: 0,
+    cityBreakdown: [],
+    countryBreakdown: [],
+    recentAccesses: [],
+  };
+}
+
+function summaryFromRecipients(recipients: SignalRecipient[], securitySummary: SecuritySummary): AdminSummary {
+  return {
+    totalRegistrations: recipients.length,
+    approved: recipients.filter((recipient) => recipient.enabled || recipient.access_status === "approved").length,
+    pending: recipients.filter((recipient) => recipient.access_status === "pending").length,
+    paused: recipients.filter((recipient) => recipient.access_status === "paused").length,
+    totalAccesses: securitySummary.total,
+    uniqueAccesses: 0,
+    cityBreakdown: locationBreakdown(recipients, "city"),
+    countryBreakdown: locationBreakdown(recipients, "country"),
+    recentAccesses: [],
+  };
+}
+
+function locationBreakdown(recipients: SignalRecipient[], field: "city" | "country") {
+  const counts = new Map<string, number>();
+  for (const recipient of recipients) {
+    const label = String(recipient[field] || "Nao informado").trim();
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 8);
 }
 
 function calculateExpiryDate(startsAt: string, daysText: string) {

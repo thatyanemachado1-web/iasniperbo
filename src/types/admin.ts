@@ -49,3 +49,30 @@ export interface SecuritySummary {
   high: number;
   critical: number;
 }
+
+export interface AdminSummaryLocation {
+  label: string;
+  count: number;
+}
+
+export interface AdminSummaryAccess {
+  id: string;
+  created_at: string;
+  type: string;
+  email: string;
+  full_name: string;
+  city: string;
+  country: string;
+}
+
+export interface AdminSummary {
+  totalRegistrations: number;
+  approved: number;
+  pending: number;
+  paused: number;
+  totalAccesses: number;
+  uniqueAccesses: number;
+  cityBreakdown: AdminSummaryLocation[];
+  countryBreakdown: AdminSummaryLocation[];
+  recentAccesses: AdminSummaryAccess[];
+}

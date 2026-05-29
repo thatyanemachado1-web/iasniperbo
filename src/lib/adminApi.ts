@@ -1,4 +1,4 @@
-import type { AdminSession, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
+import type { AdminSession, AdminSummary, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
 import type { ModuleToggles } from "@/types/dashboard";
 
 const API_URL_KEY = "sniper_admin_api_url";
@@ -122,6 +122,11 @@ export async function getModuleToggles(session: AdminSession) {
 
 export async function listSecurityEvents(session: AdminSession) {
   return request<{ events: SecurityEvent[]; summary: SecuritySummary }>(session, "/security-events");
+}
+
+export async function getAdminSummary(session: AdminSession) {
+  const data = await request<{ summary: AdminSummary }>(session, "/admin/summary");
+  return data.summary;
 }
 
 export async function updateModuleToggles(
