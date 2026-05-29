@@ -4,11 +4,10 @@ import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
 import type { DashboardData } from "@/types/dashboard";
 
-const PUBLIC_API_URL = "https://becoming-component-lighting-onion.trycloudflare.com";
-const PUBLIC_DASHBOARD_URL = `${PUBLIC_API_URL}/dashboard`;
 const ALLOWED_REMOTE_API_HOSTS = new Set([
-  "becoming-component-lighting-onion.trycloudflare.com",
   "api.sniperbo.com",
+  "sniperbo.com",
+  "www.sniperbo.com",
 ]);
 
 function configuredDashboardUrl() {
@@ -27,9 +26,10 @@ function configuredDashboardUrl() {
 
     const savedAdminApi = window.localStorage.getItem("sniper_admin_api_url");
     if (savedAdminApi && isAllowedApiBaseUrl(savedAdminApi)) return ensureDashboardPath(savedAdminApi);
+    if (savedAdminApi) window.localStorage.removeItem("sniper_admin_api_url");
   }
 
-  return PUBLIC_DASHBOARD_URL;
+  return defaultDashboardUrl();
 }
 
 function dashboardUrlFromQuery(search: string) {
@@ -57,7 +57,9 @@ function isAllowedApiBaseUrl(url: string) {
 }
 
 function isAllowedParsedUrl(parsed: URL) {
+  if (parsed.hostname.endsWith("trycloudflare.com")) return false;
   if (["127.0.0.1", "localhost"].includes(parsed.hostname)) return true;
+  if (typeof window !== "undefined" && parsed.hostname === window.location.hostname) return parsed.protocol === "https:";
   return parsed.protocol === "https:" && ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname);
 }
 
@@ -68,6 +70,14 @@ function ensureDashboardPath(url: string) {
 
 function stripDashboardPath(url: string) {
   return url.replace(/\/dashboard\/?$/, "");
+}
+
+function defaultDashboardUrl() {
+  if (typeof window === "undefined") return "";
+  if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
+    return "http://127.0.0.1:8787/dashboard";
+  }
+  return `${window.location.origin.replace(/\/+$/, "")}/dashboard`;
 }
 
 async function fetchDashboardData(): Promise<DashboardData> {
