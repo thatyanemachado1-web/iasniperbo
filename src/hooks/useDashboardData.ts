@@ -1,8 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { mockDashboardData } from "@/data/mockDashboardData";
+import { readAdminSession } from "@/lib/adminApi";
+import { readUserSession } from "@/lib/userSession";
 import type { DashboardData } from "@/types/dashboard";
 
-const PUBLIC_DASHBOARD_URL = "https://courts-slides-pretty-escape.trycloudflare.com/dashboard";
+const PUBLIC_API_URL = "https://becoming-component-lighting-onion.trycloudflare.com";
+const PUBLIC_DASHBOARD_URL = `${PUBLIC_API_URL}/dashboard`;
+const ALLOWED_REMOTE_API_HOSTS = new Set([
+  "becoming-component-lighting-onion.trycloudflare.com",
+  "api.sniperbo.com",
+]);
 
 function configuredDashboardUrl() {
   const directUrl = import.meta.env.VITE_SNIPER_DASHBOARD_URL as string | undefined;
@@ -19,7 +26,7 @@ function configuredDashboardUrl() {
     }
 
     const savedAdminApi = window.localStorage.getItem("sniper_admin_api_url");
-    if (savedAdminApi) return ensureDashboardPath(savedAdminApi);
+    if (savedAdminApi && isAllowedApiBaseUrl(savedAdminApi)) return ensureDashboardPath(savedAdminApi);
   }
 
   return PUBLIC_DASHBOARD_URL;
@@ -32,13 +39,26 @@ function dashboardUrlFromQuery(search: string) {
 
   try {
     const parsed = new URL(rawUrl);
-    if (parsed.protocol !== "https:" && parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
+    if (!isAllowedParsedUrl(parsed)) {
       return null;
     }
     return ensureDashboardPath(parsed.toString());
   } catch {
     return null;
   }
+}
+
+function isAllowedApiBaseUrl(url: string) {
+  try {
+    return isAllowedParsedUrl(new URL(url));
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedParsedUrl(parsed: URL) {
+  if (["127.0.0.1", "localhost"].includes(parsed.hostname)) return true;
+  return parsed.protocol === "https:" && ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname);
 }
 
 function ensureDashboardPath(url: string) {
@@ -52,8 +72,14 @@ function stripDashboardPath(url: string) {
 
 async function fetchDashboardData(): Promise<DashboardData> {
   const url = configuredDashboardUrl();
+  const userSession = readUserSession();
+  const adminSession = readAdminSession();
+  const token = adminSession?.token || userSession.clientToken;
   const response = await fetch(url, {
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   });
 
   if (!response.ok) {

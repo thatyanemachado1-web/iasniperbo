@@ -7,6 +7,7 @@ export interface UserSession {
   expiresAt: string;
   registered: boolean;
   approved: boolean;
+  clientToken?: string;
 }
 
 const USER_SESSION_KEY = "sniper_user_session";
@@ -34,6 +35,7 @@ export function readUserSession(): UserSession {
       expiresAt: String(session.expiresAt || ""),
       registered: owner || session.registered === true,
       approved: owner || session.approved === true || accessMode === "full",
+      clientToken: typeof session.clientToken === "string" ? session.clientToken : "",
     };
   } catch {
     return emptyUserSession();
@@ -59,6 +61,7 @@ export function saveUserSession(email: string, partial: Partial<UserSession> = {
       expiresAt: partial.expiresAt || "",
       registered: partial.registered ?? owner,
       approved: partial.approved ?? (owner || accessMode === "full"),
+      clientToken: partial.clientToken || "",
     }),
   );
 }
@@ -101,6 +104,7 @@ function emptyUserSession(): UserSession {
     expiresAt: "",
     registered: false,
     approved: false,
+    clientToken: "",
   };
 }
 

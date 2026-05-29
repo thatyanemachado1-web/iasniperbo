@@ -7,6 +7,7 @@ import {
   createSignalRecipient,
   deleteSignalRecipient,
   getInitialApiUrl,
+  listSecurityEvents,
   listSignalRecipients,
   readAdminSession,
   saveAdminSession,
@@ -14,7 +15,7 @@ import {
   useLocalAdminApiUrl,
 } from "@/lib/adminApi";
 import { isAdminOwnerEmail, readUserSession, saveUserSession } from "@/lib/userSession";
-import type { AdminSession, RecipientKind, RecipientPlan, SignalRecipient } from "@/types/admin";
+import type { AdminSession, RecipientKind, RecipientPlan, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -95,6 +96,14 @@ function AdminPage() {
   const [email, setEmail] = useState(() => readAdminSession()?.email || "gabrielmendespromove@gmail.com");
   const [password, setPassword] = useState("");
   const [recipients, setRecipients] = useState<SignalRecipient[]>([]);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
+  const [securitySummary, setSecuritySummary] = useState<SecuritySummary>({
+    total: 0,
+    low: 0,
+    medium: 0,
+    high: 0,
+    critical: 0,
+  });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -163,8 +172,30 @@ function AdminPage() {
     }
   }
 
+  async function refreshSecurityEvents(currentSession = session) {
+    if (!currentSession) return;
+    try {
+      const data = await listSecurityEvents(currentSession);
+      setSecurityEvents(data.events ?? []);
+      setSecuritySummary(
+        data.summary ?? {
+          total: 0,
+          low: 0,
+          medium: 0,
+          high: 0,
+          critical: 0,
+        },
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel carregar alertas de seguranca.");
+    }
+  }
+
   useEffect(() => {
-    if (canUseAdmin) refreshRecipients();
+    if (canUseAdmin) {
+      refreshRecipients();
+      refreshSecurityEvents();
+    }
   }, [canUseAdmin]);
 
   if (!canAttemptAdminLogin) {
@@ -217,6 +248,7 @@ function AdminPage() {
       setEmail(logged.email);
       setPassword("");
       await refreshRecipients(logged);
+      await refreshSecurityEvents(logged);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel entrar no admin.");
     } finally {
@@ -396,6 +428,8 @@ function AdminPage() {
     clearAdminSession();
     setSession(null);
     setRecipients([]);
+    setSecurityEvents([]);
+    setSecuritySummary({ total: 0, low: 0, medium: 0, high: 0, critical: 0 });
   }
 
   if (!session) {
@@ -489,7 +523,10 @@ function AdminPage() {
           <AppBadge tone="muted">{recipients.length} cadastros</AppBadge>
           <button
             type="button"
-            onClick={() => refreshRecipients()}
+            onClick={() => {
+              refreshRecipients();
+              refreshSecurityEvents();
+            }}
             className="glass inline-flex size-10 items-center justify-center rounded-xl hover:glow-blue"
             aria-label="Atualizar lista"
           >
@@ -508,6 +545,61 @@ function AdminPage() {
 
       {error && <StatusMessage tone="red" icon={<WifiOff className="size-4" />} text={error} />}
       {exported && <StatusMessage tone="green" icon={<Check className="size-4" />} text={exported} />}
+
+      <GlassCard className="py-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">
+              Seguranca
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <AppBadge tone="muted">{securitySummary.total} rastros</AppBadge>
+              <AppBadge tone={securitySummary.critical ? "red" : "muted"}>
+                {securitySummary.critical} criticos
+              </AppBadge>
+              <AppBadge tone={securitySummary.high ? "amber" : "muted"}>
+                {securitySummary.high} altos
+              </AppBadge>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => refreshSecurityEvents()}
+            className="glass inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-neon-cyan hover:glow-blue"
+          >
+            <RefreshCw className="size-3.5" /> Atualizar rastros
+          </button>
+        </div>
+        <div className="mt-3 space-y-2">
+          {securityEvents.length === 0 && (
+            <div className="rounded-xl border border-border/60 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
+              Nenhuma tentativa suspeita registrada nesta execucao da API.
+            </div>
+          )}
+          {securityEvents.slice(0, 5).map((event) => (
+            <div
+              key={event.id}
+              className="rounded-xl border border-border/60 bg-secondary/25 px-3 py-2"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <AppBadge tone={securityTone(event.severity)}>{event.severity}</AppBadge>
+                  <span className="truncate text-xs font-bold">{securityTypeLabel(event.type)}</span>
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  {formatDateTimeBR(event.created_at)}
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                <span>IP {event.client_ip || "unknown"}</span>
+                <span>{event.method} {event.path}</span>
+                {event.email && <span>{event.email}</span>}
+              </div>
+              {event.reason && <div className="mt-1 text-[11px] text-muted-foreground">{event.reason}</div>}
+            </div>
+          ))}
+        </div>
+      </GlassCard>
 
       <GlassCard className="py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1132,6 +1224,38 @@ function formatDateBR(value: string) {
   const [year, month, day] = value.split("-");
   if (!year || !month || !day) return value;
   return `${day}/${month}/${year}`;
+}
+
+function formatDateTimeBR(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function securityTone(severity: SecurityEvent["severity"]) {
+  if (severity === "critical") return "red";
+  if (severity === "high") return "amber";
+  if (severity === "medium") return "blue";
+  return "muted";
+}
+
+function securityTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    admin_api_unauthorized: "Admin sem token",
+    admin_login_failed: "Login admin falhou",
+    admin_login_rate_limited: "Admin bloqueado por excesso",
+    admin_password_in_client_login: "Senha admin errada",
+    client_login_rate_limited: "Cliente bloqueado por excesso",
+    client_password_invalid: "Senha de cliente errada",
+    dashboard_unauthorized: "Dashboard sem sessao",
+    suspicious_probe: "Sondagem suspeita",
+  };
+  return labels[type] ?? type.replace(/_/g, " ");
 }
 
 function StatusMessage({

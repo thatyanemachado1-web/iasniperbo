@@ -1,10 +1,14 @@
-import type { AdminSession, SignalRecipient } from "@/types/admin";
+import type { AdminSession, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
 import type { ModuleToggles } from "@/types/dashboard";
 
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
 export const LOCAL_ADMIN_API_URL = "http://127.0.0.1:8787";
-export const PUBLIC_ADMIN_API_URL = "https://courts-slides-pretty-escape.trycloudflare.com";
+export const PUBLIC_ADMIN_API_URL = "https://becoming-component-lighting-onion.trycloudflare.com";
+const ALLOWED_REMOTE_API_HOSTS = new Set([
+  "becoming-component-lighting-onion.trycloudflare.com",
+  "api.sniperbo.com",
+]);
 
 const defaultApiUrl = () =>
   (import.meta.env.VITE_SNIPER_API_URL as string | undefined) ||
@@ -18,7 +22,7 @@ export function getInitialApiUrl() {
     window.localStorage.setItem(API_URL_KEY, LOCAL_ADMIN_API_URL);
     return LOCAL_ADMIN_API_URL;
   }
-  if (!isLocalFrontend() && (!saved || isLocalApiUrl(saved))) {
+  if (!isLocalFrontend() && (!saved || isLocalApiUrl(saved) || !isAllowedRemoteApiUrl(saved))) {
     window.localStorage.setItem(API_URL_KEY, PUBLIC_ADMIN_API_URL);
     return PUBLIC_ADMIN_API_URL;
   }
@@ -116,6 +120,10 @@ export async function getModuleToggles(session: AdminSession) {
   return data.moduleToggles;
 }
 
+export async function listSecurityEvents(session: AdminSession) {
+  return request<{ events: SecurityEvent[]; summary: SecuritySummary }>(session, "/security-events");
+}
+
 export async function updateModuleToggles(
   session: AdminSession,
   payload: Partial<ModuleToggles>,
@@ -164,6 +172,15 @@ function isLocalApiUrl(apiUrl: string) {
   try {
     const parsed = new URL(apiUrl);
     return ["127.0.0.1", "localhost"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedRemoteApiUrl(apiUrl: string) {
+  try {
+    const parsed = new URL(apiUrl);
+    return parsed.protocol === "https:" && ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname);
   } catch {
     return false;
   }

@@ -21,7 +21,7 @@ import { NeuralLines } from "@/components/brand/NeuralLines";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { checkClientAccess, registerClient, saveAccessSession, type ClientAccess } from "@/lib/accessApi";
-import { readUserSession, saveDemoSession } from "@/lib/userSession";
+import { readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/")({
   component: LoginPage,
@@ -79,12 +79,7 @@ function LoginPage() {
         setNotice("Email ainda nao cadastrado. Faca seu cadastro para continuar.");
         return;
       }
-      if (access.approved || access.access_mode === "full") {
-        saveAccessSession(access, email);
-        window.location.href = "/app";
-        return;
-      }
-      saveDemoSession(access.email || email, access.full_name);
+      saveAccessSession(access, email);
       window.location.href = "/app";
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Nao foi possivel validar seu acesso.");
@@ -122,7 +117,7 @@ function LoginPage() {
         city: String(data.get("city") || "").trim(),
         country: String(data.get("country") || "").trim(),
       });
-      saveDemoSession(access.email || email, access.full_name || fullName);
+      saveAccessSession(access, email);
       window.location.href = "/app";
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Nao foi possivel concluir o cadastro.");
@@ -133,7 +128,7 @@ function LoginPage() {
 
   function enterDemo() {
     if (!pendingAccess) return;
-    saveDemoSession(pendingAccess.email, pendingAccess.full_name);
+    saveAccessSession(pendingAccess);
     window.location.href = "/app";
   }
 

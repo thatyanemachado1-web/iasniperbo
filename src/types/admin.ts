@@ -27,3 +27,25 @@ export interface AdminSession {
   email: string;
   token: string;
 }
+
+export interface SecurityEvent {
+  id: string;
+  created_at: string;
+  type: string;
+  severity: "low" | "medium" | "high" | "critical";
+  client_ip: string;
+  path: string;
+  method: string;
+  email?: string;
+  reason?: string;
+  origin?: string;
+  user_agent?: string;
+}
+
+export interface SecuritySummary {
+  total: number;
+  low: number;
+  medium: number;
+  high: number;
+  critical: number;
+}
