@@ -92,6 +92,9 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      const adminRedirect = redirectLegacyAdminRoute(request);
+      if (adminRedirect) return withSecurityHeaders(adminRedirect);
+
       const dashboardResponse = await handleDashboardRequest(request, env);
       if (dashboardResponse) return withSecurityHeaders(dashboardResponse);
 
@@ -104,6 +107,16 @@ export default {
     }
   },
 };
+
+function redirectLegacyAdminRoute(request: Request) {
+  if (request.method !== "GET" && request.method !== "HEAD") return null;
+  const url = new URL(request.url);
+  if (url.pathname !== "/admin" && url.pathname !== "/admin/login") return null;
+
+  url.pathname = "/app/admin";
+  url.search = "";
+  return Response.redirect(url.toString(), 302);
+}
 
 async function handleDashboardRequest(request: Request, env: unknown) {
   const url = new URL(request.url);
