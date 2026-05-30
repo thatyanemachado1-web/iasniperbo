@@ -143,15 +143,15 @@ export function buildVoiceEvents(
   }
 
   if (!hasTieEntry && signal.status === "tie_watch" && tieEvent) {
-    candidateEvents.push(appendEventText(tieEvent, paganteContext.text));
+    candidateEvents.push(tieEvent);
   }
 
   if (surfEvent) {
-    candidateEvents.push(appendEventText(surfEvent, paganteContext.text));
+    candidateEvents.push(surfEvent);
   }
 
   if (!hasTieEntry && signal.status !== "tie_watch" && tieEvent) {
-    candidateEvents.push(appendEventText(tieEvent, paganteContext.text));
+    candidateEvents.push(tieEvent);
   }
 
   const bestSide = currentBestSide(data);
