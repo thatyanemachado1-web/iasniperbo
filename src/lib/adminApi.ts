@@ -4,10 +4,8 @@ import type { ModuleToggles } from "@/types/dashboard";
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
 export const LOCAL_ADMIN_API_URL = "http://127.0.0.1:8787";
-export const PUBLIC_ADMIN_API_URL = "https://isaac-therapist-indicators-michigan.trycloudflare.com";
+export const PUBLIC_ADMIN_API_URL = "https://sniperbo.com";
 const ALLOWED_REMOTE_API_HOSTS = new Set([
-  "isaac-therapist-indicators-michigan.trycloudflare.com",
-  "api.sniperbo.com",
   "sniperbo.com",
   "www.sniperbo.com",
 ]);
@@ -209,9 +207,6 @@ function isSameOriginApiUrl(apiUrl: string) {
 function isAllowedRemoteApiUrl(apiUrl: string) {
   try {
     const parsed = new URL(apiUrl);
-    if (parsed.hostname.endsWith("trycloudflare.com")) {
-      return parsed.protocol === "https:" && ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname);
-    }
     if (typeof window !== "undefined" && parsed.hostname === window.location.hostname) return parsed.protocol === "https:";
     return parsed.protocol === "https:" && ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname);
   } catch {

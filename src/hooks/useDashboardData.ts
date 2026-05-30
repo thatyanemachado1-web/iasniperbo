@@ -4,11 +4,9 @@ import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
 import type { DashboardData } from "@/types/dashboard";
 
-const PUBLIC_API_URL = "https://isaac-therapist-indicators-michigan.trycloudflare.com";
+const PUBLIC_API_URL = "https://sniperbo.com";
 const PUBLIC_DASHBOARD_URL = `${PUBLIC_API_URL}/dashboard`;
 const ALLOWED_REMOTE_API_HOSTS = new Set([
-  "isaac-therapist-indicators-michigan.trycloudflare.com",
-  "api.sniperbo.com",
   "sniperbo.com",
   "www.sniperbo.com",
 ]);
@@ -72,9 +70,6 @@ function isSameOriginApiBaseUrl(url: string) {
 }
 
 function isAllowedParsedUrl(parsed: URL) {
-  if (parsed.hostname.endsWith("trycloudflare.com")) {
-    return parsed.protocol === "https:" && ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname);
-  }
   if (["127.0.0.1", "localhost"].includes(parsed.hostname)) return true;
   if (typeof window !== "undefined" && parsed.hostname === window.location.hostname) return parsed.protocol === "https:";
   return parsed.protocol === "https:" && ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname);

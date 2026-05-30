@@ -48,9 +48,10 @@ function DashboardPage() {
   const tieResult = calculateTieResult(d.tieAlertScoreboard);
   const neuralResult = calculateNeuralResult(d.neuralReading);
   const surfResult = calculateSurfResult(surfBoard);
-  const surfSummary = d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER"
-    ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
-    : undefined;
+  const surfSummary =
+    d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER"
+      ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
+      : undefined;
   const lastRound = d.rounds[d.rounds.length - 1];
   const sequence = calculateCurrentStreak(d.rounds);
   const stats = {
@@ -59,7 +60,12 @@ function DashboardPage() {
     tie: calculateTieFrequency(d.rounds),
     alt: calculateAlternationRate(d.rounds),
   };
-  const dataModeLabel = mode === "live" ? "Dados em tempo real" : mode === "connecting" ? "Conectando API" : "Modo demonstração";
+  const dataModeLabel =
+    mode === "live"
+      ? "Dados em tempo real"
+      : mode === "connecting"
+        ? "Conectando API"
+        : "Modo demonstração";
   const dataModeTone = mode === "live" ? "green" : mode === "connecting" ? "blue" : "amber";
 
   return (
@@ -68,7 +74,8 @@ function DashboardPage() {
         <div>
           <div className="text-xs text-muted-foreground">Olá,</div>
           <div className="text-lg font-bold">
-            {userSession.name || d.user.name} <span className="text-muted-foreground font-normal text-sm">- painel operacional</span>
+            {userSession.name || d.user.name}{" "}
+            <span className="text-muted-foreground font-normal text-sm">- painel operacional</span>
           </div>
         </div>
         <Link
@@ -85,7 +92,9 @@ function DashboardPage() {
           Núcleo operacional
         </div>
         <div className="flex flex-wrap gap-2">
-          <AppBadge tone={dataModeTone} pulse={mode !== "mock"}>{dataModeLabel}</AppBadge>
+          <AppBadge tone={dataModeTone} pulse={mode !== "mock"}>
+            {dataModeLabel}
+          </AppBadge>
           <AppBadge tone={fullAccess ? "green" : "amber"}>{accessLabel(userSession)}</AppBadge>
           <AppBadge tone="blue">Entrada em prioridade</AppBadge>
           <ModuleToggleStrip toggles={d.moduleToggles} />
@@ -94,10 +103,23 @@ function DashboardPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-4">
         <div className="space-y-4">
-          <PremiumFeature title="Entrada principal VIP" description="A entrada confirmada completa so aparece para clientes liberados.">
-            <SignalCard signal={d.currentSignal} neuralReading={d.neuralReading} surfSummary={surfSummary} tieAlert={d.currentTieAlert} priority />
+          <PremiumFeature
+            title="Entrada principal VIP"
+            description="A entrada confirmada completa so aparece para clientes liberados."
+          >
+            <SignalCard
+              signal={d.currentSignal}
+              neuralReading={d.neuralReading}
+              surfSummary={surfSummary}
+              tieAlert={d.currentTieAlert}
+              priority
+            />
           </PremiumFeature>
-          <PremiumFeature title="Placares VIP" description="Os resultados completos ficam liberados apos aprovacao do ADM." className="space-y-2">
+          <PremiumFeature
+            title="Placares VIP"
+            description="Os resultados completos ficam liberados apos aprovacao do ADM."
+            className="space-y-2"
+          >
             <ModuleMiniScoreboard
               moduleType="MAIN"
               title="Resultado Principal"
@@ -130,7 +152,11 @@ function DashboardPage() {
             />
           </PremiumFeature>
           {surfAlert && (
-            <PremiumFeature title="Surf Analyzer VIP" description="Leitura completa de surf fica bloqueada no demo." className="space-y-2">
+            <PremiumFeature
+              title="Surf Analyzer VIP"
+              description="Leitura completa de surf fica bloqueada no demo."
+              className="space-y-2"
+            >
               <SurfAlertCard alert={surfAlert} />
               <ModuleMiniScoreboard
                 moduleType="SURF"
@@ -154,10 +180,17 @@ function DashboardPage() {
         </div>
 
         <div className="space-y-4">
-          <PremiumFeature title="Decisao da engine VIP" description="A decisao tecnica fica completa apenas no acesso liberado.">
+          <PremiumFeature
+            title="Decisao da engine VIP"
+            description="A decisao tecnica fica completa apenas no acesso liberado."
+          >
             <EngineDecisionCard decision={d.engineDecision} />
           </PremiumFeature>
-          <PremiumFeature title="Tie Alert VIP" description="Leitura completa de empate fica bloqueada no demo." className="space-y-2">
+          <PremiumFeature
+            title="Tie Alert VIP"
+            description="Leitura completa de empate fica bloqueada no demo."
+            className="space-y-2"
+          >
             <TieAlertCard alert={d.currentTieAlert} />
             <ModuleMiniScoreboard
               moduleType="TIE"
@@ -180,27 +213,48 @@ function DashboardPage() {
         <div className="lg:col-span-2 space-y-4">
           <LiveTableView lastRound={lastRound} roundId={lastRound.id} />
 
-          <PremiumFeature title="Analise estatistica VIP" description="O demo mostra a estrutura, mas bloqueia a leitura completa.">
+          <PremiumFeature
+            title="Analise estatistica VIP"
+            description="O demo mostra a estrutura, mas bloqueia a leitura completa."
+          >
             <GlassCard>
-            <SectionTitle
-              title="Análise estatística da mesa"
-              subtitle="Pressão estatística calculada pelas últimas rodadas."
-              right={<AppBadge tone={dataModeTone} pulse={mode !== "mock"}>{dataModeLabel}</AppBadge>}
-            />
-            <PressureChart data={d.pressureSeries} />
-            <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-banker" /> Banker Pressure</span>
-              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-player" /> Player Pressure</span>
-              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-tie" /> Tie Pressure</span>
-            </div>
-            <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-2 text-[11px]">
-              <Metric label="Pressão B" value={`${stats.banker.toFixed(0)}%`} tone="text-banker" />
-              <Metric label="Pressão P" value={`${stats.player.toFixed(0)}%`} tone="text-player" />
-              <Metric label="Pressão T" value={`${stats.tie.toFixed(0)}%`} tone="text-tie" />
-              <Metric label="Sequência" value={`${sequence.side ?? "-"} x${sequence.count}`} />
-              <Metric label="Alternância" value={`${stats.alt.toFixed(0)}%`} />
-              <Metric label="Padrão" value="Observação" />
-            </div>
+              <SectionTitle
+                title="Análise estatística da mesa"
+                subtitle="Pressão estatística calculada pelas últimas rodadas."
+                right={
+                  <AppBadge tone={dataModeTone} pulse={mode !== "mock"}>
+                    {dataModeLabel}
+                  </AppBadge>
+                }
+              />
+              <PressureChart data={d.pressureSeries} />
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                <span className="inline-flex items-center gap-1">
+                  <span className="size-2 rounded-full bg-banker" /> Banker Pressure
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="size-2 rounded-full bg-player" /> Player Pressure
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="size-2 rounded-full bg-tie" /> Tie Pressure
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-2 text-[11px]">
+                <Metric
+                  label="Pressão B"
+                  value={`${stats.banker.toFixed(0)}%`}
+                  tone="text-banker"
+                />
+                <Metric
+                  label="Pressão P"
+                  value={`${stats.player.toFixed(0)}%`}
+                  tone="text-player"
+                />
+                <Metric label="Pressão T" value={`${stats.tie.toFixed(0)}%`} tone="text-tie" />
+                <Metric label="Sequência" value={`${sequence.side ?? "-"} x${sequence.count}`} />
+                <Metric label="Alternância" value={`${stats.alt.toFixed(0)}%`} />
+                <Metric label="Padrão" value="Observação" />
+              </div>
             </GlassCard>
           </PremiumFeature>
 
@@ -210,15 +264,21 @@ function DashboardPage() {
               right={<AppBadge tone="blue">Últimas 30 rodadas</AppBadge>}
             />
             <RoadmapDots rounds={d.rounds} compact showScore />
-            <Link to="/app" className="mt-3 inline-flex items-center gap-1 text-xs text-neon-cyan hover:text-neon-blue">
+            <Link
+              to="/app"
+              className="mt-3 inline-flex items-center gap-1 text-xs text-neon-cyan hover:text-neon-blue"
+            >
               Ver histórico completo <ChevronRight className="size-3" />
             </Link>
           </GlassCard>
         </div>
 
         <div className="space-y-4">
-          <PremiumFeature title="IA completa VIP" description="A IA operacional completa fica liberada para VIP/Premium.">
-            <BrainAssistantCard />
+          <PremiumFeature
+            title="IA completa VIP"
+            description="A IA operacional completa fica liberada para VIP/Premium."
+          >
+            <BrainAssistantCard data={d} mode={mode} locked={!fullAccess} />
           </PremiumFeature>
 
           <GlassCard className="border-gold/40">
@@ -231,7 +291,10 @@ function DashboardPage() {
                 <div className="text-[11px] text-muted-foreground">Recursos premium bloqueados</div>
               </div>
             </div>
-            <Link to="/app/planos" className="mt-3 inline-flex w-full justify-center btn-primary-grad rounded-xl py-2 text-xs font-semibold">
+            <Link
+              to="/app/planos"
+              className="mt-3 inline-flex w-full justify-center btn-primary-grad rounded-xl py-2 text-xs font-semibold"
+            >
               Desbloquear Premium
             </Link>
           </GlassCard>

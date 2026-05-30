@@ -13,6 +13,10 @@ type LiveDashboardData = DashboardData & { updatedAt?: string };
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
+const OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech";
+const DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
+const DEFAULT_OPENAI_TTS_VOICE = "alloy";
+const MAX_NARRATION_CHARS = 900;
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 let liveDashboardData: LiveDashboardData = {
@@ -31,17 +35,19 @@ let liveModuleToggles = {
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
     serverEntryPromise = import("@tanstack/react-start/server-entry").then(
-      (m) => ((m as { default?: ServerEntry }).default ?? (m as unknown as ServerEntry)),
+      (m) => (m as { default?: ServerEntry }).default ?? (m as unknown as ServerEntry),
     );
   }
   return serverEntryPromise;
 }
 
 function brandedErrorResponse(): Response {
-  return withSecurityHeaders(new Response(renderErrorPage(), {
-    status: 500,
-    headers: { "content-type": "text/html; charset=utf-8" },
-  }));
+  return withSecurityHeaders(
+    new Response(renderErrorPage(), {
+      status: 500,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    }),
+  );
 }
 
 function withSecurityHeaders(response: Response): Response {
@@ -109,6 +115,9 @@ export default {
 
       await loadLiveState();
 
+      const voiceResponse = await handleVoiceNarrationRequest(request, env);
+      if (voiceResponse) return withSecurityHeaders(voiceResponse);
+
       const adminApiResponse = await handleAdminApiRequest(request, env);
       if (adminApiResponse) return withSecurityHeaders(adminApiResponse);
 
@@ -133,6 +142,82 @@ function redirectLegacyAdminRoute(request: Request) {
   url.pathname = "/app/admin";
   url.search = "";
   return Response.redirect(url.toString(), 302);
+}
+
+async function handleVoiceNarrationRequest(request: Request, env: unknown) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/voice/narration") return null;
+
+  if (request.method === "OPTIONS") {
+    return json(null, 204);
+  }
+
+  if (request.method !== "POST") {
+    return json({ error: "Metodo nao permitido." }, 405);
+  }
+
+  if (!isDashboardAuthorized(request, url, env)) {
+    return json({ error: "Nao autorizado." }, 401);
+  }
+
+  const body = readRecord(await request.json().catch(() => ({})));
+  const text = normalizeNarrationText(body.text || body.narration);
+  if (!text) {
+    return json({ error: "Texto de voz obrigatorio." }, 400);
+  }
+
+  const apiKey = getOpenAiApiKey(env);
+  if (!apiKey) {
+    return json({ error: "OPENAI_API_KEY nao configurada no backend." }, 503);
+  }
+
+  const envRecord = readRecord(env);
+  const model = readConfigString(
+    envRecord.OPENAI_TTS_MODEL || readProcessEnv("OPENAI_TTS_MODEL"),
+    DEFAULT_OPENAI_TTS_MODEL,
+  );
+  const voice = readConfigString(
+    envRecord.OPENAI_TTS_VOICE || readProcessEnv("OPENAI_TTS_VOICE"),
+    DEFAULT_OPENAI_TTS_VOICE,
+  );
+
+  const response = await fetch(OPENAI_SPEECH_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      voice,
+      input: text,
+      response_format: "mp3",
+    }),
+  }).catch((error) => {
+    console.warn("Falha de conexao ao gerar voz OpenAI.", error);
+    return null;
+  });
+
+  if (!response) {
+    return json({ error: "Falha de conexao ao gerar voz OpenAI." }, 502);
+  }
+
+  if (!response.ok) {
+    const upstreamError = await response.text().catch(() => "");
+    console.warn(`Falha ao gerar voz OpenAI (${response.status}). ${upstreamError.slice(0, 300)}`);
+    return json({ error: "Falha ao gerar voz OpenAI." }, 502);
+  }
+
+  return new Response(await response.arrayBuffer(), {
+    status: 200,
+    headers: {
+      "content-type": "audio/mpeg",
+      "cache-control": "no-store",
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "POST,OPTIONS",
+      "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token",
+    },
+  });
 }
 
 async function handleAdminApiRequest(request: Request, env: unknown) {
@@ -160,7 +245,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "12346");
     const adminToken = getAdminToken(env);
 
-    if (readString(body, "email") === adminEmail && readString(body, "password") === adminPassword) {
+    if (
+      readString(body, "email") === adminEmail &&
+      readString(body, "password") === adminPassword
+    ) {
       recordAccessEvent("admin_login", {
         email: adminEmail,
         full_name: "Gabriel Mendes",
@@ -179,7 +267,9 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
     const envRecord = readRecord(env);
-    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "gabrielmendespromove@gmail.com").toLowerCase();
+    const adminEmail = String(
+      envRecord.SNIPER_ADMIN_EMAIL || "gabrielmendespromove@gmail.com",
+    ).toLowerCase();
     const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "12346");
 
     if (email === adminEmail && password === adminPassword) {
@@ -227,7 +317,9 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ error: "Email e senha sao obrigatorios." }, 400);
     }
 
-    const existingIndex = liveClients.findIndex((item) => readString(item, "email").toLowerCase() === email);
+    const existingIndex = liveClients.findIndex(
+      (item) => readString(item, "email").toLowerCase() === email,
+    );
     const now = new Date().toISOString();
     const client = {
       id: existingIndex >= 0 ? liveClients[existingIndex].id : crypto.randomUUID(),
@@ -238,9 +330,11 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       city: readString(body, "city"),
       country: readString(body, "country"),
       plan: existingIndex >= 0 ? liveClients[existingIndex].plan || "free" : "free",
-      access_status: existingIndex >= 0 ? liveClients[existingIndex].access_status || "pending" : "pending",
+      access_status:
+        existingIndex >= 0 ? liveClients[existingIndex].access_status || "pending" : "pending",
       enabled: existingIndex >= 0 ? Boolean(liveClients[existingIndex].enabled) : false,
-      starts_at: existingIndex >= 0 ? liveClients[existingIndex].starts_at || todayIso() : todayIso(),
+      starts_at:
+        existingIndex >= 0 ? liveClients[existingIndex].starts_at || todayIso() : todayIso(),
       validity_days: existingIndex >= 0 ? liveClients[existingIndex].validity_days || 30 : 30,
       expires_at: existingIndex >= 0 ? liveClients[existingIndex].expires_at || "" : "",
       created_at: existingIndex >= 0 ? liveClients[existingIndex].created_at || now : now,
@@ -255,7 +349,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     upsertRecipientFromClient(client);
     recordAccessEvent(existingIndex >= 0 ? "client_update" : "client_register", client);
     await saveLiveState();
-    return json({ access: clientAccess(client, getAdminToken(env)) }, existingIndex >= 0 ? 200 : 201);
+    return json(
+      { access: clientAccess(client, getAdminToken(env)) },
+      existingIndex >= 0 ? 200 : 201,
+    );
   }
 
   if (!isAdminAuthorized(request, env)) {
@@ -305,7 +402,9 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         created_at: liveRecipients[index].created_at,
         updated_at: new Date().toISOString(),
       });
-      liveRecipients = liveRecipients.map((recipient, recipientIndex) => (recipientIndex === index ? updated : recipient));
+      liveRecipients = liveRecipients.map((recipient, recipientIndex) =>
+        recipientIndex === index ? updated : recipient,
+      );
       upsertClientFromRecipient(updated);
       await saveLiveState();
       return json({ recipient: updated });
@@ -327,7 +426,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       const body = readRecord(await request.json().catch(() => ({})));
       liveModuleToggles = {
         tieAlert: typeof body.tieAlert === "boolean" ? body.tieAlert : liveModuleToggles.tieAlert,
-        surfAnalyzer: typeof body.surfAnalyzer === "boolean" ? body.surfAnalyzer : liveModuleToggles.surfAnalyzer,
+        surfAnalyzer:
+          typeof body.surfAnalyzer === "boolean"
+            ? body.surfAnalyzer
+            : liveModuleToggles.surfAnalyzer,
       };
       liveDashboardData = {
         ...liveDashboardData,
@@ -358,7 +460,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 async function handleDashboardRequest(request: Request, env: unknown) {
   const url = new URL(request.url);
 
-  if (request.method === "OPTIONS" && (url.pathname === "/dashboard" || url.pathname === "/dashboard/signal")) {
+  if (
+    request.method === "OPTIONS" &&
+    (url.pathname === "/dashboard" || url.pathname === "/dashboard/signal")
+  ) {
     return json(null, 204);
   }
 
@@ -366,7 +471,10 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     return json(liveDashboardData);
   }
 
-  if (request.method === "POST" && (url.pathname === "/dashboard" || url.pathname === "/dashboard/signal")) {
+  if (
+    request.method === "POST" &&
+    (url.pathname === "/dashboard" || url.pathname === "/dashboard/signal")
+  ) {
     if (!isDashboardAuthorized(request, url, env)) {
       return json({ error: "Nao autorizado." }, 401);
     }
@@ -391,8 +499,13 @@ function updateDashboardData(current: DashboardData & { updatedAt?: string }, bo
     user: { ...current.user, ...readRecord(incoming.user) },
     rounds,
     currentSignal: normalizeSignal(readMainSignal(incoming), current.currentSignal),
-    currentTieAlert: normalizeTieAlert(incoming.currentTieAlert || incoming.tieAlert, current.currentTieAlert),
-    pressureSeries: Array.isArray(incoming.pressureSeries) ? incoming.pressureSeries : current.pressureSeries,
+    currentTieAlert: normalizeTieAlert(
+      incoming.currentTieAlert || incoming.tieAlert,
+      current.currentTieAlert,
+    ),
+    pressureSeries: Array.isArray(incoming.pressureSeries)
+      ? incoming.pressureSeries
+      : current.pressureSeries,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -406,7 +519,9 @@ function pickDashboardSections(incoming: Record<string, unknown>) {
     ...(incoming.engineDecision ? { engineDecision: incoming.engineDecision } : {}),
     ...(incoming.mainScoreboard ? { mainScoreboard: incoming.mainScoreboard } : {}),
     ...(incoming.tieAlertScoreboard ? { tieAlertScoreboard: incoming.tieAlertScoreboard } : {}),
-    ...(incoming.surfAnalyzerScoreboard ? { surfAnalyzerScoreboard: incoming.surfAnalyzerScoreboard } : {}),
+    ...(incoming.surfAnalyzerScoreboard
+      ? { surfAnalyzerScoreboard: incoming.surfAnalyzerScoreboard }
+      : {}),
   };
 }
 
@@ -428,14 +543,21 @@ function readMainSignal(payload: Record<string, unknown>) {
   );
 }
 
-function normalizeSignal(signal: Record<string, unknown>, fallback: DashboardData["currentSignal"]) {
+function normalizeSignal(
+  signal: Record<string, unknown>,
+  fallback: DashboardData["currentSignal"],
+) {
   const side = normalizeSignalSide(signal.side || signal.direcao || signal.entry || signal.entrada);
   return {
     id: String(signal.id || signal.signalId || `signal-${Date.now()}`),
     side,
     status: normalizeSignalStatus(signal.status || signal.resultado || signal.state, side),
-    protection: String(signal.protection || signal.validade || signal.gale || fallback.protection || "G1"),
-    strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
+    protection: String(
+      signal.protection || signal.validade || signal.gale || fallback.protection || "G1",
+    ),
+    strength: clampPercent(
+      signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
+    ),
     lastResult: signal.lastResult || fallback.lastResult || null,
   };
 }
@@ -473,7 +595,9 @@ function normalizeRounds(rounds: unknown[]) {
 }
 
 function normalizeSignalSide(value: unknown) {
-  const text = String(value || "").trim().toUpperCase();
+  const text = String(value || "")
+    .trim()
+    .toUpperCase();
   if (["B", "BANKER", "BANCA"].includes(text)) return "BANKER";
   if (["P", "PLAYER", "JOGADOR"].includes(text)) return "PLAYER";
   if (["T", "TIE", "EMPATE"].includes(text)) return "TIE";
@@ -481,7 +605,9 @@ function normalizeSignalSide(value: unknown) {
 }
 
 function normalizeSignalStatus(value: unknown, side: DashboardData["currentSignal"]["side"]) {
-  const text = String(value || "").trim().toLowerCase();
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
   if (["pending", "entrada", "active", "ativo"].includes(text)) return "pending";
   if (["g1", "gale1"].includes(text)) return "g1";
   if (["green", "win", "sg"].includes(text)) return "green";
@@ -494,7 +620,9 @@ function normalizeSignalStatus(value: unknown, side: DashboardData["currentSigna
 }
 
 function normalizeRoundResult(value: unknown) {
-  const text = String(value || "").trim().toUpperCase();
+  const text = String(value || "")
+    .trim()
+    .toUpperCase();
   if (["B", "BANKER", "BANCA"].includes(text)) return "B";
   if (["P", "PLAYER", "JOGADOR"].includes(text)) return "P";
   if (["T", "TIE", "EMPATE"].includes(text)) return "T";
@@ -519,9 +647,12 @@ function clampPercent(value: unknown) {
 
 function isDashboardAuthorized(request: Request, url: URL, env: unknown) {
   const envRecord = readRecord(env);
-  const token = String(envRecord.SNIPER_DASHBOARD_TOKEN || envRecord.SNIPER_ADMIN_TOKEN || "sniper-local-admin-token");
+  const token = String(
+    envRecord.SNIPER_DASHBOARD_TOKEN || envRecord.SNIPER_ADMIN_TOKEN || "sniper-local-admin-token",
+  );
   const headerToken =
-    request.headers.get("x-sniper-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    request.headers.get("x-sniper-token") ||
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   return Boolean(token) && (headerToken === token || url.searchParams.get("token") === token);
 }
 
@@ -533,6 +664,30 @@ function isAdminAuthorized(request: Request, env: unknown) {
 function getAdminToken(env: unknown) {
   const envRecord = readRecord(env);
   return String(envRecord.SNIPER_ADMIN_TOKEN || "sniper-local-admin-token");
+}
+
+function getOpenAiApiKey(env: unknown) {
+  const envRecord = readRecord(env);
+  return readConfigString(envRecord.OPENAI_API_KEY || readProcessEnv("OPENAI_API_KEY"), "");
+}
+
+function readProcessEnv(key: string) {
+  const globalWithProcess = globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  };
+  return globalWithProcess.process?.env?.[key] || "";
+}
+
+function normalizeNarrationText(value: unknown) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_NARRATION_CHARS);
+}
+
+function readConfigString(value: unknown, fallback: string) {
+  const text = String(value || "").trim();
+  return text || fallback;
 }
 
 function normalizeRecipient(recipient: Record<string, unknown>) {
@@ -549,10 +704,16 @@ function normalizeRecipient(recipient: Record<string, unknown>) {
     city: readString(recipient, "city"),
     country: readString(recipient, "country"),
     chat_id: readString(recipient, "chat_id"),
-    kind: ["group", "channel", "user"].includes(readString(recipient, "kind")) ? readString(recipient, "kind") : "user",
+    kind: ["group", "channel", "user"].includes(readString(recipient, "kind"))
+      ? readString(recipient, "kind")
+      : "user",
     enabled,
-    plan: ["free", "premium", "vip"].includes(readString(recipient, "plan")) ? readString(recipient, "plan") : "vip",
-    access_status: ["approved", "paused", "pending"].includes(readString(recipient, "access_status"))
+    plan: ["free", "premium", "vip"].includes(readString(recipient, "plan"))
+      ? readString(recipient, "plan")
+      : "vip",
+    access_status: ["approved", "paused", "pending"].includes(
+      readString(recipient, "access_status"),
+    )
       ? readString(recipient, "access_status")
       : enabled
         ? "approved"
@@ -584,7 +745,9 @@ function ownerAccess(email: string, token: string) {
 function clientAccess(client: Record<string, unknown>, token: string) {
   const enabled = Boolean(client.enabled) || readString(client, "access_status") === "approved";
   const accessStatus = readString(client, "access_status") || (enabled ? "approved" : "pending");
-  const plan = ["premium", "vip"].includes(readString(client, "plan")) ? readString(client, "plan") : "free";
+  const plan = ["premium", "vip"].includes(readString(client, "plan"))
+    ? readString(client, "plan")
+    : "free";
 
   return {
     registered: true,
@@ -593,9 +756,12 @@ function clientAccess(client: Record<string, unknown>, token: string) {
     access_status: accessStatus,
     plan,
     email: readString(client, "email"),
-    full_name: readString(client, "full_name") || readString(client, "name") || readString(client, "email"),
+    full_name:
+      readString(client, "full_name") || readString(client, "name") || readString(client, "email"),
     expires_at: readString(client, "expires_at"),
-    reason: enabled ? "Acesso liberado pelo administrador." : "Aguardando liberacao do administrador.",
+    reason: enabled
+      ? "Acesso liberado pelo administrador."
+      : "Aguardando liberacao do administrador.",
     client_token: enabled ? token : "",
   };
 }
@@ -615,10 +781,14 @@ function recordAccessEvent(type: string, source: Record<string, unknown>) {
 
 function buildAdminSummary() {
   const people = uniquePeople([...liveClients, ...liveRecipients]);
-  const approved = people.filter((person) => Boolean(person.enabled) || readString(person, "access_status") === "approved");
+  const approved = people.filter(
+    (person) => Boolean(person.enabled) || readString(person, "access_status") === "approved",
+  );
   const pending = people.filter((person) => readString(person, "access_status") === "pending");
   const paused = people.filter((person) => readString(person, "access_status") === "paused");
-  const uniqueAccesses = new Set(liveAccessEvents.map((event) => readString(event, "email")).filter(Boolean)).size;
+  const uniqueAccesses = new Set(
+    liveAccessEvents.map((event) => readString(event, "email")).filter(Boolean),
+  ).size;
 
   return {
     totalRegistrations: people.length,
@@ -651,7 +821,10 @@ function uniquePeople(records: Array<Record<string, unknown>>) {
   return [...byKey.values()];
 }
 
-function buildLocationBreakdown(records: Array<Record<string, unknown>>, field: "city" | "country") {
+function buildLocationBreakdown(
+  records: Array<Record<string, unknown>>,
+  field: "city" | "country",
+) {
   const counts = new Map<string, number>();
   for (const record of records) {
     const label = readString(record, field) || "Nao informado";
@@ -666,7 +839,9 @@ function buildLocationBreakdown(records: Array<Record<string, unknown>>, field: 
 function upsertRecipientFromClient(client: Record<string, unknown>) {
   const email = readString(client, "email").toLowerCase();
   if (!email) return;
-  const existingIndex = liveRecipients.findIndex((recipient) => readString(recipient, "email").toLowerCase() === email);
+  const existingIndex = liveRecipients.findIndex(
+    (recipient) => readString(recipient, "email").toLowerCase() === email,
+  );
   const recipient = normalizeRecipient({
     ...(existingIndex >= 0 ? liveRecipients[existingIndex] : {}),
     name: readString(client, "full_name") || email,
@@ -692,7 +867,9 @@ function upsertRecipientFromClient(client: Record<string, unknown>) {
 function upsertClientFromRecipient(recipient: Record<string, unknown>) {
   const email = readString(recipient, "email").toLowerCase();
   if (!email) return;
-  const existingIndex = liveClients.findIndex((client) => readString(client, "email").toLowerCase() === email);
+  const existingIndex = liveClients.findIndex(
+    (client) => readString(client, "email").toLowerCase() === email,
+  );
   const client = {
     ...(existingIndex >= 0 ? liveClients[existingIndex] : {}),
     full_name: readString(recipient, "full_name") || readString(recipient, "name") || email,
@@ -753,15 +930,22 @@ async function loadLiveState() {
     }
 
     if (Array.isArray(state.recipients)) {
-      liveRecipients = state.recipients.map(readRecord).filter((recipient) => Object.keys(recipient).length > 0);
+      liveRecipients = state.recipients
+        .map(readRecord)
+        .filter((recipient) => Object.keys(recipient).length > 0);
     }
 
     if (Array.isArray(state.clients)) {
-      liveClients = state.clients.map(readRecord).filter((client) => Object.keys(client).length > 0);
+      liveClients = state.clients
+        .map(readRecord)
+        .filter((client) => Object.keys(client).length > 0);
     }
 
     if (Array.isArray(state.accessEvents)) {
-      liveAccessEvents = state.accessEvents.map(readRecord).filter((event) => Object.keys(event).length > 0).slice(0, 200);
+      liveAccessEvents = state.accessEvents
+        .map(readRecord)
+        .filter((event) => Object.keys(event).length > 0)
+        .slice(0, 200);
     }
 
     const moduleToggles = readRecord(state.moduleToggles);
@@ -813,12 +997,15 @@ function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData
 function restoreModuleToggles(value: Record<string, unknown>) {
   return {
     tieAlert: typeof value.tieAlert === "boolean" ? value.tieAlert : liveModuleToggles.tieAlert,
-    surfAnalyzer: typeof value.surfAnalyzer === "boolean" ? value.surfAnalyzer : liveModuleToggles.surfAnalyzer,
+    surfAnalyzer:
+      typeof value.surfAnalyzer === "boolean" ? value.surfAnalyzer : liveModuleToggles.surfAnalyzer,
   };
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function json(data: unknown, status = 200) {
