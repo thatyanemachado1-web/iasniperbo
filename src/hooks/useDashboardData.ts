@@ -6,10 +6,9 @@ import type { DashboardData } from "@/types/dashboard";
 
 const PUBLIC_API_URL = "https://reflection-herbal-representative-nut.trycloudflare.com";
 const PUBLIC_DASHBOARD_URL = `${PUBLIC_API_URL}/dashboard`;
+const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const ALLOWED_REMOTE_API_HOSTS = new Set([
   "reflection-herbal-representative-nut.trycloudflare.com",
-  "sniperbo.com",
-  "www.sniperbo.com",
 ]);
 
 function configuredDashboardUrl() {
@@ -99,6 +98,7 @@ async function fetchDashboardData(): Promise<DashboardData> {
   const adminSession = readAdminSession();
   const token = adminSession?.token || userSession.clientToken;
   const response = await fetch(url, {
+    cache: "no-store",
     headers: {
       Accept: "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -119,8 +119,10 @@ export function useDashboardData() {
     queryFn: fetchDashboardData,
     enabled: Boolean(dashboardUrl) && typeof window !== "undefined",
     initialData: mockDashboardData,
-    refetchInterval: dashboardUrl ? 4000 : false,
+    refetchInterval: dashboardUrl ? LIVE_REFETCH_INTERVAL_MS : false,
+    refetchIntervalInBackground: true,
     retry: 1,
+    staleTime: 0,
   });
 
   return {

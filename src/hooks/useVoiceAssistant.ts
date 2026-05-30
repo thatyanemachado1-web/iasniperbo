@@ -8,9 +8,11 @@ import type {
 } from "@/types/dashboard";
 import { getInitialApiUrl, readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
+import { buildSurfEntrySummary } from "@/utils/surf";
 
 type DashboardMode = "mock" | "fallback" | "connecting" | "live";
 type VoicePriority = 1 | 2 | 3;
+type PaganteStatusKind = "favorable" | "watch" | "risk";
 
 interface VoiceEvent {
   key: string;
@@ -347,10 +349,13 @@ function buildVoiceEvents(data: DashboardData): VoiceEvent[] {
     (signal.side === "BANKER" || signal.side === "PLAYER");
   const hasTieEntry =
     (signal.status === "pending" || signal.status === "g1") && signal.side === "TIE";
+  const mainEntrySide = hasMainEntry && (signal.side === "BANKER" || signal.side === "PLAYER")
+    ? signal.side
+    : undefined;
 
   const paganteContext = buildPaganteContext(
     data.neuralReading,
-    hasMainEntry ? signal.side : undefined,
+    mainEntrySide,
   );
 
   if (decision.state === "BLOQUEADO") {
@@ -362,11 +367,12 @@ function buildVoiceEvents(data: DashboardData): VoiceEvent[] {
     ];
   }
 
-  if (hasMainEntry) {
+  if (mainEntrySide) {
+    const entryRiskText = buildEntryRiskText(data, mainEntrySide, paganteContext);
     return [
       urgent(
         `entry:${signal.id}:${signal.side}:${signal.status}:${signal.protection}:${paganteContext.key}`,
-        `Leitura atual favorece ${sideLabel(signal.side)}. Entrada confirmada com proteção ${signal.protection}. Motivo: ${decision.reason}${paganteContext.text}`,
+        `Leitura atual favorece ${sideLabel(signal.side)}. Entrada confirmada com proteção ${signal.protection}. Motivo: ${decision.reason}${paganteContext.text}${entryRiskText}`,
       ),
     ];
   }
@@ -416,25 +422,71 @@ function buildVoiceEvents(data: DashboardData): VoiceEvent[] {
 
 function buildPaganteContext(reading?: NeuralReading, entrySide?: CurrentSignalSide) {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") {
-    return { key: "no-pagante", text: "" };
+    return { key: "no-pagante", text: "", isAlignedWithEntry: false };
   }
 
   const paganteSide = reading.direcao ?? reading.origem;
-  if (!paganteSide) return { key: "no-pagante-side", text: "" };
+  if (!paganteSide) return { key: "no-pagante-side", text: "", isAlignedWithEntry: false };
 
   const key = `pagante:${reading.numero}:${paganteSide}:${reading.validade ?? ""}:${reading.paganteStatus ?? ""}`;
+  const statusKind = paganteStatusKind(reading);
+  const status = paganteStatusLabel(reading);
+  const isEntrySide = entrySide && entrySide !== "NONE" && entrySide !== "TIE";
+  const isAlignedWithEntry = Boolean(isEntrySide && paganteSide === entrySide && statusKind === "favorable");
+
+  if (statusKind === "risk") {
+    return {
+      key,
+      text: ` Atenção: número ${reading.numero} apareceu apontando ${sideLabel(paganteSide)}, mas está ${status}; não tratar como pagante favorável agora.`,
+      isAlignedWithEntry: false,
+    };
+  }
+
+  if (statusKind === "watch") {
+    return {
+      key,
+      text: ` Número ${reading.numero} apareceu apontando ${sideLabel(paganteSide)}, mas ainda está ${status}.`,
+      isAlignedWithEntry: false,
+    };
+  }
+
   if (entrySide && entrySide !== "NONE" && entrySide !== "TIE") {
     const text =
       paganteSide !== entrySide
         ? ` Atenção: número pagante ${reading.numero} também aponta ${sideLabel(paganteSide)} agora.`
-        : ` Número pagante ${reading.numero} também acompanha ${sideLabel(paganteSide)} agora.`;
-    return { key, text };
+        : ` Número pagante ${reading.numero} alinhado com ${sideLabel(paganteSide)} agora.`;
+    return { key, text, isAlignedWithEntry };
   }
 
   return {
     key,
     text: ` Número pagante ${reading.numero} aponta ${sideLabel(paganteSide)} agora.`,
+    isAlignedWithEntry,
   };
+}
+
+function buildEntryRiskText(
+  data: DashboardData,
+  entrySide: "BANKER" | "PLAYER",
+  paganteContext: ReturnType<typeof buildPaganteContext>,
+) {
+  if (!paganteContext.isAlignedWithEntry) return "";
+
+  if (hasHighRiskForEntry(data, entrySide)) {
+    return " Número pagante alinhado, mas ainda existe risco alto sinalizado; manter leitura protegida.";
+  }
+
+  return " Número pagante alinhado; sem risco alto identificado nos dados atuais.";
+}
+
+function hasHighRiskForEntry(data: DashboardData, entrySide: "BANKER" | "PLAYER") {
+  const tieHigh =
+    data.currentTieAlert.status === "active" &&
+    normalizeText(data.currentTieAlert.level).includes("ALTO");
+  const surfHigh = buildSurfEntrySummary(data.currentSurfAlert, entrySide).oppositeRiskLevel === "ALTO";
+  const paganteHigh = paganteStatusKind(data.neuralReading) === "risk";
+
+  return tieHigh || surfHigh || paganteHigh || data.engineDecision.state === "BLOQUEADO";
 }
 
 function appendEventText(event: VoiceEvent, text: string) {
@@ -446,7 +498,9 @@ function currentBestSide(data: DashboardData): CurrentSignalSide | null {
   const surfSide = data.currentSurfAlert?.surf_prediction_side || data.currentSurfAlert?.surf_side;
   if (surfSide === "BANKER" || surfSide === "PLAYER") return surfSide;
 
-  const neuralSide = data.neuralReading?.direcao ?? data.neuralReading?.origem;
+  const neuralSide = isFavorablePagante(data.neuralReading)
+    ? data.neuralReading?.direcao ?? data.neuralReading?.origem
+    : null;
   if (neuralSide === "BANKER" || neuralSide === "PLAYER" || neuralSide === "TIE") {
     return neuralSide;
   }
@@ -458,6 +512,10 @@ function buildNeuralEvent(reading?: NeuralReading): VoiceEvent | null {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
 
   const side = reading.direcao ?? reading.origem;
+  if (!side) return null;
+
+  const statusKind = paganteStatusKind(reading);
+  const status = paganteStatusLabel(reading);
   const details = [
     `${sideLabel(side)} ${reading.numero}`,
     reading.validade ? `validade ${reading.validade}` : "",
@@ -467,8 +525,71 @@ function buildNeuralEvent(reading?: NeuralReading): VoiceEvent | null {
 
   return medium(
     `neural:${reading.mode}:${reading.numero}:${reading.origem ?? ""}:${reading.direcao ?? ""}:${reading.paganteStatus ?? ""}:${reading.alertas ?? ""}`,
-    `Número pagante identificado. ${details.join(", ")}.`,
+    neuralEventText(statusKind, reading.numero, side, status, details, reading.paganteAlert),
   );
+}
+
+function neuralEventText(
+  statusKind: PaganteStatusKind,
+  number: number,
+  side: CurrentSignalSide,
+  status: string,
+  details: string[],
+  alert?: string | null,
+) {
+  if (statusKind === "risk") {
+    return `Número ${number} apareceu apontando ${sideLabel(side)}, mas está ${status}. Não tratar como pagante favorável agora${alert ? `. ${alert}` : ""}.`;
+  }
+
+  if (statusKind === "watch") {
+    return `Número ${number} apareceu apontando ${sideLabel(side)}, ainda em observação. ${details.join(", ")}.`;
+  }
+
+  return `Número pagante identificado. ${details.join(", ")}.`;
+}
+
+function isFavorablePagante(reading?: NeuralReading) {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
+  const side = reading.direcao ?? reading.origem;
+  return Boolean(side) && paganteStatusKind(reading) === "favorable";
+}
+
+function paganteStatusKind(reading?: NeuralReading): PaganteStatusKind {
+  if (!reading) return "watch";
+
+  const status = normalizeText(reading.paganteStatus);
+  if (
+    reading.isRedAlert ||
+    reading.isSaturated ||
+    status.includes("RISCO") ||
+    status.includes("ESTICADO")
+  ) {
+    return "risk";
+  }
+
+  if (
+    reading.mode === "OBSERVING" ||
+    status.includes("INICIANTE") ||
+    status.includes("OBSERV") ||
+    status.includes("POS-EMPATE") ||
+    status.includes("POS EMPATE")
+  ) {
+    return "watch";
+  }
+
+  return "favorable";
+}
+
+function paganteStatusLabel(reading?: NeuralReading) {
+  const status = reading?.paganteStatus?.trim();
+  return status ? status.toLocaleLowerCase("pt-BR").replace(/_/g, " ") : "em observação";
+}
+
+function normalizeText(value?: string | null) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
 }
 
 function buildSurfEvent(alert?: SurfAlert): VoiceEvent | null {
