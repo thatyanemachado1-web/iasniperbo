@@ -245,24 +245,33 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
 
   const enqueueEvents = useCallback(
     (nextEvents: VoiceEvent[]) => {
-      let hasUrgentEvent = false;
-
-      for (const event of nextEvents) {
-        if (seenKeysRef.current.has(event.key)) continue;
-        seenKeysRef.current.add(event.key);
-        latestNarrationRef.current = event.text;
-        setLatestNarration(event.text);
-
-        queueRef.current.push(event);
-        if (event.priority === 3) hasUrgentEvent = true;
+      const event = nextEvents.find((candidate) => !seenKeysRef.current.has(candidate.key));
+      if (!event) {
+        syncQueueLength();
+        processQueue();
+        return;
       }
 
+      seenKeysRef.current.add(event.key);
+      latestNarrationRef.current = event.text;
+      setLatestNarration(event.text);
+
+      if (event.priority === 3 && event.bypassCooldown) {
+        queueRef.current = [];
+      }
+
+      queueRef.current.push(event);
       queueRef.current = queueRef.current
         .sort((a, b) => b.priority - a.priority)
         .slice(0, MAX_QUEUE_SIZE);
       syncQueueLength();
 
-      if (hasUrgentEvent && supported && speakingRef.current && currentPriorityRef.current < 3) {
+      if (
+        event.priority === 3 &&
+        event.bypassCooldown &&
+        supported &&
+        speakingRef.current
+      ) {
         stopCurrentPlayback();
       }
 
@@ -330,89 +339,119 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
 }
 
 function buildVoiceEvents(data: DashboardData): VoiceEvent[] {
-  const events: VoiceEvent[] = [];
   const signal = data.currentSignal;
   const decision = data.engineDecision;
+  const roundId = data.rounds[data.rounds.length - 1]?.id ?? "sem-rodada";
+  const hasMainEntry =
+    (signal.status === "pending" || signal.status === "g1") &&
+    (signal.side === "BANKER" || signal.side === "PLAYER");
+  const hasTieEntry =
+    (signal.status === "pending" || signal.status === "g1") && signal.side === "TIE";
 
-  if (
-    signal.status === "green" ||
-    signal.status === "green_g1" ||
-    data.currentSignal.lastResult?.status?.startsWith("green")
-  ) {
-    const result =
-      signal.status === "green_g1" || data.currentSignal.lastResult?.status === "green_g1"
-        ? "Green G1"
-        : "Green";
-    events.push(
-      urgent(
-        `result:${signal.id}:${signal.status}:${data.currentSignal.lastResult?.id ?? ""}`,
-        `${result} confirmado em ${sideLabel(data.currentSignal.lastResult?.side ?? signal.side)}.`,
-      ),
-    );
-  }
-
-  if (signal.status === "red" || data.currentSignal.lastResult?.status === "red") {
-    events.push(
-      urgent(
-        `red:${signal.id}:${data.currentSignal.lastResult?.id ?? ""}`,
-        `Red registrado em ${sideLabel(data.currentSignal.lastResult?.side ?? signal.side)}.`,
-      ),
-    );
-  }
+  const paganteContext = buildPaganteContext(
+    data.neuralReading,
+    hasMainEntry ? signal.side : undefined,
+  );
 
   if (decision.state === "BLOQUEADO") {
-    events.push(
+    return [
       urgent(
-        `blocked:${decision.reason}:${decision.confidence}`,
-        `Entrada bloqueada por risco alto. Motivo: ${decision.reason}`,
+        `blocked:${roundId}:${decision.reason}:${decision.confidence}`,
+        `Sem entrada agora. A leitura bloqueou por risco alto. Motivo: ${decision.reason}${paganteContext.text}`,
       ),
-    );
+    ];
   }
 
-  if (
-    (signal.status === "pending" || signal.status === "g1") &&
-    (signal.side === "BANKER" || signal.side === "PLAYER")
-  ) {
-    events.push(
+  if (hasMainEntry) {
+    return [
       urgent(
-        `entry:${signal.id}:${signal.side}:${signal.status}:${signal.protection}`,
-        `Entrada confirmada em ${sideLabel(signal.side)}. Motivo: ${decision.reason}`,
+        `entry:${signal.id}:${signal.side}:${signal.status}:${signal.protection}:${paganteContext.key}`,
+        `Leitura atual favorece ${sideLabel(signal.side)}. Entrada confirmada com proteção ${signal.protection}. Motivo: ${decision.reason}${paganteContext.text}`,
       ),
-    );
+    ];
   }
 
-  if (
-    (signal.status === "pending" || signal.status === "g1" || signal.status === "tie_watch") &&
-    signal.side === "TIE"
-  ) {
-    events.push(
+  if (hasTieEntry) {
+    return [
       urgent(
-        `entry-tie:${signal.id}:${signal.status}`,
-        `Entrada confirmada em Tie. Motivo: ${decision.reason}`,
+        `entry-tie:${signal.id}:${signal.status}:${paganteContext.key}`,
+        `Leitura atual favorece Tie. Entrada confirmada em Tie. Motivo: ${decision.reason}${paganteContext.text}`,
       ),
-    );
+    ];
   }
 
   const tieEvent = buildTieEvent(data.currentTieAlert);
-  if (tieEvent) events.push(tieEvent);
+  if (signal.status === "tie_watch" && tieEvent) return [appendEventText(tieEvent, paganteContext.text)];
 
   const surfEvent = buildSurfEvent(data.currentSurfAlert);
-  if (surfEvent) events.push(surfEvent);
+  if (surfEvent) return [appendEventText(surfEvent, paganteContext.text)];
 
   const neuralEvent = buildNeuralEvent(data.neuralReading);
-  if (neuralEvent) events.push(neuralEvent);
+  if (neuralEvent) return [neuralEvent];
+
+  if (tieEvent) return [appendEventText(tieEvent, paganteContext.text)];
+
+  const bestSide = currentBestSide(data);
+  if (bestSide) {
+    return [
+      medium(
+        `current-reading:${roundId}:${decision.state}:${bestSide}:${decision.reason}:${paganteContext.key}`,
+        `Leitura do momento favorece ${sideLabel(bestSide)}, mas ainda sem entrada confirmada. Motivo: ${decision.reason}${paganteContext.text}`,
+      ),
+    ];
+  }
 
   if (signal.status === "waiting" && decision.state !== "BLOQUEADO") {
     const lastRoundId = data.rounds[data.rounds.length - 1]?.id ?? "sem-rodada";
-    events.push(
+    return [
       common(
         `observing:${lastRoundId}:${decision.state}:${decision.reason}`,
         `Mesa em observação sem entrada confirmada. ${decision.reason}`,
       ),
-    );
+    ];
   }
 
-  return events;
+  return [];
+}
+
+function buildPaganteContext(reading?: NeuralReading, entrySide?: CurrentSignalSide) {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") {
+    return { key: "no-pagante", text: "" };
+  }
+
+  const paganteSide = reading.direcao ?? reading.origem;
+  if (!paganteSide) return { key: "no-pagante-side", text: "" };
+
+  const key = `pagante:${reading.numero}:${paganteSide}:${reading.validade ?? ""}:${reading.paganteStatus ?? ""}`;
+  if (entrySide && entrySide !== "NONE" && entrySide !== "TIE") {
+    const text =
+      paganteSide !== entrySide
+        ? ` Atenção: número pagante ${reading.numero} também aponta ${sideLabel(paganteSide)} agora.`
+        : ` Número pagante ${reading.numero} também acompanha ${sideLabel(paganteSide)} agora.`;
+    return { key, text };
+  }
+
+  return {
+    key,
+    text: ` Número pagante ${reading.numero} aponta ${sideLabel(paganteSide)} agora.`,
+  };
+}
+
+function appendEventText(event: VoiceEvent, text: string) {
+  if (!text) return event;
+  return { ...event, key: `${event.key}:${text}`, text: `${event.text}${text}` };
+}
+
+function currentBestSide(data: DashboardData): CurrentSignalSide | null {
+  const surfSide = data.currentSurfAlert?.surf_prediction_side || data.currentSurfAlert?.surf_side;
+  if (surfSide === "BANKER" || surfSide === "PLAYER") return surfSide;
+
+  const neuralSide = data.neuralReading?.direcao ?? data.neuralReading?.origem;
+  if (neuralSide === "BANKER" || neuralSide === "PLAYER" || neuralSide === "TIE") {
+    return neuralSide;
+  }
+
+  return null;
 }
 
 function buildNeuralEvent(reading?: NeuralReading): VoiceEvent | null {
@@ -452,7 +491,7 @@ function buildSurfEvent(alert?: SurfAlert): VoiceEvent | null {
 
 function buildTieEvent(alert: TieAlert): VoiceEvent | null {
   if (alert.status !== "active") return null;
-  return urgent(
+  return high(
     `tie:${alert.id}:${alert.status}:${alert.level}:${alert.validityRounds}`,
     `Atenção para empate. Mesa com pressão de Tie, validade até ${alert.validityRounds} rodadas.`,
   );
@@ -460,6 +499,10 @@ function buildTieEvent(alert: TieAlert): VoiceEvent | null {
 
 function urgent(key: string, text: string): VoiceEvent {
   return { key, text, priority: 3, bypassCooldown: true };
+}
+
+function high(key: string, text: string): VoiceEvent {
+  return { key, text, priority: 3, bypassCooldown: false };
 }
 
 function medium(key: string, text: string): VoiceEvent {

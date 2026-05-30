@@ -48,8 +48,11 @@ function DashboardPage() {
   const tieResult = calculateTieResult(d.tieAlertScoreboard);
   const neuralResult = calculateNeuralResult(d.neuralReading);
   const surfResult = calculateSurfResult(surfBoard);
+  const signalHasActiveEntry =
+    (d.currentSignal.status === "pending" || d.currentSignal.status === "g1") &&
+    (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER");
   const surfSummary =
-    d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER"
+    signalHasActiveEntry
       ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
       : undefined;
   const lastRound = d.rounds[d.rounds.length - 1];

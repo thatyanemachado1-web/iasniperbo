@@ -548,18 +548,50 @@ function normalizeSignal(
   fallback: DashboardData["currentSignal"],
 ) {
   const side = normalizeSignalSide(signal.side || signal.direcao || signal.entry || signal.entrada);
+  const status = normalizeSignalStatus(signal.status || signal.resultado || signal.state, side);
+  const protection = String(
+    signal.protection || signal.validade || signal.gale || fallback.protection || "G1",
+  );
+  const terminalStatus = terminalSignalStatus(status);
+  const lastResult =
+    signal.lastResult ||
+    fallback.lastResult ||
+    (terminalStatus && (side === "BANKER" || side === "PLAYER")
+      ? {
+          id: String(signal.id || signal.signalId || `result-${Date.now()}`),
+          side,
+          status: terminalStatus,
+          protection,
+          finishedAt: readString(signal, "finishedAt") || new Date().toISOString(),
+        }
+      : null);
+
+  if (terminalStatus) {
+    return {
+      id: "waiting",
+      side: "NONE" as const,
+      status: "waiting" as const,
+      protection: "-",
+      strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
+      lastResult,
+    };
+  }
+
   return {
     id: String(signal.id || signal.signalId || `signal-${Date.now()}`),
     side,
-    status: normalizeSignalStatus(signal.status || signal.resultado || signal.state, side),
-    protection: String(
-      signal.protection || signal.validade || signal.gale || fallback.protection || "G1",
-    ),
+    status,
+    protection,
     strength: clampPercent(
       signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
     ),
-    lastResult: signal.lastResult || fallback.lastResult || null,
+    lastResult,
   };
+}
+
+function terminalSignalStatus(status: DashboardData["currentSignal"]["status"]) {
+  if (status === "green" || status === "green_g1" || status === "red") return status;
+  return null;
 }
 
 function normalizeTieAlert(value: unknown, fallback: DashboardData["currentTieAlert"]) {

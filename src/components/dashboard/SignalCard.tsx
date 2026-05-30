@@ -24,19 +24,32 @@ export function SignalCard({
   const isBanker = signal.side === "BANKER";
   const isPlayer = signal.side === "PLAYER";
   const tieAlertIsActive = tieAlert?.status === "active";
-  const isTieWatch = signal.status === "tie_watch" || (signal.status === "waiting" && tieAlertIsActive);
-  const isWaiting = signal.status === "waiting";
+  const isResultStatus =
+    signal.status === "green" || signal.status === "green_g1" || signal.status === "red";
+  const isTieWatch =
+    !isResultStatus && (signal.status === "tie_watch" || (signal.status === "waiting" && tieAlertIsActive));
+  const isWaiting = signal.status === "waiting" || isResultStatus;
   const sideColor = isBanker ? "text-banker" : isPlayer ? "text-player" : isTieWatch ? "text-tie" : "text-muted-foreground";
   const beamColor = isBanker ? "from-banker/40" : isPlayer ? "from-player/40" : isTieWatch ? "from-tie/35" : "from-neon-cyan/15";
-  const displaySide = isTieWatch ? "POSSÍVEL EMPATE" : isWaiting ? "AGUARDAR ENTRADA" : signal.side;
+  const displaySide = isResultStatus
+    ? "AGUARDAR ANÁLISE"
+    : isTieWatch
+      ? "POSSÍVEL EMPATE"
+      : isWaiting
+        ? "AGUARDAR ENTRADA"
+        : signal.side;
   const displaySideClass = isWaiting || isTieWatch ? "text-[1.85rem] leading-none sm:text-3xl" : "text-4xl leading-none sm:text-5xl";
-  const sideCaption = isTieWatch ? "Sem entrada principal" : isWaiting ? "Sem entrada principal" : "Lado da entrada";
+  const sideCaption = isResultStatus
+    ? "Última entrada finalizada"
+    : isTieWatch || isWaiting
+      ? "Sem entrada principal"
+      : "Lado da entrada";
   const visibleProtection = isTieWatch && tieAlert ? `${tieAlert.validityRounds} casas` : signal.protection;
   const visibleStrength = isTieWatch && tieAlert ? tieAlert.confidence : signal.strength;
   const status = signalStatus(signal, tieAlertIsActive, tieAlert?.validityRounds);
   const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
   const StatusIcon = status.Icon;
-  const tieRisk = tieAlert ? tieRiskBadge(tieAlert) : null;
+  const tieRisk = !isResultStatus && tieAlert ? tieRiskBadge(tieAlert) : null;
   const riskTone = surfSummary?.oppositeRiskLevel === "ALTO"
     ? "text-destructive"
     : surfSummary?.oppositeRiskLevel === "MEDIO"
@@ -49,7 +62,7 @@ export function SignalCard({
       <div className="absolute inset-0 scan-grid opacity-10" />
       <div className="absolute -left-12 -top-16 size-44 rounded-full bg-neon-blue/10 blur-3xl" />
       <SectionTitle
-        title={isWaiting ? "Aguardar entrada" : isTieWatch ? "Possível empate" : "Entrada confirmada"}
+        title={isResultStatus ? "Aguardar análise" : isWaiting ? "Aguardar entrada" : isTieWatch ? "Possível empate" : "Entrada confirmada"}
         right={<AppBadge tone={status.badgeTone} pulse={status.pulse}><StatusIcon className="size-3" /> {status.badge}</AppBadge>}
       />
       <div className="relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
