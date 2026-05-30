@@ -51,6 +51,7 @@ export interface NeuralReading {
   paganteWindow?: number | null;
   isSaturated?: boolean | null;
   isRedAlert?: boolean | null;
+  postTie?: boolean | null;
 }
 
 export interface ModuleToggles {

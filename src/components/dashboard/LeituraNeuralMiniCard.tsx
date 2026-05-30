@@ -36,6 +36,7 @@ export function LeituraNeuralMiniCard({
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
   const showPayingStats = totalGreens > 0 || accuracy !== null || totalAlerts !== null;
   const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
+  const postTie = Boolean(data.postTie);
 
   return (
     <aside
@@ -59,7 +60,7 @@ export function LeituraNeuralMiniCard({
             Leitura Neural
           </div>
           <div className="truncate text-[7px] font-bold uppercase tracking-[0.1em] text-neon-cyan/75 sm:text-[8px]">
-            de números pagantes
+            {postTie ? "cor pos-empate" : "de numeros pagantes"}
           </div>
         </div>
       </div>
@@ -87,7 +88,7 @@ export function LeituraNeuralMiniCard({
 
           {data.direcao ? (
             <div className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]">
-              <span className="text-neon-cyan">Puxando --&gt;</span>{" "}
+              <span className="text-neon-cyan">{postTie ? "Cor pos-empate --&gt;" : "Puxando --&gt;"}</span>{" "}
               <span className={sideClass(data.direcao)}>{sideLabel(data.direcao)}</span>{" "}
               {data.validade ?? "G1"}
             </div>
@@ -101,7 +102,7 @@ export function LeituraNeuralMiniCard({
             <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
               <div className="flex items-baseline justify-between gap-1">
                 <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                  Pagando
+                  {postTie ? "Pos-empate" : "Pagando"}
                 </span>
                 <span className="text-[11px] font-black text-neon-cyan">
                   {formatPercent(accuracy)}
