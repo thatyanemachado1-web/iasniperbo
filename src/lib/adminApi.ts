@@ -24,7 +24,7 @@ export function getInitialApiUrl() {
     window.localStorage.setItem(API_URL_KEY, LOCAL_ADMIN_API_URL);
     return LOCAL_ADMIN_API_URL;
   }
-  if (!isLocalFrontend() && (!saved || isLocalApiUrl(saved) || !isAllowedRemoteApiUrl(saved))) {
+  if (!isLocalFrontend() && (!saved || isLocalApiUrl(saved) || isSameOriginApiUrl(saved) || !isAllowedRemoteApiUrl(saved))) {
     window.localStorage.setItem(API_URL_KEY, PUBLIC_ADMIN_API_URL);
     return PUBLIC_ADMIN_API_URL;
   }
@@ -192,6 +192,15 @@ function isLocalApiUrl(apiUrl: string) {
   try {
     const parsed = new URL(apiUrl);
     return ["127.0.0.1", "localhost"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isSameOriginApiUrl(apiUrl: string) {
+  try {
+    const parsed = new URL(apiUrl);
+    return typeof window !== "undefined" && parsed.hostname === window.location.hostname;
   } catch {
     return false;
   }

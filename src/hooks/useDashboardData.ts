@@ -28,6 +28,10 @@ function configuredDashboardUrl() {
     }
 
     const savedAdminApi = window.localStorage.getItem("sniper_admin_api_url");
+    if (savedAdminApi && isSameOriginApiBaseUrl(savedAdminApi)) {
+      window.localStorage.removeItem("sniper_admin_api_url");
+      return defaultDashboardUrl();
+    }
     if (savedAdminApi && isAllowedApiBaseUrl(savedAdminApi)) return ensureDashboardPath(savedAdminApi);
     if (savedAdminApi) window.localStorage.removeItem("sniper_admin_api_url");
   }
@@ -54,6 +58,14 @@ function dashboardUrlFromQuery(search: string) {
 function isAllowedApiBaseUrl(url: string) {
   try {
     return isAllowedParsedUrl(new URL(url));
+  } catch {
+    return false;
+  }
+}
+
+function isSameOriginApiBaseUrl(url: string) {
+  try {
+    return typeof window !== "undefined" && new URL(url).hostname === window.location.hostname;
   } catch {
     return false;
   }
