@@ -1,27 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type {
-  CurrentSignalSide,
-  DashboardData,
-  NeuralReading,
-  SurfAlert,
-  TieAlert,
-} from "@/types/dashboard";
+import type { DashboardData } from "@/types/dashboard";
 import { getInitialApiUrl, readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
-import { buildSurfEntrySummary } from "@/utils/surf";
+import {
+  DEFAULT_VOICE_NARRATION_STYLE,
+  buildVoiceEvents,
+  isVoiceNarrationStyle,
+  type VoiceEvent,
+  type VoiceNarrationStyle,
+  type VoicePriority,
+} from "@/lib/voiceNarrative";
 
 type DashboardMode = "mock" | "fallback" | "connecting" | "live";
-type VoicePriority = 1 | 2 | 3;
-type PaganteStatusKind = "favorable" | "watch" | "risk";
-
-interface VoiceEvent {
-  key: string;
-  text: string;
-  priority: VoicePriority;
-  bypassCooldown: boolean;
-}
+export type BrowserVoiceChoice = "automatic" | "julio" | "feminine" | "masculine";
 
 const STORAGE_KEY = "sniper_voice_assistant_enabled";
+const STYLE_STORAGE_KEY = "sniper_voice_assistant_style";
+const VOICE_CHOICE_STORAGE_KEY = "sniper_voice_assistant_browser_voice";
 const COMMON_COOLDOWN_MS = 30_000;
 const MAX_QUEUE_SIZE = 6;
 const OPENAI_VOICE_ENABLED = import.meta.env.VITE_OPENAI_VOICE_ENABLED === "true";
@@ -31,6 +26,8 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [latestNarration, setLatestNarration] = useState("");
   const [queueLength, setQueueLength] = useState(0);
+  const [style, setStyle] = useState<VoiceNarrationStyle>(DEFAULT_VOICE_NARRATION_STYLE);
+  const [voiceChoice, setVoiceChoice] = useState<BrowserVoiceChoice>("automatic");
 
   const enabledRef = useRef(false);
   const currentPriorityRef = useRef<VoicePriority | 0>(0);
@@ -56,7 +53,7 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
     isBrowser && typeof window.Audio !== "undefined" && typeof window.URL !== "undefined";
   const supported = speechSupported || (OPENAI_VOICE_ENABLED && audioSupported);
   const hasLiveBackendData = mode === "live" && data.mockMode === false;
-  const events = useMemo(() => buildVoiceEvents(data), [data]);
+  const events = useMemo(() => buildVoiceEvents(data, style), [data, style]);
   const canAutoNarrate = enabled && hasLiveBackendData && supported;
 
   const clearTimer = useCallback(() => {
@@ -127,7 +124,7 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
         utterance.rate = 1;
         utterance.pitch = 1;
         utterance.volume = 1;
-        utterance.voice = selectBestPortugueseVoice();
+        utterance.voice = selectBestPortugueseVoice(voiceChoice);
 
         const finish = (played: boolean) => {
           speechFinishRef.current = null;
@@ -141,7 +138,7 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
       }),
-    [speechSupported],
+    [speechSupported, voiceChoice],
   );
 
   const playOpenAiSpeech = useCallback(
@@ -304,10 +301,28 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const saved = window.localStorage.getItem(STORAGE_KEY) === "true";
+    const savedStyle = window.localStorage.getItem(STYLE_STORAGE_KEY);
+    const savedVoiceChoice = window.localStorage.getItem(VOICE_CHOICE_STORAGE_KEY);
     enabledRef.current = saved;
     preferenceLoadedRef.current = true;
     setEnabled(saved);
+    if (isVoiceNarrationStyle(savedStyle)) {
+      setStyle(savedStyle);
+    }
+    if (isBrowserVoiceChoice(savedVoiceChoice)) {
+      setVoiceChoice(savedVoiceChoice);
+    }
   }, []);
+
+  useEffect(() => {
+    if (!preferenceLoadedRef.current || typeof window === "undefined") return;
+    window.localStorage.setItem(STYLE_STORAGE_KEY, style);
+  }, [style]);
+
+  useEffect(() => {
+    if (!preferenceLoadedRef.current || typeof window === "undefined") return;
+    window.localStorage.setItem(VOICE_CHOICE_STORAGE_KEY, voiceChoice);
+  }, [voiceChoice]);
 
   useEffect(() => {
     if (hasLiveBackendData && events[0]) {
@@ -333,6 +348,10 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
     isSpeaking,
     latestNarration,
     queueLength,
+    style,
+    setStyle,
+    voiceChoice,
+    setVoiceChoice,
     hasLiveBackendData,
     supported,
     canReplay: supported && Boolean(latestNarration),
@@ -340,304 +359,34 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
   };
 }
 
-function buildVoiceEvents(data: DashboardData): VoiceEvent[] {
-  const signal = data.currentSignal;
-  const decision = data.engineDecision;
-  const roundId = data.rounds[data.rounds.length - 1]?.id ?? "sem-rodada";
-  const hasMainEntry =
-    (signal.status === "pending" || signal.status === "g1") &&
-    (signal.side === "BANKER" || signal.side === "PLAYER");
-  const hasTieEntry =
-    (signal.status === "pending" || signal.status === "g1") && signal.side === "TIE";
-  const mainEntrySide = hasMainEntry && (signal.side === "BANKER" || signal.side === "PLAYER")
-    ? signal.side
-    : undefined;
-
-  const paganteContext = buildPaganteContext(
-    data.neuralReading,
-    mainEntrySide,
-  );
-
-  if (decision.state === "BLOQUEADO") {
-    return [
-      urgent(
-        `blocked:${roundId}:${decision.reason}:${decision.confidence}`,
-        `Sem entrada agora. A leitura bloqueou por risco alto. Motivo: ${decision.reason}${paganteContext.text}`,
-      ),
-    ];
-  }
-
-  if (mainEntrySide) {
-    const entryRiskText = buildEntryRiskText(data, mainEntrySide, paganteContext);
-    return [
-      urgent(
-        `entry:${signal.id}:${signal.side}:${signal.status}:${signal.protection}:${paganteContext.key}`,
-        `Leitura atual favorece ${sideLabel(signal.side)}. Entrada confirmada com proteção ${signal.protection}. Motivo: ${decision.reason}${paganteContext.text}${entryRiskText}`,
-      ),
-    ];
-  }
-
-  if (hasTieEntry) {
-    return [
-      urgent(
-        `entry-tie:${signal.id}:${signal.status}:${paganteContext.key}`,
-        `Leitura atual favorece Tie. Entrada confirmada em Tie. Motivo: ${decision.reason}${paganteContext.text}`,
-      ),
-    ];
-  }
-
-  const tieEvent = buildTieEvent(data.currentTieAlert);
-  if (signal.status === "tie_watch" && tieEvent) return [appendEventText(tieEvent, paganteContext.text)];
-
-  const surfEvent = buildSurfEvent(data.currentSurfAlert);
-  if (surfEvent) return [appendEventText(surfEvent, paganteContext.text)];
-
-  const neuralEvent = buildNeuralEvent(data.neuralReading);
-  if (neuralEvent) return [neuralEvent];
-
-  if (tieEvent) return [appendEventText(tieEvent, paganteContext.text)];
-
-  const bestSide = currentBestSide(data);
-  if (bestSide) {
-    return [
-      medium(
-        `current-reading:${roundId}:${decision.state}:${bestSide}:${decision.reason}:${paganteContext.key}`,
-        `Leitura do momento favorece ${sideLabel(bestSide)}, mas ainda sem entrada confirmada. Motivo: ${decision.reason}${paganteContext.text}`,
-      ),
-    ];
-  }
-
-  if (signal.status === "waiting" && decision.state !== "BLOQUEADO") {
-    const lastRoundId = data.rounds[data.rounds.length - 1]?.id ?? "sem-rodada";
-    return [
-      common(
-        `observing:${lastRoundId}:${decision.state}:${decision.reason}`,
-        `Mesa em observação sem entrada confirmada. ${decision.reason}`,
-      ),
-    ];
-  }
-
-  return [];
-}
-
-function buildPaganteContext(reading?: NeuralReading, entrySide?: CurrentSignalSide) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") {
-    return { key: "no-pagante", text: "", isAlignedWithEntry: false };
-  }
-
-  const paganteSide = reading.direcao ?? reading.origem;
-  if (!paganteSide) return { key: "no-pagante-side", text: "", isAlignedWithEntry: false };
-
-  const key = `pagante:${reading.numero}:${paganteSide}:${reading.validade ?? ""}:${reading.paganteStatus ?? ""}`;
-  const statusKind = paganteStatusKind(reading);
-  const status = paganteStatusLabel(reading);
-  const isEntrySide = entrySide && entrySide !== "NONE" && entrySide !== "TIE";
-  const isAlignedWithEntry = Boolean(isEntrySide && paganteSide === entrySide && statusKind === "favorable");
-
-  if (statusKind === "risk") {
-    return {
-      key,
-      text: ` Atenção: número ${reading.numero} apareceu apontando ${sideLabel(paganteSide)}, mas está ${status}; não tratar como pagante favorável agora.`,
-      isAlignedWithEntry: false,
-    };
-  }
-
-  if (statusKind === "watch") {
-    return {
-      key,
-      text: ` Número ${reading.numero} apareceu apontando ${sideLabel(paganteSide)}, mas ainda está ${status}.`,
-      isAlignedWithEntry: false,
-    };
-  }
-
-  if (entrySide && entrySide !== "NONE" && entrySide !== "TIE") {
-    const text =
-      paganteSide !== entrySide
-        ? ` Atenção: número pagante ${reading.numero} também aponta ${sideLabel(paganteSide)} agora.`
-        : ` Número pagante ${reading.numero} alinhado com ${sideLabel(paganteSide)} agora.`;
-    return { key, text, isAlignedWithEntry };
-  }
-
-  return {
-    key,
-    text: ` Número pagante ${reading.numero} aponta ${sideLabel(paganteSide)} agora.`,
-    isAlignedWithEntry,
-  };
-}
-
-function buildEntryRiskText(
-  data: DashboardData,
-  entrySide: "BANKER" | "PLAYER",
-  paganteContext: ReturnType<typeof buildPaganteContext>,
-) {
-  if (!paganteContext.isAlignedWithEntry) return "";
-
-  if (hasHighRiskForEntry(data, entrySide)) {
-    return " Número pagante alinhado, mas ainda existe risco alto sinalizado; manter leitura protegida.";
-  }
-
-  return " Número pagante alinhado; sem risco alto identificado nos dados atuais.";
-}
-
-function hasHighRiskForEntry(data: DashboardData, entrySide: "BANKER" | "PLAYER") {
-  const tieHigh =
-    data.currentTieAlert.status === "active" &&
-    normalizeText(data.currentTieAlert.level).includes("ALTO");
-  const surfHigh = buildSurfEntrySummary(data.currentSurfAlert, entrySide).oppositeRiskLevel === "ALTO";
-  const paganteHigh = paganteStatusKind(data.neuralReading) === "risk";
-
-  return tieHigh || surfHigh || paganteHigh || data.engineDecision.state === "BLOQUEADO";
-}
-
-function appendEventText(event: VoiceEvent, text: string) {
-  if (!text) return event;
-  return { ...event, key: `${event.key}:${text}`, text: `${event.text}${text}` };
-}
-
-function currentBestSide(data: DashboardData): CurrentSignalSide | null {
-  const surfSide = data.currentSurfAlert?.surf_prediction_side || data.currentSurfAlert?.surf_side;
-  if (surfSide === "BANKER" || surfSide === "PLAYER") return surfSide;
-
-  const neuralSide = isFavorablePagante(data.neuralReading)
-    ? data.neuralReading?.direcao ?? data.neuralReading?.origem
-    : null;
-  if (neuralSide === "BANKER" || neuralSide === "PLAYER" || neuralSide === "TIE") {
-    return neuralSide;
-  }
-
-  return null;
-}
-
-function buildNeuralEvent(reading?: NeuralReading): VoiceEvent | null {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
-
-  const side = reading.direcao ?? reading.origem;
-  if (!side) return null;
-
-  const statusKind = paganteStatusKind(reading);
-  const status = paganteStatusLabel(reading);
-  const details = [
-    `${sideLabel(side)} ${reading.numero}`,
-    reading.validade ? `validade ${reading.validade}` : "",
-    reading.paganteStatus ? `status ${reading.paganteStatus}` : "",
-    reading.paganteAlert ?? "",
-  ].filter(Boolean);
-
-  return medium(
-    `neural:${reading.mode}:${reading.numero}:${reading.origem ?? ""}:${reading.direcao ?? ""}:${reading.paganteStatus ?? ""}:${reading.alertas ?? ""}`,
-    neuralEventText(statusKind, reading.numero, side, status, details, reading.paganteAlert),
+function isBrowserVoiceChoice(value: unknown): value is BrowserVoiceChoice {
+  return (
+    value === "automatic" ||
+    value === "julio" ||
+    value === "feminine" ||
+    value === "masculine"
   );
 }
 
-function neuralEventText(
-  statusKind: PaganteStatusKind,
-  number: number,
-  side: CurrentSignalSide,
-  status: string,
-  details: string[],
-  alert?: string | null,
-) {
-  if (statusKind === "risk") {
-    return `Número ${number} apareceu apontando ${sideLabel(side)}, mas está ${status}. Não tratar como pagante favorável agora${alert ? `. ${alert}` : ""}.`;
-  }
-
-  if (statusKind === "watch") {
-    return `Número ${number} apareceu apontando ${sideLabel(side)}, ainda em observação. ${details.join(", ")}.`;
-  }
-
-  return `Número pagante identificado. ${details.join(", ")}.`;
-}
-
-function isFavorablePagante(reading?: NeuralReading) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
-  const side = reading.direcao ?? reading.origem;
-  return Boolean(side) && paganteStatusKind(reading) === "favorable";
-}
-
-function paganteStatusKind(reading?: NeuralReading): PaganteStatusKind {
-  if (!reading) return "watch";
-
-  const status = normalizeText(reading.paganteStatus);
-  if (
-    reading.isRedAlert ||
-    reading.isSaturated ||
-    status.includes("RISCO") ||
-    status.includes("ESTICADO")
-  ) {
-    return "risk";
-  }
-
-  if (
-    reading.mode === "OBSERVING" ||
-    status.includes("INICIANTE") ||
-    status.includes("OBSERV") ||
-    status.includes("POS-EMPATE") ||
-    status.includes("POS EMPATE")
-  ) {
-    return "watch";
-  }
-
-  return "favorable";
-}
-
-function paganteStatusLabel(reading?: NeuralReading) {
-  const status = reading?.paganteStatus?.trim();
-  return status ? status.toLocaleLowerCase("pt-BR").replace(/_/g, " ") : "em observação";
-}
-
-function normalizeText(value?: string | null) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase();
-}
-
-function buildSurfEvent(alert?: SurfAlert): VoiceEvent | null {
-  if (!alert || (!alert.surf_alert && alert.surf_phase === "SEM_RISCO")) return null;
-
-  const breakRisk = alert.surf_break_risk ?? alert.surf_risk;
-  const risk = riskLabel(breakRisk);
-  const side = sideLabel(
-    alert.surf_prediction_side && alert.surf_prediction_side !== "NONE"
-      ? alert.surf_prediction_side
-      : alert.surf_side,
-  );
-  const status = alert.surf_status ?? phaseLabel(alert.surf_phase);
-
-  return medium(
-    `surf:${alert.surf_phase}:${alert.surf_side}:${alert.surf_prediction_side ?? ""}:${alert.surf_prediction_status ?? ""}:${breakRisk}:${alert.surf_confidence}`,
-    `Leitura de surf detectada. ${side} em ${status}, com risco ${risk} de quebra.`,
-  );
-}
-
-function buildTieEvent(alert: TieAlert): VoiceEvent | null {
-  if (alert.status !== "active") return null;
-  return high(
-    `tie:${alert.id}:${alert.status}:${alert.level}:${alert.validityRounds}`,
-    `Atenção para empate. Mesa com pressão de Tie, validade até ${alert.validityRounds} rodadas.`,
-  );
-}
-
-function urgent(key: string, text: string): VoiceEvent {
-  return { key, text, priority: 3, bypassCooldown: true };
-}
-
-function high(key: string, text: string): VoiceEvent {
-  return { key, text, priority: 3, bypassCooldown: false };
-}
-
-function medium(key: string, text: string): VoiceEvent {
-  return { key, text, priority: 2, bypassCooldown: false };
-}
-
-function common(key: string, text: string): VoiceEvent {
-  return { key, text, priority: 1, bypassCooldown: false };
-}
-
-function selectBestPortugueseVoice() {
+function selectBestPortugueseVoice(choice: BrowserVoiceChoice) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return null;
+
+  const julioVoice = bestMatchingVoice(voices, isJulioVoice);
+  if ((choice === "automatic" || choice === "julio") && julioVoice) {
+    return julioVoice;
+  }
+
+  if (choice === "feminine") {
+    const feminineVoice = bestMatchingVoice(voices, isFeminineVoice);
+    if (feminineVoice) return feminineVoice;
+  }
+
+  if (choice === "masculine") {
+    const masculineVoice = bestMatchingVoice(voices, isMasculineVoice);
+    if (masculineVoice) return masculineVoice;
+  }
 
   const scoredVoices = voices
     .map((voice) => ({ voice, score: scorePortugueseVoice(voice) }))
@@ -645,6 +394,16 @@ function selectBestPortugueseVoice() {
     .sort((a, b) => b.score - a.score);
 
   return scoredVoices[0]?.voice ?? null;
+}
+
+function bestMatchingVoice(
+  voices: SpeechSynthesisVoice[],
+  predicate: (voice: SpeechSynthesisVoice) => boolean,
+) {
+  return voices
+    .map((voice) => ({ voice, score: scorePortugueseVoice(voice) }))
+    .filter((item) => item.score > 0 && predicate(item.voice))
+    .sort((a, b) => b.score - a.score)[0]?.voice ?? null;
 }
 
 function scorePortugueseVoice(voice: SpeechSynthesisVoice) {
@@ -670,6 +429,49 @@ function scorePortugueseVoice(voice: SpeechSynthesisVoice) {
   return score;
 }
 
+function isJulioVoice(voice: SpeechSynthesisVoice) {
+  return normalizeVoiceText(voice.name).includes("julio");
+}
+
+function isFeminineVoice(voice: SpeechSynthesisVoice) {
+  const name = normalizeVoiceText(`${voice.name} ${voice.lang}`);
+  return [
+    "female",
+    "feminina",
+    "mulher",
+    "woman",
+    "maria",
+    "francisca",
+    "luciana",
+    "helena",
+    "leticia",
+    "vitoria",
+  ].some((token) => name.includes(token));
+}
+
+function isMasculineVoice(voice: SpeechSynthesisVoice) {
+  const name = normalizeVoiceText(`${voice.name} ${voice.lang}`);
+  return [
+    "male",
+    "masculina",
+    "masculino",
+    "homem",
+    "man",
+    "julio",
+    "antonio",
+    "daniel",
+    "rafael",
+    "ricardo",
+  ].some((token) => name.includes(token));
+}
+
+function normalizeVoiceText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
 function readVoiceApiUrl() {
   const adminSession = readAdminSession();
   const apiUrl = adminSession?.apiUrl || getInitialApiUrl();
@@ -691,21 +493,4 @@ function readVoiceAuthToken() {
   }
 
   return "";
-}
-
-function sideLabel(side?: CurrentSignalSide | null) {
-  if (side === "BANKER") return "Banker";
-  if (side === "PLAYER") return "Player";
-  if (side === "TIE") return "Tie";
-  return "mesa";
-}
-
-function riskLabel(value: number) {
-  if (value >= 70) return "alto";
-  if (value >= 40) return "médio";
-  return "baixo";
-}
-
-function phaseLabel(phase: SurfAlert["surf_phase"]) {
-  return phase.toLowerCase().replace(/_/g, " ");
 }
