@@ -4,9 +4,10 @@ import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
 import type { DashboardData } from "@/types/dashboard";
 
-const PUBLIC_API_URL = "https://sniperbo.com";
+const PUBLIC_API_URL = "https://reflection-herbal-representative-nut.trycloudflare.com";
 const PUBLIC_DASHBOARD_URL = `${PUBLIC_API_URL}/dashboard`;
 const ALLOWED_REMOTE_API_HOSTS = new Set([
+  "reflection-herbal-representative-nut.trycloudflare.com",
   "sniperbo.com",
   "www.sniperbo.com",
 ]);
