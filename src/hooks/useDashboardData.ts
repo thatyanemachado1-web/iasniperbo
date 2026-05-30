@@ -87,7 +87,7 @@ function stripDashboardPath(url: string) {
 function defaultDashboardUrl() {
   if (typeof window === "undefined") return "";
   if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
-    return "http://127.0.0.1:8787/dashboard";
+    return `${window.location.origin}/dashboard`;
   }
   return PUBLIC_DASHBOARD_URL;
 }
