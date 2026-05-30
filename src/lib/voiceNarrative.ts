@@ -24,6 +24,59 @@ export function isVoiceNarrationStyle(value: unknown): value is VoiceNarrationSt
   return value === "balanced" || value === "aggressive";
 }
 
+export function buildVoiceResultEvents(
+  previousData: DashboardData | null | undefined,
+  data: DashboardData,
+  style: VoiceNarrationStyle = DEFAULT_VOICE_NARRATION_STYLE,
+): VoiceEvent[] {
+  if (!previousData) return [];
+
+  const name = firstName(data.user?.name);
+  const events: VoiceEvent[] = [];
+  const lastResult = data.currentSignal.lastResult;
+  const previousLastResult = previousData.currentSignal.lastResult;
+
+  if (lastResult && resultKey(lastResult) !== resultKey(previousLastResult)) {
+    events.push(
+      urgent(
+        `result-main:${resultKey(lastResult)}:${style}`,
+        mainResultText(name, lastResult.side, lastResult.status, lastResult.protection, style),
+      ),
+    );
+  }
+
+  if (
+    data.currentTieAlert.status !== "active" &&
+    tieResultKey(data.currentTieAlert) !== tieResultKey(previousData.currentTieAlert)
+  ) {
+    events.push(
+      urgent(
+        `result-tie:${tieResultKey(data.currentTieAlert)}:${style}`,
+        tieResultText(name, data.currentTieAlert.status, style),
+      ),
+    );
+  }
+
+  const surfStatus = data.currentSurfAlert?.surf_prediction_status;
+  if (
+    surfStatus &&
+    surfStatus !== "ACTIVE" &&
+    surfResultKey(data.currentSurfAlert) !== surfResultKey(previousData.currentSurfAlert)
+  ) {
+    events.push(
+      urgent(
+        `result-surf:${surfResultKey(data.currentSurfAlert)}:${style}`,
+        surfResultText(name, data.currentSurfAlert, style),
+      ),
+    );
+  }
+
+  const neuralEvent = buildNeuralResultEvent(previousData.neuralReading, data.neuralReading, name, style);
+  if (neuralEvent) events.push(neuralEvent);
+
+  return events;
+}
+
 export function buildVoiceEvents(
   data: DashboardData,
   style: VoiceNarrationStyle = DEFAULT_VOICE_NARRATION_STYLE,
@@ -42,21 +95,22 @@ export function buildVoiceEvents(
     : undefined;
 
   const paganteContext = buildPaganteContext(data.neuralReading, mainEntrySide, style);
+  const candidateEvents: VoiceEvent[] = [];
 
   if (decision.state === "BLOQUEADO") {
-    return [
+    candidateEvents.push(
       urgent(
         `blocked:${roundId}:${decision.reason}:${decision.confidence}:${style}`,
         blockedText(name, decision.reason, paganteContext.text, style),
       ),
-    ];
+    );
   }
 
   if (mainEntrySide) {
     const entryRiskText = buildEntryRiskText(data, mainEntrySide, paganteContext, style);
-    return [
+    candidateEvents.push(
       urgent(
-        `entry:${signal.id}:${signal.side}:${signal.status}:${signal.protection}:${paganteContext.key}:${style}`,
+        `entry:${signal.id}:${signal.side}:${signal.status}:${signal.protection}:${style}`,
         entryText(
           name,
           signal.side,
@@ -68,28 +122,27 @@ export function buildVoiceEvents(
           style,
         ),
       ),
-    ];
+    );
   }
 
   if (hasTieEntry) {
-    return [
+    candidateEvents.push(
       urgent(
         `entry-tie:${signal.id}:${signal.status}:${paganteContext.key}:${style}`,
         tieEntryText(name, decision.reason, paganteContext.text, style),
       ),
-    ];
+    );
   }
 
   const surfEvent = buildSurfEvent(data.currentSurfAlert, name, style);
   const tieEvent = buildTieEvent(data.currentTieAlert, name, style);
   const neuralEvent = buildNeuralEvent(data.neuralReading, name, style, roundId);
-  const candidateEvents: VoiceEvent[] = [];
 
   if (neuralEvent) {
     candidateEvents.push(neuralEvent);
   }
 
-  if (signal.status === "tie_watch" && tieEvent) {
+  if (!hasTieEntry && signal.status === "tie_watch" && tieEvent) {
     candidateEvents.push(appendEventText(tieEvent, paganteContext.text));
   }
 
@@ -97,12 +150,12 @@ export function buildVoiceEvents(
     candidateEvents.push(appendEventText(surfEvent, paganteContext.text));
   }
 
-  if (signal.status !== "tie_watch" && tieEvent) {
+  if (!hasTieEntry && signal.status !== "tie_watch" && tieEvent) {
     candidateEvents.push(appendEventText(tieEvent, paganteContext.text));
   }
 
   const bestSide = currentBestSide(data);
-  if (bestSide) {
+  if (!hasMainEntry && !hasTieEntry && bestSide) {
     candidateEvents.push(
       medium(
         `current-reading:${roundId}:${decision.state}:${bestSide}:${decision.reason}:${paganteContext.key}:${style}`,
@@ -111,7 +164,7 @@ export function buildVoiceEvents(
     );
   }
 
-  if (signal.status === "waiting" && decision.state !== "BLOQUEADO") {
+  if (!hasMainEntry && !hasTieEntry && signal.status === "waiting" && decision.state !== "BLOQUEADO") {
     const lastRoundId = data.rounds[data.rounds.length - 1]?.id ?? "sem-rodada";
     candidateEvents.push(
       common(
@@ -130,6 +183,98 @@ function blockedText(name: string, reason: string, paganteText: string, style: V
   }
 
   return `Sem entrada agora. A leitura bloqueou por risco alto. Motivo: ${reason}${paganteText}`;
+}
+
+function mainResultText(
+  name: string,
+  side: CurrentSignalSide,
+  status: "green" | "green_g1" | "red",
+  protection: string,
+  style: VoiceNarrationStyle,
+) {
+  const sideText = sideLabel(side);
+  if (status === "red") {
+    return style === "aggressive"
+      ? `${namePrefix(name)}red registrado na entrada principal em ${sideText}. Respeita a gestão e aguarda nova leitura.`
+      : `Red registrado na entrada principal em ${sideText}. Aguardar nova análise.`;
+  }
+
+  const greenText = status === "green_g1" ? `Green no G1 em ${sideText}` : `Green em ${sideText}`;
+  return style === "aggressive"
+    ? `${namePrefix(name)}boa. ${greenText} na entrada principal. Protege a gestão.`
+    : `${greenText} na entrada principal, com proteção ${protection}.`;
+}
+
+function tieResultText(name: string, status: TieAlert["status"], style: VoiceNarrationStyle) {
+  if (status === "green") {
+    return style === "aggressive"
+      ? `${namePrefix(name)}tiro certo no empate. A análise Tie confirmou green. Agora segura a emoção e respeita a gestão.`
+      : `Tiro certo no empate. A análise Tie confirmou green.`;
+  }
+
+  return style === "aggressive"
+    ? `${namePrefix(name)}Tie expirou sem confirmar. Sem forçar a próxima mão; espera a leitura voltar.`
+    : `Tie expirou sem confirmar. Aguardar nova leitura.`;
+}
+
+function surfResultText(name: string, alert: SurfAlert | undefined, style: VoiceNarrationStyle) {
+  const side = sideLabel(alert?.surf_prediction_side && alert.surf_prediction_side !== "NONE"
+    ? alert.surf_prediction_side
+    : alert?.surf_side);
+
+  if (alert?.surf_prediction_status === "HIT") {
+    return style === "aggressive"
+      ? `${namePrefix(name)}acertamos no Surf Analyzer. O surf respeitou em ${side}. Gestão mantida.`
+      : `Acertamos no Surf Analyzer. A leitura de surf confirmou em ${side}.`;
+  }
+
+  if (alert?.surf_prediction_status === "FAILED") {
+    return style === "aggressive"
+      ? `${namePrefix(name)}Surf não confirmou agora. Registra o red do Surf Analyzer e espera nova formação.`
+      : `Surf Analyzer não confirmou agora. Aguardar nova formação.`;
+  }
+
+  return style === "aggressive"
+    ? `${namePrefix(name)}Surf expirou sem confirmar. Melhor esperar outra leitura limpa.`
+    : `Surf Analyzer expirou sem confirmar. Aguardar nova leitura.`;
+}
+
+function buildNeuralResultEvent(
+  previousReading: NeuralReading | undefined,
+  reading: NeuralReading | undefined,
+  name: string,
+  style: VoiceNarrationStyle,
+): VoiceEvent | null {
+  if (!previousReading || !reading || !isSameNeuralReading(previousReading, reading)) return null;
+
+  const previousGreens = neuralGreens(previousReading);
+  const currentGreens = neuralGreens(reading);
+  const previousReds = neuralReds(previousReading);
+  const currentReds = neuralReds(reading);
+  const side = reading.direcao ?? reading.origem;
+  const number = reading.numero;
+
+  if (typeof number === "number" && side && currentGreens > previousGreens) {
+    const g1Increased = safeNumber(reading.greenG1) > safeNumber(previousReading.greenG1);
+    const protection = g1Increased ? " no G1" : "";
+    return urgent(
+      `result-neural:green:${number}:${side}:${currentGreens}:${currentReds}:${style}`,
+      style === "aggressive"
+        ? `${namePrefix(name)}número pagante respeitou mesmo. Foi green${protection} na previsão de número pagante ${number}, puxando ${sideLabel(side)}.`
+        : `Número pagante respeitou. Foi green${protection} na previsão de número pagante ${number}, em ${sideLabel(side)}.`,
+    );
+  }
+
+  if (typeof number === "number" && side && currentReds > previousReds) {
+    return urgent(
+      `result-neural:red:${number}:${side}:${currentGreens}:${currentReds}:${style}`,
+      style === "aggressive"
+        ? `${namePrefix(name)}número pagante não confirmou agora. Red na previsão do número ${number}; gestão primeiro.`
+        : `Número pagante ${number} não confirmou agora. Aguardar nova leitura.`,
+    );
+  }
+
+  return null;
 }
 
 function entryText(
@@ -444,6 +589,54 @@ function paganteStatusKind(reading?: NeuralReading): PaganteStatusKind {
 function paganteStatusLabel(reading?: NeuralReading) {
   const status = reading?.paganteStatus?.trim();
   return status ? status.toLocaleLowerCase("pt-BR").replace(/_/g, " ") : "em observação";
+}
+
+function resultKey(result: DashboardData["currentSignal"]["lastResult"] | undefined | null) {
+  if (!result) return "no-result";
+  return `${result.id}:${result.status}:${result.side}:${result.protection}:${result.finishedAt ?? ""}`;
+}
+
+function tieResultKey(alert: TieAlert | undefined) {
+  if (!alert) return "no-tie";
+  return `${alert.id}:${alert.status}:${alert.level}:${alert.validityRounds}`;
+}
+
+function surfResultKey(alert: SurfAlert | undefined) {
+  if (!alert) return "no-surf";
+  return [
+    alert.surf_prediction_status ?? "",
+    alert.surf_prediction_side ?? "",
+    alert.surf_phase,
+    alert.surf_side,
+    alert.surf_prediction_window ?? "",
+    alert.surf_prediction_confidence ?? "",
+    alert.surf_confidence,
+    alert.stretched_count,
+    alert.correction_count,
+  ].join(":");
+}
+
+function isSameNeuralReading(previousReading: NeuralReading, reading: NeuralReading) {
+  return (
+    previousReading.mode !== "SCANNING" &&
+    reading.mode !== "SCANNING" &&
+    previousReading.numero === reading.numero &&
+    previousReading.origem === reading.origem &&
+    previousReading.direcao === reading.direcao
+  );
+}
+
+function neuralGreens(reading?: NeuralReading) {
+  const splitGreens = safeNumber(reading?.greenSemGale) + safeNumber(reading?.greenG1);
+  return splitGreens || safeNumber(reading?.acertos);
+}
+
+function neuralReds(reading?: NeuralReading) {
+  return safeNumber(reading?.reds ?? reading?.erros);
+}
+
+function safeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function urgent(key: string, text: string): VoiceEvent {

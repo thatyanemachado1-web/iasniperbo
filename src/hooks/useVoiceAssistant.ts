@@ -5,6 +5,7 @@ import { readUserSession } from "@/lib/userSession";
 import {
   DEFAULT_VOICE_NARRATION_STYLE,
   buildVoiceEvents,
+  buildVoiceResultEvents,
   isVoiceNarrationStyle,
   type VoiceEvent,
   type VoiceNarrationStyle,
@@ -43,6 +44,7 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef("");
   const playbackIdRef = useRef(0);
+  const previousDataRef = useRef<DashboardData | null>(null);
   const speakingRef = useRef(false);
   const speechFinishRef = useRef<(() => void) | null>(null);
 
@@ -53,7 +55,13 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
     isBrowser && typeof window.Audio !== "undefined" && typeof window.URL !== "undefined";
   const supported = speechSupported || (OPENAI_VOICE_ENABLED && audioSupported);
   const hasLiveBackendData = mode === "live" && data.mockMode === false;
-  const events = useMemo(() => buildVoiceEvents(data, style), [data, style]);
+  const events = useMemo(
+    () => [
+      ...buildVoiceResultEvents(previousDataRef.current, data, style),
+      ...buildVoiceEvents(data, style),
+    ],
+    [data, style],
+  );
   const canAutoNarrate = enabled && hasLiveBackendData && supported;
 
   const clearTimer = useCallback(() => {
@@ -339,6 +347,12 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
     if (!canAutoNarrate) return;
     enqueueEvents(events);
   }, [canAutoNarrate, enqueueEvents, events]);
+
+  useEffect(() => {
+    if (hasLiveBackendData) {
+      previousDataRef.current = data;
+    }
+  }, [data, hasLiveBackendData]);
 
   useEffect(() => {
     return () => {
