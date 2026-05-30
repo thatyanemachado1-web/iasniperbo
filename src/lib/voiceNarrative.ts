@@ -80,38 +80,48 @@ export function buildVoiceEvents(
     ];
   }
 
-  const tieEvent = buildTieEvent(data.currentTieAlert, name, style);
-  if (signal.status === "tie_watch" && tieEvent) return [appendEventText(tieEvent, paganteContext.text)];
-
   const surfEvent = buildSurfEvent(data.currentSurfAlert, name, style);
-  if (surfEvent) return [appendEventText(surfEvent, paganteContext.text)];
+  const tieEvent = buildTieEvent(data.currentTieAlert, name, style);
+  const neuralEvent = buildNeuralEvent(data.neuralReading, name, style, roundId);
+  const candidateEvents: VoiceEvent[] = [];
 
-  const neuralEvent = buildNeuralEvent(data.neuralReading, name, style);
-  if (neuralEvent) return [neuralEvent];
+  if (neuralEvent) {
+    candidateEvents.push(neuralEvent);
+  }
 
-  if (tieEvent) return [appendEventText(tieEvent, paganteContext.text)];
+  if (signal.status === "tie_watch" && tieEvent) {
+    candidateEvents.push(appendEventText(tieEvent, paganteContext.text));
+  }
+
+  if (surfEvent) {
+    candidateEvents.push(appendEventText(surfEvent, paganteContext.text));
+  }
+
+  if (signal.status !== "tie_watch" && tieEvent) {
+    candidateEvents.push(appendEventText(tieEvent, paganteContext.text));
+  }
 
   const bestSide = currentBestSide(data);
   if (bestSide) {
-    return [
+    candidateEvents.push(
       medium(
         `current-reading:${roundId}:${decision.state}:${bestSide}:${decision.reason}:${paganteContext.key}:${style}`,
         currentReadingText(name, bestSide, decision.reason, paganteContext.text, style),
       ),
-    ];
+    );
   }
 
   if (signal.status === "waiting" && decision.state !== "BLOQUEADO") {
     const lastRoundId = data.rounds[data.rounds.length - 1]?.id ?? "sem-rodada";
-    return [
+    candidateEvents.push(
       common(
         `observing:${lastRoundId}:${decision.state}:${decision.reason}:${style}`,
         observingText(name, decision.reason, style),
       ),
-    ];
+    );
   }
 
-  return [];
+  return candidateEvents;
 }
 
 function blockedText(name: string, reason: string, paganteText: string, style: VoiceNarrationStyle) {
@@ -313,6 +323,7 @@ function buildNeuralEvent(
   reading: NeuralReading | undefined,
   name: string,
   style: VoiceNarrationStyle,
+  roundId: string,
 ): VoiceEvent | null {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
 
@@ -328,8 +339,8 @@ function buildNeuralEvent(
     reading.paganteAlert ?? "",
   ].filter(Boolean);
 
-  return medium(
-    `neural:${reading.mode}:${reading.numero}:${reading.origem ?? ""}:${reading.direcao ?? ""}:${reading.paganteStatus ?? ""}:${reading.alertas ?? ""}:${style}`,
+  return analysis(
+    `neural:${roundId}:${reading.mode}:${reading.numero}:${reading.origem ?? ""}:${reading.direcao ?? ""}:${reading.validade ?? ""}:${reading.paganteStatus ?? ""}:${reading.alertas ?? ""}:${style}`,
     neuralEventText(statusKind, reading.numero, side, status, details, reading.paganteAlert, name, style),
   );
 }
@@ -376,7 +387,7 @@ function buildSurfEvent(
   );
   const status = alert.surf_status ?? phaseLabel(alert.surf_phase);
 
-  return medium(
+  return analysis(
     `surf:${alert.surf_phase}:${alert.surf_side}:${alert.surf_prediction_side ?? ""}:${alert.surf_prediction_status ?? ""}:${breakRisk}:${alert.surf_confidence}:${style}`,
     style === "aggressive"
       ? `${namePrefix(name)}atenção na leitura de surf: ${side} em ${status}, risco ${risk} de quebra. Sem exagero na mão.`
@@ -440,11 +451,15 @@ function urgent(key: string, text: string): VoiceEvent {
 }
 
 function high(key: string, text: string): VoiceEvent {
-  return { key, text, priority: 3, bypassCooldown: false };
+  return { key, text, priority: 3, bypassCooldown: true };
 }
 
 function medium(key: string, text: string): VoiceEvent {
   return { key, text, priority: 2, bypassCooldown: false };
+}
+
+function analysis(key: string, text: string): VoiceEvent {
+  return { key, text, priority: 2, bypassCooldown: true };
 }
 
 function common(key: string, text: string): VoiceEvent {

@@ -244,30 +244,34 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
 
   const enqueueEvents = useCallback(
     (nextEvents: VoiceEvent[]) => {
-      const event = nextEvents.find((candidate) => !seenKeysRef.current.has(candidate.key));
-      if (!event) {
+      const unseenEvents = nextEvents.filter((candidate) => !seenKeysRef.current.has(candidate.key));
+      if (!unseenEvents.length) {
         syncQueueLength();
         processQueue();
         return;
       }
 
-      seenKeysRef.current.add(event.key);
-      latestNarrationRef.current = event.text;
-      setLatestNarration(event.text);
-
-      if (event.priority === 3 && event.bypassCooldown) {
+      const hasInterruptingEvent = unseenEvents.some(
+        (event) => event.priority === 3 && event.bypassCooldown,
+      );
+      if (hasInterruptingEvent) {
         queueRef.current = [];
       }
 
-      queueRef.current.push(event);
+      for (const event of unseenEvents) {
+        seenKeysRef.current.add(event.key);
+        latestNarrationRef.current = event.text;
+        setLatestNarration(event.text);
+        queueRef.current.push(event);
+      }
+
       queueRef.current = queueRef.current
         .sort((a, b) => b.priority - a.priority)
         .slice(0, MAX_QUEUE_SIZE);
       syncQueueLength();
 
       if (
-        event.priority === 3 &&
-        event.bypassCooldown &&
+        hasInterruptingEvent &&
         supported &&
         speakingRef.current
       ) {
