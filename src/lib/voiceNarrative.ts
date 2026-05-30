@@ -663,8 +663,8 @@ function firstName(name?: string) {
   return String(name || "").trim().split(/\s+/)[0] || "";
 }
 
-function namePrefix(name: string) {
-  return name ? `${name}, ` : "";
+function namePrefix(_name: string) {
+  return "";
 }
 
 function sideLabel(side?: CurrentSignalSide | null) {
