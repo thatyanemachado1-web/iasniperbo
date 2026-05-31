@@ -710,7 +710,7 @@ function normalizeSignalSide(value: unknown): CurrentSignalSide {
   return "NONE";
 }
 
-function normalizeSignalStatus(value: unknown, side: DashboardData["currentSignal"]["side"]) {
+function normalizeSignalStatus(value: unknown, side: DashboardData["currentSignal"]["side"]): SignalStatus {
   const text = String(value || "")
     .trim()
     .toLowerCase();
