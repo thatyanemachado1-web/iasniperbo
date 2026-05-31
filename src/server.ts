@@ -736,7 +736,7 @@ function normalizeRoundResult(value: unknown) {
   return null;
 }
 
-function normalizeTieLevel(value: unknown) {
+function normalizeTieLevel(value: unknown): DashboardData["currentTieAlert"]["level"] {
   const text = String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
