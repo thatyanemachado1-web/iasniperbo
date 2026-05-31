@@ -4,7 +4,6 @@ import { Activity, ChevronRight, Crown } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { LiveTableView } from "@/components/dashboard/LiveTableView";
-import { BrainAssistantCard } from "@/components/dashboard/BrainAssistantCard";
 import { SignalCard } from "@/components/dashboard/SignalCard";
 import { TieAlertCard } from "@/components/dashboard/TieAlertCard";
 import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
@@ -279,13 +278,6 @@ function DashboardPage() {
         </div>
 
         <div className="space-y-4">
-          <PremiumFeature
-            title="IA completa VIP"
-            description="A IA operacional completa fica liberada para VIP/Premium."
-          >
-            <BrainAssistantCard data={d} mode={mode} locked={!fullAccess} />
-          </PremiumFeature>
-
           <GlassCard className="border-gold/40">
             <div className="flex items-center gap-3">
               <div className="size-10 rounded-xl btn-gold-grad flex items-center justify-center glow-gold">

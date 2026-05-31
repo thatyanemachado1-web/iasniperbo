@@ -8,8 +8,8 @@ import type { ReactNode } from "react";
 
 const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/app/ia", label: "Assistente IA", icon: Brain },
   { to: "/app/voz", label: "Voz", icon: Mic },
+  { to: "/app/ia", label: "Assistente IA", icon: Brain },
   { to: "/app/planos", label: "Planos", icon: Crown },
   { to: "/app/conta", label: "Conta", icon: User },
 ] as const;
