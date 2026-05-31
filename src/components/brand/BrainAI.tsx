@@ -8,11 +8,12 @@ interface BrainAIProps {
 }
 
 export function BrainAI({ size = 120, speaking = false, className = "" }: BrainAIProps) {
-  const particleCount = size >= 220 ? 14 : size >= 120 ? 8 : 0;
+  const visualSize = Math.round(size * 1.18);
+  const particleCount = visualSize >= 220 ? 14 : visualSize >= 120 ? 8 : 0;
   return (
     <div
       className={`relative inline-flex items-center justify-center ${className}`}
-      style={{ width: size, height: size }}
+      style={{ width: visualSize, height: visualSize }}
     >
       {/* outer halo */}
       <div
@@ -34,9 +35,9 @@ export function BrainAI({ size = 120, speaking = false, className = "" }: BrainA
       <div
         className="absolute left-1/2 -translate-x-1/2 rounded-full animate-base-pulse"
         style={{
-          bottom: size * 0.02,
-          width: size * 0.78,
-          height: size * 0.1,
+          bottom: visualSize * 0.02,
+          width: visualSize * 0.78,
+          height: visualSize * 0.1,
           background:
             "radial-gradient(ellipse at center, color-mix(in oklab, var(--neon-blue) 80%, transparent), transparent 70%)",
           filter: "blur(6px)",
@@ -48,7 +49,7 @@ export function BrainAI({ size = 120, speaking = false, className = "" }: BrainA
         className="relative animate-brain-pulse"
         animate={{ y: [0, -6, 0] }}
         transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
-        style={{ width: size, height: size }}
+        style={{ width: visualSize, height: visualSize }}
       >
         <motion.div
           className="w-full h-full"
@@ -93,7 +94,7 @@ export function BrainAI({ size = 120, speaking = false, className = "" }: BrainA
                   boxShadow: "0 0 8px color-mix(in oklab, var(--neon-cyan) 80%, transparent)",
                   // @ts-expect-error css var
                   "--angle": `${angle}deg`,
-                  "--radius": `${size * 0.42}px`,
+                  "--radius": `${visualSize * 0.42}px`,
                   animationDelay: `${delay}s`,
                 }}
               />
