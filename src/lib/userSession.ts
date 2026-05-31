@@ -11,14 +11,15 @@ export interface UserSession {
 }
 
 const USER_SESSION_KEY = "sniper_user_session";
-// Admin owner email is configured via env var (not hardcoded to avoid leaking PII in the bundle).
+// Admin owner emails are configured via env var (not hardcoded to avoid leaking PII in the bundle).
 // Leave VITE_ADMIN_OWNER_EMAIL unset to disable client-side owner shortcuts entirely;
 // real authorization must be enforced server-side.
-export const ADMIN_OWNER_EMAIL = String(
-  (import.meta.env.VITE_ADMIN_OWNER_EMAIL as string | undefined) || "",
-)
-  .trim()
-  .toLowerCase();
+export const ADMIN_OWNER_EMAILS = parseAdminEmails(
+  `${(import.meta.env.VITE_ADMIN_OWNER_EMAIL as string | undefined) || ""},${
+    (import.meta.env.VITE_ADMIN_OWNER_EMAILS as string | undefined) || ""
+  }`,
+);
+export const ADMIN_OWNER_EMAIL = ADMIN_OWNER_EMAILS[0] || "";
 
 export function readUserSession(): UserSession {
   if (typeof window === "undefined") {
@@ -90,8 +91,8 @@ export function clearUserSession() {
 }
 
 export function isAdminOwnerEmail(email?: string | null) {
-  if (!ADMIN_OWNER_EMAIL) return false;
-  return String(email || "").trim().toLowerCase() === ADMIN_OWNER_EMAIL;
+  if (ADMIN_OWNER_EMAILS.length === 0) return false;
+  return ADMIN_OWNER_EMAILS.includes(normalizeEmail(email));
 }
 
 export function hasFullAccess(session: UserSession = readUserSession()) {
@@ -128,6 +129,21 @@ function normalizePlan(value: unknown): UserSession["plan"] {
   const text = String(value || "free").trim().toLowerCase();
   if (text === "premium" || text === "vip") return text;
   return "free";
+}
+
+function parseAdminEmails(value: unknown) {
+  return Array.from(
+    new Set(
+      String(value || "")
+        .split(/[,;\s]+/)
+        .map((email) => normalizeEmail(email))
+        .filter(Boolean),
+    ),
+  );
+}
+
+function normalizeEmail(value: unknown) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function nameFromEmail(email: string) {

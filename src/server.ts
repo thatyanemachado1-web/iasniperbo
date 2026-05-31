@@ -314,7 +314,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ error: "Nao autorizado." }, 401);
     }
     return json({
-      hasAdminEmail: Boolean(getAdminEmail(env)),
+      hasAdminEmail: getAdminEmails(env).length > 0,
       hasAdminPassword: Boolean(getAdminPassword(env)),
       hasAdminToken: Boolean(getAdminToken(env)),
       hasSessionSecret: Boolean(getSessionSecret(env)),
@@ -325,27 +325,28 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (request.method === "POST" && url.pathname === "/admin/login") {
     const body = await request.json().catch(() => ({}));
-    const adminEmail = getAdminEmail(env);
+    const adminEmails = getAdminEmails(env);
+    const loginEmail = readString(body, "email").toLowerCase();
     const adminPassword = getAdminPassword(env);
     const adminToken = getAdminToken(env);
 
-    if (!adminEmail || !adminPassword || !adminToken || !getSessionSecret(env)) {
+    if (adminEmails.length === 0 || !adminPassword || !adminToken || !getSessionSecret(env)) {
       return json({ error: "Credenciais admin nao configuradas no servidor." }, 503);
     }
 
     if (
-      readString(body, "email").toLowerCase() === adminEmail &&
+      adminEmails.includes(loginEmail) &&
       readString(body, "password") === adminPassword
     ) {
       recordAccessEvent("admin_login", {
-        email: adminEmail,
-        full_name: "Gabriel Mendes",
+        email: loginEmail,
+        full_name: nameFromEmail(loginEmail),
         city: "",
         country: "",
       });
       await saveLiveState(env);
       // Admin token is returned only inside a successful admin-login response.
-      return json({ token: adminToken, email: adminEmail });
+      return json({ token: adminToken, email: loginEmail });
     }
 
     return json({ error: "Email ou senha admin invalidos." }, 401);
@@ -355,17 +356,17 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = readRecord(await request.json().catch(() => ({})));
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
-    const adminEmail = getAdminEmail(env);
+    const adminEmails = getAdminEmails(env);
     const adminPassword = getAdminPassword(env);
 
     if (!getSessionSecret(env)) {
       return json({ error: "Sessao nao configurada no servidor." }, 503);
     }
 
-    if (adminEmail && adminPassword && email === adminEmail && password === adminPassword) {
+    if (adminEmails.includes(email) && adminPassword && password === adminPassword) {
       recordAccessEvent("owner_login", {
         email,
-        full_name: "Gabriel Mendes",
+        full_name: nameFromEmail(email),
         city: "",
         country: "",
       });
@@ -1056,8 +1057,14 @@ function getAdminToken(env: unknown) {
   return readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "sniper-local-admin-token");
 }
 
-function getAdminEmail(env: unknown) {
-  return readNamedServerSecret(env, "SNIPER_ADMIN_EMAIL", "").toLowerCase();
+function getAdminEmails(env: unknown) {
+  return parseEmailList(
+    `${readNamedServerSecret(env, "SNIPER_ADMIN_EMAIL", "")},${readNamedServerSecret(
+      env,
+      "SNIPER_ADMIN_EMAILS",
+      "",
+    )}`,
+  );
 }
 
 function getAdminPassword(env: unknown) {
@@ -1208,7 +1215,7 @@ async function ownerAccess(env: unknown, email: string) {
     access_status: "owner",
     plan: "vip",
     email,
-    full_name: "Gabriel Mendes",
+    full_name: nameFromEmail(email),
     expires_at: "",
     reason: "Acesso do administrador.",
     client_token: token,
@@ -1428,6 +1435,28 @@ function isExpiredIso(value: string) {
 
 function readString(record: Record<string, unknown>, key: string) {
   return String(record[key] || "").trim();
+}
+
+function parseEmailList(value: unknown) {
+  return Array.from(
+    new Set(
+      String(value || "")
+        .split(/[,;\s]+/)
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function nameFromEmail(email: string) {
+  const localPart = email.split("@")[0]?.trim();
+  if (!localPart) return "Administrador";
+  return localPart
+    .replace(/[._-]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function todayIso() {
