@@ -3,7 +3,7 @@ import "./lib/error-capture";
 import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import type { DashboardData } from "./types/dashboard";
+import type { CurrentSignalSide, DashboardData, SignalStatus } from "./types/dashboard";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
