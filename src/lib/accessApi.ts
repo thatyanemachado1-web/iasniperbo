@@ -21,6 +21,7 @@ export interface ClientRegistrationPayload {
   phone: string;
   city: string;
   country: string;
+  [key: string]: unknown;
 }
 
 export function saveAccessSession(access: ClientAccess, fallbackEmail = "") {

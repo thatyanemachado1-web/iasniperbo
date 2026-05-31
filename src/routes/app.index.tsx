@@ -53,7 +53,7 @@ function DashboardPage() {
     (d.currentSignal.status === "pending" || d.currentSignal.status === "g1") &&
     (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER");
   const surfSummary =
-    signalHasActiveEntry
+    signalHasActiveEntry && (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER")
       ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
       : undefined;
   const lastRound = d.rounds[d.rounds.length - 1];

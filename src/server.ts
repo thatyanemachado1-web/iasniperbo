@@ -3,7 +3,7 @@ import "./lib/error-capture";
 import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import type { DashboardData } from "./types/dashboard";
+import type { CurrentSignalSide, DashboardData, SignalStatus } from "./types/dashboard";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -584,19 +584,17 @@ function updateDashboardData(current: DashboardData & { updatedAt?: string }, bo
   };
 }
 
-function pickDashboardSections(incoming: Record<string, unknown>) {
-  return {
-    ...(incoming.currentSurfAlert ? { currentSurfAlert: incoming.currentSurfAlert } : {}),
-    ...(incoming.surfAlert ? { currentSurfAlert: incoming.surfAlert } : {}),
-    ...(incoming.neuralReading ? { neuralReading: incoming.neuralReading } : {}),
-    ...(incoming.moduleToggles ? { moduleToggles: incoming.moduleToggles } : {}),
-    ...(incoming.engineDecision ? { engineDecision: incoming.engineDecision } : {}),
-    ...(incoming.mainScoreboard ? { mainScoreboard: incoming.mainScoreboard } : {}),
-    ...(incoming.tieAlertScoreboard ? { tieAlertScoreboard: incoming.tieAlertScoreboard } : {}),
-    ...(incoming.surfAnalyzerScoreboard
-      ? { surfAnalyzerScoreboard: incoming.surfAnalyzerScoreboard }
-      : {}),
-  };
+function pickDashboardSections(incoming: Record<string, unknown>): Partial<DashboardData> {
+  const out: Partial<DashboardData> = {};
+  if (incoming.currentSurfAlert) out.currentSurfAlert = incoming.currentSurfAlert as DashboardData["currentSurfAlert"];
+  if (incoming.surfAlert) out.currentSurfAlert = incoming.surfAlert as DashboardData["currentSurfAlert"];
+  if (incoming.neuralReading) out.neuralReading = incoming.neuralReading as DashboardData["neuralReading"];
+  if (incoming.moduleToggles) out.moduleToggles = incoming.moduleToggles as DashboardData["moduleToggles"];
+  if (incoming.engineDecision) out.engineDecision = incoming.engineDecision as DashboardData["engineDecision"];
+  if (incoming.mainScoreboard) out.mainScoreboard = incoming.mainScoreboard as DashboardData["mainScoreboard"];
+  if (incoming.tieAlertScoreboard) out.tieAlertScoreboard = incoming.tieAlertScoreboard as DashboardData["tieAlertScoreboard"];
+  if (incoming.surfAnalyzerScoreboard) out.surfAnalyzerScoreboard = incoming.surfAnalyzerScoreboard as DashboardData["surfAnalyzerScoreboard"];
+  return out;
 }
 
 function readMainSignal(payload: Record<string, unknown>) {
@@ -620,15 +618,16 @@ function readMainSignal(payload: Record<string, unknown>) {
 function normalizeSignal(
   signal: Record<string, unknown>,
   fallback: DashboardData["currentSignal"],
-) {
+): DashboardData["currentSignal"] {
   const side = normalizeSignalSide(signal.side || signal.direcao || signal.entry || signal.entrada);
   const status = normalizeSignalStatus(signal.status || signal.resultado || signal.state, side);
   const protection = String(
     signal.protection || signal.validade || signal.gale || fallback.protection || "G1",
   );
   const terminalStatus = terminalSignalStatus(status);
-  const lastResult =
-    signal.lastResult ||
+  const incomingLastResult = (signal.lastResult ?? null) as DashboardData["currentSignal"]["lastResult"];
+  const lastResult: DashboardData["currentSignal"]["lastResult"] =
+    incomingLastResult ||
     fallback.lastResult ||
     (terminalStatus && (side === "BANKER" || side === "PLAYER")
       ? {
@@ -643,8 +642,8 @@ function normalizeSignal(
   if (terminalStatus) {
     return {
       id: "waiting",
-      side: "NONE" as const,
-      status: "waiting" as const,
+      side: "NONE",
+      status: "waiting",
       protection: "-",
       strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
       lastResult,
@@ -700,7 +699,7 @@ function normalizeRounds(rounds: unknown[]) {
     .slice(-30);
 }
 
-function normalizeSignalSide(value: unknown) {
+function normalizeSignalSide(value: unknown): CurrentSignalSide {
   const text = String(value || "")
     .trim()
     .toUpperCase();
@@ -710,7 +709,7 @@ function normalizeSignalSide(value: unknown) {
   return "NONE";
 }
 
-function normalizeSignalStatus(value: unknown, side: DashboardData["currentSignal"]["side"]) {
+function normalizeSignalStatus(value: unknown, side: DashboardData["currentSignal"]["side"]): SignalStatus {
   const text = String(value || "")
     .trim()
     .toLowerCase();
@@ -735,7 +734,7 @@ function normalizeRoundResult(value: unknown) {
   return null;
 }
 
-function normalizeTieLevel(value: unknown) {
+function normalizeTieLevel(value: unknown): DashboardData["currentTieAlert"]["level"] {
   const text = String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -871,7 +870,13 @@ function normalizeRecipient(recipient: Record<string, unknown>) {
   };
 }
 
-function ownerAccess(email: string, token: string) {
+async function ownerAccess(env: unknown, email: string) {
+  const token = await issueSessionToken(env, {
+    email,
+    scope: "owner",
+    plan: "vip",
+    approved: true,
+  });
   return {
     registered: true,
     approved: true,
@@ -886,12 +891,17 @@ function ownerAccess(email: string, token: string) {
   };
 }
 
-function clientAccess(client: Record<string, unknown>, token: string) {
+async function clientAccess(env: unknown, client: Record<string, unknown>) {
   const enabled = Boolean(client.enabled) || readString(client, "access_status") === "approved";
   const accessStatus = readString(client, "access_status") || (enabled ? "approved" : "pending");
   const plan = ["premium", "vip"].includes(readString(client, "plan"))
     ? readString(client, "plan")
     : "free";
+  const email = readString(client, "email");
+
+  const token = enabled
+    ? await issueSessionToken(env, { email, scope: "client", plan, approved: true })
+    : "";
 
   return {
     registered: true,
@@ -899,14 +909,14 @@ function clientAccess(client: Record<string, unknown>, token: string) {
     access_mode: enabled ? "full" : "pending",
     access_status: accessStatus,
     plan,
-    email: readString(client, "email"),
+    email,
     full_name:
       readString(client, "full_name") || readString(client, "name") || readString(client, "email"),
     expires_at: readString(client, "expires_at"),
     reason: enabled
       ? "Acesso liberado pelo administrador."
       : "Aguardando liberacao do administrador.",
-    client_token: enabled ? token : "",
+    client_token: token,
   };
 }
 
