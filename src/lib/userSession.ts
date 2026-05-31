@@ -90,6 +90,7 @@ export function clearUserSession() {
 }
 
 export function isAdminOwnerEmail(email?: string | null) {
+  if (!ADMIN_OWNER_EMAIL) return false;
   return String(email || "").trim().toLowerCase() === ADMIN_OWNER_EMAIL;
 }
 

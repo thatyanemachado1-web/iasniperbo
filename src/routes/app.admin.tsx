@@ -96,7 +96,7 @@ function AdminPage() {
     isAdminOwnerEmail(userSession.email) ? readAdminSession() : null,
   );
   const [apiUrl, setApiUrl] = useState(() => readAdminSession()?.apiUrl || getInitialApiUrl());
-  const [email, setEmail] = useState(() => readAdminSession()?.email || "gabrielmendespromove@gmail.com");
+  const [email, setEmail] = useState(() => readAdminSession()?.email || "");
   const [password, setPassword] = useState("");
   const [recipients, setRecipients] = useState<SignalRecipient[]>([]);
   const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
