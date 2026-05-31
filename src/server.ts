@@ -702,12 +702,21 @@ function getAdminToken(env: unknown) {
 }
 
 function getElevenLabsApiKey(env: unknown) {
-  return readServerEnvString(env, "ELEVENLABS_API_KEY", "");
+  return normalizeSecretValue(readServerEnvString(env, "ELEVENLABS_API_KEY", ""));
 }
 
 function readServerEnvString(env: unknown, key: string, fallback: string) {
   const envRecord = readRecord(env);
   return readConfigString(readProcessEnv(key) || envRecord[key], fallback);
+}
+
+function normalizeSecretValue(value: unknown) {
+  return String(value || "")
+    .trim()
+    .replace(/^ELEVENLABS_API_KEY\s*=\s*/i, "")
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^["']|["']$/g, "")
+    .replace(/[\s\u200B-\u200D\uFEFF]+/g, "");
 }
 
 function elevenLabsErrorStatus(status: number) {
