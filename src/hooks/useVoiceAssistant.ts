@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardData } from "@/types/dashboard";
 import { getInitialApiUrl, readAdminSession } from "@/lib/adminApi";
-import { readUserSession } from "@/lib/userSession";
+import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import {
   DEFAULT_VOICE_NARRATION_STYLE,
   buildVoiceEvents,
@@ -362,6 +362,7 @@ function readVoiceAuthToken() {
 
   const userSession = readUserSession();
   if (userSession.clientToken) return userSession.clientToken;
+  if (hasFullAccess(userSession)) return "sniper-local-admin-token";
 
   if (
     typeof window !== "undefined" &&
