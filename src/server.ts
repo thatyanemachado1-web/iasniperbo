@@ -1394,17 +1394,14 @@ function liveStateCacheRequest() {
 }
 
 async function loadLiveState(env: unknown) {
-  const durableState = await loadDurableLiveState(env);
-  if (durableState) {
-    applyLiveState(durableState);
-    await saveLiveStateCache(durableState);
-    return;
-  }
-
-  const cacheState = await loadLiveStateCache();
-  if (cacheState) {
-    applyLiveState(cacheState);
-    await saveDurableLiveState(env, buildLiveStateSnapshot());
+  const [durableState, cacheState] = await Promise.all([
+    loadDurableLiveState(env),
+    loadLiveStateCache(),
+  ]);
+  const state = mergeLiveStates(durableState, cacheState);
+  if (state) {
+    applyLiveState(state);
+    await Promise.allSettled([saveLiveStateCache(state), saveDurableLiveState(env, state)]);
   }
 }
 
@@ -1453,6 +1450,51 @@ function applyLiveState(state: Record<string, unknown>) {
     liveModuleToggles = restoreModuleToggles(moduleToggles);
     liveDashboardData = { ...liveDashboardData, moduleToggles: liveModuleToggles };
   }
+}
+
+function mergeLiveStates(
+  durableState: Record<string, unknown> | null,
+  cacheState: Record<string, unknown> | null,
+) {
+  if (!durableState && !cacheState) return null;
+  const durable = durableState || {};
+  const cache = cacheState || {};
+  return {
+    ...cache,
+    ...durable,
+    dashboard: pickStateObject(durable.dashboard, cache.dashboard),
+    recipients: pickStateArray(durable.recipients, cache.recipients),
+    clients: pickStateArray(durable.clients, cache.clients),
+    accessEvents: mergeStateArrays(durable.accessEvents, cache.accessEvents).slice(0, 200),
+    moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
+    savedAt: readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
+  };
+}
+
+function pickStateObject(primary: unknown, secondary: unknown) {
+  const first = readRecord(primary);
+  if (Object.keys(first).length > 0) return first;
+  return readRecord(secondary);
+}
+
+function pickStateArray(primary: unknown, secondary: unknown) {
+  const first = Array.isArray(primary) ? primary.map(readRecord).filter(hasRecordFields) : [];
+  const second = Array.isArray(secondary) ? secondary.map(readRecord).filter(hasRecordFields) : [];
+  return first.length >= second.length ? first : second;
+}
+
+function mergeStateArrays(primary: unknown, secondary: unknown) {
+  const rows = [...pickStateArray(primary, []), ...pickStateArray(secondary, [])];
+  const byKey = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const key = readString(row, "id") || readString(row, "email").toLowerCase() || JSON.stringify(row);
+    byKey.set(key, { ...(byKey.get(key) || {}), ...row });
+  }
+  return [...byKey.values()];
+}
+
+function hasRecordFields(record: Record<string, unknown>) {
+  return Object.keys(record).length > 0;
 }
 
 function buildLiveStateSnapshot() {

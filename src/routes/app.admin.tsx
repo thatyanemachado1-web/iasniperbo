@@ -68,6 +68,8 @@ const accessStatusLabels = {
   pending: "Pendente",
 };
 
+const ADMIN_RECIPIENTS_BACKUP_KEY = "sniper_admin_recipients_backup_v1";
+
 type RecipientEditForm = {
   full_name: string;
   email: string;
@@ -164,12 +166,24 @@ function AdminPage() {
     [form.starts_at, form.validity_months, form.validity_days],
   );
 
+  function setRecipientsWithBackup(
+    value: SignalRecipient[] | ((current: SignalRecipient[]) => SignalRecipient[]),
+  ) {
+    setRecipients((current) => {
+      const next = typeof value === "function" ? value(current) : value;
+      writeRecipientsBackup(next);
+      return next;
+    });
+  }
+
   async function refreshRecipients(currentSession = session) {
     if (!currentSession) return;
     setLoading(true);
     setError("");
     try {
-      setRecipients(await listSignalRecipients(currentSession));
+      const fetched = await listSignalRecipients(currentSession);
+      const restored = await restoreRecipientsFromBackupIfNeeded(currentSession, fetched);
+      setRecipientsWithBackup(restored);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel carregar destinatarios.");
       setSession(readAdminSession());
@@ -204,6 +218,36 @@ function AdminPage() {
     } catch {
       setAdminSummary(summaryFromRecipients(recipients, securitySummary));
     }
+  }
+
+  async function restoreRecipientsFromBackupIfNeeded(
+    currentSession: AdminSession,
+    fetched: SignalRecipient[],
+  ) {
+    if (fetched.length > 0) {
+      writeRecipientsBackup(fetched);
+      return fetched;
+    }
+
+    const backup = readRecipientsBackup();
+    if (backup.length === 0) return fetched;
+
+    const restored: SignalRecipient[] = [];
+    for (const recipient of backup) {
+      try {
+        restored.push(await createSignalRecipient(currentSession, recipientPayloadForRestore(recipient)));
+      } catch {
+        // Keep trying the remaining clients so one bad old record does not block the backup.
+      }
+    }
+
+    if (restored.length > 0) {
+      setExported("Backup local de cadastros restaurado no servidor.");
+      writeRecipientsBackup(restored);
+      return restored;
+    }
+
+    return fetched;
   }
 
   useEffect(() => {
@@ -288,7 +332,7 @@ function AdminPage() {
         enabled: true,
         access_status: "approved",
       });
-      setRecipients((current) => [...current, recipient]);
+      setRecipientsWithBackup((current) => [...current, recipient]);
       setForm({
         full_name: "",
         email: "",
@@ -321,7 +365,7 @@ function AdminPage() {
       nextEnabled && (!recipient.expires_at || isRecipientExpired(recipient))
         ? addMonthsIso(startsAt || todayIso(), 1)
         : recipient.expires_at;
-    setRecipients((current) =>
+    setRecipientsWithBackup((current) =>
       current.map((item) => (item.id === recipient.id ? { ...item, enabled: nextEnabled } : item)),
     );
     try {
@@ -333,13 +377,13 @@ function AdminPage() {
         validity_days: nextEnabled ? daysBetweenIso(startsAt || todayIso(), expiresAt || addMonthsIso(todayIso(), 1)) : recipient.validity_days,
         expires_at: expiresAt,
       });
-      setRecipients((current) =>
+      setRecipientsWithBackup((current) =>
         current.map((item) => (item.id === recipient.id ? updated : item)),
       );
       await refreshAdminSummary(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel atualizar.");
-      setRecipients((current) =>
+      setRecipientsWithBackup((current) =>
         current.map((item) => (item.id === recipient.id ? recipient : item)),
       );
     }
@@ -349,13 +393,13 @@ function AdminPage() {
     if (!session) return;
     setError("");
     const previous = recipients;
-    setRecipients((current) => current.filter((item) => item.id !== recipient.id));
+    setRecipientsWithBackup((current) => current.filter((item) => item.id !== recipient.id));
     try {
       await deleteSignalRecipient(session, recipient.id);
       await refreshAdminSummary(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel remover.");
-      setRecipients(previous);
+      setRecipientsWithBackup(previous);
     }
   }
 
@@ -416,7 +460,7 @@ function AdminPage() {
         expires_at: updatedDates.expires_at,
         notes: editForm.notes,
       });
-      setRecipients((current) =>
+      setRecipientsWithBackup((current) =>
         current.map((item) => (item.id === recipient.id ? updated : item)),
       );
       cancelEdit();
@@ -443,7 +487,7 @@ function AdminPage() {
         validity_days: daysBetweenIso(startsAt, expiresAt),
         expires_at: expiresAt,
       });
-      setRecipients((current) =>
+      setRecipientsWithBackup((current) =>
         current.map((item) => (item.id === recipient.id ? updated : item)),
       );
       await refreshAdminSummary(session);
@@ -1452,6 +1496,49 @@ function recipientsToCsv(recipients: SignalRecipient[]) {
     recipient.notes || "",
   ]);
   return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function readRecipientsBackup() {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ADMIN_RECIPIENTS_BACKUP_KEY) || "{}") as {
+      recipients?: SignalRecipient[];
+    };
+    return Array.isArray(parsed.recipients) ? parsed.recipients.filter((recipient) => recipient?.email) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRecipientsBackup(recipients: SignalRecipient[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    ADMIN_RECIPIENTS_BACKUP_KEY,
+    JSON.stringify({
+      recipients,
+      savedAt: new Date().toISOString(),
+    }),
+  );
+}
+
+function recipientPayloadForRestore(recipient: SignalRecipient): Partial<SignalRecipient> {
+  return {
+    name: recipient.name,
+    full_name: recipient.full_name || recipient.name,
+    email: recipient.email,
+    phone: recipient.phone,
+    city: recipient.city,
+    country: recipient.country,
+    chat_id: recipient.chat_id,
+    kind: recipient.kind || "user",
+    enabled: recipient.enabled,
+    plan: recipient.plan || "premium",
+    access_status: recipient.access_status || (recipient.enabled ? "approved" : "pending"),
+    starts_at: recipient.starts_at || todayIso(),
+    validity_days: recipient.validity_days || 30,
+    expires_at: recipient.expires_at,
+    notes: recipient.notes,
+  };
 }
 
 function csvCell(value: string) {
