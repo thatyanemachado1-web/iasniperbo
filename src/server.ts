@@ -1462,7 +1462,7 @@ function mergeLiveStates(
   return {
     ...cache,
     ...durable,
-    dashboard: pickStateObject(durable.dashboard, cache.dashboard),
+    dashboard: pickDashboardState(durable.dashboard, cache.dashboard),
     recipients: pickStateArray(durable.recipients, cache.recipients),
     clients: pickStateArray(durable.clients, cache.clients),
     accessEvents: mergeStateArrays(durable.accessEvents, cache.accessEvents).slice(0, 200),
@@ -1475,6 +1475,44 @@ function pickStateObject(primary: unknown, secondary: unknown) {
   const first = readRecord(primary);
   if (Object.keys(first).length > 0) return first;
   return readRecord(secondary);
+}
+
+function pickDashboardState(primary: unknown, secondary: unknown) {
+  const first = readRecord(primary);
+  const second = readRecord(secondary);
+  if (!hasRecordFields(first)) return second;
+  if (!hasRecordFields(second)) return first;
+  return compareDashboardStateFreshness(first, second) >= 0 ? first : second;
+}
+
+function compareDashboardStateFreshness(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+) {
+  const leftScore = dashboardStateFreshnessScore(left);
+  const rightScore = dashboardStateFreshnessScore(right);
+  for (let index = 0; index < leftScore.length; index += 1) {
+    const diff = leftScore[index] - rightScore[index];
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function dashboardStateFreshnessScore(state: Record<string, unknown>) {
+  const cycleDate = currentDashboardCycleDate();
+  const rounds = Array.isArray(state.rounds) ? state.rounds.map(readRecord) : [];
+  const lastRound = rounds[rounds.length - 1] ?? {};
+  const lastRoundId = Number(readString(lastRound, "id") || lastRound.id || 0) || 0;
+  const updatedAtMs = Date.parse(readString(state, "updatedAt") || "");
+  const hasCurrentCycle = readDashboardCycleDate(state) === cycleDate ? 1 : 0;
+  const hasLiveRounds = rounds.length > 0 ? 1 : 0;
+  return [
+    hasCurrentCycle,
+    hasLiveRounds,
+    lastRoundId,
+    Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
+    rounds.length,
+  ];
 }
 
 function pickStateArray(primary: unknown, secondary: unknown) {
@@ -1606,8 +1644,18 @@ function supabasePersistenceHeaders(key: string) {
 }
 
 function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData {
+  if (compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, value) > 0) {
+    return ensureDashboardDailyCycle(liveDashboardData).dashboard;
+  }
+
+  const incomingCycleDate = readDashboardCycleDate(value);
+  const currentCycleDate = currentDashboardCycleDate();
+  if (incomingCycleDate && incomingCycleDate !== currentCycleDate) {
+    return ensureDashboardDailyCycle(liveDashboardData).dashboard;
+  }
+
   const restored = updateDashboardData(liveDashboardData, value);
-  const cycleDate = readDashboardCycleDate(value) || restored.cycleDate || currentDashboardCycleDate();
+  const cycleDate = incomingCycleDate || restored.cycleDate || currentCycleDate;
   const restoredWithMetadata = {
     ...restored,
     updatedAt: readString(value, "updatedAt") || restored.updatedAt,
