@@ -743,11 +743,13 @@ function getAdminToken(env: unknown) {
 }
 
 function getElevenLabsApiKey(env: unknown) {
-  return normalizeSecretValue(
-    readServerEnvString(env, "ELEVENLABS_TTS_API_KEY", "") ||
-      readServerEnvString(env, "ELEVENLABS_SECRET_KEY", "") ||
-      readServerEnvString(env, "ELEVENLABS_API_KEY", ""),
-  );
+  // Only read the canonical secret name to avoid conflicts with legacy values.
+  return normalizeSecretValue(readServerEnvString(env, "ELEVENLABS_TTS_API_KEY", ""));
+}
+
+let lastElevenLabsStatus: { code: number | "ok" | "network_error"; at: string } | null = null;
+function recordElevenLabsStatus(code: number | "ok" | "network_error") {
+  lastElevenLabsStatus = { code, at: new Date().toISOString() };
 }
 
 function readServerEnvString(env: unknown, key: string, fallback: string) {
