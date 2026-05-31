@@ -240,9 +240,34 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
     return json({ error: "Nao autorizado." }, 401);
   }
 
-  const hasElevenLabsKey = Boolean(getElevenLabsApiKey(env));
+  const apiKey = getElevenLabsApiKey(env);
+  const hasElevenLabsKey = Boolean(apiKey);
   const hasVoiceId = Boolean(readServerEnvString(env, "ELEVENLABS_VOICE_ID", ""));
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
+
+  if (url.searchParams.get("check") === "elevenlabs") {
+    let elevenLabsAuthOk = false;
+    let elevenLabsAuthStatus: string | number = "no_api_key";
+    if (apiKey) {
+      try {
+        const res = await fetch("https://api.elevenlabs.io/v1/user", {
+          method: "GET",
+          headers: { "xi-api-key": apiKey, Accept: "application/json" },
+        });
+        elevenLabsAuthOk = res.ok;
+        elevenLabsAuthStatus = res.status;
+      } catch {
+        elevenLabsAuthStatus = "network_error";
+      }
+    }
+    return json({
+      elevenLabsAuthOk,
+      elevenLabsAuthStatus,
+      hasElevenLabsKey,
+      hasVoiceId,
+      modelId,
+    });
+  }
 
   return json({
     hasElevenLabsKey,
