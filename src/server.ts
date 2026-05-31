@@ -203,14 +203,17 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
   ).catch(() => null);
 
   if (!response) {
+    recordElevenLabsStatus("network_error");
     return json({ error: "Falha de conexao ao gerar voz ElevenLabs." }, 502);
   }
 
   if (!response.ok) {
+    recordElevenLabsStatus(response.status);
     console.warn(`Falha ao gerar voz ElevenLabs (${response.status}).`);
     return json(elevenLabsErrorPayload(response.status), elevenLabsErrorStatus(response.status));
   }
 
+  recordElevenLabsStatus("ok");
   return new Response(await response.arrayBuffer(), {
     status: 200,
     headers: {
@@ -220,6 +223,30 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
       "access-control-allow-methods": "POST,OPTIONS",
       "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token",
     },
+  });
+}
+
+async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/voice/diagnostics") return null;
+
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "GET") return json({ error: "Metodo nao permitido." }, 405);
+
+  if (!isDashboardAuthorized(request, url, env)) {
+    return json({ error: "Nao autorizado." }, 401);
+  }
+
+  const hasElevenLabsKey = Boolean(getElevenLabsApiKey(env));
+  const hasVoiceId = Boolean(readServerEnvString(env, "ELEVENLABS_VOICE_ID", ""));
+  const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
+
+  return json({
+    hasElevenLabsKey,
+    hasVoiceId,
+    modelId,
+    provider: "elevenlabs",
+    lastElevenLabsStatus,
   });
 }
 
