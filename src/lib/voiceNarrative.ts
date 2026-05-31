@@ -168,7 +168,7 @@ export function buildVoiceEvents(
 ): VoiceEvent[] {
   const signal = data.currentSignal;
   const decision = data.engineDecision;
-  const roundId = data.rounds[data.rounds.length - 1]?.id ?? "sem-rodada";
+  const roundId = String(data.rounds[data.rounds.length - 1]?.id ?? "sem-rodada");
   const name = firstName(data.user?.name);
   const hasMainEntry =
     (signal.status === "pending" || signal.status === "g1") &&
