@@ -10,33 +10,35 @@ export function TieAlertCard({ alert, locked }: { alert: TieAlert; locked?: bool
   const message = buildTieCopy(alert);
 
   return (
-    <GlassCard className="min-h-[180px] border-neon-purple/30">
+    <GlassCard className="digital-risk-card min-h-[180px] border-warning/20">
+      <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warning/30 to-transparent" />
       <SectionTitle
-        title="Tie Alert estatístico"
-        right={<AppBadge tone="purple" pulse>Aviso paralelo</AppBadge>}
+        title="Tie Alert estatistico"
+        right={<AppBadge tone="amber" pulse>Pressao Tie</AppBadge>}
       />
       <div className="flex items-center gap-3">
-        <div className="size-12 rounded-xl glass-strong border-neon-purple/40 flex items-center justify-center glow-purple">
-          <Sparkles className="size-5 text-neon-purple" />
+        <div className="flex size-12 items-center justify-center rounded-xl border border-warning/20 bg-secondary/20">
+          <Sparkles className="size-5 text-warning" />
         </div>
         <div>
-          <div className="text-2xl font-extrabold text-neon-purple">Nível {alert.level}</div>
-          <div className="text-xs text-muted-foreground">Não substitui Banker/Player</div>
+          <div className="text-2xl font-extrabold text-neon-purple">Nivel {alert.level}</div>
+          <div className="text-xs text-muted-foreground">Nao substitui Banker/Player</div>
         </div>
       </div>
-      <div className="mt-3 rounded-xl bg-secondary/35 p-3 text-xs leading-relaxed text-foreground/85">
+      <div className="mt-3 rounded-xl border border-warning/10 bg-secondary/25 p-3 text-xs leading-relaxed text-foreground/85">
         {message}
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
-        <div className="rounded-lg bg-secondary/40 p-2">
-          <div className="text-muted-foreground">Confiança</div>
+        <div className="rounded-lg border border-white/5 bg-secondary/25 p-2">
+          <div className="text-muted-foreground">Confianca</div>
           <div className="font-semibold text-neon-purple">{alert.confidence}%</div>
         </div>
-        <div className="rounded-lg bg-secondary/40 p-2">
+        <div className="rounded-lg border border-white/5 bg-secondary/25 p-2">
           <div className="text-muted-foreground">Validade</div>
           <div className="font-semibold">{alert.validityRounds} rodadas</div>
         </div>
-        <div className="rounded-lg bg-secondary/40 p-2">
+        <div className="rounded-lg border border-white/5 bg-secondary/25 p-2">
           <div className="text-muted-foreground">Status</div>
           <div className={`font-semibold ${alert.status === "expired" ? "text-neon-purple" : "text-success"}`}>
             {tieStatusLabel(alert.status)}
@@ -46,7 +48,7 @@ export function TieAlertCard({ alert, locked }: { alert: TieAlert; locked?: bool
       {locked && (
         <PremiumLock
           title="Tie Alert Premium"
-          description="Tie Alert estatístico disponível para assinantes"
+          description="Tie Alert estatistico disponivel para assinantes"
         />
       )}
     </GlassCard>

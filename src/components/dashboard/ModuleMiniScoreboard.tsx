@@ -81,19 +81,22 @@ export function ModuleMiniScoreboard({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-xl border bg-secondary/20 px-2.5 py-2 backdrop-blur-xl",
+        "digital-result-card relative overflow-hidden rounded-xl border bg-secondary/20 px-2.5 py-2 backdrop-blur-xl",
         tone.border,
         tone.glow,
       )}
     >
-      <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.05]" />
+      <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.045]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/24 to-transparent" />
+      <div className="pointer-events-none absolute bottom-0 left-3 right-3 h-px bg-gradient-to-r from-transparent via-neon-cyan/22 to-transparent" />
       <div className="relative flex items-center gap-2.5">
         <MiniCircularProgress value={assertiveness} color={tone.progress} />
 
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-            <div className={cn("text-[9px] font-black uppercase tracking-[0.16em]", tone.title)}>
-              {title}
+            <div className={cn("flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.16em]", tone.title)}>
+              <span className="size-1.5 rounded-full bg-current shadow-[0_0_10px_currentColor]" />
+              <span>{title}</span>
             </div>
             <ScoreboardDetailsModal
               title={title}
@@ -180,7 +183,7 @@ function MiniCircularProgress({
 
   return (
     <div
-      className="relative grid size-12 shrink-0 place-items-center rounded-full border border-white/10 bg-background/55 sm:size-14"
+      className="digital-dial relative grid size-12 shrink-0 place-items-center rounded-full border border-white/10 bg-background/55 sm:size-14"
       aria-label={`Assertividade ${formatPercent(targetPct)}`}
     >
       <svg className="absolute inset-0 size-full -rotate-90" viewBox="0 0 56 56" aria-hidden="true">
@@ -218,7 +221,7 @@ function ScoreChip({ label, value, variant }: ScoreChipData) {
   return (
     <span
       className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-full border px-2 text-[10px] font-extrabold leading-none",
+        "digital-chip inline-flex h-7 items-center gap-1 rounded-full border px-2 text-[10px] font-extrabold leading-none",
         chipClass(variant),
       )}
     >

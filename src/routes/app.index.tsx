@@ -104,11 +104,12 @@ function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-4">
-        <div className="space-y-4">
+      <div className="dashboard-command-grid grid grid-cols-1 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)] gap-4 xl:items-start">
+        <div className="contents xl:block xl:space-y-4 xl:rounded-2xl xl:border xl:border-neon-cyan/10 xl:bg-background/10 xl:p-2">
           <PremiumFeature
             title="Entrada principal VIP"
             description="A entrada confirmada completa so aparece para clientes liberados."
+            className="order-1"
           >
             <SignalCard
               signal={d.currentSignal}
@@ -120,10 +121,56 @@ function DashboardPage() {
               priority
             />
           </PremiumFeature>
+
+          <PremiumFeature
+            title="Tie Alert VIP"
+            description="Alerta de pressao e risco de empate fica completo apenas no acesso liberado."
+            className="order-2"
+          >
+            <TieAlertCard alert={d.currentTieAlert} />
+          </PremiumFeature>
+
+          {surfAlert && (
+            <PremiumFeature
+              title="Surf Analyzer VIP"
+              description="Leitura completa de surf fica bloqueada no demo."
+              className="order-7 space-y-2"
+            >
+              <SurfAlertCard alert={surfAlert} />
+              <ModuleMiniScoreboard
+                moduleType="SURF"
+                title="Resultado Surf"
+                assertiveness={surfResult.assertiveness}
+                chips={[
+                  { label: "Green", value: surfResult.greens, variant: "green" },
+                  { label: "SG", value: surfResult.greenSemGale, variant: "green" },
+                  { label: "G1", value: surfResult.greenG1, variant: "cyan" },
+                  { label: "RED", value: surfResult.reds, variant: "red" },
+                  { label: "Total", value: surfResult.total, variant: "neutral" },
+                  { label: "Bloq.", value: surfResult.blocked, variant: "yellow" },
+                  { label: "Sem risco", value: surfResult.noRisk, variant: "neutral" },
+                ]}
+                sequencePositive={surfResult.sequencePositive}
+                sequenceNegative={surfResult.sequenceNegative}
+                breakdown={surfResult.breakdown}
+              />
+            </PremiumFeature>
+          )}
+        </div>
+
+        <div className="contents xl:block xl:space-y-4 xl:rounded-2xl xl:border xl:border-neon-purple/10 xl:bg-background/10 xl:p-2">
+          <PremiumFeature
+            title="Decisao da engine VIP"
+            description="A decisao tecnica fica completa apenas no acesso liberado."
+            className="order-3"
+          >
+            <EngineDecisionCard decision={d.engineDecision} data={d} />
+          </PremiumFeature>
+
           <PremiumFeature
             title="Placares VIP"
             description="Os resultados completos ficam liberados apos aprovacao do ADM."
-            className="space-y-2"
+            className="digital-score-rail order-4 space-y-3"
           >
             <ModuleMiniScoreboard
               moduleType="MAIN"
@@ -155,48 +202,6 @@ function DashboardPage() {
               sequenceNegative={neuralResult.sequenceNegative}
               breakdown={neuralResult.breakdown}
             />
-          </PremiumFeature>
-          {surfAlert && (
-            <PremiumFeature
-              title="Surf Analyzer VIP"
-              description="Leitura completa de surf fica bloqueada no demo."
-              className="space-y-2"
-            >
-              <SurfAlertCard alert={surfAlert} />
-              <ModuleMiniScoreboard
-                moduleType="SURF"
-                title="Resultado Surf"
-                assertiveness={surfResult.assertiveness}
-                chips={[
-                  { label: "Green", value: surfResult.greens, variant: "green" },
-                  { label: "SG", value: surfResult.greenSemGale, variant: "green" },
-                  { label: "G1", value: surfResult.greenG1, variant: "cyan" },
-                  { label: "RED", value: surfResult.reds, variant: "red" },
-                  { label: "Total", value: surfResult.total, variant: "neutral" },
-                  { label: "Bloq.", value: surfResult.blocked, variant: "yellow" },
-                  { label: "Sem risco", value: surfResult.noRisk, variant: "neutral" },
-                ]}
-                sequencePositive={surfResult.sequencePositive}
-                sequenceNegative={surfResult.sequenceNegative}
-                breakdown={surfResult.breakdown}
-              />
-            </PremiumFeature>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          <PremiumFeature
-            title="Decisao da engine VIP"
-            description="A decisao tecnica fica completa apenas no acesso liberado."
-          >
-            <EngineDecisionCard decision={d.engineDecision} data={d} />
-          </PremiumFeature>
-          <PremiumFeature
-            title="Tie Alert VIP"
-            description="Leitura completa de empate fica bloqueada no demo."
-            className="space-y-2"
-          >
-            <TieAlertCard alert={d.currentTieAlert} />
             <ModuleMiniScoreboard
               moduleType="TIE"
               title="Resultado Tie"
