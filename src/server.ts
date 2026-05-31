@@ -244,12 +244,16 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   if (request.method === "POST" && url.pathname === "/admin/login") {
     const body = await request.json().catch(() => ({}));
     const envRecord = readRecord(env);
-    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "gabrielmendespromove@gmail.com");
-    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "12346");
+    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "").toLowerCase();
+    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "");
     const adminToken = getAdminToken(env);
 
+    if (!adminEmail || !adminPassword || !adminToken || !getSessionSecret(env)) {
+      return json({ error: "Credenciais admin nao configuradas no servidor." }, 503);
+    }
+
     if (
-      readString(body, "email") === adminEmail &&
+      readString(body, "email").toLowerCase() === adminEmail &&
       readString(body, "password") === adminPassword
     ) {
       recordAccessEvent("admin_login", {
@@ -259,6 +263,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         country: "",
       });
       await saveLiveState();
+      // Admin token is returned only inside a successful admin-login response.
       return json({ token: adminToken, email: adminEmail });
     }
 
@@ -270,12 +275,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
     const envRecord = readRecord(env);
-    const adminEmail = String(
-      envRecord.SNIPER_ADMIN_EMAIL || "gabrielmendespromove@gmail.com",
-    ).toLowerCase();
-    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "12346");
+    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "").toLowerCase();
+    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "");
 
-    if (email === adminEmail && password === adminPassword) {
+    if (!getSessionSecret(env)) {
+      return json({ error: "Sessao nao configurada no servidor." }, 503);
+    }
+
+    if (adminEmail && adminPassword && email === adminEmail && password === adminPassword) {
       recordAccessEvent("owner_login", {
         email,
         full_name: "Gabriel Mendes",
@@ -283,7 +290,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         country: "",
       });
       await saveLiveState();
-      return json({ access: ownerAccess(email, getAdminToken(env)) });
+      return json({ access: await ownerAccess(env, email) });
     }
 
     const client = liveClients.find((item) => readString(item, "email").toLowerCase() === email);
@@ -303,13 +310,26 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       });
     }
 
-    if (readString(client, "password") !== password) {
+    const storedHash = readString(client, "password_hash");
+    const legacyPassword = readString(client, "password");
+    let ok = false;
+    if (storedHash) {
+      ok = await verifyPassword(password, storedHash);
+    } else if (legacyPassword) {
+      ok = legacyPassword === password;
+      if (ok) {
+        client.password_hash = await hashPassword(password);
+        delete (client as Record<string, unknown>).password;
+        await saveLiveState();
+      }
+    }
+    if (!ok) {
       return json({ error: "Senha invalida." }, 401);
     }
 
     recordAccessEvent(Boolean(client.enabled) ? "client_login" : "client_pending_login", client);
     await saveLiveState();
-    return json({ access: clientAccess(client, getAdminToken(env)) });
+    return json({ access: await clientAccess(env, client) });
   }
 
   if (request.method === "POST" && url.pathname === "/auth/register") {
@@ -319,16 +339,20 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (!email || !password) {
       return json({ error: "Email e senha sao obrigatorios." }, 400);
     }
+    if (!getSessionSecret(env)) {
+      return json({ error: "Sessao nao configurada no servidor." }, 503);
+    }
 
     const existingIndex = liveClients.findIndex(
       (item) => readString(item, "email").toLowerCase() === email,
     );
     const now = new Date().toISOString();
-    const client = {
+    const passwordHash = await hashPassword(password);
+    const client: Record<string, unknown> = {
       id: existingIndex >= 0 ? liveClients[existingIndex].id : crypto.randomUUID(),
       full_name: readString(body, "full_name") || email,
       email,
-      password,
+      password_hash: passwordHash,
       phone: readString(body, "phone"),
       city: readString(body, "city"),
       country: readString(body, "country"),
@@ -353,9 +377,26 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     recordAccessEvent(existingIndex >= 0 ? "client_update" : "client_register", client);
     await saveLiveState();
     return json(
-      { access: clientAccess(client, getAdminToken(env)) },
+      { access: await clientAccess(env, client) },
       existingIndex >= 0 ? 200 : 201,
     );
+  }
+
+  if (request.method === "POST" && url.pathname === "/auth/verify") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const token = readString(body, "token");
+    const session = await verifySessionToken(env, token);
+    if (!session) {
+      return json({ valid: false }, 401);
+    }
+    return json({
+      valid: true,
+      email: session.email,
+      scope: session.scope,
+      plan: session.plan,
+      approved: session.approved,
+      exp: session.exp,
+    });
   }
 
   if (!isAdminAuthorized(request, env)) {
