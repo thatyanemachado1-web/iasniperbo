@@ -584,19 +584,17 @@ function updateDashboardData(current: DashboardData & { updatedAt?: string }, bo
   };
 }
 
-function pickDashboardSections(incoming: Record<string, unknown>) {
-  return {
-    ...(incoming.currentSurfAlert ? { currentSurfAlert: incoming.currentSurfAlert } : {}),
-    ...(incoming.surfAlert ? { currentSurfAlert: incoming.surfAlert } : {}),
-    ...(incoming.neuralReading ? { neuralReading: incoming.neuralReading } : {}),
-    ...(incoming.moduleToggles ? { moduleToggles: incoming.moduleToggles } : {}),
-    ...(incoming.engineDecision ? { engineDecision: incoming.engineDecision } : {}),
-    ...(incoming.mainScoreboard ? { mainScoreboard: incoming.mainScoreboard } : {}),
-    ...(incoming.tieAlertScoreboard ? { tieAlertScoreboard: incoming.tieAlertScoreboard } : {}),
-    ...(incoming.surfAnalyzerScoreboard
-      ? { surfAnalyzerScoreboard: incoming.surfAnalyzerScoreboard }
-      : {}),
-  };
+function pickDashboardSections(incoming: Record<string, unknown>): Partial<DashboardData> {
+  const out: Partial<DashboardData> = {};
+  if (incoming.currentSurfAlert) out.currentSurfAlert = incoming.currentSurfAlert as DashboardData["currentSurfAlert"];
+  if (incoming.surfAlert) out.currentSurfAlert = incoming.surfAlert as DashboardData["currentSurfAlert"];
+  if (incoming.neuralReading) out.neuralReading = incoming.neuralReading as DashboardData["neuralReading"];
+  if (incoming.moduleToggles) out.moduleToggles = incoming.moduleToggles as DashboardData["moduleToggles"];
+  if (incoming.engineDecision) out.engineDecision = incoming.engineDecision as DashboardData["engineDecision"];
+  if (incoming.mainScoreboard) out.mainScoreboard = incoming.mainScoreboard as DashboardData["mainScoreboard"];
+  if (incoming.tieAlertScoreboard) out.tieAlertScoreboard = incoming.tieAlertScoreboard as DashboardData["tieAlertScoreboard"];
+  if (incoming.surfAnalyzerScoreboard) out.surfAnalyzerScoreboard = incoming.surfAnalyzerScoreboard as DashboardData["surfAnalyzerScoreboard"];
+  return out;
 }
 
 function readMainSignal(payload: Record<string, unknown>) {
