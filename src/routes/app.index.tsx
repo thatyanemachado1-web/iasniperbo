@@ -137,23 +137,6 @@ function DashboardPage() {
               className="order-7 space-y-2"
             >
               <SurfAlertCard alert={surfAlert} />
-              <ModuleMiniScoreboard
-                moduleType="SURF"
-                title="Resultado Surf"
-                assertiveness={surfResult.assertiveness}
-                chips={[
-                  { label: "Green", value: surfResult.greens, variant: "green" },
-                  { label: "SG", value: surfResult.greenSemGale, variant: "green" },
-                  { label: "G1", value: surfResult.greenG1, variant: "cyan" },
-                  { label: "RED", value: surfResult.reds, variant: "red" },
-                  { label: "Total", value: surfResult.total, variant: "neutral" },
-                  { label: "Bloq.", value: surfResult.blocked, variant: "yellow" },
-                  { label: "Sem risco", value: surfResult.noRisk, variant: "neutral" },
-                ]}
-                sequencePositive={surfResult.sequencePositive}
-                sequenceNegative={surfResult.sequenceNegative}
-                breakdown={surfResult.breakdown}
-              />
             </PremiumFeature>
           )}
         </div>
@@ -215,6 +198,25 @@ function DashboardPage() {
               sequenceExpired={tieResult.sequenceExpired}
               breakdown={tieResult.breakdown}
             />
+            {surfAlert && (
+              <ModuleMiniScoreboard
+                moduleType="SURF"
+                title="Resultado Surf"
+                assertiveness={surfResult.assertiveness}
+                chips={[
+                  { label: "Green", value: surfResult.greens, variant: "green" },
+                  { label: "SG", value: surfResult.greenSemGale, variant: "green" },
+                  { label: "G1", value: surfResult.greenG1, variant: "cyan" },
+                  { label: "RED", value: surfResult.reds, variant: "red" },
+                  { label: "Total", value: surfResult.total, variant: "neutral" },
+                  { label: "Bloq.", value: surfResult.blocked, variant: "yellow" },
+                  { label: "Sem risco", value: surfResult.noRisk, variant: "neutral" },
+                ]}
+                sequencePositive={surfResult.sequencePositive}
+                sequenceNegative={surfResult.sequenceNegative}
+                breakdown={surfResult.breakdown}
+              />
+            )}
           </PremiumFeature>
         </div>
       </div>
