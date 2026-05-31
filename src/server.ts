@@ -871,7 +871,13 @@ function normalizeRecipient(recipient: Record<string, unknown>) {
   };
 }
 
-function ownerAccess(email: string, token: string) {
+async function ownerAccess(env: unknown, email: string) {
+  const token = await issueSessionToken(env, {
+    email,
+    scope: "owner",
+    plan: "vip",
+    approved: true,
+  });
   return {
     registered: true,
     approved: true,
@@ -886,12 +892,17 @@ function ownerAccess(email: string, token: string) {
   };
 }
 
-function clientAccess(client: Record<string, unknown>, token: string) {
+async function clientAccess(env: unknown, client: Record<string, unknown>) {
   const enabled = Boolean(client.enabled) || readString(client, "access_status") === "approved";
   const accessStatus = readString(client, "access_status") || (enabled ? "approved" : "pending");
   const plan = ["premium", "vip"].includes(readString(client, "plan"))
     ? readString(client, "plan")
     : "free";
+  const email = readString(client, "email");
+
+  const token = enabled
+    ? await issueSessionToken(env, { email, scope: "client", plan, approved: true })
+    : "";
 
   return {
     registered: true,
@@ -899,14 +910,14 @@ function clientAccess(client: Record<string, unknown>, token: string) {
     access_mode: enabled ? "full" : "pending",
     access_status: accessStatus,
     plan,
-    email: readString(client, "email"),
+    email,
     full_name:
       readString(client, "full_name") || readString(client, "name") || readString(client, "email"),
     expires_at: readString(client, "expires_at"),
     reason: enabled
       ? "Acesso liberado pelo administrador."
       : "Aguardando liberacao do administrador.",
-    client_token: enabled ? token : "",
+    client_token: token,
   };
 }
 
