@@ -116,6 +116,7 @@ function DashboardPage() {
               surfSummary={surfSummary}
               tieAlert={d.currentTieAlert}
               operationalMessage={buildSignalCopy(d)}
+              enableResultFlash={mode === "live"}
               priority
             />
           </PremiumFeature>

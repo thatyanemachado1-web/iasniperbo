@@ -3,8 +3,10 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { LeituraNeuralMiniCard } from "@/components/dashboard/LeituraNeuralMiniCard";
+import { cn } from "@/lib/utils";
 import type { MainSignal, NeuralReading, SurfEntrySummary, TieAlert } from "@/types/dashboard";
 import { CheckCircle2, Clock3, Radio, ShieldCheck, Target, Zap } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 export function SignalCard({
   signal,
@@ -14,6 +16,7 @@ export function SignalCard({
   operationalMessage,
   locked,
   priority = false,
+  enableResultFlash = false,
 }: {
   signal: MainSignal;
   neuralReading?: NeuralReading;
@@ -22,7 +25,14 @@ export function SignalCard({
   operationalMessage?: string;
   locked?: boolean;
   priority?: boolean;
+  enableResultFlash?: boolean;
 }) {
+  const [mainGreenFlash, setMainGreenFlash] = useState(false);
+  const [neuralGreenFlash, setNeuralGreenFlash] = useState(false);
+  const mainResultSeen = useRef(false);
+  const neuralResultSeen = useRef(false);
+  const previousMainResultKey = useRef<string | null>(null);
+  const previousNeuralTotals = useRef({ greens: 0, reds: 0 });
   const isBanker = signal.side === "BANKER";
   const isPlayer = signal.side === "PLAYER";
   const tieAlertIsActive = tieAlert?.status === "active";
@@ -50,6 +60,8 @@ export function SignalCard({
   const visibleStrength = isTieWatch && tieAlert ? tieAlert.confidence : signal.strength;
   const status = signalStatus(signal, tieAlertIsActive, tieAlert?.validityRounds);
   const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
+  const lastResultKey = signal.lastResult ? signalResultKey(signal.lastResult) : null;
+  const neuralTotals = neuralResultTotals(neuralReading);
   const StatusIcon = status.Icon;
   const tieRisk = !isResultStatus && tieAlert ? tieRiskBadge(tieAlert) : null;
   const riskTone = surfSummary?.oppositeRiskLevel === "ALTO"
@@ -58,8 +70,58 @@ export function SignalCard({
       ? "text-warning"
       : "text-success";
 
+  useEffect(() => {
+    if (!enableResultFlash) {
+      mainResultSeen.current = false;
+      previousMainResultKey.current = lastResultKey;
+      return;
+    }
+
+    if (!mainResultSeen.current) {
+      mainResultSeen.current = true;
+      previousMainResultKey.current = lastResultKey;
+      return;
+    }
+
+    if (
+      lastResultKey &&
+      lastResultKey !== previousMainResultKey.current &&
+      signal.lastResult &&
+      isGreenSignalResult(signal.lastResult)
+    ) {
+      pulseGreen(setMainGreenFlash);
+    }
+
+    previousMainResultKey.current = lastResultKey;
+  }, [enableResultFlash, lastResultKey, signal.lastResult]);
+
+  useEffect(() => {
+    if (!enableResultFlash) {
+      neuralResultSeen.current = false;
+      previousNeuralTotals.current = neuralTotals;
+      return;
+    }
+
+    if (!neuralResultSeen.current) {
+      neuralResultSeen.current = true;
+      previousNeuralTotals.current = neuralTotals;
+      return;
+    }
+
+    if (neuralTotals.greens > previousNeuralTotals.current.greens) {
+      pulseGreen(setNeuralGreenFlash);
+    }
+
+    previousNeuralTotals.current = neuralTotals;
+  }, [enableResultFlash, neuralTotals.greens, neuralTotals.reds]);
+
   return (
-    <GlassCard className={priority ? "min-h-[260px] border-neon-cyan/40" : "min-h-[180px]"}>
+    <GlassCard
+      className={cn(
+        priority ? "min-h-[260px] border-neon-cyan/40" : "min-h-[180px]",
+        mainGreenFlash && "result-green-flash",
+      )}
+    >
       <div className={`absolute inset-x-0 top-0 h-24 bg-gradient-to-b ${beamColor} to-transparent opacity-45`} />
       <div className="absolute inset-0 scan-grid opacity-10" />
       <div className="absolute -left-12 -top-16 size-44 rounded-full bg-neon-blue/10 blur-3xl" />
@@ -90,7 +152,10 @@ export function SignalCard({
             </div>
           )}
         </div>
-        <LeituraNeuralMiniCard {...(neuralReading ?? { mode: "SCANNING" })} />
+        <LeituraNeuralMiniCard
+          {...(neuralReading ?? { mode: "SCANNING" })}
+          greenFlash={neuralGreenFlash}
+        />
       </div>
       <div className="relative mt-4 grid grid-cols-3 gap-2 text-xs">
         <div className="rounded-lg bg-secondary/40 p-2">
@@ -238,6 +303,38 @@ function lastSignalResult(result: NonNullable<MainSignal["lastResult"]>) {
     side: result.side,
     protection: result.protection,
   };
+}
+
+function signalResultKey(result: NonNullable<MainSignal["lastResult"]>) {
+  return `${result.id}:${result.status}:${result.side}:${result.protection}:${result.finishedAt ?? ""}`;
+}
+
+function isGreenSignalResult(result: NonNullable<MainSignal["lastResult"]>) {
+  return result.status === "green" || result.status === "green_g1";
+}
+
+function neuralResultTotals(reading?: NeuralReading) {
+  return {
+    greens: neuralGreens(reading),
+    reds: safeNumber(reading?.reds ?? reading?.erros),
+  };
+}
+
+function neuralGreens(reading?: NeuralReading) {
+  const splitGreens = safeNumber(reading?.greenSemGale) + safeNumber(reading?.greenG1);
+  return splitGreens || safeNumber(reading?.acertos);
+}
+
+function safeNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function pulseGreen(setter: (value: boolean) => void) {
+  setter(false);
+  window.requestAnimationFrame(() => {
+    setter(true);
+    window.setTimeout(() => setter(false), 2100);
+  });
 }
 
 function tieRiskBadge(alert: TieAlert) {

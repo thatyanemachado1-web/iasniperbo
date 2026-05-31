@@ -7,6 +7,7 @@ type NeuralSide = SignalSide | "TIE";
 
 type LeituraNeuralMiniCardProps = NeuralReading & {
   className?: string;
+  greenFlash?: boolean;
 };
 
 const SCANNING_READING: NeuralReading = {
@@ -25,6 +26,7 @@ const SCANNING_READING: NeuralReading = {
 
 export function LeituraNeuralMiniCard({
   className,
+  greenFlash = false,
   ...reading
 }: LeituraNeuralMiniCardProps) {
   const data = { ...SCANNING_READING, ...reading };
@@ -49,6 +51,7 @@ export function LeituraNeuralMiniCard({
       className={cn(
         "neural-mini-card relative w-[140px] shrink-0 overflow-hidden rounded-xl border border-neon-cyan/35 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_28px_-14px_var(--neon-cyan)] backdrop-blur-xl sm:w-[170px] lg:w-[180px]",
         mode === "ACTIVE" && "border-neon-purple/45 shadow-[0_0_32px_-14px_var(--neon-purple)]",
+        greenFlash && "result-green-flash",
         className,
       )}
       aria-label="Leitura neural de numeros pagantes"
