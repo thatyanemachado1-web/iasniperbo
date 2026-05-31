@@ -488,6 +488,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (url.pathname === "/telegram-recipients") {
     if (request.method === "GET") {
+      const changed = syncRecipientsFromClients();
+      if (changed) await saveLiveState(env);
       return json({ recipients: liveRecipients });
     }
 
@@ -510,10 +512,18 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   const recipientMatch = url.pathname.match(/^\/telegram-recipients\/([^/]+)$/);
   if (recipientMatch) {
     const recipientId = decodeURIComponent(recipientMatch[1]);
+    const syncChanged = syncRecipientsFromClients();
     const index = liveRecipients.findIndex((recipient) => recipient.id === recipientId);
 
     if (index === -1) {
-      return json({ error: "Destinatario nao encontrado." }, 404);
+      const clientIndex = liveClients.findIndex((client) => client.id === recipientId);
+      if (clientIndex === -1) {
+        if (syncChanged) await saveLiveState(env);
+        return json({ error: "Destinatario nao encontrado." }, 404);
+      }
+      upsertRecipientFromClient(liveClients[clientIndex]);
+      await saveLiveState(env);
+      return handleAdminApiRequest(request, env);
     }
 
     if (request.method === "PATCH") {
@@ -534,7 +544,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
 
     if (request.method === "DELETE") {
+      const deletedRecipient = liveRecipients[index];
+      const deletedEmail = readString(deletedRecipient, "email").toLowerCase();
       liveRecipients = liveRecipients.filter((recipient) => recipient.id !== recipientId);
+      liveClients = liveClients.filter((client) => {
+        const clientId = readString(client, "id");
+        const clientEmail = readString(client, "email").toLowerCase();
+        return clientId !== recipientId && (!deletedEmail || clientEmail !== deletedEmail);
+      });
       await saveLiveState(env);
       return json({ ok: true });
     }
@@ -1178,27 +1195,31 @@ async function ownerAccess(env: unknown, email: string) {
 
 async function clientAccess(env: unknown, client: Record<string, unknown>) {
   const enabled = Boolean(client.enabled) || readString(client, "access_status") === "approved";
+  const expired = enabled && isExpiredIso(readString(client, "expires_at"));
+  const approved = enabled && !expired;
   const accessStatus = readString(client, "access_status") || (enabled ? "approved" : "pending");
   const plan = ["premium", "vip"].includes(readString(client, "plan"))
     ? readString(client, "plan")
     : "free";
   const email = readString(client, "email");
 
-  const token = enabled
+  const token = approved
     ? await issueSessionToken(env, { email, scope: "client", plan, approved: true })
     : "";
 
   return {
     registered: true,
-    approved: enabled,
-    access_mode: enabled ? "full" : "pending",
-    access_status: accessStatus,
+    approved,
+    access_mode: expired ? "expired" : enabled ? "full" : "pending",
+    access_status: expired ? "expired" : accessStatus,
     plan,
     email,
     full_name:
       readString(client, "full_name") || readString(client, "name") || readString(client, "email"),
     expires_at: readString(client, "expires_at"),
-    reason: enabled
+    reason: expired
+      ? "Acesso expirado. Fale com o administrador para renovar."
+      : enabled
       ? "Acesso liberado pelo administrador."
       : "Aguardando liberacao do administrador.",
     client_token: token,
@@ -1277,7 +1298,7 @@ function buildLocationBreakdown(
 
 function upsertRecipientFromClient(client: Record<string, unknown>) {
   const email = readString(client, "email").toLowerCase();
-  if (!email) return;
+  if (!email) return false;
   const existingIndex = liveRecipients.findIndex(
     (recipient) => readString(recipient, "email").toLowerCase() === email,
   );
@@ -1301,6 +1322,7 @@ function upsertRecipientFromClient(client: Record<string, unknown>) {
     existingIndex >= 0
       ? liveRecipients.map((item, index) => (index === existingIndex ? recipient : item))
       : [...liveRecipients, recipient];
+  return true;
 }
 
 function upsertClientFromRecipient(recipient: Record<string, unknown>) {
@@ -1330,6 +1352,23 @@ function upsertClientFromRecipient(recipient: Record<string, unknown>) {
     existingIndex >= 0
       ? liveClients.map((item, index) => (index === existingIndex ? client : item))
       : [...liveClients, client];
+}
+
+function syncRecipientsFromClients() {
+  let changed = false;
+  for (const client of liveClients) {
+    const before = JSON.stringify(liveRecipients);
+    const didSync = upsertRecipientFromClient(client);
+    changed = changed || (didSync && before !== JSON.stringify(liveRecipients));
+  }
+  return changed;
+}
+
+function isExpiredIso(value: string) {
+  if (!value) return false;
+  const expiration = new Date(`${value}T23:59:59`);
+  if (Number.isNaN(expiration.getTime())) return false;
+  return expiration.getTime() < Date.now();
 }
 
 function readString(record: Record<string, unknown>, key: string) {
@@ -1556,7 +1595,7 @@ function json(data: unknown, status = 200) {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET,POST,OPTIONS",
+      "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
       "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token",
     },
   });

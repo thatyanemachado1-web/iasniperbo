@@ -126,6 +126,7 @@ function AdminPage() {
     kind: "user" as RecipientKind,
     plan: "vip" as RecipientPlan,
     starts_at: "",
+    validity_months: "1",
     validity_days: "30",
     expires_at: "",
     notes: "",
@@ -158,9 +159,9 @@ function AdminPage() {
     () => recipients.filter((recipient) => recipient.access_status === "pending"),
     [recipients],
   );
-  const calculatedExpiresAt = useMemo(
-    () => calculateExpiryDate(form.starts_at, form.validity_days),
-    [form.starts_at, form.validity_days],
+  const formDates = useMemo(
+    () => datesFromNewClientForm(form.starts_at, form.validity_months, form.validity_days),
+    [form.starts_at, form.validity_months, form.validity_days],
   );
 
   async function refreshRecipients(currentSession = session) {
@@ -281,8 +282,9 @@ function AdminPage() {
       const recipient = await createSignalRecipient(session, {
         ...form,
         name: form.full_name,
-        validity_days: Number(form.validity_days) || 0,
-        expires_at: calculatedExpiresAt || form.expires_at,
+        starts_at: formDates.starts_at,
+        validity_days: formDates.validity_days,
+        expires_at: formDates.expires_at || form.expires_at,
         enabled: true,
         access_status: "approved",
       });
@@ -297,6 +299,7 @@ function AdminPage() {
         kind: "user",
         plan: "vip",
         starts_at: "",
+        validity_months: "1",
         validity_days: "30",
         expires_at: "",
         notes: "",
@@ -312,7 +315,12 @@ function AdminPage() {
   async function toggleRecipient(recipient: SignalRecipient) {
     if (!session) return;
     setError("");
-    const nextEnabled = !recipient.enabled;
+    const nextEnabled = !recipient.enabled || isRecipientExpired(recipient);
+    const startsAt = nextEnabled ? recipient.starts_at || todayIso() : recipient.starts_at;
+    const expiresAt =
+      nextEnabled && (!recipient.expires_at || isRecipientExpired(recipient))
+        ? addMonthsIso(startsAt || todayIso(), 1)
+        : recipient.expires_at;
     setRecipients((current) =>
       current.map((item) => (item.id === recipient.id ? { ...item, enabled: nextEnabled } : item)),
     );
@@ -321,8 +329,9 @@ function AdminPage() {
         enabled: nextEnabled,
         access_status: nextEnabled ? "approved" : "paused",
         plan: nextEnabled && recipient.plan === "free" ? "premium" : recipient.plan,
-        starts_at: nextEnabled ? recipient.starts_at || todayIso() : recipient.starts_at,
-        validity_days: nextEnabled ? recipient.validity_days || 30 : recipient.validity_days,
+        starts_at: startsAt,
+        validity_days: nextEnabled ? daysBetweenIso(startsAt || todayIso(), expiresAt || addMonthsIso(todayIso(), 1)) : recipient.validity_days,
+        expires_at: expiresAt,
       });
       setRecipients((current) =>
         current.map((item) => (item.id === recipient.id ? updated : item)),
@@ -574,7 +583,7 @@ function AdminPage() {
           Resumo
         </AdminTabButton>
         <AdminTabButton active={adminView === "clientes"} onClick={() => setAdminView("clientes")}>
-          Aprovar
+          Clientes
         </AdminTabButton>
         <AdminTabButton active={adminView === "seguranca"} onClick={() => setAdminView("seguranca")}>
           Seguranca
@@ -681,8 +690,8 @@ function AdminPage() {
       <div className="grid grid-cols-1 xl:grid-cols-[0.78fr_1.22fr] gap-4">
         <GlassCard>
           <SectionTitle
-            title="Novo cliente"
-            subtitle="Cadastre quem comprou e libere o acesso manualmente."
+            title="Adicionar cliente"
+            subtitle="Cadastre quem comprou; o painel calcula a validade do plano automaticamente."
             right={<UserPlus className="size-4 text-neon-cyan" />}
           />
           <form className="space-y-3" onSubmit={handleAddRecipient}>
@@ -745,13 +754,21 @@ function AdminPage() {
                 options={planLabels}
               />
             </div>
-            <div className="grid grid-cols-[1fr_0.72fr] gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <AdminInput
                 icon={<CalendarDays className="size-4" />}
                 label="Data início"
                 type="date"
                 value={form.starts_at}
                 onChange={(value) => setForm((current) => ({ ...current, starts_at: value }))}
+              />
+              <AdminInput
+                icon={<CalendarDays className="size-4" />}
+                label="Meses"
+                type="number"
+                value={form.validity_months}
+                onChange={(value) => setForm((current) => ({ ...current, validity_months: value }))}
+                placeholder="1"
               />
               <AdminInput
                 icon={<CalendarDays className="size-4" />}
@@ -765,7 +782,7 @@ function AdminPage() {
             <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
               Vencimento calculado:{" "}
               <span className="font-bold text-neon-cyan">
-                {calculatedExpiresAt ? formatDateBR(calculatedExpiresAt) : "informe início e dias"}
+                {formDates.expires_at ? formatDateBR(formDates.expires_at) : "informe inicio e meses"}
               </span>
             </div>
             <label className="block">
@@ -786,15 +803,15 @@ function AdminPage() {
               className="btn-primary-grad inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold disabled:opacity-60"
             >
               {saving ? <Loader2 className="size-4 animate-spin" /> : <UserCheck className="size-4" />}
-              Cadastrar e liberar acesso
+              Adicionar e aprovar plano
             </button>
           </form>
         </GlassCard>
 
         <GlassCard>
           <SectionTitle
-            title="Cadastros liberados"
-            subtitle="Clientes aprovados aqui ficam com acesso VIP/Premium controlado por você."
+            title="Painel de cadastros"
+            subtitle="Aprove, pause, edite validade/data de expiracao, exclua e acompanhe todos em um lugar."
             right={
               <button
                 type="button"
@@ -958,8 +975,16 @@ function RecipientRow({
   onDelete: () => void;
 }) {
   const isPending = recipient.access_status === "pending";
-  const statusLabel = isPending ? "Pendente" : recipient.enabled ? "Liberado" : "Bloqueado";
-  const statusTone = isPending ? "amber" : recipient.enabled ? "green" : "muted";
+  const expired = isRecipientExpired(recipient);
+  const active = recipient.enabled && !expired;
+  const statusLabel = expired ? "Expirado" : isPending ? "Pendente" : active ? "Liberado" : "Bloqueado";
+  const statusTone: "amber" | "green" | "muted" | "red" = expired
+    ? "red"
+    : isPending
+    ? "amber"
+    : active
+    ? "green"
+    : "muted";
 
   return (
     <div className="rounded-xl border border-border/60 bg-secondary/25 p-3">
@@ -1038,8 +1063,16 @@ function RecipientRowV2({
   saving: boolean;
 }) {
   const isPending = recipient.access_status === "pending";
-  const statusLabel = isPending ? "Pendente" : recipient.enabled ? "Liberado" : "Bloqueado";
-  const statusTone = isPending ? "amber" : recipient.enabled ? "green" : "muted";
+  const expired = isRecipientExpired(recipient);
+  const active = recipient.enabled && !expired;
+  const statusLabel = expired ? "Expirado" : isPending ? "Pendente" : active ? "Liberado" : "Bloqueado";
+  const statusTone: "amber" | "green" | "muted" | "red" = expired
+    ? "red"
+    : isPending
+    ? "amber"
+    : active
+    ? "green"
+    : "muted";
   const updateEdit = (field: keyof RecipientEditForm, value: string) => {
     if (!editForm) return;
     onEditFormChange({ ...editForm, [field]: value });
@@ -1139,7 +1172,19 @@ function RecipientRowV2({
               </div>
               {recipient.notes && <div className="mt-2 text-xs text-muted-foreground">{recipient.notes}</div>}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={onToggle}
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-black ${
+                  active
+                    ? "border-warning/40 bg-warning/10 text-warning"
+                    : "border-success/40 bg-success/15 text-success"
+                }`}
+              >
+                <UserCheck className="size-3.5" />
+                {active ? "Pausar" : "Aprovar"}
+              </button>
               <button
                 type="button"
                 onClick={onEdit}
@@ -1147,18 +1192,6 @@ function RecipientRowV2({
                 aria-label="Editar cadastro"
               >
                 <Edit3 className="size-4" />
-              </button>
-              <button
-                type="button"
-                onClick={onToggle}
-                className={`inline-flex size-10 items-center justify-center rounded-xl border ${
-                  recipient.enabled
-                    ? "border-success/40 bg-success/15 text-success"
-                    : "border-border bg-secondary/40 text-muted-foreground"
-                }`}
-                aria-label={recipient.enabled ? "Bloquear acesso" : "Liberar acesso"}
-              >
-                <Power className="size-4" />
               </button>
               <button
                 type="button"
@@ -1182,7 +1215,7 @@ function RecipientRowV2({
                 onClick={() => onQuickApprove(months)}
                 className="rounded-lg border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-1 text-[10px] font-black text-neon-cyan hover:bg-neon-cyan/15"
               >
-                {months}m
+                Aprovar {months}m
               </button>
             ))}
             <button
@@ -1309,6 +1342,27 @@ function calculateExpiryDate(startsAt: string, daysText: string) {
   return date.toISOString().slice(0, 10);
 }
 
+function datesFromNewClientForm(startsAtText: string, monthsText: string, daysText: string) {
+  const startsAt = startsAtText || todayIso();
+  const months = Number(monthsText);
+  if (Number.isFinite(months) && months > 0) {
+    const expiresAt = addMonthsIso(startsAt, months);
+    return {
+      starts_at: startsAt,
+      validity_days: daysBetweenIso(startsAt, expiresAt),
+      expires_at: expiresAt,
+    };
+  }
+
+  const days = Number(daysText) || 30;
+  const expiresAt = calculateExpiryDate(startsAt, String(days));
+  return {
+    starts_at: startsAt,
+    validity_days: days,
+    expires_at: expiresAt,
+  };
+}
+
 function recipientToEditForm(recipient: SignalRecipient): RecipientEditForm {
   return {
     full_name: recipient.full_name || recipient.name || "",
@@ -1359,6 +1413,13 @@ function daysBetweenIso(startIso: string, endIso: string) {
   const end = new Date(`${endIso}T00:00:00`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
   return Math.max(0, Math.round((end.getTime() - start.getTime()) / 86_400_000));
+}
+
+function isRecipientExpired(recipient: SignalRecipient) {
+  if (!recipient.expires_at) return false;
+  const expiration = new Date(`${recipient.expires_at}T23:59:59`);
+  if (Number.isNaN(expiration.getTime())) return false;
+  return expiration.getTime() < Date.now();
 }
 
 function recipientsToCsv(recipients: SignalRecipient[]) {
