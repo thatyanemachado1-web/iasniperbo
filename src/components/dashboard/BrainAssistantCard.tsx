@@ -53,8 +53,8 @@ export function BrainAssistantCard({ data, mode, locked = false }: BrainAssistan
         {active ? "Narrando a mesa em tempo real." : "IA acompanhando a mesa"}
       </div>
       <p className="relative max-w-[24rem] text-xs leading-relaxed text-muted-foreground">
-        Quando ativado, usa a voz gratuita do navegador para narrar em tempo real numero pagante,
-        surf, tie, bloqueios e entradas confirmadas.
+        Quando ativado, usa ElevenLabs para narrar em tempo real numero pagante, surf, tie,
+        bloqueios e entradas confirmadas.
       </p>
 
       <label className="relative flex w-full items-center justify-between gap-3 rounded-xl border border-neon-cyan/20 bg-secondary/30 px-3 py-2 text-left">
@@ -76,7 +76,7 @@ export function BrainAssistantCard({ data, mode, locked = false }: BrainAssistan
 
       <div className="relative w-full rounded-xl border border-border/60 bg-secondary/20 px-3 py-2 text-left">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-xs font-bold">Estilo da narração</span>
+          <span className="text-xs font-bold">Estilo da narracao</span>
           <span className="text-[11px] text-muted-foreground">
             {voice.style === "aggressive" ? "Agressivo" : "Equilibrado"}
           </span>
@@ -104,38 +104,35 @@ export function BrainAssistantCard({ data, mode, locked = false }: BrainAssistan
           </ToggleGroupItem>
         </ToggleGroup>
         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-          O modo agressivo usa mais energia, mas continua sem prometer ganho e sempre respeita gestão.
+          O modo agressivo usa mais energia, mas continua sem prometer ganho e sempre respeita gestao.
         </p>
       </div>
 
       <div className="relative w-full rounded-xl border border-border/60 bg-secondary/20 px-3 py-2 text-left">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-xs font-bold">Voz do navegador</span>
-          <span className="text-[11px] text-muted-foreground">Gratuita</span>
+          <span className="text-xs font-bold">Voz ElevenLabs</span>
+          <span className="text-[11px] text-muted-foreground">Masculina grave</span>
         </div>
         <Select
           value={voice.voiceChoice}
-          disabled={locked || !voice.supported}
+          disabled
           onValueChange={(value) => voice.setVoiceChoice(value as BrowserVoiceChoice)}
         >
           <SelectTrigger className="h-9 border-neon-cyan/20 bg-background/35 text-xs">
-            <SelectValue placeholder="Automática" />
+            <SelectValue placeholder="Masculina grave (ElevenLabs)" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="automatic">Automática</SelectItem>
-            <SelectItem value="julio">Júlio, se disponível</SelectItem>
-            <SelectItem value="feminine">Voz feminina, se disponível</SelectItem>
-            <SelectItem value="masculine">Voz masculina, se disponível</SelectItem>
+            <SelectItem value="elevenlabs_male_deep">Masculina grave (ElevenLabs)</SelectItem>
           </SelectContent>
         </Select>
         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-          Se a voz escolhida não existir neste dispositivo, a IA usa a melhor voz pt-BR disponível.
+          A voz real e definida no backend por ELEVENLABS_VOICE_ID.
         </p>
       </div>
 
       <div className="relative min-h-[3.75rem] w-full rounded-xl border border-border/60 bg-background/25 px-3 py-2 text-left">
         <div className="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-          <span>Última análise</span>
+          <span>Ultima analise</span>
           {voice.queueLength > 0 && <span>{voice.queueLength} na fila</span>}
         </div>
         <div className="text-xs leading-relaxed text-foreground">
@@ -146,7 +143,12 @@ export function BrainAssistantCard({ data, mode, locked = false }: BrainAssistan
 
       {!voice.supported && (
         <div className="relative rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          Voz automática indisponível neste navegador.
+          Voz ElevenLabs indisponivel no momento.
+        </div>
+      )}
+      {voice.voiceError && (
+        <div className="relative rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+          {voice.voiceError}
         </div>
       )}
 
@@ -157,7 +159,7 @@ export function BrainAssistantCard({ data, mode, locked = false }: BrainAssistan
         className="relative inline-flex w-full items-center justify-center gap-2 rounded-xl border border-neon-cyan/30 px-3 py-2 text-xs font-bold text-neon-cyan transition hover:bg-neon-cyan/10 disabled:cursor-not-allowed disabled:opacity-45"
       >
         <Volume2 className="size-4" />
-        Ouvir última análise
+        Ouvir ultima analise
       </button>
 
       <div className="relative size-14 rounded-full btn-primary-grad flex items-center justify-center glow-blue">

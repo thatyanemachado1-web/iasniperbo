@@ -13,9 +13,8 @@ type LiveDashboardData = DashboardData & { updatedAt?: string };
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
-const OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech";
-const DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts";
-const DEFAULT_OPENAI_TTS_VOICE = "alloy";
+const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
+const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 const MAX_NARRATION_CHARS = 900;
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
@@ -161,51 +160,62 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
   }
 
   const body = readRecord(await request.json().catch(() => ({})));
-  const text = normalizeNarrationText(body.text || body.narration);
+  const rawText = String(body.text || body.narration || "");
+  const text = normalizeNarrationText(rawText);
   if (!text) {
     return json({ error: "Texto de voz obrigatorio." }, 400);
   }
+  if (text.length > MAX_NARRATION_CHARS) {
+    return json({ error: `Texto de voz muito longo. Limite: ${MAX_NARRATION_CHARS} caracteres.` }, 413);
+  }
 
-  const apiKey = getOpenAiApiKey(env);
+  const apiKey = getElevenLabsApiKey(env);
   if (!apiKey) {
-    return json({ error: "OPENAI_API_KEY nao configurada no backend." }, 503);
+    return json({ error: "ELEVENLABS_API_KEY nao configurada no backend." }, 503);
   }
 
   const envRecord = readRecord(env);
-  const model = readConfigString(
-    envRecord.OPENAI_TTS_MODEL || readProcessEnv("OPENAI_TTS_MODEL"),
-    DEFAULT_OPENAI_TTS_MODEL,
+  const voiceId = readConfigString(
+    envRecord.ELEVENLABS_VOICE_ID || readProcessEnv("ELEVENLABS_VOICE_ID"),
+    "",
   );
-  const voice = readConfigString(
-    envRecord.OPENAI_TTS_VOICE || readProcessEnv("OPENAI_TTS_VOICE"),
-    DEFAULT_OPENAI_TTS_VOICE,
+  if (!voiceId) {
+    return json({ error: "ELEVENLABS_VOICE_ID nao configurado no backend." }, 503);
+  }
+
+  const modelId = readConfigString(
+    envRecord.ELEVENLABS_MODEL_ID || readProcessEnv("ELEVENLABS_MODEL_ID"),
+    DEFAULT_ELEVENLABS_MODEL_ID,
   );
 
-  const response = await fetch(OPENAI_SPEECH_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `${ELEVENLABS_TTS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: modelId,
+        voice_settings: {
+          stability: 0.48,
+          similarity_boost: 0.78,
+          style: 0.18,
+          use_speaker_boost: true,
+        },
+      }),
     },
-    body: JSON.stringify({
-      model,
-      voice,
-      input: text,
-      response_format: "mp3",
-    }),
-  }).catch((error) => {
-    console.warn("Falha de conexao ao gerar voz OpenAI.", error);
-    return null;
-  });
+  ).catch(() => null);
 
   if (!response) {
-    return json({ error: "Falha de conexao ao gerar voz OpenAI." }, 502);
+    return json({ error: "Falha de conexao ao gerar voz ElevenLabs." }, 502);
   }
 
   if (!response.ok) {
-    const upstreamError = await response.text().catch(() => "");
-    console.warn(`Falha ao gerar voz OpenAI (${response.status}). ${upstreamError.slice(0, 300)}`);
-    return json({ error: "Falha ao gerar voz OpenAI." }, 502);
+    console.warn(`Falha ao gerar voz ElevenLabs (${response.status}).`);
+    return json(elevenLabsErrorPayload(response.status), elevenLabsErrorStatus(response.status));
   }
 
   return new Response(await response.arrayBuffer(), {
@@ -698,9 +708,29 @@ function getAdminToken(env: unknown) {
   return String(envRecord.SNIPER_ADMIN_TOKEN || "sniper-local-admin-token");
 }
 
-function getOpenAiApiKey(env: unknown) {
+function getElevenLabsApiKey(env: unknown) {
   const envRecord = readRecord(env);
-  return readConfigString(envRecord.OPENAI_API_KEY || readProcessEnv("OPENAI_API_KEY"), "");
+  return readConfigString(envRecord.ELEVENLABS_API_KEY || readProcessEnv("ELEVENLABS_API_KEY"), "");
+}
+
+function elevenLabsErrorStatus(status: number) {
+  if (status === 401 || status === 403 || status === 404 || status === 422 || status === 429) {
+    return status;
+  }
+  return 502;
+}
+
+function elevenLabsErrorPayload(status: number) {
+  if (status === 401 || status === 403) {
+    return { error: "API key ElevenLabs invalida ou sem permissao." };
+  }
+  if (status === 404 || status === 422) {
+    return { error: "ELEVENLABS_VOICE_ID invalido ou indisponivel." };
+  }
+  if (status === 429) {
+    return { error: "Quota ou limite da ElevenLabs atingido." };
+  }
+  return { error: "Falha ao gerar voz ElevenLabs." };
 }
 
 function readProcessEnv(key: string) {
@@ -713,8 +743,7 @@ function readProcessEnv(key: string) {
 function normalizeNarrationText(value: unknown) {
   return String(value || "")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, MAX_NARRATION_CHARS);
+    .trim();
 }
 
 function readConfigString(value: unknown, fallback: string) {
