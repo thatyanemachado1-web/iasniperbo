@@ -174,19 +174,12 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
     return json({ error: "ELEVENLABS_API_KEY nao configurada no backend." }, 503);
   }
 
-  const envRecord = readRecord(env);
-  const voiceId = readConfigString(
-    envRecord.ELEVENLABS_VOICE_ID || readProcessEnv("ELEVENLABS_VOICE_ID"),
-    "",
-  );
+  const voiceId = readServerEnvString(env, "ELEVENLABS_VOICE_ID", "");
   if (!voiceId) {
     return json({ error: "ELEVENLABS_VOICE_ID nao configurado no backend." }, 503);
   }
 
-  const modelId = readConfigString(
-    envRecord.ELEVENLABS_MODEL_ID || readProcessEnv("ELEVENLABS_MODEL_ID"),
-    DEFAULT_ELEVENLABS_MODEL_ID,
-  );
+  const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
 
   const response = await fetch(
     `${ELEVENLABS_TTS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
@@ -709,8 +702,12 @@ function getAdminToken(env: unknown) {
 }
 
 function getElevenLabsApiKey(env: unknown) {
+  return readServerEnvString(env, "ELEVENLABS_API_KEY", "");
+}
+
+function readServerEnvString(env: unknown, key: string, fallback: string) {
   const envRecord = readRecord(env);
-  return readConfigString(envRecord.ELEVENLABS_API_KEY || readProcessEnv("ELEVENLABS_API_KEY"), "");
+  return readConfigString(readProcessEnv(key) || envRecord[key], fallback);
 }
 
 function elevenLabsErrorStatus(status: number) {
