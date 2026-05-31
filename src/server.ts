@@ -620,15 +620,16 @@ function readMainSignal(payload: Record<string, unknown>) {
 function normalizeSignal(
   signal: Record<string, unknown>,
   fallback: DashboardData["currentSignal"],
-) {
+): DashboardData["currentSignal"] {
   const side = normalizeSignalSide(signal.side || signal.direcao || signal.entry || signal.entrada);
   const status = normalizeSignalStatus(signal.status || signal.resultado || signal.state, side);
   const protection = String(
     signal.protection || signal.validade || signal.gale || fallback.protection || "G1",
   );
   const terminalStatus = terminalSignalStatus(status);
-  const lastResult =
-    signal.lastResult ||
+  const incomingLastResult = (signal.lastResult ?? null) as DashboardData["currentSignal"]["lastResult"];
+  const lastResult: DashboardData["currentSignal"]["lastResult"] =
+    incomingLastResult ||
     fallback.lastResult ||
     (terminalStatus && (side === "BANKER" || side === "PLAYER")
       ? {
@@ -643,8 +644,8 @@ function normalizeSignal(
   if (terminalStatus) {
     return {
       id: "waiting",
-      side: "NONE" as const,
-      status: "waiting" as const,
+      side: "NONE",
+      status: "waiting",
       protection: "-",
       strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
       lastResult,
