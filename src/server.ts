@@ -700,7 +700,7 @@ function normalizeRounds(rounds: unknown[]) {
     .slice(-30);
 }
 
-function normalizeSignalSide(value: unknown) {
+function normalizeSignalSide(value: unknown): CurrentSignalSide {
   const text = String(value || "")
     .trim()
     .toUpperCase();
