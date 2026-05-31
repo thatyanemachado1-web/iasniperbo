@@ -117,6 +117,9 @@ export default {
       const voiceResponse = await handleVoiceNarrationRequest(request, env);
       if (voiceResponse) return withSecurityHeaders(voiceResponse);
 
+      const voiceDiagnosticsResponse = await handleVoiceDiagnosticsRequest(request, env);
+      if (voiceDiagnosticsResponse) return withSecurityHeaders(voiceDiagnosticsResponse);
+
       const adminApiResponse = await handleAdminApiRequest(request, env);
       if (adminApiResponse) return withSecurityHeaders(adminApiResponse);
 
