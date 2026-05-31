@@ -9,12 +9,18 @@ type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
 
-type LiveDashboardData = DashboardData & { updatedAt?: string };
+type LiveDashboardData = DashboardData & {
+  updatedAt?: string;
+  cycleDate?: string;
+  dailyCycleDate?: string;
+  strictDailyCounters?: boolean;
+};
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
 const LIVE_STATE_TABLE = "sniper_live_state";
+const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 const MAX_NARRATION_CHARS = 900;
@@ -24,6 +30,9 @@ let liveDashboardData: LiveDashboardData = {
   ...mockDashboardData,
   mockMode: false,
   updatedAt: new Date().toISOString(),
+  cycleDate: currentDashboardCycleDate(),
+  dailyCycleDate: currentDashboardCycleDate(),
+  strictDailyCounters: false,
 };
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
@@ -582,6 +591,11 @@ async function handleDashboardRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "GET" && url.pathname === "/dashboard") {
+    const cycle = ensureDashboardDailyCycle(liveDashboardData);
+    if (cycle.changed) {
+      liveDashboardData = cycle.dashboard;
+      await saveLiveState(env);
+    }
     return json(liveDashboardData);
   }
 
@@ -602,26 +616,220 @@ async function handleDashboardRequest(request: Request, env: unknown) {
   return null;
 }
 
-function updateDashboardData(current: DashboardData & { updatedAt?: string }, body: unknown) {
+function updateDashboardData(current: LiveDashboardData, body: unknown) {
+  const cycle = ensureDashboardDailyCycle(current);
+  const currentDashboard = cycle.dashboard;
   const incoming = readRecord(readRecord(body).dashboard || body);
-  const rounds = Array.isArray(incoming.rounds) ? normalizeRounds(incoming.rounds) : current.rounds;
+  const cycleDate = currentDashboardCycleDate();
+  const incomingCycleDate = readDashboardCycleDate(incoming);
+  const acceptsCurrentCycle = !incomingCycleDate || incomingCycleDate === cycleDate;
+  const acceptsDailyCounters =
+    acceptsCurrentCycle && (!currentDashboard.strictDailyCounters || incomingCycleDate === cycleDate);
+  const pickedSections = acceptsCurrentCycle ? pickDashboardSections(incoming) : {};
+  if (!acceptsDailyCounters) {
+    delete pickedSections.mainScoreboard;
+    delete pickedSections.tieAlertScoreboard;
+    delete pickedSections.surfAnalyzerScoreboard;
+    if (pickedSections.neuralReading) {
+      pickedSections.neuralReading = resetNeuralReadingDailyCounters(pickedSections.neuralReading);
+    }
+  }
+  const rounds =
+    acceptsCurrentCycle && Array.isArray(incoming.rounds)
+      ? normalizeRounds(incoming.rounds)
+      : currentDashboard.rounds;
 
   return {
-    ...current,
-    ...pickDashboardSections(incoming),
+    ...currentDashboard,
+    ...pickedSections,
     mockMode: false,
-    user: { ...current.user, ...readRecord(incoming.user) },
+    user: { ...currentDashboard.user, ...readRecord(incoming.user) },
     rounds,
-    currentSignal: normalizeSignal(readMainSignal(incoming), current.currentSignal),
+    currentSignal: acceptsCurrentCycle
+      ? normalizeSignal(readMainSignal(incoming), currentDashboard.currentSignal)
+      : currentDashboard.currentSignal,
     currentTieAlert: normalizeTieAlert(
-      incoming.currentTieAlert || incoming.tieAlert,
-      current.currentTieAlert,
+      acceptsCurrentCycle ? incoming.currentTieAlert || incoming.tieAlert : {},
+      currentDashboard.currentTieAlert,
     ),
-    pressureSeries: Array.isArray(incoming.pressureSeries)
+    pressureSeries: acceptsCurrentCycle && Array.isArray(incoming.pressureSeries)
       ? incoming.pressureSeries
-      : current.pressureSeries,
+      : currentDashboard.pressureSeries,
     updatedAt: new Date().toISOString(),
+    cycleDate,
+    dailyCycleDate: cycleDate,
+    strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
   };
+}
+
+function ensureDashboardDailyCycle(
+  dashboard: DashboardData & { updatedAt?: string; cycleDate?: string; dailyCycleDate?: string },
+) {
+  const cycleDate = currentDashboardCycleDate();
+  if (readDashboardCycleDate(dashboard) === cycleDate) {
+    return {
+      dashboard: {
+        ...dashboard,
+        cycleDate,
+        dailyCycleDate: cycleDate,
+        strictDailyCounters: dashboard.strictDailyCounters ?? false,
+      },
+      changed: false,
+    };
+  }
+
+  return {
+    dashboard: resetDashboardDailyCycle(dashboard, cycleDate),
+    changed: true,
+  };
+}
+
+function resetDashboardDailyCycle(
+  dashboard: DashboardData & { updatedAt?: string },
+  cycleDate = currentDashboardCycleDate(),
+): LiveDashboardData {
+  return {
+    ...dashboard,
+    mockMode: false,
+    rounds: [],
+    currentSignal: {
+      id: "waiting",
+      side: "NONE",
+      status: "waiting",
+      protection: "-",
+      strength: 0,
+      lastResult: null,
+    },
+    currentTieAlert: {
+      id: "current-tie",
+      level: "Baixo",
+      confidence: 0,
+      validityRounds: 0,
+      status: "expired",
+    },
+    currentSurfAlert: {
+      surf_alert: false,
+      surf_phase: "SEM_RISCO",
+      surf_side: "NONE",
+      surf_status: "SEM_RISCO",
+      surf_risk: 0,
+      surf_break_risk: 0,
+      surf_confidence: 0,
+      stretched_count: 0,
+      correction_count: 0,
+      reason: "Novo ciclo diario iniciado. Aguardando leitura atual da mesa.",
+      panels: {
+        big_road: "Aguardando primeiras rodadas do ciclo.",
+        big_eye_boy: "Aguardando primeiras rodadas do ciclo.",
+        small_road: "Aguardando primeiras rodadas do ciclo.",
+        cockroach_pig: "Aguardando primeiras rodadas do ciclo.",
+      },
+      surf_prediction_side: "NONE",
+      surf_prediction_status: "EXPIRED",
+      surf_prediction_confidence: 0,
+      surf_prediction_window: 0,
+    },
+    neuralReading: {
+      mode: "SCANNING",
+      alertas: 0,
+      acertos: 0,
+      greenSemGale: 0,
+      greenG1: 0,
+      erros: 0,
+      reds: 0,
+      assertividade: 0,
+      sequencePositive: 0,
+      sequenceNegative: 0,
+    },
+    engineDecision: {
+      state: "AGUARDAR",
+      reason: "Novo ciclo diario iniciado. Aguardando primeiras rodadas.",
+      confidence: 0,
+      debug: "cycle=novo",
+    },
+    mainScoreboard: {
+      greens: 0,
+      greensG1: 0,
+      reds: 0,
+      totalGreens: 0,
+      totalEntries: 0,
+      assertiveness: 0,
+      sequencePositive: 0,
+      sequenceNegative: 0,
+    },
+    tieAlertScoreboard: {
+      greenTieAlerts: 0,
+      expired: 0,
+      totalAlerts: 0,
+      assertiveness: 0,
+      sequencePositive: 0,
+      sequenceExpired: 0,
+    },
+    surfAnalyzerScoreboard: {
+      totalAlerts: 0,
+      hits: 0,
+      fails: 0,
+      expired: 0,
+      greenSemGale: 0,
+      greenG1: 0,
+      reds: 0,
+      blocked: 0,
+      noRisk: 0,
+      bankerHits: 0,
+      playerHits: 0,
+      assertiveness: 0,
+      sequencePositive: 0,
+      sequenceNegative: 0,
+      maxBankerSurfHit: 0,
+      maxPlayerSurfHit: 0,
+      maxBreakDetected: 0,
+      maxRetakeDetected: 0,
+      currentHitStreak: 0,
+    },
+    pressureSeries: [],
+    updatedAt: new Date().toISOString(),
+    cycleDate,
+    dailyCycleDate: cycleDate,
+    strictDailyCounters: true,
+  };
+}
+
+function resetNeuralReadingDailyCounters(
+  reading: DashboardData["neuralReading"],
+): DashboardData["neuralReading"] {
+  if (!reading) return reading;
+  return {
+    ...reading,
+    alertas: 0,
+    acertos: 0,
+    greenSemGale: 0,
+    greenG1: 0,
+    erros: 0,
+    reds: 0,
+    assertividade: 0,
+    sequencePositive: 0,
+    sequenceNegative: 0,
+  };
+}
+
+function readDashboardCycleDate(value: unknown) {
+  const record = readRecord(value);
+  const explicit = readString(record, "cycleDate") || readString(record, "dailyCycleDate");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit;
+  const updatedAt = readString(record, "updatedAt");
+  if (!updatedAt) return "";
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return "";
+  return currentDashboardCycleDate(date);
+}
+
+function currentDashboardCycleDate(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: DASHBOARD_CYCLE_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
 }
 
 function pickDashboardSections(incoming: Record<string, unknown>): Partial<DashboardData> {
@@ -1318,10 +1526,14 @@ function supabasePersistenceHeaders(key: string) {
 
 function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData {
   const restored = updateDashboardData(liveDashboardData, value);
-  return {
+  const cycleDate = readDashboardCycleDate(value) || restored.cycleDate || currentDashboardCycleDate();
+  const restoredWithMetadata = {
     ...restored,
     updatedAt: readString(value, "updatedAt") || restored.updatedAt,
+    cycleDate,
+    dailyCycleDate: cycleDate,
   };
+  return ensureDashboardDailyCycle(restoredWithMetadata).dashboard;
 }
 
 function restoreModuleToggles(value: Record<string, unknown>) {

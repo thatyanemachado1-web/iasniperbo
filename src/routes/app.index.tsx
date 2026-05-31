@@ -55,7 +55,7 @@ function DashboardPage() {
     signalHasActiveEntry && (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER")
       ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
       : undefined;
-  const lastRound = d.rounds[d.rounds.length - 1];
+  const lastRound = d.rounds[d.rounds.length - 1] ?? null;
   const sequence = calculateCurrentStreak(d.rounds);
   const stats = {
     banker: calculateBankerFrequency(d.rounds),
@@ -215,7 +215,7 @@ function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
-          <LiveTableView lastRound={lastRound} roundId={lastRound.id} />
+          <LiveTableView lastRound={lastRound} roundId={lastRound?.id ?? 0} />
 
           <PremiumFeature
             title="Analise estatistica VIP"
