@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { LogOut, ShieldCheck, Users } from "lucide-react";
+import { Cloud, Database, LogOut, ShieldCheck, Users } from "lucide-react";
 import { clearAdminSession } from "@/lib/adminApi";
 import { accessLabel } from "@/lib/accessApi";
 import { clearUserSession, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
