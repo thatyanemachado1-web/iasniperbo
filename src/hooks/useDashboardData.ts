@@ -4,11 +4,10 @@ import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
 import type { DashboardData, NeuralReading } from "@/types/dashboard";
 
-const PUBLIC_API_URL = "https://reflection-herbal-representative-nut.trycloudflare.com";
-const PUBLIC_DASHBOARD_URL = `${PUBLIC_API_URL}/dashboard`;
 const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const ALLOWED_REMOTE_API_HOSTS = new Set([
-  "reflection-herbal-representative-nut.trycloudflare.com",
+  "sniperbo.com",
+  "www.sniperbo.com",
 ]);
 
 function configuredDashboardUrl() {
@@ -91,10 +90,7 @@ function stripDashboardPath(url: string) {
 
 function defaultDashboardUrl() {
   if (typeof window === "undefined") return "";
-  if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
-    return `${window.location.origin}/dashboard`;
-  }
-  return PUBLIC_DASHBOARD_URL;
+  return `${window.location.origin}/dashboard`;
 }
 
 async function fetchDashboardData(): Promise<DashboardData> {

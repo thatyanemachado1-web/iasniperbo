@@ -1684,6 +1684,8 @@ function json(data: unknown, status = 200) {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store, no-cache, must-revalidate",
+      pragma: "no-cache",
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
       "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token",
