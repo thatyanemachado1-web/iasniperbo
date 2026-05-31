@@ -195,14 +195,14 @@ function mainResultText(
   const sideText = sideLabel(side);
   if (status === "red") {
     return style === "aggressive"
-      ? `${namePrefix(name)}red registrado na entrada principal em ${sideText}. Respeita a gestão e aguarda nova leitura.`
-      : `Red registrado na entrada principal em ${sideText}. Aguardar nova análise.`;
+      ? `${namePrefix(name)}resultado confirmado: red na entrada principal em ${sideText}. Respeita a gestão e aguarda nova leitura.`
+      : `Resultado confirmado: red na entrada principal em ${sideText}. Aguardar nova análise.`;
   }
 
   const greenText = status === "green_g1" ? `Green no G1 em ${sideText}` : `Green em ${sideText}`;
   return style === "aggressive"
-    ? `${namePrefix(name)}boa. ${greenText} na entrada principal. Protege a gestão.`
-    : `${greenText} na entrada principal, com proteção ${protection}.`;
+    ? `${namePrefix(name)}resultado confirmado: ${greenText} na entrada principal. Protege a gestão.`
+    : `Resultado confirmado: ${greenText} na entrada principal, com proteção ${protection}.`;
 }
 
 function tieResultText(name: string, status: TieAlert["status"], style: VoiceNarrationStyle) {
@@ -306,7 +306,7 @@ function entryActionText(
       : `Proteção G1 ativa. Fazer Gale 1 com proteção ${protection}.`;
   }
 
-  return `Entrada confirmada com proteção ${protection}.`;
+  return `Entrada confirmada com proteção ${protection}. Aguardando fechamento para confirmar green ou red.`;
 }
 
 function tieEntryText(name: string, reason: string, paganteText: string, style: VoiceNarrationStyle) {
