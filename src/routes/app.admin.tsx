@@ -84,21 +84,26 @@ type RecipientEditForm = {
   validity_months: string;
   validity_days: string;
   expires_at: string;
+  password: string;
   notes: string;
 };
 
-type AdminView = "resumo" | "clientes" | "seguranca";
+type AdminView = "aprovacoes" | "resumo" | "clientes" | "seguranca";
 
 function AdminPage() {
   const userSession = readUserSession();
-  const [ownerEmail, setOwnerEmail] = useState(userSession.email);
-  const canUseAdmin = isAdminOwnerEmail(ownerEmail);
-  const canAttemptAdminLogin = true;
-  const [session, setSession] = useState<AdminSession | null>(() =>
-    isAdminOwnerEmail(userSession.email) ? readAdminSession() : null,
+  const savedAdminSession = readAdminSession();
+  const [ownerEmail, setOwnerEmail] = useState(
+    isAdminOwnerEmail(userSession.email) ? userSession.email : savedAdminSession?.email || "",
   );
-  const [apiUrl, setApiUrl] = useState(() => readAdminSession()?.apiUrl || getInitialApiUrl());
-  const [email, setEmail] = useState(() => readAdminSession()?.email || "");
+  const canUseAdmin = isAdminOwnerEmail(ownerEmail);
+  const canAttemptAdminLogin =
+    isAdminOwnerEmail(userSession.email) || isAdminOwnerEmail(savedAdminSession?.email);
+  const [session, setSession] = useState<AdminSession | null>(() =>
+    canAttemptAdminLogin ? savedAdminSession : null,
+  );
+  const [apiUrl, setApiUrl] = useState(() => savedAdminSession?.apiUrl || getInitialApiUrl());
+  const [email, setEmail] = useState(() => savedAdminSession?.email || "");
   const [password, setPassword] = useState("");
   const [recipients, setRecipients] = useState<SignalRecipient[]>([]);
   const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
@@ -110,7 +115,7 @@ function AdminPage() {
     critical: 0,
   });
   const [adminSummary, setAdminSummary] = useState<AdminSummary>(() => emptyAdminSummary());
-  const [adminView, setAdminView] = useState<AdminView>("resumo");
+  const [adminView, setAdminView] = useState<AdminView>("aprovacoes");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -125,6 +130,7 @@ function AdminPage() {
     city: "",
     country: "",
     chat_id: "",
+    password: "",
     kind: "user" as RecipientKind,
     plan: "vip" as RecipientPlan,
     starts_at: "",
@@ -159,6 +165,10 @@ function AdminPage() {
   );
   const pendingClients = useMemo(
     () => recipients.filter((recipient) => recipient.access_status === "pending"),
+    [recipients],
+  );
+  const sortedRecipients = useMemo(
+    () => [...recipients].sort(compareRecipientsForAdmin),
     [recipients],
   );
   const formDates = useMemo(
@@ -340,6 +350,7 @@ function AdminPage() {
         city: "",
         country: "",
         chat_id: "",
+        password: "",
         kind: "user",
         plan: "vip",
         starts_at: "",
@@ -458,6 +469,7 @@ function AdminPage() {
         starts_at: updatedDates.starts_at,
         validity_days: updatedDates.validity_days,
         expires_at: updatedDates.expires_at,
+        ...(editForm.password.trim() ? { password: editForm.password.trim() } : {}),
         notes: editForm.notes,
       });
       setRecipientsWithBackup((current) =>
@@ -622,7 +634,10 @@ function AdminPage() {
       {error && <StatusMessage tone="red" icon={<WifiOff className="size-4" />} text={error} />}
       {exported && <StatusMessage tone="green" icon={<Check className="size-4" />} text={exported} />}
 
-      <div className="grid grid-cols-3 rounded-2xl border border-border/70 bg-secondary/30 p-1">
+      <div className="grid grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 sm:grid-cols-4">
+        <AdminTabButton active={adminView === "aprovacoes"} onClick={() => setAdminView("aprovacoes")}>
+          Aprovações
+        </AdminTabButton>
         <AdminTabButton active={adminView === "resumo"} onClick={() => setAdminView("resumo")}>
           Resumo
         </AdminTabButton>
@@ -633,6 +648,45 @@ function AdminPage() {
           Seguranca
         </AdminTabButton>
       </div>
+
+      {adminView === "aprovacoes" && (
+        <GlassCard>
+          <SectionTitle
+            title="Aprovações pendentes"
+            subtitle="Quem se cadastrou pelo app aparece aqui para você liberar o acesso."
+            right={<AppBadge tone={pendingClients.length > 0 ? "amber" : "green"}>{pendingClients.length} pendentes</AppBadge>}
+          />
+
+          <div className="mb-3 rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
+            Ao aprovar, o painel libera o login do cliente e calcula automaticamente a validade do plano. Você ainda pode editar data,
+            vencimento, status, plano e excluir tudo nesta mesma tela.
+          </div>
+
+          <div className="space-y-2">
+            {pendingClients.length === 0 && (
+              <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+                Nenhum cadastro aguardando aprovação agora.
+              </div>
+            )}
+            {pendingClients.map((recipient) => (
+              <RecipientRowV2
+                key={recipient.id}
+                recipient={recipient}
+                onToggle={() => toggleRecipient(recipient)}
+                onDelete={() => removeRecipient(recipient)}
+                onEdit={() => startEdit(recipient)}
+                onQuickApprove={(months) => quickApprove(recipient, months)}
+                isEditing={editingId === recipient.id}
+                editForm={editingId === recipient.id ? editForm : null}
+                onEditFormChange={setEditForm}
+                onSave={() => saveEdit(recipient)}
+                onCancel={cancelEdit}
+                saving={saving}
+              />
+            ))}
+          </div>
+        </GlassCard>
+      )}
 
       {adminView === "resumo" && <AdminSummaryPanel summary={adminSummary} />}
 
@@ -755,6 +809,14 @@ function AdminPage() {
               placeholder="cliente@email.com"
             />
             <AdminInput
+              icon={<KeyRound className="size-4" />}
+              label="Senha opcional"
+              type="password"
+              value={form.password}
+              onChange={(value) => setForm((current) => ({ ...current, password: value }))}
+              placeholder="Defina ou deixe o cliente usar a senha do cadastro"
+            />
+            <AdminInput
               icon={<Phone className="size-4" />}
               label="Telefone"
               value={form.phone}
@@ -874,7 +936,7 @@ function AdminPage() {
                 Nenhum cliente cadastrado ainda.
               </div>
             )}
-            {recipients.map((recipient) => (
+            {sortedRecipients.map((recipient) => (
               <RecipientRowV2
                 key={recipient.id}
                 recipient={recipient}
@@ -1157,6 +1219,7 @@ function RecipientRowV2({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <AdminInput icon={<Users className="size-4" />} label="Nome completo" value={editForm.full_name} onChange={(value) => updateEdit("full_name", value)} />
             <AdminInput icon={<Mail className="size-4" />} label="Email" type="email" value={editForm.email} onChange={(value) => updateEdit("email", value)} />
+            <AdminInput icon={<KeyRound className="size-4" />} label="Nova senha opcional" type="password" value={editForm.password} onChange={(value) => updateEdit("password", value)} placeholder="Preencha só se quiser trocar" />
             <AdminInput icon={<Phone className="size-4" />} label="Telefone" value={editForm.phone} onChange={(value) => updateEdit("phone", value)} />
             <AdminInput icon={<Radio className="size-4" />} label="Chat ID Telegram" value={editForm.chat_id} onChange={(value) => updateEdit("chat_id", value)} />
             <AdminInput icon={<MapPin className="size-4" />} label="Cidade" value={editForm.city} onChange={(value) => updateEdit("city", value)} />
@@ -1259,7 +1322,7 @@ function RecipientRowV2({
                 onClick={() => onQuickApprove(months)}
                 className="rounded-lg border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-1 text-[10px] font-black text-neon-cyan hover:bg-neon-cyan/15"
               >
-                Aprovar {months}m
+                Aprovar Premium {months}m
               </button>
             ))}
             <button
@@ -1365,6 +1428,23 @@ function summaryFromRecipients(recipients: SignalRecipient[], securitySummary: S
   };
 }
 
+function compareRecipientsForAdmin(a: SignalRecipient, b: SignalRecipient) {
+  const statusDiff = recipientStatusRank(a) - recipientStatusRank(b);
+  if (statusDiff !== 0) return statusDiff;
+  const dateA = Date.parse(a.created_at || a.updated_at || "");
+  const dateB = Date.parse(b.created_at || b.updated_at || "");
+  const safeDateA = Number.isFinite(dateA) ? dateA : 0;
+  const safeDateB = Number.isFinite(dateB) ? dateB : 0;
+  return safeDateB - safeDateA || (a.full_name || a.name || a.email || "").localeCompare(b.full_name || b.name || b.email || "");
+}
+
+function recipientStatusRank(recipient: SignalRecipient) {
+  if (recipient.access_status === "pending") return 0;
+  if (recipient.enabled && !isRecipientExpired(recipient)) return 1;
+  if (isRecipientExpired(recipient)) return 2;
+  return 3;
+}
+
 function locationBreakdown(recipients: SignalRecipient[], field: "city" | "country") {
   const counts = new Map<string, number>();
   for (const recipient of recipients) {
@@ -1422,6 +1502,7 @@ function recipientToEditForm(recipient: SignalRecipient): RecipientEditForm {
     validity_months: "",
     validity_days: String(recipient.validity_days || 30),
     expires_at: recipient.expires_at || "",
+    password: "",
     notes: recipient.notes || "",
   };
 }

@@ -19,9 +19,10 @@ const adminNavItem = { to: "/app/admin", label: "ADM", icon: ShieldCheck } as co
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const userSession = readUserSession();
-  const canSeeAdmin = isAdminOwnerEmail(userSession.email) || userSession.accessStatus === "owner";
+  const canSeeAdmin = isAdminOwnerEmail(userSession.email);
   const fullAccess = hasFullAccess(userSession);
-  const mobileNavItems = canSeeAdmin ? [...navItems, adminNavItem] : navItems;
+  const visibleNavItems = fullAccess ? navItems.filter((item) => item.to !== "/app/planos") : navItems;
+  const mobileNavItems = canSeeAdmin ? [...visibleNavItems, adminNavItem] : visibleNavItems;
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -79,7 +80,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Sidebar desktop */}
         <aside className="hidden lg:flex flex-col w-60 shrink-0 sticky top-14 self-start h-[calc(100vh-3.5rem)] border-r border-border/60 px-3 py-5">
           <nav className="flex-1 space-y-1">
-            {navItems.map((it) => {
+            {visibleNavItems.map((it) => {
               const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
               return (
                 <Link

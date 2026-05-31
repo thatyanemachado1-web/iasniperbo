@@ -296,6 +296,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     url.pathname === "/auth/check" ||
     url.pathname === "/auth/diagnostics" ||
     url.pathname === "/auth/register" ||
+    url.pathname === "/auth/verify" ||
     url.pathname === "/admin/summary" ||
     url.pathname === "/telegram-recipients" ||
     url.pathname.startsWith("/telegram-recipients/") ||
@@ -468,14 +469,33 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (!session) {
       return json({ valid: false }, 401);
     }
-    return json({
-      valid: true,
-      email: session.email,
-      scope: session.scope,
-      plan: session.plan,
-      approved: session.approved,
-      exp: session.exp,
-    });
+
+    if (session.scope === "owner") {
+      return json({ valid: true, access: await ownerAccess(env, session.email) });
+    }
+
+    const client = liveClients.find(
+      (item) => readString(item, "email").toLowerCase() === session.email.toLowerCase(),
+    );
+    if (!client) {
+      return json({
+        valid: true,
+        access: {
+          registered: false,
+          approved: false,
+          access_mode: "none",
+          access_status: "none",
+          plan: "free",
+          email: session.email,
+          full_name: "",
+          expires_at: "",
+          reason: "Email ainda nao cadastrado.",
+          client_token: "",
+        },
+      });
+    }
+
+    return json({ valid: true, access: await clientAccess(env, client) });
   }
 
   if (!isAdminAuthorized(request, env)) {
@@ -504,6 +524,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       });
       liveRecipients = [...liveRecipients, recipient];
       upsertClientFromRecipient(recipient);
+      await updateClientPasswordFromBody(recipient, body);
       await saveLiveState(env);
       return json({ recipient }, 201);
     }
@@ -539,6 +560,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         recipientIndex === index ? updated : recipient,
       );
       upsertClientFromRecipient(updated);
+      await updateClientPasswordFromBody(updated, body);
       await saveLiveState(env);
       return json({ recipient: updated });
     }
@@ -1203,9 +1225,7 @@ async function clientAccess(env: unknown, client: Record<string, unknown>) {
     : "free";
   const email = readString(client, "email");
 
-  const token = approved
-    ? await issueSessionToken(env, { email, scope: "client", plan, approved: true })
-    : "";
+  const token = await issueSessionToken(env, { email, scope: "client", plan, approved });
 
   return {
     registered: true,
@@ -1352,6 +1372,41 @@ function upsertClientFromRecipient(recipient: Record<string, unknown>) {
     existingIndex >= 0
       ? liveClients.map((item, index) => (index === existingIndex ? client : item))
       : [...liveClients, client];
+}
+
+async function updateClientPasswordFromBody(
+  clientHint: Record<string, unknown>,
+  body: Record<string, unknown>,
+) {
+  const password = readString(body, "password") || readString(body, "new_password");
+  if (!password) return false;
+
+  const id = readString(clientHint, "id");
+  const email = readString(clientHint, "email").toLowerCase();
+  const clientIndex = liveClients.findIndex((client) => {
+    const sameId = id && readString(client, "id") === id;
+    const sameEmail = email && readString(client, "email").toLowerCase() === email;
+    return sameId || sameEmail;
+  });
+  if (clientIndex === -1) return false;
+
+  const passwordHash = await hashPassword(password);
+  liveClients = liveClients.map((client, index) =>
+    index === clientIndex
+      ? removeLegacyPassword({
+          ...client,
+          password_hash: passwordHash,
+          updated_at: new Date().toISOString(),
+        })
+      : client,
+  );
+  return true;
+}
+
+function removeLegacyPassword(client: Record<string, unknown>) {
+  const updated = { ...client };
+  delete updated.password;
+  return updated;
 }
 
 function syncRecipientsFromClients() {

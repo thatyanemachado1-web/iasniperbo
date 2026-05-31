@@ -6,6 +6,7 @@ export interface SignalRecipient {
   name: string;
   full_name?: string;
   email?: string;
+  password?: string;
   phone?: string;
   city?: string;
   country?: string;

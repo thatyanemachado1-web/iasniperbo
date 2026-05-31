@@ -82,12 +82,16 @@ function DashboardPage() {
             <span className="text-muted-foreground font-normal text-sm">- painel operacional</span>
           </div>
         </div>
-        <Link
-          to="/app/planos"
-          className="hidden sm:inline-flex items-center gap-1.5 btn-gold-grad rounded-xl px-3 py-2 text-xs font-bold shine"
-        >
-          <Crown className="size-3.5" /> Premium
-        </Link>
+        {fullAccess ? (
+          <AppBadge tone="green">{userSession.plan === "vip" ? "Conta VIP" : "Conta Premium"}</AppBadge>
+        ) : (
+          <Link
+            to="/app/planos"
+            className="hidden sm:inline-flex items-center gap-1.5 btn-gold-grad rounded-xl px-3 py-2 text-xs font-bold shine"
+          >
+            <Crown className="size-3.5" /> Premium
+          </Link>
+        )}
       </div>
 
       <div className="rounded-2xl border border-neon-cyan/20 bg-secondary/20 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
@@ -294,25 +298,27 @@ function DashboardPage() {
           </GlassCard>
         </div>
 
-        <div className="space-y-4">
-          <GlassCard className="border-gold/40">
-            <div className="flex items-center gap-3">
-              <div className="size-10 rounded-xl btn-gold-grad flex items-center justify-center glow-gold">
-                <Crown className="size-5" />
+        {!fullAccess && (
+          <div className="space-y-4">
+            <GlassCard className="border-gold/40">
+              <div className="flex items-center gap-3">
+                <div className="size-10 rounded-xl btn-gold-grad flex items-center justify-center glow-gold">
+                  <Crown className="size-5" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-sm font-bold">Plano gratuito</div>
+                  <div className="text-[11px] text-muted-foreground">Recursos premium bloqueados</div>
+                </div>
               </div>
-              <div className="flex-1">
-                <div className="text-sm font-bold">Plano gratuito</div>
-                <div className="text-[11px] text-muted-foreground">Recursos premium bloqueados</div>
-              </div>
-            </div>
-            <Link
-              to="/app/planos"
-              className="mt-3 inline-flex w-full justify-center btn-primary-grad rounded-xl py-2 text-xs font-semibold"
-            >
-              Desbloquear Premium
-            </Link>
-          </GlassCard>
-        </div>
+              <Link
+                to="/app/planos"
+                className="mt-3 inline-flex w-full justify-center btn-primary-grad rounded-xl py-2 text-xs font-semibold"
+              >
+                Desbloquear Premium
+              </Link>
+            </GlassCard>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -14,7 +14,7 @@ export const Route = createFileRoute("/app/conta")({
 
 function ContaPage() {
   const userSession = readUserSession();
-  const canSeeAdmin = isAdminOwnerEmail(userSession.email) || userSession.accessStatus === "owner";
+  const canSeeAdmin = isAdminOwnerEmail(userSession.email);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

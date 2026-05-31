@@ -1,5 +1,5 @@
 import { getInitialApiUrl } from "@/lib/adminApi";
-import { saveUserSession, type UserSession } from "@/lib/userSession";
+import { readUserSession, saveUserSession, type UserSession } from "@/lib/userSession";
 
 export interface ClientAccess {
   registered: boolean;
@@ -44,6 +44,19 @@ export async function checkClientAccess(email: string, password: string) {
 
 export async function registerClient(payload: ClientRegistrationPayload) {
   const data = await publicRequest<{ access: ClientAccess }>("/auth/register", payload);
+  return data.access;
+}
+
+export async function refreshAccessSession() {
+  const session = readUserSession();
+  if (!session.clientToken) return null;
+
+  const data = await publicRequest<{ valid: boolean; access?: ClientAccess }>("/auth/verify", {
+    token: session.clientToken,
+  });
+  if (!data.valid || !data.access) return null;
+
+  saveAccessSession(data.access, session.email);
   return data.access;
 }
 
