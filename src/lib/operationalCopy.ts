@@ -20,7 +20,7 @@ export function buildEngineDecisionCopy(data: DashboardData) {
     return "Entrada bloqueada por risco elevado. Aguardar nova confirmação da engine.";
   }
 
-  if (hasMainEntry) {
+  if (hasMainEntry && (signal.side === "BANKER" || signal.side === "PLAYER")) {
     return buildEntryCopy(data, signal.side);
   }
 
