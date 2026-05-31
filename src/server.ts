@@ -240,9 +240,34 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
     return json({ error: "Nao autorizado." }, 401);
   }
 
-  const hasElevenLabsKey = Boolean(getElevenLabsApiKey(env));
+  const apiKey = getElevenLabsApiKey(env);
+  const hasElevenLabsKey = Boolean(apiKey);
   const hasVoiceId = Boolean(readServerEnvString(env, "ELEVENLABS_VOICE_ID", ""));
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
+
+  if (url.searchParams.get("check") === "elevenlabs") {
+    let elevenLabsAuthOk = false;
+    let elevenLabsAuthStatus: string | number = "no_api_key";
+    if (apiKey) {
+      try {
+        const res = await fetch("https://api.elevenlabs.io/v1/user", {
+          method: "GET",
+          headers: { "xi-api-key": apiKey, Accept: "application/json" },
+        });
+        elevenLabsAuthOk = res.ok;
+        elevenLabsAuthStatus = res.status;
+      } catch {
+        elevenLabsAuthStatus = "network_error";
+      }
+    }
+    return json({
+      elevenLabsAuthOk,
+      elevenLabsAuthStatus,
+      hasElevenLabsKey,
+      hasVoiceId,
+      modelId,
+    });
+  }
 
   return json({
     hasElevenLabsKey,
@@ -787,12 +812,26 @@ function readServerEnvString(env: unknown, key: string, fallback: string) {
 }
 
 function normalizeSecretValue(value: unknown) {
-  return String(value || "")
-    .trim()
-    .replace(/^ELEVENLABS_API_KEY\s*=\s*/i, "")
-    .replace(/^Bearer\s+/i, "")
-    .replace(/^["']|["']$/g, "")
-    .replace(/[\s\u200B-\u200D\uFEFF]+/g, "");
+  let raw = String(value || "").trim().replace(/^["']|["']$/g, "").trim();
+  // Strip common accidental prefixes (env var name pasted in, or auth scheme).
+  const prefixes = [
+    /^ELEVENLABS_TTS_API_KEY\s*[:=]\s*/i,
+    /^ELEVENLABS_API_KEY\s*[:=]\s*/i,
+    /^ELEVENLABS_SECRET_KEY\s*[:=]\s*/i,
+    /^Bearer\s+/i,
+    /^Token\s+/i,
+  ];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const re of prefixes) {
+      if (re.test(raw)) {
+        raw = raw.replace(re, "").trim().replace(/^["']|["']$/g, "").trim();
+        changed = true;
+      }
+    }
+  }
+  return raw.replace(/[\s\u200B-\u200D\uFEFF]+/g, "");
 }
 
 function elevenLabsErrorStatus(status: number) {
