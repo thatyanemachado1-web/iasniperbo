@@ -138,7 +138,7 @@ export function useDashboardData() {
 }
 
 function normalizeDashboardData(payload: unknown): DashboardData {
-  const data = readRecord(payload) as DashboardData;
+  const data = readRecord(payload) as unknown as DashboardData;
   const neuralReading =
     data.neuralReading ??
     (data as unknown as Record<string, unknown>).neural_reading ??

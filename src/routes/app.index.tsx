@@ -10,6 +10,7 @@ import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
 import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
 import { ModuleMiniScoreboard } from "@/components/dashboard/ModuleMiniScoreboard";
 import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
+import { AIReadingCard } from "@/components/dashboard/AIReadingCard";
 import { RoadmapDots } from "@/components/dashboard/RoadmapDots";
 import { PressureChart } from "@/components/dashboard/PressureChart";
 import { GlassCard } from "@/components/ui-app/GlassCard";
@@ -148,6 +149,14 @@ function DashboardPage() {
             className="order-3"
           >
             <EngineDecisionCard decision={d.engineDecision} data={d} />
+          </PremiumFeature>
+
+          <PremiumFeature
+            title="Leitura IA das entradas"
+            description="Analise automatica das entradas liberada no acesso Premium."
+            className="order-3"
+          >
+            <AIReadingCard data={d} mode={mode} />
           </PremiumFeature>
 
           <PremiumFeature
