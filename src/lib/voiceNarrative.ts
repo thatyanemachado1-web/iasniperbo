@@ -10,6 +10,90 @@ import { buildSurfEntrySummary } from "@/utils/surf";
 export type VoiceNarrationStyle = "balanced" | "aggressive";
 export type VoicePriority = 1 | 2 | 3;
 type PaganteStatusKind = "favorable" | "watch" | "risk";
+type VoiceLeadKind =
+  | "blocked"
+  | "resultGreen"
+  | "resultRed"
+  | "tieResult"
+  | "surfResult"
+  | "neuralResultGreen"
+  | "neuralResultRed"
+  | "entry"
+  | "tieEntry"
+  | "currentReading"
+  | "observing"
+  | "neuralRisk"
+  | "neuralWatch"
+  | "neuralFavorable"
+  | "surf"
+  | "tie";
+
+const VOICE_LEADS: Record<VoiceLeadKind, Record<VoiceNarrationStyle, readonly string[]>> = {
+  blocked: {
+    balanced: ["Sem entrada agora.", "Entrada segurada.", "A leitura pediu bloqueio.", "Melhor aguardar agora."],
+    aggressive: ["Segura essa entrada.", "Entrada travada agora.", "Risco no radar.", "Melhor não forçar agora."],
+  },
+  resultGreen: {
+    balanced: ["Resultado confirmado:", "Fechamento da entrada:", "Entrada encerrada:", "Atualização do sinal:"],
+    aggressive: ["Boa leitura:", "Fechou positivo:", "Mandou bem nessa:", "Sinal respeitou:"],
+  },
+  resultRed: {
+    balanced: ["Resultado confirmado:", "Fechamento da entrada:", "Entrada encerrada:", "Atualização do sinal:"],
+    aggressive: ["Resultado registrado:", "Não confirmou agora:", "Fechou contra:", "Gestão primeiro:"],
+  },
+  tieResult: {
+    balanced: ["Resultado do Tie:", "Fechamento do empate:", "Atualização do Tie:", "Leitura de empate encerrada:"],
+    aggressive: ["Tie resolvido:", "Empate no radar fechou:", "Atualização forte do Tie:", "Linha do Tie encerrou:"],
+  },
+  surfResult: {
+    balanced: ["Resultado do Surf Analyzer:", "Fechamento da leitura de surf:", "Atualização do surf:", "Surf Analyzer finalizou:"],
+    aggressive: ["Surf resolvido:", "Leitura de surf fechou:", "Atualização do Surf Analyzer:", "Movimento de surf encerrou:"],
+  },
+  neuralResultGreen: {
+    balanced: ["Número pagante respeitou.", "Previsão do pagante confirmou.", "Número pagante fechou green.", "Leitura do pagante bateu."],
+    aggressive: ["Número pagante respeitou mesmo.", "Pagante bateu na leitura.", "Boa no pagante.", "Leitura do número cravou."],
+  },
+  neuralResultRed: {
+    balanced: ["Número pagante não confirmou agora.", "Previsão do pagante falhou agora.", "Pagante fechou contra.", "Leitura do número não bateu."],
+    aggressive: ["Número pagante não confirmou agora.", "Pagante veio contra.", "Essa do número não bateu.", "Leitura do pagante falhou agora."],
+  },
+  entry: {
+    balanced: ["Leitura atual favorece", "Entrada formada em", "Sinal confirmado em", "A mesa abriu entrada em"],
+    aggressive: ["Leitura forte agora:", "Linha interessante agora:", "Sinal formou com presença:", "A mesa apontou firme:"],
+  },
+  tieEntry: {
+    balanced: ["Leitura atual favorece Tie.", "Tie ganhou leitura agora.", "Entrada de Tie formada.", "A mesa abriu janela de Tie."],
+    aggressive: ["Tie ganhou força agora.", "Empate entrou com presença.", "Atenção no Tie agora.", "Linha de Tie formada."],
+  },
+  currentReading: {
+    balanced: ["Leitura do momento favorece", "A tendência atual aponta", "No momento, a mesa favorece", "Leitura parcial inclinada para"],
+    aggressive: ["Leitura em formação:", "Momento pede atenção:", "Linha ganhando forma:", "Mesa começando a apontar:"],
+  },
+  observing: {
+    balanced: ["Mesa em observação.", "Aguardando confirmação.", "Sem gatilho limpo agora.", "Leitura ainda em formação."],
+    aggressive: ["Mesa em observação.", "Calma nessa linha.", "Ainda não fechou entrada.", "Esperando confirmação limpa."],
+  },
+  neuralRisk: {
+    balanced: ["Atenção no número.", "Número em zona de risco.", "Pagante pede cautela.", "Leitura numérica travada."],
+    aggressive: ["Atenção nesse número.", "Cuidado com esse pagante.", "Número veio pesado, mas com risco.", "Segura a mão nesse número."],
+  },
+  neuralWatch: {
+    balanced: ["Número em observação.", "Pagante ainda formando.", "Leitura numérica inicial.", "Número apareceu no radar."],
+    aggressive: ["Número apareceu, mas calma.", "Pagante no radar, sem cravar.", "Olho nesse número.", "Leitura numérica querendo formar."],
+  },
+  neuralFavorable: {
+    balanced: ["Número pagante identificado.", "Pagante entrou na leitura.", "Número favorável no radar.", "Leitura numérica ativa."],
+    aggressive: ["Pagante entrou forte.", "Número pagante com presença.", "Leitura forte no número.", "Pagante querendo pagar agora."],
+  },
+  surf: {
+    balanced: ["Leitura de surf detectada.", "Surf Analyzer em leitura.", "Movimento de surf no radar.", "Leitura paralela de surf ativa."],
+    aggressive: ["Surf entrou no radar:", "Movimento de surf detectado:", "Surf pedindo atenção:", "Leitura de surf ativa:"],
+  },
+  tie: {
+    balanced: ["Atenção para empate.", "Tie entrou em observação.", "Pressão de empate detectada.", "Leitura de Tie ativa."],
+    aggressive: ["Pressão de Tie no radar.", "Tie começou a pressionar.", "Empate entrou na leitura.", "Atenção nessa pressão de Tie."],
+  },
+};
 
 export interface VoiceEvent {
   key: string;
@@ -179,10 +263,10 @@ export function buildVoiceEvents(
 
 function blockedText(name: string, reason: string, paganteText: string, style: VoiceNarrationStyle) {
   if (style === "aggressive") {
-    return `${namePrefix(name)}atenção nessa linha. Entrada bloqueada por risco alto. Motivo: ${reason}${paganteText} Aqui é mão leve e gestão.`;
+    return `${voiceLead("blocked", style, `${reason}:${paganteText}`, name)}Entrada bloqueada por risco alto. Motivo: ${reason}${paganteText} Aqui é mão leve e gestão.`;
   }
 
-  return `Sem entrada agora. A leitura bloqueou por risco alto. Motivo: ${reason}${paganteText}`;
+  return `${voiceLead("blocked", style, `${reason}:${paganteText}`, name)}A leitura bloqueou por risco alto. Motivo: ${reason}${paganteText}`;
 }
 
 function mainResultText(
@@ -193,28 +277,29 @@ function mainResultText(
   style: VoiceNarrationStyle,
 ) {
   const sideText = sideLabel(side);
+  const seed = `${side}:${status}:${protection}`;
   if (status === "red") {
     return style === "aggressive"
-      ? `${namePrefix(name)}resultado confirmado: red na entrada principal em ${sideText}. Respeita a gestão e aguarda nova leitura.`
-      : `Resultado confirmado: red na entrada principal em ${sideText}. Aguardar nova análise.`;
+      ? `${voiceLead("resultRed", style, seed, name)}Red na entrada principal em ${sideText}. Respeita a gestão e aguarda nova leitura.`
+      : `${voiceLead("resultRed", style, seed, name)}Red na entrada principal em ${sideText}. Aguardar nova análise.`;
   }
 
   const greenText = status === "green_g1" ? `Green no G1 em ${sideText}` : `Green em ${sideText}`;
   return style === "aggressive"
-    ? `${namePrefix(name)}resultado confirmado: ${greenText} na entrada principal. Protege a gestão.`
-    : `Resultado confirmado: ${greenText} na entrada principal, com proteção ${protection}.`;
+    ? `${voiceLead("resultGreen", style, seed, name)}${greenText} na entrada principal. Protege a gestão.`
+    : `${voiceLead("resultGreen", style, seed, name)}${greenText} na entrada principal, com proteção ${protection}.`;
 }
 
 function tieResultText(name: string, status: TieAlert["status"], style: VoiceNarrationStyle) {
   if (status === "green") {
     return style === "aggressive"
-      ? `${namePrefix(name)}tiro certo no empate. A análise Tie confirmou green. Agora segura a emoção e respeita a gestão.`
-      : `Tiro certo no empate. A análise Tie confirmou green.`;
+      ? `${voiceLead("tieResult", style, status, name)}A análise Tie confirmou green. Agora segura a emoção e respeita a gestão.`
+      : `${voiceLead("tieResult", style, status, name)}A análise Tie confirmou green.`;
   }
 
   return style === "aggressive"
-    ? `${namePrefix(name)}Tie expirou sem confirmar. Sem forçar a próxima mão; espera a leitura voltar.`
-    : `Tie expirou sem confirmar. Aguardar nova leitura.`;
+    ? `${voiceLead("tieResult", style, status, name)}Tie expirou sem confirmar. Sem forçar a próxima mão; espera a leitura voltar.`
+    : `${voiceLead("tieResult", style, status, name)}Tie expirou sem confirmar. Aguardar nova leitura.`;
 }
 
 function surfResultText(name: string, alert: SurfAlert | undefined, style: VoiceNarrationStyle) {
@@ -224,19 +309,19 @@ function surfResultText(name: string, alert: SurfAlert | undefined, style: Voice
 
   if (alert?.surf_prediction_status === "HIT") {
     return style === "aggressive"
-      ? `${namePrefix(name)}acertamos no Surf Analyzer. O surf respeitou em ${side}. Gestão mantida.`
-      : `Acertamos no Surf Analyzer. A leitura de surf confirmou em ${side}.`;
+      ? `${voiceLead("surfResult", style, `${side}:hit`, name)}O surf respeitou em ${side}. Gestão mantida.`
+      : `${voiceLead("surfResult", style, `${side}:hit`, name)}A leitura de surf confirmou em ${side}.`;
   }
 
   if (alert?.surf_prediction_status === "FAILED") {
     return style === "aggressive"
-      ? `${namePrefix(name)}Surf não confirmou agora. Registra o red do Surf Analyzer e espera nova formação.`
-      : `Surf Analyzer não confirmou agora. Aguardar nova formação.`;
+      ? `${voiceLead("surfResult", style, `${side}:failed`, name)}Surf não confirmou agora. Registra o red do Surf Analyzer e espera nova formação.`
+      : `${voiceLead("surfResult", style, `${side}:failed`, name)}Surf Analyzer não confirmou agora. Aguardar nova formação.`;
   }
 
   return style === "aggressive"
-    ? `${namePrefix(name)}Surf expirou sem confirmar. Melhor esperar outra leitura limpa.`
-    : `Surf Analyzer expirou sem confirmar. Aguardar nova leitura.`;
+    ? `${voiceLead("surfResult", style, `${side}:expired`, name)}Surf expirou sem confirmar. Melhor esperar outra leitura limpa.`
+    : `${voiceLead("surfResult", style, `${side}:expired`, name)}Surf Analyzer expirou sem confirmar. Aguardar nova leitura.`;
 }
 
 function buildNeuralResultEvent(
@@ -260,8 +345,8 @@ function buildNeuralResultEvent(
     return urgent(
       `result-neural:green:${number}:${side}:${currentGreens}:${currentReds}:${style}`,
       style === "aggressive"
-        ? `${namePrefix(name)}número pagante respeitou mesmo. Foi green${protection} na previsão de número pagante ${number}, puxando ${sideLabel(side)}.`
-        : `Número pagante respeitou. Foi green${protection} na previsão de número pagante ${number}, em ${sideLabel(side)}.`,
+        ? `${voiceLead("neuralResultGreen", style, `${number}:${side}:${currentGreens}`, name)}Foi green${protection} na previsão de número pagante ${number}, puxando ${sideLabel(side)}.`
+        : `${voiceLead("neuralResultGreen", style, `${number}:${side}:${currentGreens}`, name)}Foi green${protection} na previsão de número pagante ${number}, em ${sideLabel(side)}.`,
     );
   }
 
@@ -269,8 +354,8 @@ function buildNeuralResultEvent(
     return urgent(
       `result-neural:red:${number}:${side}:${currentGreens}:${currentReds}:${style}`,
       style === "aggressive"
-        ? `${namePrefix(name)}número pagante não confirmou agora. Red na previsão do número ${number}; gestão primeiro.`
-        : `Número pagante ${number} não confirmou agora. Aguardar nova leitura.`,
+        ? `${voiceLead("neuralResultRed", style, `${number}:${side}:${currentReds}`, name)}Red na previsão do número ${number}; gestão primeiro.`
+        : `${voiceLead("neuralResultRed", style, `${number}:${side}:${currentReds}`, name)}Número pagante ${number} não confirmou agora. Aguardar nova leitura.`,
     );
   }
 
@@ -289,10 +374,10 @@ function entryText(
 ) {
   const action = entryActionText(status, protection, style);
   if (style === "aggressive") {
-    return `${namePrefix(name)}olha essa leitura: ${sideLabel(side)} está puxando forte. ${action} Motivo: ${reason}${paganteText}${riskText}`;
+    return `${voiceLead("entry", style, `${side}:${status}:${protection}:${reason}:${paganteText}`, name)}${sideLabel(side)} está puxando forte. ${action} Motivo: ${reason}${paganteText}${riskText}`;
   }
 
-  return `Leitura atual favorece ${sideLabel(side)}. ${action} Motivo: ${reason}${paganteText}${riskText}`;
+  return `${voiceLead("entry", style, `${side}:${status}:${protection}:${reason}:${paganteText}`, name)}${sideLabel(side)}. ${action} Motivo: ${reason}${paganteText}${riskText}`;
 }
 
 function entryActionText(
@@ -311,10 +396,10 @@ function entryActionText(
 
 function tieEntryText(name: string, reason: string, paganteText: string, style: VoiceNarrationStyle) {
   if (style === "aggressive") {
-    return `${namePrefix(name)}atenção: leitura favorece Tie agora. Entrada confirmada em Tie. Motivo: ${reason}${paganteText} Gestão e cautela.`;
+    return `${voiceLead("tieEntry", style, `${reason}:${paganteText}`, name)}Entrada confirmada em Tie. Motivo: ${reason}${paganteText} Gestão e cautela.`;
   }
 
-  return `Leitura atual favorece Tie. Entrada confirmada em Tie. Motivo: ${reason}${paganteText}`;
+  return `${voiceLead("tieEntry", style, `${reason}:${paganteText}`, name)}Entrada confirmada em Tie. Motivo: ${reason}${paganteText}`;
 }
 
 function currentReadingText(
@@ -325,18 +410,18 @@ function currentReadingText(
   style: VoiceNarrationStyle,
 ) {
   if (style === "aggressive") {
-    return `${namePrefix(name)}olha essa leitura: ${sideLabel(side)} está mais interessante, mas ainda sem entrada confirmada. Motivo: ${reason}${paganteText}`;
+    return `${voiceLead("currentReading", style, `${side}:${reason}:${paganteText}`, name)}${sideLabel(side)} está mais interessante, mas ainda sem entrada confirmada. Motivo: ${reason}${paganteText}`;
   }
 
-  return `Leitura do momento favorece ${sideLabel(side)}, mas ainda sem entrada confirmada. Motivo: ${reason}${paganteText}`;
+  return `${voiceLead("currentReading", style, `${side}:${reason}:${paganteText}`, name)}${sideLabel(side)}, mas ainda sem entrada confirmada. Motivo: ${reason}${paganteText}`;
 }
 
 function observingText(name: string, reason: string, style: VoiceNarrationStyle) {
   if (style === "aggressive") {
-    return `${namePrefix(name)}mesa em observação. Ainda não tem entrada limpa. ${reason}`;
+    return `${voiceLead("observing", style, reason, name)}Ainda não tem entrada limpa. ${reason}`;
   }
 
-  return `Mesa em observação sem entrada confirmada. ${reason}`;
+  return `${voiceLead("observing", style, reason, name)}Sem entrada confirmada. ${reason}`;
 }
 
 function buildPaganteContext(
@@ -502,18 +587,20 @@ function neuralEventText(
 ) {
   if (statusKind === "risk") {
     const base = `Número ${number} apareceu apontando ${sideLabel(side)}, mas está ${status}. Não tratar como pagante favorável agora${alert ? `. ${alert}` : ""}.`;
-    return style === "aggressive" ? `${namePrefix(name)}atenção nesse número. ${base} Mão leve.` : base;
+    return style === "aggressive"
+      ? `${voiceLead("neuralRisk", style, `${number}:${side}:${status}:${alert ?? ""}`, name)}${base} Mão leve.`
+      : `${voiceLead("neuralRisk", style, `${number}:${side}:${status}:${alert ?? ""}`, name)}${base}`;
   }
 
   if (statusKind === "watch") {
     return style === "aggressive"
-      ? `${namePrefix(name)}olha essa leitura: número ${number} apareceu em ${sideLabel(side)}, mas ainda precisa confirmar.`
-      : `Número ${number} apareceu apontando ${sideLabel(side)}, ainda em observação. ${details.join(", ")}.`;
+      ? `${voiceLead("neuralWatch", style, `${number}:${side}:${status}`, name)}Número ${number} apareceu em ${sideLabel(side)}, mas ainda precisa confirmar.`
+      : `${voiceLead("neuralWatch", style, `${number}:${side}:${status}`, name)}Número ${number} apareceu apontando ${sideLabel(side)}, ainda em observação. ${details.join(", ")}.`;
   }
 
   return style === "aggressive"
-    ? `${namePrefix(name)}número pagante identificado em ${sideLabel(side)}. Leitura forte, mas mantém gestão. ${details.join(", ")}.`
-    : `Número pagante identificado. ${details.join(", ")}.`;
+    ? `${voiceLead("neuralFavorable", style, `${number}:${side}:${details.join(":")}`, name)}Em ${sideLabel(side)}. Leitura forte, mas mantém gestão. ${details.join(", ")}.`
+    : `${voiceLead("neuralFavorable", style, `${number}:${side}:${details.join(":")}`, name)}${details.join(", ")}.`;
 }
 
 function buildSurfEvent(
@@ -535,8 +622,8 @@ function buildSurfEvent(
   return analysis(
     `surf:${alert.surf_phase}:${alert.surf_side}:${alert.surf_prediction_side ?? ""}:${alert.surf_prediction_status ?? ""}:${breakRisk}:${alert.surf_confidence}:${style}`,
     style === "aggressive"
-      ? `${namePrefix(name)}atenção na leitura de surf: ${side} em ${status}, risco ${risk} de quebra. Sem exagero na mão.`
-      : `Leitura de surf detectada. ${side} em ${status}, com risco ${risk} de quebra.`,
+      ? `${voiceLead("surf", style, `${alert.surf_phase}:${side}:${risk}:${alert.surf_confidence}`, name)}${side} em ${status}, risco ${risk} de quebra. Sem exagero na mão.`
+      : `${voiceLead("surf", style, `${alert.surf_phase}:${side}:${risk}:${alert.surf_confidence}`, name)}${side} em ${status}, com risco ${risk} de quebra.`,
   );
 }
 
@@ -549,8 +636,8 @@ function buildTieEvent(
   return high(
     `tie:${alert.id}:${alert.status}:${alert.level}:${alert.validityRounds}:${style}`,
     style === "aggressive"
-      ? `${namePrefix(name)}atenção nessa linha. Tem pressão de Tie, validade até ${alert.validityRounds} rodadas. Aqui é cautela.`
-      : `Atenção para empate. Mesa com pressão de Tie, validade até ${alert.validityRounds} rodadas.`,
+      ? `${voiceLead("tie", style, `${alert.id}:${alert.level}:${alert.validityRounds}`, name)}Tem pressão de Tie, validade até ${alert.validityRounds} rodadas. Aqui é cautela.`
+      : `${voiceLead("tie", style, `${alert.id}:${alert.level}:${alert.validityRounds}`, name)}Mesa com pressão de Tie, validade até ${alert.validityRounds} rodadas.`,
   );
 }
 
@@ -665,6 +752,22 @@ function firstName(name?: string) {
 
 function namePrefix(_name: string) {
   return "";
+}
+
+function voiceLead(kind: VoiceLeadKind, style: VoiceNarrationStyle, seed: string, name = "") {
+  return `${namePrefix(name)}${pickVoiceVariant(`${kind}:${style}:${seed}`, VOICE_LEADS[kind][style])} `;
+}
+
+function pickVoiceVariant(seed: string, variants: readonly string[]) {
+  return variants[hashText(seed) % variants.length];
+}
+
+function hashText(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
 }
 
 function sideLabel(side?: CurrentSignalSide | null) {
