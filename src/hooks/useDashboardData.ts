@@ -226,11 +226,15 @@ function normalizeNeuralReading(value: unknown, fallback?: NeuralReading): Neura
     greenSemGale: rawSg ?? fallback?.greenSemGale ?? null,
     greenG1: rawG1 ?? fallback?.greenG1 ?? null,
     erros:
-      readOptionalNumber(firstDefined(record.erros, record.reds, record.red, record.fails, record.losses)) ??
+      readOptionalNumber(
+        firstDefined(record.erros, record.reds, record.red, record.redCount, record.red_count, record.fails, record.losses),
+      ) ??
       fallback?.erros ??
       null,
     reds:
-      readOptionalNumber(firstDefined(record.reds, record.red, record.erros, record.fails, record.losses)) ??
+      readOptionalNumber(
+        firstDefined(record.reds, record.red, record.redCount, record.red_count, record.erros, record.fails, record.losses),
+      ) ??
       fallback?.reds ??
       null,
     assertividade:

@@ -34,6 +34,7 @@ export function LeituraNeuralMiniCard({
   const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
   const sg = optionalNumberFrom(data.greenSemGale);
   const g1 = optionalNumberFrom(data.greenG1);
+  const red = optionalNumberFrom(data.reds ?? data.erros);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
   const showPayingStats = hasNumber || totalGreens !== null || accuracy !== null || totalAlerts !== null;
   const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
@@ -106,14 +107,14 @@ export function LeituraNeuralMiniCard({
             <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
               <div className="flex items-baseline justify-between gap-1">
                 <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                  {postTie ? "Pos-empate" : "Assertividade"}
+                  {postTie ? "Pos-empate" : "Pagando"}
                 </span>
                 <span className="text-[11px] font-black text-neon-cyan">
                   {formatPercent(accuracy)}
                 </span>
               </div>
               <div className="truncate text-[8px] font-semibold text-muted-foreground sm:text-[9px]">
-                Green SG: {formatCount(sg)} | G1: {formatCount(g1)}
+                SG:{formatCount(sg)}  G1:{formatCount(g1)}  RED:{formatCount(red, true)}
               </div>
               <div className="truncate text-[8px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[9px]">
                 Total de Greens: {formatCount(totalGreens)}
@@ -223,8 +224,9 @@ function formatPercent(value: number | null) {
   return `${value.toFixed(1).replace(".", ",")}%`;
 }
 
-function formatCount(value: number | null) {
-  return value === null ? "--" : String(value);
+function formatCount(value: number | null, pad = false) {
+  if (value === null) return "--";
+  return pad && value >= 0 && value < 10 ? `0${value}` : String(value);
 }
 
 function sideLabel(side?: NeuralSide | null) {
