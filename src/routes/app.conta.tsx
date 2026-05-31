@@ -15,11 +15,14 @@ export const Route = createFileRoute("/app/conta")({
 function ContaPage() {
   const adminSession = readAdminSession();
   const userSession = readUserSession();
-  const canSeeAdmin = isAdminOwnerEmail(userSession.email);
+  const canSeeAdmin =
+    isAdminOwnerEmail(userSession.email) ||
+    userSession.accessStatus === "owner" ||
+    Boolean(adminSession);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {adminSession && canSeeAdmin && (
+      {canSeeAdmin && (
         <GlassCard className="md:col-span-2 border-neon-cyan/35">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">

@@ -3,6 +3,7 @@ import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck }
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { accessLabel } from "@/lib/accessApi";
+import { readAdminSession } from "@/lib/adminApi";
 import { hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 import type { ReactNode } from "react";
 
@@ -14,11 +15,17 @@ const navItems = [
   { to: "/app/conta", label: "Conta", icon: User },
 ] as const;
 
+const adminNavItem = { to: "/app/admin", label: "ADM", icon: ShieldCheck } as const;
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const userSession = readUserSession();
-  const canSeeAdmin = isAdminOwnerEmail(userSession.email);
+  const canSeeAdmin =
+    isAdminOwnerEmail(userSession.email) ||
+    userSession.accessStatus === "owner" ||
+    Boolean(readAdminSession());
   const fullAccess = hasFullAccess(userSession);
+  const mobileNavItems = canSeeAdmin ? [...navItems, adminNavItem] : navItems;
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -114,8 +121,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Bottom nav mobile */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 glass-strong border-t border-border/60">
-        <div className="grid grid-cols-5">
-          {navItems.map((it) => {
+        <div className={`grid ${canSeeAdmin ? "grid-cols-6" : "grid-cols-5"}`}>
+          {mobileNavItems.map((it) => {
             const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
             return (
               <Link
