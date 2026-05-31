@@ -689,7 +689,7 @@ function ensureDashboardDailyCycle(
         ...dashboard,
         cycleDate,
         dailyCycleDate: cycleDate,
-        strictDailyCounters: dashboard.strictDailyCounters ?? false,
+        strictDailyCounters: (dashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
       },
       changed: false,
     };
