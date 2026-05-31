@@ -43,7 +43,7 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
   const processQueueRef = useRef<() => void>(() => undefined);
   const queueRef = useRef<VoiceEvent[]>([]);
   const seenKeysRef = useRef<Set<string>>(new Set());
-  const timerRef = useRef<number | undefined>();
+  const timerRef = useRef<number | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
   const audioFinishRef = useRef<(() => void) | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
