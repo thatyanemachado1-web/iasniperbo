@@ -787,12 +787,26 @@ function readServerEnvString(env: unknown, key: string, fallback: string) {
 }
 
 function normalizeSecretValue(value: unknown) {
-  return String(value || "")
-    .trim()
-    .replace(/^ELEVENLABS_API_KEY\s*=\s*/i, "")
-    .replace(/^Bearer\s+/i, "")
-    .replace(/^["']|["']$/g, "")
-    .replace(/[\s\u200B-\u200D\uFEFF]+/g, "");
+  let raw = String(value || "").trim().replace(/^["']|["']$/g, "").trim();
+  // Strip common accidental prefixes (env var name pasted in, or auth scheme).
+  const prefixes = [
+    /^ELEVENLABS_TTS_API_KEY\s*[:=]\s*/i,
+    /^ELEVENLABS_API_KEY\s*[:=]\s*/i,
+    /^ELEVENLABS_SECRET_KEY\s*[:=]\s*/i,
+    /^Bearer\s+/i,
+    /^Token\s+/i,
+  ];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const re of prefixes) {
+      if (re.test(raw)) {
+        raw = raw.replace(re, "").trim().replace(/^["']|["']$/g, "").trim();
+        changed = true;
+      }
+    }
+  }
+  return raw.replace(/[\s\u200B-\u200D\uFEFF]+/g, "");
 }
 
 function elevenLabsErrorStatus(status: number) {
