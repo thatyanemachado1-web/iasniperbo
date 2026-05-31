@@ -5,6 +5,7 @@ import type {
   SurfAlert,
   TieAlert,
 } from "@/types/dashboard";
+import { buildSurfCopy, buildTieCopy } from "@/lib/operationalCopy";
 import { buildSurfEntrySummary } from "@/utils/surf";
 
 export type VoiceNarrationStyle = "balanced" | "aggressive";
@@ -373,11 +374,12 @@ function entryText(
   style: VoiceNarrationStyle,
 ) {
   const action = entryActionText(status, protection, style);
+  const reasonText = entryReasonPhrase(reason, paganteText, riskText);
   if (style === "aggressive") {
-    return `${voiceLead("entry", style, `${side}:${status}:${protection}:${reason}:${paganteText}`, name)}${sideLabel(side)} está puxando forte. ${action} Motivo: ${reason}${paganteText}${riskText}`;
+    return `${voiceLead("entry", style, `${side}:${status}:${protection}:${reason}:${paganteText}`, name)}Entrada confirmada em ${sideLabel(side)}. Motivo: ${reasonText}. ${action}`;
   }
 
-  return `${voiceLead("entry", style, `${side}:${status}:${protection}:${reason}:${paganteText}`, name)}${sideLabel(side)}. ${action} Motivo: ${reason}${paganteText}${riskText}`;
+  return `Entrada confirmada em ${sideLabel(side)}. Motivo: ${reasonText}. ${action}`;
 }
 
 function entryActionText(
@@ -392,6 +394,28 @@ function entryActionText(
   }
 
   return `Entrada confirmada com proteção ${protection}. Aguardando fechamento para confirmar green ou red.`;
+}
+
+function entryReasonPhrase(reason: string, paganteText: string, riskText: string) {
+  const normalized = normalizeText(`${reason} ${paganteText} ${riskText}`);
+  const reasons = ["tendência ativa"];
+
+  if (normalized.includes("PAGANTE") && normalized.includes("ALINH")) {
+    reasons.push("número pagante favorável");
+  }
+  if (normalized.includes("SURF") && (normalized.includes("ALINH") || normalized.includes("FAVOR"))) {
+    reasons.push("leitura de surf favorável");
+  }
+
+  if (normalized.includes("RISCO ALTO") || normalized.includes("RISCO ELEVADO")) {
+    reasons.push("risco elevado monitorado");
+  } else if (normalized.includes("RISCO MEDIO") || normalized.includes("RISCO MÉDIO")) {
+    reasons.push("risco médio monitorado");
+  } else {
+    reasons.push("risco controlado");
+  }
+
+  return joinText(reasons);
 }
 
 function tieEntryText(name: string, reason: string, paganteText: string, style: VoiceNarrationStyle) {
@@ -617,13 +641,13 @@ function buildSurfEvent(
       ? alert.surf_prediction_side
       : alert.surf_side,
   );
-  const status = alert.surf_status ?? phaseLabel(alert.surf_phase);
+  const message = buildSurfCopy(alert);
 
   return analysis(
     `surf:${alert.surf_phase}:${alert.surf_side}:${alert.surf_prediction_side ?? ""}:${alert.surf_prediction_status ?? ""}:${breakRisk}:${alert.surf_confidence}:${style}`,
     style === "aggressive"
-      ? `${voiceLead("surf", style, `${alert.surf_phase}:${side}:${risk}:${alert.surf_confidence}`, name)}${side} em ${status}, risco ${risk} de quebra. Sem exagero na mão.`
-      : `${voiceLead("surf", style, `${alert.surf_phase}:${side}:${risk}:${alert.surf_confidence}`, name)}${side} em ${status}, com risco ${risk} de quebra.`,
+      ? `${voiceLead("surf", style, `${alert.surf_phase}:${side}:${risk}:${alert.surf_confidence}`, name)}${message} Sem exagero na mão.`
+      : message,
   );
 }
 
@@ -633,11 +657,12 @@ function buildTieEvent(
   style: VoiceNarrationStyle,
 ): VoiceEvent | null {
   if (alert.status !== "active") return null;
+  const message = buildTieCopy(alert);
   return high(
     `tie:${alert.id}:${alert.status}:${alert.level}:${alert.validityRounds}:${style}`,
     style === "aggressive"
-      ? `${voiceLead("tie", style, `${alert.id}:${alert.level}:${alert.validityRounds}`, name)}Tem pressão de Tie, validade até ${alert.validityRounds} rodadas. Aqui é cautela.`
-      : `${voiceLead("tie", style, `${alert.id}:${alert.level}:${alert.validityRounds}`, name)}Mesa com pressão de Tie, validade até ${alert.validityRounds} rodadas.`,
+      ? `${voiceLead("tie", style, `${alert.id}:${alert.level}:${alert.validityRounds}`, name)}${message} Aqui é cautela.`
+      : message,
   );
 }
 
@@ -768,6 +793,11 @@ function hashText(value: string) {
     hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
   }
   return hash;
+}
+
+function joinText(parts: string[]) {
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} e ${parts[parts.length - 1]}`;
 }
 
 function sideLabel(side?: CurrentSignalSide | null) {

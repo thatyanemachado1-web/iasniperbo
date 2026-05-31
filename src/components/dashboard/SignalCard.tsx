@@ -11,6 +11,7 @@ export function SignalCard({
   neuralReading,
   surfSummary,
   tieAlert,
+  operationalMessage,
   locked,
   priority = false,
 }: {
@@ -18,6 +19,7 @@ export function SignalCard({
   neuralReading?: NeuralReading;
   surfSummary?: SurfEntrySummary;
   tieAlert?: TieAlert;
+  operationalMessage?: string;
   locked?: boolean;
   priority?: boolean;
 }) {
@@ -82,6 +84,11 @@ export function SignalCard({
             )}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">{sideCaption}</div>
+          {operationalMessage && (
+            <div className="mt-2 max-w-[42rem] text-xs leading-relaxed text-foreground/85">
+              {operationalMessage}
+            </div>
+          )}
         </div>
         <LeituraNeuralMiniCard {...(neuralReading ?? { mode: "SCANNING" })} />
       </div>

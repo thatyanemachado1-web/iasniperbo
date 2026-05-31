@@ -12,6 +12,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useVoiceAssistant, type BrowserVoiceChoice } from "@/hooks/useVoiceAssistant";
+import { buildAssistantCopy } from "@/lib/operationalCopy";
 import type { VoiceNarrationStyle } from "@/lib/voiceNarrative";
 import type { DashboardData } from "@/types/dashboard";
 import { Mic, Volume2, VolumeX } from "lucide-react";
@@ -28,6 +29,7 @@ export function BrainAssistantCard({ data, mode, locked = false }: BrainAssistan
   const voiceEnabled = !locked && voice.enabled;
   const active = voiceEnabled && voice.isSpeaking;
   const liveReady = !locked && voice.hasLiveBackendData;
+  const operationalMessage = buildAssistantCopy(data);
 
   useEffect(() => {
     if (locked && voice.enabled) voice.setEnabled(false);
@@ -138,7 +140,7 @@ export function BrainAssistantCard({ data, mode, locked = false }: BrainAssistan
         </div>
         <div className="text-xs leading-relaxed text-foreground">
           {voice.latestNarration ||
-            (liveReady ? "Aguardando evento relevante." : "Aguardando dados reais do backend.")}
+            (liveReady ? operationalMessage : "Aguardando dados reais do backend.")}
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { buildNeuralCopy } from "@/lib/operationalCopy";
 import type { NeuralReading, SignalSide } from "@/types/dashboard";
 
 type NeuralSide = SignalSide | "TIE";
@@ -37,6 +38,7 @@ export function LeituraNeuralMiniCard({
   const showPayingStats = totalGreens > 0 || accuracy !== null || totalAlerts !== null;
   const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
   const postTie = Boolean(data.postTie);
+  const message = buildNeuralCopy(data);
 
   return (
     <aside
@@ -46,6 +48,7 @@ export function LeituraNeuralMiniCard({
         className,
       )}
       aria-label="Leitura neural de numeros pagantes"
+      title={message}
     >
       <div className="absolute inset-0 neural-mini-grid opacity-40" />
       <div className="absolute -right-5 -top-6 size-16 rounded-full bg-neon-purple/15 blur-2xl" />

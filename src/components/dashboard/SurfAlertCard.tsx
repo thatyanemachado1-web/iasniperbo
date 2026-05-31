@@ -2,6 +2,7 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
+import { buildSurfCopy } from "@/lib/operationalCopy";
 import type { SurfAlert } from "@/types/dashboard";
 import { clampPercent, surfRiskBand, surfStrengthBand } from "@/utils/surf";
 import { Activity, AlertTriangle, Gauge, Target, Waves } from "lucide-react";
@@ -16,6 +17,7 @@ export function SurfAlertCard({ alert, locked }: { alert: SurfAlert; locked?: bo
     ? alert.surf_prediction_side
     : alert.surf_side;
   const borderTone = strengthBand.tone === "red" ? "border-destructive/35" : strengthBand.tone === "amber" ? "border-warning/35" : "border-neon-cyan/30";
+  const message = buildSurfCopy(alert);
 
   return (
     <GlassCard className={`min-h-[220px] ${borderTone}`}>
@@ -54,7 +56,7 @@ export function SurfAlertCard({ alert, locked }: { alert: SurfAlert; locked?: bo
         <div className="flex items-start gap-2">
           <Target className="mt-0.5 size-3.5 text-neon-cyan" />
           <div>
-            <div className="font-semibold text-foreground">{strengthBand.status}</div>
+            <div className="font-semibold text-foreground">{message}</div>
             <div className="mt-1 text-muted-foreground">{alert.reason}</div>
           </div>
         </div>

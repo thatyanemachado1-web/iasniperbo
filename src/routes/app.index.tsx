@@ -33,6 +33,7 @@ import {
 } from "@/utils/moduleResults";
 import { accessLabel } from "@/lib/accessApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { buildSignalCopy } from "@/lib/operationalCopy";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
@@ -115,6 +116,7 @@ function DashboardPage() {
               neuralReading={d.neuralReading}
               surfSummary={surfSummary}
               tieAlert={d.currentTieAlert}
+              operationalMessage={buildSignalCopy(d)}
               priority
             />
           </PremiumFeature>
@@ -187,7 +189,7 @@ function DashboardPage() {
             title="Decisao da engine VIP"
             description="A decisao tecnica fica completa apenas no acesso liberado."
           >
-            <EngineDecisionCard decision={d.engineDecision} />
+            <EngineDecisionCard decision={d.engineDecision} data={d} />
           </PremiumFeature>
           <PremiumFeature
             title="Tie Alert VIP"

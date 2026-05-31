@@ -2,7 +2,8 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
-import type { EngineDecision } from "@/types/dashboard";
+import { buildDecisionFallbackCopy, buildEngineDecisionCopy } from "@/lib/operationalCopy";
+import type { DashboardData, EngineDecision } from "@/types/dashboard";
 import { Cpu, ChevronRight } from "lucide-react";
 
 const toneByState = {
@@ -12,7 +13,17 @@ const toneByState = {
   BLOQUEADO: "red",
 } as const;
 
-export function EngineDecisionCard({ decision, locked }: { decision: EngineDecision; locked?: boolean }) {
+export function EngineDecisionCard({
+  decision,
+  data,
+  locked,
+}: {
+  decision: EngineDecision;
+  data?: DashboardData;
+  locked?: boolean;
+}) {
+  const message = data ? buildEngineDecisionCopy(data) : buildDecisionFallbackCopy(decision);
+
   return (
     <GlassCard>
       <SectionTitle
@@ -24,7 +35,7 @@ export function EngineDecisionCard({ decision, locked }: { decision: EngineDecis
           <Cpu className="size-5 text-neon-cyan" />
         </div>
         <div className="flex-1">
-          <div className="text-sm text-foreground">{decision.reason}</div>
+          <div className="text-sm text-foreground">{message}</div>
           <div className="mt-1 text-[11px] text-muted-foreground">
             Confiança da leitura: <span className="text-neon-cyan">{decision.confidence}%</span>
           </div>

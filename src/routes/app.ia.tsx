@@ -3,6 +3,8 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { BrainAI } from "@/components/brand/BrainAI";
 import { NeuralLines } from "@/components/brand/NeuralLines";
 import { AppBadge } from "@/components/ui-app/AppBadge";
+import { useDashboardData } from "@/hooks/useDashboardData";
+import { buildAssistantCopy } from "@/lib/operationalCopy";
 import { Send, Mic } from "lucide-react";
 import { useState } from "react";
 
@@ -13,24 +15,33 @@ export const Route = createFileRoute("/app/ia")({
 type Msg = { from: "ia" | "user"; text: string; locked?: boolean };
 
 const initial: Msg[] = [
-  { from: "ia", text: "Olá, sou o Assistente IA. Posso explicar a leitura da mesa, o sinal atual, o Tie Alert e o placar." },
+  {
+    from: "ia",
+    text: "Sou o Assistente IA. Explico a mesa, a entrada principal, o Tie Alert e as leituras paralelas.",
+  },
   { from: "user", text: "Como está a mesa agora?" },
-  { from: "ia", text: "A mesa está em observação. Última rodada: Banker 7 contra Player 4. Existe Tie Alert estatístico ativo em paralelo." },
+  {
+    from: "ia",
+    text: "Mesa em observação. Nenhuma entrada principal confirmada no momento. Aguardar.",
+  },
   { from: "ia", text: "Resposta completa disponível no Premium.", locked: true },
 ];
 
 const quick = ["Tem entrada?", "Tem Tie Alert?", "Mostrar placar", "Última rodada", "Explicar decisão"];
 
 function IAPage() {
+  const { data } = useDashboardData();
   const [msgs, setMsgs] = useState<Msg[]>(initial);
   const [text, setText] = useState("");
+  const currentCopy = buildAssistantCopy(data);
 
   function send(t: string) {
     if (!t.trim()) return;
     setMsgs((m) => [
       ...m,
       { from: "user", text: t },
-      { from: "ia", text: "Leitura completa da engine disponível no Premium.", locked: true },
+      { from: "ia", text: currentCopy },
+      { from: "ia", text: "Detalhes completos da engine disponíveis no Premium.", locked: true },
     ]);
     setText("");
   }
