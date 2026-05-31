@@ -298,9 +298,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (request.method === "POST" && url.pathname === "/admin/login") {
     const body = await request.json().catch(() => ({}));
-    const envRecord = readRecord(env);
-    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "").toLowerCase();
-    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "");
+    const adminEmail = readServerEnvString(env, "SNIPER_ADMIN_EMAIL", "").toLowerCase();
+    const adminPassword = readServerEnvString(env, "SNIPER_ADMIN_PASSWORD", "");
     const adminToken = getAdminToken(env);
 
     if (!adminEmail || !adminPassword || !adminToken || !getSessionSecret(env)) {
@@ -329,9 +328,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = readRecord(await request.json().catch(() => ({})));
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
-    const envRecord = readRecord(env);
-    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "").toLowerCase();
-    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "");
+    const adminEmail = readServerEnvString(env, "SNIPER_ADMIN_EMAIL", "").toLowerCase();
+    const adminPassword = readServerEnvString(env, "SNIPER_ADMIN_PASSWORD", "");
 
     if (!getSessionSecret(env)) {
       return json({ error: "Sessao nao configurada no servidor." }, 503);
@@ -792,8 +790,7 @@ function isAdminAuthorized(request: Request, env: unknown) {
 }
 
 function getAdminToken(env: unknown) {
-  const envRecord = readRecord(env);
-  return String(envRecord.SNIPER_ADMIN_TOKEN || "sniper-local-admin-token");
+  return readServerEnvString(env, "SNIPER_ADMIN_TOKEN", "sniper-local-admin-token");
 }
 
 function getElevenLabsApiKey(env: unknown) {
@@ -1286,10 +1283,11 @@ type SessionPayload = {
 };
 
 function getSessionSecret(env: unknown): string {
-  const envRecord = readRecord(env);
   // Prefer dedicated secret; fall back to admin token only as keying material.
-  const secret = String(envRecord.SNIPER_SESSION_SECRET || envRecord.SNIPER_ADMIN_TOKEN || "");
-  return secret;
+  return (
+    readServerEnvString(env, "SNIPER_SESSION_SECRET", "") ||
+    readServerEnvString(env, "SNIPER_ADMIN_TOKEN", "")
+  );
 }
 
 async function hmacSign(secret: string, data: string): Promise<Uint8Array> {
