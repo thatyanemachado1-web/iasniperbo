@@ -13,6 +13,8 @@ type LiveDashboardData = DashboardData & { updatedAt?: string };
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
+const LIVE_STATE_ID = "main";
+const LIVE_STATE_TABLE = "sniper_live_state";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 const MAX_NARRATION_CHARS = 900;
@@ -112,7 +114,7 @@ export default {
       const adminRedirect = redirectLegacyAdminRoute(request);
       if (adminRedirect) return withSecurityHeaders(adminRedirect);
 
-      await loadLiveState();
+      await loadLiveState(env);
 
       const voiceResponse = await handleVoiceNarrationRequest(request, env);
       if (voiceResponse) return withSecurityHeaders(voiceResponse);
@@ -306,6 +308,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       hasAdminPassword: Boolean(getAdminPassword(env)),
       hasAdminToken: Boolean(getAdminToken(env)),
       hasSessionSecret: Boolean(getSessionSecret(env)),
+      hasDurableClientStorage: Boolean(getSupabasePersistenceConfig(env)),
+      durableClientStorageTable: LIVE_STATE_TABLE,
     });
   }
 
@@ -329,7 +333,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      await saveLiveState();
+      await saveLiveState(env);
       // Admin token is returned only inside a successful admin-login response.
       return json({ token: adminToken, email: adminEmail });
     }
@@ -355,7 +359,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      await saveLiveState();
+      await saveLiveState(env);
       return json({ access: await ownerAccess(env, email) });
     }
 
@@ -386,7 +390,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       if (ok) {
         client.password_hash = await hashPassword(password);
         delete (client as Record<string, unknown>).password;
-        await saveLiveState();
+        await saveLiveState(env);
       }
     }
     if (!ok) {
@@ -394,7 +398,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
 
     recordAccessEvent(Boolean(client.enabled) ? "client_login" : "client_pending_login", client);
-    await saveLiveState();
+    await saveLiveState(env);
     return json({ access: await clientAccess(env, client) });
   }
 
@@ -441,7 +445,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     upsertRecipientFromClient(client);
     recordAccessEvent(existingIndex >= 0 ? "client_update" : "client_register", client);
-    await saveLiveState();
+    await saveLiveState(env);
     return json(
       { access: await clientAccess(env, client) },
       existingIndex >= 0 ? 200 : 201,
@@ -489,7 +493,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       });
       liveRecipients = [...liveRecipients, recipient];
       upsertClientFromRecipient(recipient);
-      await saveLiveState();
+      await saveLiveState(env);
       return json({ recipient }, 201);
     }
   }
@@ -516,13 +520,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         recipientIndex === index ? updated : recipient,
       );
       upsertClientFromRecipient(updated);
-      await saveLiveState();
+      await saveLiveState(env);
       return json({ recipient: updated });
     }
 
     if (request.method === "DELETE") {
       liveRecipients = liveRecipients.filter((recipient) => recipient.id !== recipientId);
-      await saveLiveState();
+      await saveLiveState(env);
       return json({ ok: true });
     }
   }
@@ -546,7 +550,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         moduleToggles: liveModuleToggles,
         updatedAt: new Date().toISOString(),
       };
-      await saveLiveState();
+      await saveLiveState(env);
       return json({ moduleToggles: liveModuleToggles });
     }
   }
@@ -591,7 +595,7 @@ async function handleDashboardRequest(request: Request, env: unknown) {
 
     const body = await request.json().catch(() => ({}));
     liveDashboardData = updateDashboardData(liveDashboardData, body);
-    await saveLiveState();
+    await saveLiveState(env);
     return json({ ok: true, dashboard: liveDashboardData });
   }
 
@@ -1142,54 +1146,70 @@ function liveStateCacheRequest() {
   return new Request(LIVE_STATE_CACHE_URL, { method: "GET" });
 }
 
-async function loadLiveState() {
-  const cache = getLiveStateCache();
-  if (!cache) return;
+async function loadLiveState(env: unknown) {
+  const durableState = await loadDurableLiveState(env);
+  if (durableState) {
+    applyLiveState(durableState);
+    await saveLiveStateCache(durableState);
+    return;
+  }
 
-  try {
-    const response = await cache.match(liveStateCacheRequest());
-    if (!response) return;
-
-    const state = readRecord(await response.json().catch(() => null));
-    const dashboard = readRecord(state.dashboard);
-    if (Object.keys(dashboard).length > 0) {
-      liveDashboardData = restoreDashboardData(dashboard);
-    }
-
-    if (Array.isArray(state.recipients)) {
-      liveRecipients = state.recipients
-        .map(readRecord)
-        .filter((recipient) => Object.keys(recipient).length > 0);
-    }
-
-    if (Array.isArray(state.clients)) {
-      liveClients = state.clients
-        .map(readRecord)
-        .filter((client) => Object.keys(client).length > 0);
-    }
-
-    if (Array.isArray(state.accessEvents)) {
-      liveAccessEvents = state.accessEvents
-        .map(readRecord)
-        .filter((event) => Object.keys(event).length > 0)
-        .slice(0, 200);
-    }
-
-    const moduleToggles = readRecord(state.moduleToggles);
-    if (Object.keys(moduleToggles).length > 0) {
-      liveModuleToggles = restoreModuleToggles(moduleToggles);
-      liveDashboardData = { ...liveDashboardData, moduleToggles: liveModuleToggles };
-    }
-  } catch (error) {
-    console.warn("Nao foi possivel carregar estado vivo do cache.", error);
+  const cacheState = await loadLiveStateCache();
+  if (cacheState) {
+    applyLiveState(cacheState);
+    await saveDurableLiveState(env, buildLiveStateSnapshot());
   }
 }
 
-async function saveLiveState() {
+async function loadLiveStateCache() {
   const cache = getLiveStateCache();
-  if (!cache) return;
+  if (!cache) return null;
 
-  const state = {
+  try {
+    const response = await cache.match(liveStateCacheRequest());
+    if (!response) return null;
+
+    return readRecord(await response.json().catch(() => null));
+  } catch (error) {
+    console.warn("Nao foi possivel carregar estado vivo do cache.", error);
+    return null;
+  }
+}
+
+function applyLiveState(state: Record<string, unknown>) {
+  const dashboard = readRecord(state.dashboard);
+  if (Object.keys(dashboard).length > 0) {
+    liveDashboardData = restoreDashboardData(dashboard);
+  }
+
+  if (Array.isArray(state.recipients)) {
+    liveRecipients = state.recipients
+      .map(readRecord)
+      .filter((recipient) => Object.keys(recipient).length > 0);
+  }
+
+  if (Array.isArray(state.clients)) {
+    liveClients = state.clients
+      .map(readRecord)
+      .filter((client) => Object.keys(client).length > 0);
+  }
+
+  if (Array.isArray(state.accessEvents)) {
+    liveAccessEvents = state.accessEvents
+      .map(readRecord)
+      .filter((event) => Object.keys(event).length > 0)
+      .slice(0, 200);
+  }
+
+  const moduleToggles = readRecord(state.moduleToggles);
+  if (Object.keys(moduleToggles).length > 0) {
+    liveModuleToggles = restoreModuleToggles(moduleToggles);
+    liveDashboardData = { ...liveDashboardData, moduleToggles: liveModuleToggles };
+  }
+}
+
+function buildLiveStateSnapshot() {
+  return {
     dashboard: liveDashboardData,
     recipients: liveRecipients,
     clients: liveClients,
@@ -1197,6 +1217,16 @@ async function saveLiveState() {
     moduleToggles: liveModuleToggles,
     savedAt: new Date().toISOString(),
   };
+}
+
+async function saveLiveState(env: unknown) {
+  const state = buildLiveStateSnapshot();
+  await Promise.allSettled([saveDurableLiveState(env, state), saveLiveStateCache(state)]);
+}
+
+async function saveLiveStateCache(state: Record<string, unknown>) {
+  const cache = getLiveStateCache();
+  if (!cache) return;
 
   try {
     await cache.put(
@@ -1211,6 +1241,79 @@ async function saveLiveState() {
   } catch (error) {
     console.warn("Nao foi possivel salvar estado vivo no cache.", error);
   }
+}
+
+async function loadDurableLiveState(env: unknown) {
+  const config = getSupabasePersistenceConfig(env);
+  if (!config) return null;
+
+  try {
+    const response = await fetch(
+      `${config.url}/rest/v1/${LIVE_STATE_TABLE}?id=eq.${encodeURIComponent(LIVE_STATE_ID)}&select=state`,
+      {
+        headers: supabasePersistenceHeaders(config.key),
+      },
+    );
+    if (response.status === 404 || response.status === 406) return null;
+    if (!response.ok) {
+      console.warn(`Estado duravel indisponivel (${response.status}).`);
+      return null;
+    }
+
+    const rows = await response.json().catch(() => null);
+    const row = Array.isArray(rows) ? readRecord(rows[0]) : readRecord(rows);
+    const state = readRecord(row.state);
+    return Object.keys(state).length > 0 ? state : null;
+  } catch (error) {
+    console.warn("Nao foi possivel carregar estado duravel.", error);
+    return null;
+  }
+}
+
+async function saveDurableLiveState(env: unknown, state: Record<string, unknown>) {
+  const config = getSupabasePersistenceConfig(env);
+  if (!config) return;
+
+  try {
+    const response = await fetch(`${config.url}/rest/v1/${LIVE_STATE_TABLE}`, {
+      method: "POST",
+      headers: {
+        ...supabasePersistenceHeaders(config.key),
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify({
+        id: LIVE_STATE_ID,
+        state,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    if (!response.ok) {
+      console.warn(`Nao foi possivel salvar estado duravel (${response.status}).`);
+    }
+  } catch (error) {
+    console.warn("Nao foi possivel salvar estado duravel.", error);
+  }
+}
+
+function getSupabasePersistenceConfig(env: unknown) {
+  const url = (
+    readServerEnvString(env, "SUPABASE_URL", "") ||
+    readServerEnvString(env, "VITE_SUPABASE_URL", "")
+  ).replace(/\/+$/, "");
+  const key =
+    readServerEnvString(env, "SUPABASE_SERVICE_ROLE_KEY", "") ||
+    readServerEnvString(env, "SUPABASE_SERVICE_KEY", "");
+
+  if (!url || !key) return null;
+  return { url, key };
+}
+
+function supabasePersistenceHeaders(key: string) {
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+  };
 }
 
 function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData {
