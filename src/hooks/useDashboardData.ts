@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
-import type { DashboardData } from "@/types/dashboard";
+import type { DashboardData, NeuralReading } from "@/types/dashboard";
 
 const PUBLIC_API_URL = "https://reflection-herbal-representative-nut.trycloudflare.com";
 const PUBLIC_DASHBOARD_URL = `${PUBLIC_API_URL}/dashboard`;
@@ -114,7 +114,7 @@ async function fetchDashboardData(): Promise<DashboardData> {
     throw new Error(`Dashboard API returned ${response.status}`);
   }
 
-  return response.json();
+  return normalizeDashboardData(await response.json());
 }
 
 export function useDashboardData() {
@@ -135,4 +135,189 @@ export function useDashboardData() {
     mode: !dashboardUrl ? "mock" : query.isError ? "fallback" : query.isLoading ? "connecting" : "live",
     error: query.error,
   } as const;
+}
+
+function normalizeDashboardData(payload: unknown): DashboardData {
+  const data = readRecord(payload) as DashboardData;
+  const neuralReading =
+    data.neuralReading ??
+    (data as unknown as Record<string, unknown>).neural_reading ??
+    (data as unknown as Record<string, unknown>).numeroPagante ??
+    (data as unknown as Record<string, unknown>).numero_pagante;
+
+  return {
+    ...data,
+    neuralReading: normalizeNeuralReading(neuralReading, data.neuralReading),
+  };
+}
+
+function normalizeNeuralReading(value: unknown, fallback?: NeuralReading): NeuralReading {
+  const record = readRecord(value);
+  const rawG1 = readOptionalNumber(
+    firstDefined(
+      record.greenG1,
+      record.green_g1,
+      record.greensG1,
+      record.greens_g1,
+      record.g1,
+      record.greenGale1,
+      record.green_gale_1,
+    ),
+  );
+  const rawSg = readOptionalNumber(
+    firstDefined(
+      record.greenSemGale,
+      record.green_sem_gale,
+      record.greenSG,
+      record.green_sg,
+      record.sg,
+      record.greenSemGaleCount,
+      record.greensSemGale,
+      record.greens_sem_gale,
+      rawG1 !== null ? record.greens : undefined,
+    ),
+  );
+  const splitTotal =
+    rawSg !== null || rawG1 !== null ? numberOrZero(rawSg) + numberOrZero(rawG1) : undefined;
+
+  return {
+    ...(fallback ?? { mode: "SCANNING" }),
+    ...record,
+    mode: normalizeNeuralMode(firstDefined(record.mode, record.status, fallback?.mode)),
+    numero: readOptionalNumber(
+      firstDefined(record.numero, record.number, record.numero_pagante, record.payingNumber),
+    ) ?? fallback?.numero ?? null,
+    origem:
+      normalizeNeuralSide(
+        firstDefined(record.origem, record.source, record.side, record.lado, record.numberSide),
+      ) ?? fallback?.origem ?? null,
+    direcao:
+      normalizeNeuralSide(
+        firstDefined(
+          record.direcao,
+          record.direction,
+          record.puxando,
+          record.pulling,
+          record.pullSide,
+          record.targetSide,
+          record.entrySide,
+          record.prediction,
+          record.previsao,
+        ),
+      ) ?? fallback?.direcao ?? null,
+    validade: String(firstDefined(record.validade, record.validity, record.gale, fallback?.validade) ?? "G1"),
+    alertas:
+      readOptionalNumber(firstDefined(record.alertas, record.alerts, record.totalAlerts, record.total_alerts)) ??
+      fallback?.alertas ??
+      null,
+    acertos:
+      readOptionalNumber(
+        firstDefined(
+          record.acertos,
+          record.hits,
+          record.totalGreens,
+          record.total_greens,
+          record.greensTotal,
+          record.greens_total,
+          splitTotal,
+          record.greens,
+        ),
+      ) ?? fallback?.acertos ?? null,
+    greenSemGale: rawSg ?? fallback?.greenSemGale ?? null,
+    greenG1: rawG1 ?? fallback?.greenG1 ?? null,
+    erros:
+      readOptionalNumber(firstDefined(record.erros, record.reds, record.red, record.fails, record.losses)) ??
+      fallback?.erros ??
+      null,
+    reds:
+      readOptionalNumber(firstDefined(record.reds, record.red, record.erros, record.fails, record.losses)) ??
+      fallback?.reds ??
+      null,
+    assertividade:
+      readOptionalNumber(
+        firstDefined(
+          record.assertividade,
+          record.assertiveness,
+          record.accuracy,
+          record.porcentagem,
+          record.percentual,
+          record.percent,
+          record.winRate,
+          record.win_rate,
+        ),
+      ) ?? fallback?.assertividade ?? null,
+    sequencePositive:
+      readOptionalNumber(firstDefined(record.sequencePositive, record.sequence_positive, record.seqPositive)) ??
+      fallback?.sequencePositive ??
+      null,
+    sequenceNegative:
+      readOptionalNumber(firstDefined(record.sequenceNegative, record.sequence_negative, record.seqNegative)) ??
+      fallback?.sequenceNegative ??
+      null,
+    paganteStatus:
+      readOptionalString(firstDefined(record.paganteStatus, record.pagante_status, record.statusPagante)) ??
+      fallback?.paganteStatus ??
+      null,
+    paganteAlert:
+      readOptionalString(firstDefined(record.paganteAlert, record.pagante_alert, record.alert)) ??
+      fallback?.paganteAlert ??
+      null,
+    paganteWindow:
+      readOptionalNumber(firstDefined(record.paganteWindow, record.pagante_window, record.window)) ??
+      fallback?.paganteWindow ??
+      null,
+    isSaturated: readOptionalBoolean(firstDefined(record.isSaturated, record.is_saturated)) ?? fallback?.isSaturated ?? null,
+    isRedAlert: readOptionalBoolean(firstDefined(record.isRedAlert, record.is_red_alert)) ?? fallback?.isRedAlert ?? null,
+    postTie: readOptionalBoolean(firstDefined(record.postTie, record.post_tie)) ?? fallback?.postTie ?? null,
+  };
+}
+
+function normalizeNeuralMode(value: unknown): NeuralReading["mode"] {
+  const text = String(value || "").trim().toUpperCase();
+  if (["ACTIVE", "ATIVO", "VALIDO", "VALID"].includes(text)) return "ACTIVE";
+  if (["OBSERVING", "OBSERVACAO", "OBSERVANDO"].includes(text)) return "OBSERVING";
+  return "SCANNING";
+}
+
+function normalizeNeuralSide(value: unknown): NeuralReading["origem"] {
+  const text = String(value || "").trim().toUpperCase();
+  if (["B", "BANKER", "BANCA"].includes(text)) return "BANKER";
+  if (["P", "PLAYER", "JOGADOR"].includes(text)) return "PLAYER";
+  if (["T", "TIE", "EMPATE"].includes(text)) return "TIE";
+  return null;
+}
+
+function firstDefined(...values: unknown[]) {
+  return values.find((value) => value !== undefined && value !== null && value !== "");
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function readOptionalNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const numeric = Number(String(value).replace("%", "").replace(",", ".").trim());
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function readOptionalString(value: unknown) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+function readOptionalBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (value === undefined || value === null || value === "") return null;
+  const text = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "sim"].includes(text)) return true;
+  if (["false", "0", "no", "nao", "não"].includes(text)) return false;
+  return null;
+}
+
+function numberOrZero(value: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }

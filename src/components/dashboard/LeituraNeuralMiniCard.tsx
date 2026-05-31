@@ -29,21 +29,22 @@ export function LeituraNeuralMiniCard({
 }: LeituraNeuralMiniCardProps) {
   const data = { ...SCANNING_READING, ...reading };
   const mode = data.mode ?? "SCANNING";
-  const hasNumber = typeof data.numero === "number" && data.origem;
+  const hasNumber = typeof data.numero === "number" && Boolean(data.origem);
   const totalAlerts = totalFrom(data.alertas, data.acertos, data.erros);
   const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
-  const sg = numberFrom(data.greenSemGale);
-  const g1 = numberFrom(data.greenG1);
+  const sg = optionalNumberFrom(data.greenSemGale);
+  const g1 = optionalNumberFrom(data.greenG1);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
-  const showPayingStats = totalGreens > 0 || accuracy !== null || totalAlerts !== null;
+  const showPayingStats = hasNumber || totalGreens !== null || accuracy !== null || totalAlerts !== null;
   const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
   const postTie = Boolean(data.postTie);
+  const pullingSide = data.direcao ?? data.origem;
   const message = buildNeuralCopy(data);
 
   return (
     <aside
       className={cn(
-        "neural-mini-card relative w-[122px] shrink-0 overflow-hidden rounded-xl border border-neon-cyan/35 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_28px_-14px_var(--neon-cyan)] backdrop-blur-xl sm:w-[148px] lg:w-[156px]",
+        "neural-mini-card relative w-[140px] shrink-0 overflow-hidden rounded-xl border border-neon-cyan/35 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_28px_-14px_var(--neon-cyan)] backdrop-blur-xl sm:w-[170px] lg:w-[180px]",
         mode === "ACTIVE" && "border-neon-purple/45 shadow-[0_0_32px_-14px_var(--neon-purple)]",
         className,
       )}
@@ -89,11 +90,11 @@ export function LeituraNeuralMiniCard({
             </span>
           </div>
 
-          {data.direcao ? (
+          {pullingSide ? (
             <div className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]">
-              <span className="text-neon-cyan">{postTie ? "Cor pos-empate --&gt;" : "Puxando --&gt;"}</span>{" "}
-              <span className={sideClass(data.direcao)}>{sideLabel(data.direcao)}</span>{" "}
-              {data.validade ?? "G1"}
+              <span className="text-neon-cyan">{postTie ? "Cor pos-empate" : "Puxando"}</span>{" "}
+              <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>{" "}
+              <span className="text-[9px] text-muted-foreground/85">até {data.validade ?? "G1"}</span>
             </div>
           ) : (
             <div className="truncate text-[10px] font-semibold text-muted-foreground">
@@ -105,17 +106,17 @@ export function LeituraNeuralMiniCard({
             <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
               <div className="flex items-baseline justify-between gap-1">
                 <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                  {postTie ? "Pos-empate" : "Pagando"}
+                  {postTie ? "Pos-empate" : "Assertividade"}
                 </span>
                 <span className="text-[11px] font-black text-neon-cyan">
                   {formatPercent(accuracy)}
                 </span>
               </div>
               <div className="truncate text-[8px] font-semibold text-muted-foreground sm:text-[9px]">
-                SG:{sg} * G1:{g1}
+                Green SG: {formatCount(sg)} | G1: {formatCount(g1)}
               </div>
               <div className="truncate text-[8px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[9px]">
-                Total: {totalGreens} Greens
+                Total de Greens: {formatCount(totalGreens)}
               </div>
               {data.paganteWindow ? (
                 <div className="truncate text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -189,11 +190,11 @@ function accuracyFrom(
   acertos?: number | null,
   erros?: number | null,
 ) {
-  if (typeof assertividade === "number") return assertividade;
   if (typeof acertos === "number" || typeof erros === "number") {
     const total = (acertos ?? 0) + (erros ?? 0);
     return total > 0 ? ((acertos ?? 0) / total) * 100 : null;
   }
+  if (typeof assertividade === "number") return assertividade;
   return null;
 }
 
@@ -203,7 +204,14 @@ function totalGreensFrom(
   greenG1?: number | null,
 ) {
   if (typeof acertos === "number" && Number.isFinite(acertos)) return acertos;
-  return numberFrom(greenSemGale) + numberFrom(greenG1);
+  const sg = optionalNumberFrom(greenSemGale);
+  const g1 = optionalNumberFrom(greenG1);
+  if (sg === null && g1 === null) return null;
+  return numberFrom(sg) + numberFrom(g1);
+}
+
+function optionalNumberFrom(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function numberFrom(value?: number | null) {
@@ -213,6 +221,10 @@ function numberFrom(value?: number | null) {
 function formatPercent(value: number | null) {
   if (value === null) return "--";
   return `${value.toFixed(1).replace(".", ",")}%`;
+}
+
+function formatCount(value: number | null) {
+  return value === null ? "--" : String(value);
 }
 
 function sideLabel(side?: NeuralSide | null) {

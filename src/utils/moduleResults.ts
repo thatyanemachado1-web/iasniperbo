@@ -46,13 +46,17 @@ export function calculateTieResult(scoreboard: TieAlertScoreboard): TieResult {
 }
 
 export function calculateNeuralResult(reading?: NeuralReading): NeuralResult {
-  const hitFallback = safeNumber(reading?.acertos);
-  const greenSemGale = safeNumber(reading?.greenSemGale ?? hitFallback);
-  const greenG1 = safeNumber(reading?.greenG1 ?? Math.max(0, hitFallback - greenSemGale));
+  const hitFallback = optionalNumber(reading?.acertos);
+  const explicitSg = optionalNumber(reading?.greenSemGale);
+  const explicitG1 = optionalNumber(reading?.greenG1);
+  const hasSplitGreens = explicitSg !== null || explicitG1 !== null;
+  const greenSemGale = explicitSg ?? (hasSplitGreens ? 0 : safeNumber(hitFallback));
+  const greenG1 = explicitG1 ?? 0;
+  const greens = hasSplitGreens ? greenSemGale + greenG1 : safeNumber(hitFallback);
   const reds = safeNumber(reading?.reds ?? reading?.erros);
-  const greens = greenSemGale + greenG1;
   const total = greens + reds;
   const totalAlerts = safeNumber(reading?.alertas ?? total);
+  const providedAssertiveness = optionalNumber(reading?.assertividade);
 
   return {
     totalAlerts,
@@ -61,7 +65,7 @@ export function calculateNeuralResult(reading?: NeuralReading): NeuralResult {
     greenG1,
     reds,
     total,
-    assertiveness: calculateAssertiveness(greens, total),
+    assertiveness: total > 0 ? calculateAssertiveness(greens, total) : safeNumber(providedAssertiveness),
     sequencePositive: safeNumber(reading?.sequencePositive),
     sequenceNegative: safeNumber(reading?.sequenceNegative),
     breakdown: `SG ${greenSemGale} / G1 ${greenG1} / RED ${reds}`,
@@ -99,6 +103,12 @@ export function calculateSurfResult(scoreboard?: SurfAnalyzerScoreboard): SurfRe
 function safeNumber(value: unknown) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function optionalNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 export function calculateAssertiveness(part: number, total: number) {
