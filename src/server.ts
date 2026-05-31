@@ -283,6 +283,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   const isAdminApiPath =
     url.pathname === "/admin/login" ||
     url.pathname === "/auth/check" ||
+    url.pathname === "/auth/diagnostics" ||
     url.pathname === "/auth/register" ||
     url.pathname === "/admin/summary" ||
     url.pathname === "/telegram-recipients" ||
@@ -296,10 +297,22 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     return json(null, 204);
   }
 
+  if (request.method === "GET" && url.pathname === "/auth/diagnostics") {
+    if (!isDashboardAuthorized(request, url, env)) {
+      return json({ error: "Nao autorizado." }, 401);
+    }
+    return json({
+      hasAdminEmail: Boolean(getAdminEmail(env)),
+      hasAdminPassword: Boolean(getAdminPassword(env)),
+      hasAdminToken: Boolean(getAdminToken(env)),
+      hasSessionSecret: Boolean(getSessionSecret(env)),
+    });
+  }
+
   if (request.method === "POST" && url.pathname === "/admin/login") {
     const body = await request.json().catch(() => ({}));
-    const adminEmail = readServerEnvString(env, "SNIPER_ADMIN_EMAIL", "").toLowerCase();
-    const adminPassword = readServerEnvString(env, "SNIPER_ADMIN_PASSWORD", "");
+    const adminEmail = getAdminEmail(env);
+    const adminPassword = getAdminPassword(env);
     const adminToken = getAdminToken(env);
 
     if (!adminEmail || !adminPassword || !adminToken || !getSessionSecret(env)) {
@@ -328,8 +341,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = readRecord(await request.json().catch(() => ({})));
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
-    const adminEmail = readServerEnvString(env, "SNIPER_ADMIN_EMAIL", "").toLowerCase();
-    const adminPassword = readServerEnvString(env, "SNIPER_ADMIN_PASSWORD", "");
+    const adminEmail = getAdminEmail(env);
+    const adminPassword = getAdminPassword(env);
 
     if (!getSessionSecret(env)) {
       return json({ error: "Sessao nao configurada no servidor." }, 503);
@@ -774,10 +787,9 @@ function clampPercent(value: unknown) {
 }
 
 function isDashboardAuthorized(request: Request, url: URL, env: unknown) {
-  const envRecord = readRecord(env);
-  const token = String(
-    envRecord.SNIPER_DASHBOARD_TOKEN || envRecord.SNIPER_ADMIN_TOKEN || "sniper-local-admin-token",
-  );
+  const token =
+    readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", "") ||
+    readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "sniper-local-admin-token");
   const headerToken =
     request.headers.get("x-sniper-token") ||
     request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
@@ -790,7 +802,15 @@ function isAdminAuthorized(request: Request, env: unknown) {
 }
 
 function getAdminToken(env: unknown) {
-  return readServerEnvString(env, "SNIPER_ADMIN_TOKEN", "sniper-local-admin-token");
+  return readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "sniper-local-admin-token");
+}
+
+function getAdminEmail(env: unknown) {
+  return readNamedServerSecret(env, "SNIPER_ADMIN_EMAIL", "").toLowerCase();
+}
+
+function getAdminPassword(env: unknown) {
+  return readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD", "");
 }
 
 function getElevenLabsApiKey(env: unknown) {
@@ -806,6 +826,23 @@ function recordElevenLabsStatus(code: number | "ok" | "network_error") {
 function readServerEnvString(env: unknown, key: string, fallback: string) {
   const envRecord = readRecord(env);
   return readConfigString(readProcessEnv(key) || envRecord[key], fallback);
+}
+
+function readNamedServerSecret(env: unknown, key: string, fallback: string) {
+  return stripNamedSecretPrefix(readServerEnvString(env, key, fallback), key);
+}
+
+function stripNamedSecretPrefix(value: unknown, key: string) {
+  let raw = String(value || "").trim().replace(/^["']|["']$/g, "").trim();
+  const prefix = new RegExp(`^${escapeRegExp(key)}\\s*[:=]\\s*`, "i");
+  while (prefix.test(raw)) {
+    raw = raw.replace(prefix, "").trim().replace(/^["']|["']$/g, "").trim();
+  }
+  return raw;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function normalizeSecretValue(value: unknown) {
@@ -1285,8 +1322,8 @@ type SessionPayload = {
 function getSessionSecret(env: unknown): string {
   // Prefer dedicated secret; fall back to admin token only as keying material.
   return (
-    readServerEnvString(env, "SNIPER_SESSION_SECRET", "") ||
-    readServerEnvString(env, "SNIPER_ADMIN_TOKEN", "")
+    readNamedServerSecret(env, "SNIPER_SESSION_SECRET", "") ||
+    readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "")
   );
 }
 
