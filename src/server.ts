@@ -1090,3 +1090,122 @@ function json(data: unknown, status = 200) {
     },
   });
 }
+
+// ===== Password hashing (PBKDF2 via Web Crypto) =====
+const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_KEYLEN = 32;
+
+function bytesToB64Url(bytes: Uint8Array) {
+  let str = "";
+  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64UrlToBytes(s: string) {
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const norm = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
+  const bin = atob(norm);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function constantTimeEqual(a: Uint8Array, b: Uint8Array) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    key,
+    PBKDF2_KEYLEN * 8,
+  );
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${bytesToB64Url(salt)}$${bytesToB64Url(new Uint8Array(bits))}`;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  if (!stored || !stored.startsWith("pbkdf2$")) return false;
+  const parts = stored.split("$");
+  if (parts.length !== 4) return false;
+  const iterations = Number(parts[1]) || PBKDF2_ITERATIONS;
+  const salt = b64UrlToBytes(parts[2]);
+  const expected = b64UrlToBytes(parts[3]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    key,
+    expected.length * 8,
+  );
+  return constantTimeEqual(new Uint8Array(bits), expected);
+}
+
+// ===== Session tokens (HMAC-SHA256 signed) =====
+type SessionPayload = {
+  email: string;
+  scope: "client" | "owner";
+  plan: string;
+  approved: boolean;
+  exp: number; // unix seconds
+};
+
+function getSessionSecret(env: unknown): string {
+  const envRecord = readRecord(env);
+  // Prefer dedicated secret; fall back to admin token only as keying material.
+  const secret = String(envRecord.SNIPER_SESSION_SECRET || envRecord.SNIPER_ADMIN_TOKEN || "");
+  return secret;
+}
+
+async function hmacSign(secret: string, data: string): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
+  return new Uint8Array(sig);
+}
+
+export async function issueSessionToken(env: unknown, payload: Omit<SessionPayload, "exp">, ttlSeconds = 60 * 60 * 24): Promise<string> {
+  const secret = getSessionSecret(env);
+  if (!secret) return "";
+  const full: SessionPayload = { ...payload, exp: Math.floor(Date.now() / 1000) + ttlSeconds };
+  const body = bytesToB64Url(new TextEncoder().encode(JSON.stringify(full)));
+  const sig = bytesToB64Url(await hmacSign(secret, body));
+  return `${body}.${sig}`;
+}
+
+export async function verifySessionToken(env: unknown, token: string): Promise<SessionPayload | null> {
+  const secret = getSessionSecret(env);
+  if (!secret || !token || !token.includes(".")) return null;
+  const [body, sig] = token.split(".");
+  if (!body || !sig) return null;
+  const expected = bytesToB64Url(await hmacSign(secret, body));
+  // length-safe compare
+  if (!constantTimeEqual(new TextEncoder().encode(sig), new TextEncoder().encode(expected))) {
+    return null;
+  }
+  try {
+    const decoded = JSON.parse(new TextDecoder().decode(b64UrlToBytes(body))) as SessionPayload;
+    if (!decoded.exp || decoded.exp < Math.floor(Date.now() / 1000)) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
