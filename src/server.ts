@@ -702,7 +702,11 @@ function getAdminToken(env: unknown) {
 }
 
 function getElevenLabsApiKey(env: unknown) {
-  return normalizeSecretValue(readServerEnvString(env, "ELEVENLABS_API_KEY", ""));
+  return normalizeSecretValue(
+    readServerEnvString(env, "ELEVENLABS_TTS_API_KEY", "") ||
+      readServerEnvString(env, "ELEVENLABS_SECRET_KEY", "") ||
+      readServerEnvString(env, "ELEVENLABS_API_KEY", ""),
+  );
 }
 
 function readServerEnvString(env: unknown, key: string, fallback: string) {
