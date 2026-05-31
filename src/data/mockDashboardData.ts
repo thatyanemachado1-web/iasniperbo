@@ -93,6 +93,7 @@ export const mockDashboardData: DashboardData = {
     mode: "ACTIVE",
     numero: 7,
     origem: "BANKER",
+    origemTipo: "OPOSTO",
     direcao: "PLAYER",
     validade: "G1",
     alertas: 177,

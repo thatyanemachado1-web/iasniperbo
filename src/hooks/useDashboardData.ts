@@ -191,6 +191,19 @@ function normalizeNeuralReading(value: unknown, fallback?: NeuralReading): Neura
       normalizeNeuralSide(
         firstDefined(record.origem, record.source, record.side, record.lado, record.numberSide),
       ) ?? fallback?.origem ?? null,
+    origemTipo:
+      normalizeNeuralOriginKind(
+        firstDefined(
+          record.origemTipo,
+          record.origem_tipo,
+          record.triggerKind,
+          record.trigger_kind,
+          record.originKind,
+          record.origin_kind,
+          record.paganteKind,
+          record.pagante_kind,
+        ),
+      ) ?? fallback?.origemTipo ?? null,
     direcao:
       normalizeNeuralSide(
         firstDefined(
@@ -288,6 +301,22 @@ function normalizeNeuralSide(value: unknown): NeuralReading["origem"] {
   if (["B", "BANKER", "BANCA"].includes(text)) return "BANKER";
   if (["P", "PLAYER", "JOGADOR"].includes(text)) return "PLAYER";
   if (["T", "TIE", "EMPATE"].includes(text)) return "TIE";
+  return null;
+}
+
+function normalizeNeuralOriginKind(value: unknown): NeuralReading["origemTipo"] {
+  const text = String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+  if (!text) return null;
+  if (["PAGANTE", "PAGANTE_REAL", "WINNER", "WINNING", "VENCEDOR"].includes(text)) return "PAGANTE";
+  if (["OPOSTO", "OPPOSITE", "LOSER", "LOSING", "PERDEDOR", "CONTRA", "NEGATIVE", "NEGATIVO"].includes(text)) {
+    return "OPOSTO";
+  }
+  if (["TIE", "EMPATE", "POS_EMPATE", "POST_TIE"].includes(text)) return "TIE";
   return null;
 }
 

@@ -39,6 +39,8 @@ export function LeituraNeuralMiniCard({
   const showPayingStats = hasNumber || totalGreens !== null || accuracy !== null || totalAlerts !== null;
   const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
   const postTie = Boolean(data.postTie);
+  const originKind = neuralOriginKind(data);
+  const originBadge = originBadgeFor(originKind);
   const pullingSide = data.direcao ?? data.origem;
   const message = buildNeuralCopy(data);
 
@@ -65,7 +67,7 @@ export function LeituraNeuralMiniCard({
             Leitura Neural
           </div>
           <div className="truncate text-[7px] font-bold uppercase tracking-[0.1em] text-neon-cyan/75 sm:text-[8px]">
-            {postTie ? "cor pos-empate" : "de numeros pagantes"}
+            {originKind === "OPOSTO" ? "gatilho oposto" : postTie ? "cor pos-empate" : "numero pagante"}
           </div>
         </div>
       </div>
@@ -82,12 +84,22 @@ export function LeituraNeuralMiniCard({
         </div>
       ) : (
         <div className="relative mt-2 space-y-1">
-          <div className="flex items-baseline gap-1">
-            <span className="text-lg font-black leading-none text-foreground sm:text-xl">
-              {data.origem === "TIE" ? `${data.numero}x${data.numero}` : data.numero}
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="flex min-w-0 items-baseline gap-1">
+              <span className="text-lg font-black leading-none text-foreground sm:text-xl">
+                {data.origem === "TIE" ? `${data.numero}x${data.numero}` : data.numero}
+              </span>
+              <span className={cn("truncate text-[11px] font-extrabold", sideClass(data.origem))}>
+                {sideLabel(data.origem)}
+              </span>
             </span>
-            <span className={cn("truncate text-[11px] font-extrabold", sideClass(data.origem))}>
-              {sideLabel(data.origem)}
+            <span
+              className={cn(
+                "rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase leading-none tracking-[0.08em]",
+                originBadge.className,
+              )}
+            >
+              {originBadge.label}
             </span>
           </div>
 
@@ -107,7 +119,7 @@ export function LeituraNeuralMiniCard({
             <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
               <div className="flex items-baseline justify-between gap-1">
                 <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                  {postTie ? "Pos-empate" : "Pagando"}
+                  {originKind === "OPOSTO" ? "Oposto" : postTie ? "Pos-empate" : "Pagando"}
                 </span>
                 <span className="text-[11px] font-black text-neon-cyan">
                   {formatPercent(accuracy)}
@@ -217,6 +229,30 @@ function optionalNumberFrom(value?: number | null) {
 
 function numberFrom(value?: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function neuralOriginKind(reading: NeuralReading) {
+  if (reading.postTie || reading.origem === "TIE") return "TIE";
+  return reading.origemTipo ?? "PAGANTE";
+}
+
+function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
+  if (kind === "OPOSTO") {
+    return {
+      label: "Oposto",
+      className: "border-warning/35 bg-warning/10 text-warning",
+    };
+  }
+  if (kind === "TIE") {
+    return {
+      label: "Tie",
+      className: "border-tie/35 bg-tie/10 text-tie",
+    };
+  }
+  return {
+    label: "Pagante",
+    className: "border-success/35 bg-success/10 text-success",
+  };
 }
 
 function formatPercent(value: number | null) {

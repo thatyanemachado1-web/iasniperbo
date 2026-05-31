@@ -19,6 +19,8 @@ type VoiceLeadKind =
   | "surfResult"
   | "neuralResultGreen"
   | "neuralResultRed"
+  | "neuralOppositeResultGreen"
+  | "neuralOppositeResultRed"
   | "entry"
   | "tieEntry"
   | "currentReading"
@@ -26,6 +28,7 @@ type VoiceLeadKind =
   | "neuralRisk"
   | "neuralWatch"
   | "neuralFavorable"
+  | "neuralOpposite"
   | "surf"
   | "tie";
 
@@ -58,6 +61,14 @@ const VOICE_LEADS: Record<VoiceLeadKind, Record<VoiceNarrationStyle, readonly st
     balanced: ["Número pagante não confirmou agora.", "Previsão do pagante falhou agora.", "Pagante fechou contra.", "Leitura do número não bateu."],
     aggressive: ["Número pagante não confirmou agora.", "Pagante veio contra.", "Essa do número não bateu.", "Leitura do pagante falhou agora."],
   },
+  neuralOppositeResultGreen: {
+    balanced: ["Gatilho oposto confirmou.", "Leitura oposta bateu.", "Gatilho oposto fechou green.", "Leitura complementar confirmou."],
+    aggressive: ["Gatilho oposto bateu.", "Leitura oposta respeitou.", "Boa leitura no oposto.", "Complementar cravou agora."],
+  },
+  neuralOppositeResultRed: {
+    balanced: ["Gatilho oposto não confirmou agora.", "Leitura oposta falhou agora.", "Complementar fechou contra.", "Leitura oposta não bateu."],
+    aggressive: ["Gatilho oposto veio contra.", "Oposto não confirmou agora.", "Essa complementar não bateu.", "Leitura oposta falhou agora."],
+  },
   entry: {
     balanced: ["Leitura atual favorece", "Entrada formada em", "Sinal confirmado em", "A mesa abriu entrada em"],
     aggressive: ["Leitura forte agora:", "Linha interessante agora:", "Sinal formou com presença:", "A mesa apontou firme:"],
@@ -85,6 +96,10 @@ const VOICE_LEADS: Record<VoiceLeadKind, Record<VoiceNarrationStyle, readonly st
   neuralFavorable: {
     balanced: ["Número pagante identificado.", "Pagante entrou na leitura.", "Número favorável no radar.", "Leitura numérica ativa."],
     aggressive: ["Pagante entrou forte.", "Número pagante com presença.", "Leitura forte no número.", "Pagante querendo pagar agora."],
+  },
+  neuralOpposite: {
+    balanced: ["Gatilho oposto identificado.", "Leitura oposta no radar.", "Gatilho complementar ativo.", "Oposto entrou na leitura."],
+    aggressive: ["Gatilho oposto apareceu.", "Oposto entrou forte no radar.", "Leitura complementar pedindo atenção.", "Gatilho oposto com presença."],
   },
   surf: {
     balanced: ["Leitura de surf detectada.", "Surf Analyzer em leitura.", "Movimento de surf no radar.", "Leitura paralela de surf ativa."],
@@ -339,24 +354,28 @@ function buildNeuralResultEvent(
   const currentReds = neuralReds(reading);
   const side = reading.direcao ?? reading.origem;
   const number = reading.numero;
+  const isOpposite = isOppositeTrigger(reading);
+  const readingLabel = isOpposite ? `gatilho oposto ${number}` : `número pagante ${number}`;
+  const greenLead = isOpposite ? "neuralOppositeResultGreen" : "neuralResultGreen";
+  const redLead = isOpposite ? "neuralOppositeResultRed" : "neuralResultRed";
 
   if (typeof number === "number" && side && currentGreens > previousGreens) {
     const g1Increased = safeNumber(reading.greenG1) > safeNumber(previousReading.greenG1);
     const protection = g1Increased ? " no G1" : "";
     return urgent(
-      `result-neural:green:${number}:${side}:${currentGreens}:${currentReds}:${style}`,
+      `result-neural:green:${number}:${side}:${reading.origemTipo ?? ""}:${currentGreens}:${currentReds}:${style}`,
       style === "aggressive"
-        ? `${voiceLead("neuralResultGreen", style, `${number}:${side}:${currentGreens}`, name)}Foi green${protection} na previsão de número pagante ${number}, puxando ${sideLabel(side)}.`
-        : `${voiceLead("neuralResultGreen", style, `${number}:${side}:${currentGreens}`, name)}Foi green${protection} na previsão de número pagante ${number}, em ${sideLabel(side)}.`,
+        ? `${voiceLead(greenLead, style, `${number}:${side}:${currentGreens}`, name)}Foi green${protection} na leitura de ${readingLabel}, puxando ${sideLabel(side)}.`
+        : `${voiceLead(greenLead, style, `${number}:${side}:${currentGreens}`, name)}Foi green${protection} na leitura de ${readingLabel}, em ${sideLabel(side)}.`,
     );
   }
 
   if (typeof number === "number" && side && currentReds > previousReds) {
     return urgent(
-      `result-neural:red:${number}:${side}:${currentGreens}:${currentReds}:${style}`,
+      `result-neural:red:${number}:${side}:${reading.origemTipo ?? ""}:${currentGreens}:${currentReds}:${style}`,
       style === "aggressive"
-        ? `${voiceLead("neuralResultRed", style, `${number}:${side}:${currentReds}`, name)}Red na previsão do número ${number}; gestão primeiro.`
-        : `${voiceLead("neuralResultRed", style, `${number}:${side}:${currentReds}`, name)}Número pagante ${number} não confirmou agora. Aguardar nova leitura.`,
+        ? `${voiceLead(redLead, style, `${number}:${side}:${currentReds}`, name)}Red na leitura de ${readingLabel}; gestão primeiro.`
+        : `${voiceLead(redLead, style, `${number}:${side}:${currentReds}`, name)}${capitalizeText(readingLabel)} não confirmou agora. Aguardar nova leitura.`,
     );
   }
 
@@ -460,14 +479,23 @@ function buildPaganteContext(
   const paganteSide = reading.direcao ?? reading.origem;
   if (!paganteSide) return { key: "no-pagante-side", text: "", isAlignedWithEntry: false };
 
-  const key = `pagante:${reading.numero}:${paganteSide}:${reading.validade ?? ""}:${reading.paganteStatus ?? ""}`;
+  const isOpposite = isOppositeTrigger(reading);
+  const keyPrefix = isOpposite ? "oposto" : "pagante";
+  const key = `${keyPrefix}:${reading.numero}:${paganteSide}:${reading.validade ?? ""}:${reading.paganteStatus ?? ""}`;
   const statusKind = paganteStatusKind(reading);
   const status = paganteStatusLabel(reading);
   const isEntrySide = entrySide && entrySide !== "NONE" && entrySide !== "TIE";
-  const isAlignedWithEntry = Boolean(isEntrySide && paganteSide === entrySide && statusKind === "favorable");
+  const isAlignedWithEntry = Boolean(!isOpposite && isEntrySide && paganteSide === entrySide && statusKind === "favorable");
 
   if (statusKind === "risk") {
     const suffix = style === "aggressive" ? " Gestão primeiro." : "";
+    if (isOpposite) {
+      return {
+        key,
+        text: ` Atenção: gatilho oposto ${reading.numero} apareceu apontando ${sideLabel(paganteSide)}, mas está ${status}; não tratar como número pagante favorável agora.${suffix}`,
+        isAlignedWithEntry: false,
+      };
+    }
     return {
       key,
       text: ` Atenção: número ${reading.numero} apareceu apontando ${sideLabel(paganteSide)}, mas está ${status}; não tratar como pagante favorável agora.${suffix}`,
@@ -476,10 +504,24 @@ function buildPaganteContext(
   }
 
   if (statusKind === "watch") {
+    if (isOpposite) {
+      const text =
+        style === "aggressive"
+          ? ` Gatilho oposto ${reading.numero} apareceu em ${sideLabel(paganteSide)}, mas ainda sem confirmação forte.`
+          : ` Gatilho oposto ${reading.numero} apareceu apontando ${sideLabel(paganteSide)}, ainda como leitura complementar.`;
+      return { key, text, isAlignedWithEntry: false };
+    }
     const text =
       style === "aggressive"
         ? ` Número ${reading.numero} apareceu em ${sideLabel(paganteSide)}, mas ainda sem confirmação forte.`
         : ` Número ${reading.numero} apareceu apontando ${sideLabel(paganteSide)}, mas ainda está ${status}.`;
+    return { key, text, isAlignedWithEntry: false };
+  }
+
+  if (isOpposite) {
+    const text = entrySide && entrySide !== "NONE" && entrySide !== "TIE"
+      ? ` Gatilho oposto ${reading.numero} também aponta ${sideLabel(paganteSide)} agora; não entra como número pagante alinhado.`
+      : ` Gatilho oposto ${reading.numero} aponta ${sideLabel(paganteSide)} agora; leitura complementar.`;
     return { key, text, isAlignedWithEntry: false };
   }
 
@@ -549,7 +591,7 @@ function hasHighRiskForEntry(data: DashboardData, entrySide: "BANKER" | "PLAYER"
     data.currentTieAlert.status === "active" &&
     normalizeText(data.currentTieAlert.level).includes("ALTO");
   const surfHigh = buildSurfEntrySummary(data.currentSurfAlert, entrySide).oppositeRiskLevel === "ALTO";
-  const paganteHigh = paganteStatusKind(data.neuralReading) === "risk";
+  const paganteHigh = !isOppositeTrigger(data.neuralReading) && paganteStatusKind(data.neuralReading) === "risk";
 
   return tieHigh || surfHigh || paganteHigh || data.engineDecision.state === "BLOQUEADO";
 }
@@ -586,20 +628,23 @@ function buildNeuralEvent(
 
   const statusKind = paganteStatusKind(reading);
   const status = paganteStatusLabel(reading);
+  const originSide = reading.origem ?? side;
   const details = [
-    `${sideLabel(side)} ${reading.numero}`,
+    `${reading.numero} ${sideLabel(originSide)}`,
+    `puxando ${sideLabel(side)}`,
     reading.validade ? `validade ${reading.validade}` : "",
     reading.paganteStatus ? `status ${reading.paganteStatus}` : "",
     reading.paganteAlert ?? "",
   ].filter(Boolean);
 
   return analysis(
-    `neural:${roundId}:${reading.mode}:${reading.numero}:${reading.origem ?? ""}:${reading.direcao ?? ""}:${reading.validade ?? ""}:${reading.paganteStatus ?? ""}:${reading.alertas ?? ""}:${style}`,
-    neuralEventText(statusKind, reading.numero, side, status, details, reading.paganteAlert, name, style),
+    `neural:${roundId}:${reading.mode}:${reading.numero}:${reading.origem ?? ""}:${reading.origemTipo ?? ""}:${reading.direcao ?? ""}:${reading.validade ?? ""}:${reading.paganteStatus ?? ""}:${reading.alertas ?? ""}:${style}`,
+    neuralEventText(reading, statusKind, reading.numero, side, status, details, reading.paganteAlert, name, style),
   );
 }
 
 function neuralEventText(
+  reading: NeuralReading,
   statusKind: PaganteStatusKind,
   number: number,
   side: CurrentSignalSide,
@@ -609,17 +654,34 @@ function neuralEventText(
   name: string,
   style: VoiceNarrationStyle,
 ) {
+  const isOpposite = isOppositeTrigger(reading);
+  const originSide = sideLabel(reading.origem ?? side);
+
   if (statusKind === "risk") {
-    const base = `Número ${number} apareceu apontando ${sideLabel(side)}, mas está ${status}. Não tratar como pagante favorável agora${alert ? `. ${alert}` : ""}.`;
+    const base = isOpposite
+      ? `Gatilho oposto ${number} ${originSide} apareceu apontando ${sideLabel(side)}, mas está ${status}. Não tratar como número pagante favorável agora${alert ? `. ${alert}` : ""}.`
+      : `Número ${number} apareceu apontando ${sideLabel(side)}, mas está ${status}. Não tratar como pagante favorável agora${alert ? `. ${alert}` : ""}.`;
+    const lead = isOpposite ? "neuralOpposite" : "neuralRisk";
     return style === "aggressive"
-      ? `${voiceLead("neuralRisk", style, `${number}:${side}:${status}:${alert ?? ""}`, name)}${base} Mão leve.`
-      : `${voiceLead("neuralRisk", style, `${number}:${side}:${status}:${alert ?? ""}`, name)}${base}`;
+      ? `${voiceLead(lead, style, `${number}:${side}:${status}:${alert ?? ""}`, name)}${base} Mão leve.`
+      : `${voiceLead(lead, style, `${number}:${side}:${status}:${alert ?? ""}`, name)}${base}`;
   }
 
   if (statusKind === "watch") {
+    if (isOpposite) {
+      return style === "aggressive"
+        ? `${voiceLead("neuralOpposite", style, `${number}:${side}:${status}`, name)}${number} ${originSide} apareceu apontando ${sideLabel(side)}, mas ainda precisa confirmar.`
+        : `${voiceLead("neuralOpposite", style, `${number}:${side}:${status}`, name)}${number} ${originSide} apareceu apontando ${sideLabel(side)}, ainda como leitura complementar. ${details.join(", ")}.`;
+    }
     return style === "aggressive"
       ? `${voiceLead("neuralWatch", style, `${number}:${side}:${status}`, name)}Número ${number} apareceu em ${sideLabel(side)}, mas ainda precisa confirmar.`
       : `${voiceLead("neuralWatch", style, `${number}:${side}:${status}`, name)}Número ${number} apareceu apontando ${sideLabel(side)}, ainda em observação. ${details.join(", ")}.`;
+  }
+
+  if (isOpposite) {
+    return style === "aggressive"
+      ? `${voiceLead("neuralOpposite", style, `${number}:${side}:${details.join(":")}`, name)}${number} ${originSide} aponta ${sideLabel(side)}. Leitura complementar forte, mas não entra como pagante alinhado. Gestão primeiro.`
+      : `${voiceLead("neuralOpposite", style, `${number}:${side}:${details.join(":")}`, name)}${number} ${originSide} aponta ${sideLabel(side)}. Leitura complementar, não número pagante alinhado. ${details.join(", ")}.`;
   }
 
   return style === "aggressive"
@@ -668,8 +730,13 @@ function buildTieEvent(
 
 function isFavorablePagante(reading?: NeuralReading) {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
+  if (isOppositeTrigger(reading)) return false;
   const side = reading.direcao ?? reading.origem;
   return Boolean(side) && paganteStatusKind(reading) === "favorable";
+}
+
+function isOppositeTrigger(reading?: NeuralReading | null) {
+  return reading?.origemTipo === "OPOSTO";
 }
 
 function paganteStatusKind(reading?: NeuralReading): PaganteStatusKind {
@@ -798,6 +865,10 @@ function hashText(value: string) {
 function joinText(parts: string[]) {
   if (parts.length <= 1) return parts[0] ?? "";
   return `${parts.slice(0, -1).join(", ")} e ${parts[parts.length - 1]}`;
+}
+
+function capitalizeText(value: string) {
+  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
 }
 
 function sideLabel(side?: CurrentSignalSide | null) {

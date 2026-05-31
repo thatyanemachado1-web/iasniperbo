@@ -30,11 +30,13 @@ export interface MainSignal {
 }
 
 export type NeuralReadingMode = "SCANNING" | "OBSERVING" | "ACTIVE";
+export type NeuralOriginKind = "PAGANTE" | "OPOSTO" | "TIE";
 
 export interface NeuralReading {
   mode: NeuralReadingMode;
   numero?: number | null;
   origem?: SignalSide | "TIE" | null;
+  origemTipo?: NeuralOriginKind | null;
   direcao?: SignalSide | "TIE" | null;
   validade?: string | null;
   alertas?: number | null;

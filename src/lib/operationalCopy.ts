@@ -76,17 +76,31 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
   const number = reading.numero;
   const direction = reading.direcao;
   const status = paganteKind(reading);
+  const isOpposite = isOppositeTrigger(reading);
 
   if (status === "risk") {
+    if (isOpposite) {
+      return `Gatilho oposto ${number} ${side} apareceu, mas está em risco elevado. Não tratar como número pagante favorável agora.`;
+    }
     return `Número ${number} apareceu em ${side}, mas está em risco elevado. Aguardar nova confirmação.`;
   }
 
   if (status === "watch") {
+    if (isOpposite) {
+      return `Gatilho oposto ${number} ${side} apareceu como leitura complementar. Aguardar confirmação da engine.`;
+    }
     return `Número ${number} apareceu em ${side}, ainda como leitura complementar. Aguardar confirmação da engine.`;
   }
 
   if (direction) {
+    if (isOpposite) {
+      return `Gatilho oposto identificado. ${number} ${side} apareceu e aponta ${sideLabel(direction)} até ${reading.validade ?? "G1"}. Não tratar como número pagante favorável.`;
+    }
     return `Número pagante identificado. ${side} ${number} apareceu com força e está puxando ${sideLabel(direction)} até ${reading.validade ?? "G1"}.`;
+  }
+
+  if (isOpposite) {
+    return `Gatilho oposto identificado. ${number} ${side} apareceu nas últimas rodadas. Aguardar alinhamento da engine.`;
   }
 
   return `Número pagante identificado. ${side} ${number} apareceu com força nas últimas rodadas.`;
@@ -141,7 +155,7 @@ function entryRisk(data: DashboardData, side: SignalSide) {
   const tieHigh = data.currentTieAlert.status === "active" && riskLabelFromText(data.currentTieAlert.level) === "alta";
   const surf = data.currentSurfAlert;
   const surfOpposite = surf && surfSide(surf) !== side && (surf.surf_break_risk ?? surf.surf_risk) >= 65;
-  const paganteRisk = paganteKind(data.neuralReading) === "risk";
+  const paganteRisk = !isOppositeTrigger(data.neuralReading) && paganteKind(data.neuralReading) === "risk";
   const mediumSurf = surf && (surf.surf_break_risk ?? surf.surf_risk) >= 40;
 
   if (tieHigh || surfOpposite || paganteRisk) return "alto";
@@ -151,9 +165,14 @@ function entryRisk(data: DashboardData, side: SignalSide) {
 
 function activePaganteSide(reading?: NeuralReading | null, favorableOnly = true): CurrentSignalSide | null {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
+  if (isOppositeTrigger(reading)) return null;
   const status = paganteKind(reading);
   if (status === "risk" || (favorableOnly && status !== "favorable")) return null;
   return reading.direcao ?? reading.origem ?? null;
+}
+
+function isOppositeTrigger(reading?: NeuralReading | null) {
+  return reading?.origemTipo === "OPOSTO";
 }
 
 function paganteKind(reading?: NeuralReading | null): PaganteKind {
