@@ -4,7 +4,7 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { LogOut, ShieldCheck, Users } from "lucide-react";
-import { readAdminSession } from "@/lib/adminApi";
+import { clearAdminSession } from "@/lib/adminApi";
 import { accessLabel } from "@/lib/accessApi";
 import { clearUserSession, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 
@@ -13,12 +13,8 @@ export const Route = createFileRoute("/app/conta")({
 });
 
 function ContaPage() {
-  const adminSession = readAdminSession();
   const userSession = readUserSession();
-  const canSeeAdmin =
-    isAdminOwnerEmail(userSession.email) ||
-    userSession.accessStatus === "owner" ||
-    Boolean(adminSession);
+  const canSeeAdmin = isAdminOwnerEmail(userSession.email) || userSession.accessStatus === "owner";
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -85,7 +81,10 @@ function ContaPage() {
         <Toggle label="Animacoes" defaultOn />
         <Link
           to="/"
-          onClick={() => clearUserSession()}
+          onClick={() => {
+            clearUserSession();
+            clearAdminSession();
+          }}
           className="mt-4 inline-flex items-center gap-2 text-sm text-destructive hover:opacity-80"
         >
           <LogOut className="size-4" /> Sair
