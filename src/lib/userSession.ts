@@ -11,7 +11,14 @@ export interface UserSession {
 }
 
 const USER_SESSION_KEY = "sniper_user_session";
-export const ADMIN_OWNER_EMAIL = "gabrielmendespromove@gmail.com";
+// Admin owner email is configured via env var (not hardcoded to avoid leaking PII in the bundle).
+// Leave VITE_ADMIN_OWNER_EMAIL unset to disable client-side owner shortcuts entirely;
+// real authorization must be enforced server-side.
+export const ADMIN_OWNER_EMAIL = String(
+  (import.meta.env.VITE_ADMIN_OWNER_EMAIL as string | undefined) || "",
+)
+  .trim()
+  .toLowerCase();
 
 export function readUserSession(): UserSession {
   if (typeof window === "undefined") {
@@ -83,6 +90,7 @@ export function clearUserSession() {
 }
 
 export function isAdminOwnerEmail(email?: string | null) {
+  if (!ADMIN_OWNER_EMAIL) return false;
   return String(email || "").trim().toLowerCase() === ADMIN_OWNER_EMAIL;
 }
 
