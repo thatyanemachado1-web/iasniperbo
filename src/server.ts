@@ -244,12 +244,16 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   if (request.method === "POST" && url.pathname === "/admin/login") {
     const body = await request.json().catch(() => ({}));
     const envRecord = readRecord(env);
-    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "gabrielmendespromove@gmail.com");
-    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "12346");
+    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "").toLowerCase();
+    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "");
     const adminToken = getAdminToken(env);
 
+    if (!adminEmail || !adminPassword || !adminToken || !getSessionSecret(env)) {
+      return json({ error: "Credenciais admin nao configuradas no servidor." }, 503);
+    }
+
     if (
-      readString(body, "email") === adminEmail &&
+      readString(body, "email").toLowerCase() === adminEmail &&
       readString(body, "password") === adminPassword
     ) {
       recordAccessEvent("admin_login", {
@@ -259,6 +263,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         country: "",
       });
       await saveLiveState();
+      // Admin token is returned only inside a successful admin-login response.
       return json({ token: adminToken, email: adminEmail });
     }
 
@@ -270,12 +275,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
     const envRecord = readRecord(env);
-    const adminEmail = String(
-      envRecord.SNIPER_ADMIN_EMAIL || "gabrielmendespromove@gmail.com",
-    ).toLowerCase();
-    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "12346");
+    const adminEmail = String(envRecord.SNIPER_ADMIN_EMAIL || "").toLowerCase();
+    const adminPassword = String(envRecord.SNIPER_ADMIN_PASSWORD || "");
 
-    if (email === adminEmail && password === adminPassword) {
+    if (!getSessionSecret(env)) {
+      return json({ error: "Sessao nao configurada no servidor." }, 503);
+    }
+
+    if (adminEmail && adminPassword && email === adminEmail && password === adminPassword) {
       recordAccessEvent("owner_login", {
         email,
         full_name: "Gabriel Mendes",
@@ -283,7 +290,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         country: "",
       });
       await saveLiveState();
-      return json({ access: ownerAccess(email, getAdminToken(env)) });
+      return json({ access: await ownerAccess(env, email) });
     }
 
     const client = liveClients.find((item) => readString(item, "email").toLowerCase() === email);
@@ -303,13 +310,26 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       });
     }
 
-    if (readString(client, "password") !== password) {
+    const storedHash = readString(client, "password_hash");
+    const legacyPassword = readString(client, "password");
+    let ok = false;
+    if (storedHash) {
+      ok = await verifyPassword(password, storedHash);
+    } else if (legacyPassword) {
+      ok = legacyPassword === password;
+      if (ok) {
+        client.password_hash = await hashPassword(password);
+        delete (client as Record<string, unknown>).password;
+        await saveLiveState();
+      }
+    }
+    if (!ok) {
       return json({ error: "Senha invalida." }, 401);
     }
 
     recordAccessEvent(Boolean(client.enabled) ? "client_login" : "client_pending_login", client);
     await saveLiveState();
-    return json({ access: clientAccess(client, getAdminToken(env)) });
+    return json({ access: await clientAccess(env, client) });
   }
 
   if (request.method === "POST" && url.pathname === "/auth/register") {
@@ -319,16 +339,20 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (!email || !password) {
       return json({ error: "Email e senha sao obrigatorios." }, 400);
     }
+    if (!getSessionSecret(env)) {
+      return json({ error: "Sessao nao configurada no servidor." }, 503);
+    }
 
     const existingIndex = liveClients.findIndex(
       (item) => readString(item, "email").toLowerCase() === email,
     );
     const now = new Date().toISOString();
-    const client = {
+    const passwordHash = await hashPassword(password);
+    const client: Record<string, unknown> = {
       id: existingIndex >= 0 ? liveClients[existingIndex].id : crypto.randomUUID(),
       full_name: readString(body, "full_name") || email,
       email,
-      password,
+      password_hash: passwordHash,
       phone: readString(body, "phone"),
       city: readString(body, "city"),
       country: readString(body, "country"),
@@ -353,9 +377,26 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     recordAccessEvent(existingIndex >= 0 ? "client_update" : "client_register", client);
     await saveLiveState();
     return json(
-      { access: clientAccess(client, getAdminToken(env)) },
+      { access: await clientAccess(env, client) },
       existingIndex >= 0 ? 200 : 201,
     );
+  }
+
+  if (request.method === "POST" && url.pathname === "/auth/verify") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const token = readString(body, "token");
+    const session = await verifySessionToken(env, token);
+    if (!session) {
+      return json({ valid: false }, 401);
+    }
+    return json({
+      valid: true,
+      email: session.email,
+      scope: session.scope,
+      plan: session.plan,
+      approved: session.approved,
+      exp: session.exp,
+    });
   }
 
   if (!isAdminAuthorized(request, env)) {
@@ -1089,4 +1130,123 @@ function json(data: unknown, status = 200) {
       "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token",
     },
   });
+}
+
+// ===== Password hashing (PBKDF2 via Web Crypto) =====
+const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_KEYLEN = 32;
+
+function bytesToB64Url(bytes: Uint8Array) {
+  let str = "";
+  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64UrlToBytes(s: string) {
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const norm = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
+  const bin = atob(norm);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function constantTimeEqual(a: Uint8Array, b: Uint8Array) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    key,
+    PBKDF2_KEYLEN * 8,
+  );
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${bytesToB64Url(salt)}$${bytesToB64Url(new Uint8Array(bits))}`;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  if (!stored || !stored.startsWith("pbkdf2$")) return false;
+  const parts = stored.split("$");
+  if (parts.length !== 4) return false;
+  const iterations = Number(parts[1]) || PBKDF2_ITERATIONS;
+  const salt = b64UrlToBytes(parts[2]);
+  const expected = b64UrlToBytes(parts[3]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    key,
+    expected.length * 8,
+  );
+  return constantTimeEqual(new Uint8Array(bits), expected);
+}
+
+// ===== Session tokens (HMAC-SHA256 signed) =====
+type SessionPayload = {
+  email: string;
+  scope: "client" | "owner";
+  plan: string;
+  approved: boolean;
+  exp: number; // unix seconds
+};
+
+function getSessionSecret(env: unknown): string {
+  const envRecord = readRecord(env);
+  // Prefer dedicated secret; fall back to admin token only as keying material.
+  const secret = String(envRecord.SNIPER_SESSION_SECRET || envRecord.SNIPER_ADMIN_TOKEN || "");
+  return secret;
+}
+
+async function hmacSign(secret: string, data: string): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
+  return new Uint8Array(sig);
+}
+
+export async function issueSessionToken(env: unknown, payload: Omit<SessionPayload, "exp">, ttlSeconds = 60 * 60 * 24): Promise<string> {
+  const secret = getSessionSecret(env);
+  if (!secret) return "";
+  const full: SessionPayload = { ...payload, exp: Math.floor(Date.now() / 1000) + ttlSeconds };
+  const body = bytesToB64Url(new TextEncoder().encode(JSON.stringify(full)));
+  const sig = bytesToB64Url(await hmacSign(secret, body));
+  return `${body}.${sig}`;
+}
+
+export async function verifySessionToken(env: unknown, token: string): Promise<SessionPayload | null> {
+  const secret = getSessionSecret(env);
+  if (!secret || !token || !token.includes(".")) return null;
+  const [body, sig] = token.split(".");
+  if (!body || !sig) return null;
+  const expected = bytesToB64Url(await hmacSign(secret, body));
+  // length-safe compare
+  if (!constantTimeEqual(new TextEncoder().encode(sig), new TextEncoder().encode(expected))) {
+    return null;
+  }
+  try {
+    const decoded = JSON.parse(new TextDecoder().decode(b64UrlToBytes(body))) as SessionPayload;
+    if (!decoded.exp || decoded.exp < Math.floor(Date.now() / 1000)) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
 }
