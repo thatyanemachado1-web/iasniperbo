@@ -19,10 +19,15 @@ function configuredDashboardUrl() {
   if (apiBase) return `${apiBase.replace(/\/+$/, "")}/dashboard`;
 
   if (typeof window !== "undefined") {
-    const queryUrl = dashboardUrlFromQuery(window.location.search);
-    if (queryUrl) {
-      window.localStorage.setItem("sniper_admin_api_url", stripDashboardPath(queryUrl));
-      return queryUrl;
+    // Only accept the ?sniper_api= override on local dev frontends.
+    // In production this would allow an attacker to redirect API calls via a
+    // crafted link, so it is disabled outside of localhost.
+    if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
+      const queryUrl = dashboardUrlFromQuery(window.location.search);
+      if (queryUrl) {
+        window.localStorage.setItem("sniper_admin_api_url", stripDashboardPath(queryUrl));
+        return queryUrl;
+      }
     }
 
     const savedAdminApi = window.localStorage.getItem("sniper_admin_api_url");
