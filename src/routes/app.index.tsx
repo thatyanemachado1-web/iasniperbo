@@ -49,6 +49,9 @@ function DashboardPage() {
   const tieResult = calculateTieResult(d.tieAlertScoreboard);
   const neuralResult = calculateNeuralResult(d.neuralReading);
   const surfResult = calculateSurfResult(surfBoard);
+  const tableTieCount = d.rounds.filter((round) => round.result === "T").length;
+  const tableTieLabel = formatCompactCount(tableTieCount);
+  const tieHitLabel = formatCompactCount(tieResult.greens);
   const signalHasActiveEntry =
     (d.currentSignal.status === "pending" || d.currentSignal.status === "g1") &&
     (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER");
@@ -176,11 +179,12 @@ function DashboardPage() {
                 { label: "SG", value: mainResult.greenSemGale, variant: "green" },
                 { label: "G1", value: mainResult.greenG1, variant: "green" },
                 { label: "RED", value: mainResult.reds, variant: "red" },
+                { label: "EMP", value: tableTieLabel, variant: "purple" },
                 { label: "Total", value: mainResult.total, variant: "neutral" },
               ]}
               sequencePositive={mainResult.sequencePositive}
               sequenceNegative={mainResult.sequenceNegative}
-              breakdown={mainResult.breakdown}
+              breakdown={`${mainResult.breakdown} / EMP ${tableTieLabel}`}
             />
             <ModuleMiniScoreboard
               moduleType="NEURAL"
@@ -192,24 +196,26 @@ function DashboardPage() {
                 { label: "SG", value: neuralResult.greenSemGale, variant: "green" },
                 { label: "G1", value: neuralResult.greenG1, variant: "cyan" },
                 { label: "RED", value: neuralResult.reds, variant: "red" },
+                { label: "EMP", value: tableTieLabel, variant: "purple" },
                 { label: "Total", value: neuralResult.total, variant: "neutral" },
               ]}
               sequencePositive={neuralResult.sequencePositive}
               sequenceNegative={neuralResult.sequenceNegative}
-              breakdown={neuralResult.breakdown}
+              breakdown={`${neuralResult.breakdown} / EMP ${tableTieLabel}`}
             />
             <ModuleMiniScoreboard
               moduleType="TIE"
               title="Resultado Tie"
               assertiveness={tieResult.assertiveness}
               chips={[
-                { label: "Green", value: tieResult.greens, variant: "green" },
+                { label: "EMP", value: tieHitLabel, variant: "green" },
+                { label: "Mesa", value: tableTieLabel, variant: "purple" },
                 { label: "Exp.", value: tieResult.expired, variant: "purple" },
                 { label: "Total", value: tieResult.total, variant: "neutral" },
               ]}
               sequencePositive={tieResult.sequencePositive}
               sequenceExpired={tieResult.sequenceExpired}
-              breakdown={tieResult.breakdown}
+              breakdown={`EMP ${tieHitLabel} / Mesa ${tableTieLabel} / Exp. ${tieResult.expired}`}
             />
             {surfAlert && (
               <ModuleMiniScoreboard
@@ -221,13 +227,14 @@ function DashboardPage() {
                   { label: "SG", value: surfResult.greenSemGale, variant: "green" },
                   { label: "G1", value: surfResult.greenG1, variant: "cyan" },
                   { label: "RED", value: surfResult.reds, variant: "red" },
+                  { label: "EMP", value: tableTieLabel, variant: "purple" },
                   { label: "Total", value: surfResult.total, variant: "neutral" },
                   { label: "Bloq.", value: surfResult.blocked, variant: "yellow" },
                   { label: "Sem risco", value: surfResult.noRisk, variant: "neutral" },
                 ]}
                 sequencePositive={surfResult.sequencePositive}
                 sequenceNegative={surfResult.sequenceNegative}
-                breakdown={surfResult.breakdown}
+                breakdown={`${surfResult.breakdown} / EMP ${tableTieLabel}`}
               />
             )}
           </PremiumFeature>
@@ -322,6 +329,10 @@ function DashboardPage() {
       </div>
     </div>
   );
+}
+
+function formatCompactCount(value: number) {
+  return value >= 0 && value < 10 ? `0${value}` : String(value);
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {

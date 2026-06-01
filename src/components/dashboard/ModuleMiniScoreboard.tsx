@@ -108,7 +108,7 @@ export function ModuleMiniScoreboard({
             />
           </div>
 
-          <div className="overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="result-chip-scroll">
             <div className="flex w-max items-center gap-1.5">
               {allChips.map((chip) => (
                 <ScoreChip key={`${chip.label}-${chip.value}-${chip.variant}`} {...chip} />
