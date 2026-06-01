@@ -15,7 +15,7 @@ import {
   updateSignalRecipient,
   useLocalAdminApiUrl,
 } from "@/lib/adminApi";
-import { isAdminOwnerEmail, readUserSession, saveUserSession } from "@/lib/userSession";
+import { canAccessAdminPanel, isAdminOwnerEmail, readUserSession, saveUserSession } from "@/lib/userSession";
 import type { AdminSession, AdminSummary, RecipientKind, RecipientPlan, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
@@ -89,19 +89,22 @@ type RecipientEditForm = {
 };
 
 type AdminView = "aprovacoes" | "resumo" | "clientes" | "seguranca";
+type AdminRole = NonNullable<AdminSession["role"]>;
 
 function AdminPage() {
   const userSession = readUserSession();
   const savedAdminSession = readAdminSession();
   const [ownerEmail, setOwnerEmail] = useState(
-    isAdminOwnerEmail(userSession.email) ? userSession.email : savedAdminSession?.email || "",
+    canAccessAdminPanel(userSession.email) ? userSession.email : savedAdminSession?.email || "",
   );
-  const canUseAdmin = isAdminOwnerEmail(ownerEmail);
+  const canUseAdmin = canAccessAdminPanel(ownerEmail);
   const canAttemptAdminLogin =
-    isAdminOwnerEmail(userSession.email) || isAdminOwnerEmail(savedAdminSession?.email);
+    canAccessAdminPanel(userSession.email) || canAccessAdminPanel(savedAdminSession?.email);
   const [session, setSession] = useState<AdminSession | null>(() =>
     canAttemptAdminLogin ? savedAdminSession : null,
   );
+  const adminRole = resolveAdminRole(session);
+  const isOwnerAdmin = adminRole === "owner";
   const [apiUrl, setApiUrl] = useState(() => savedAdminSession?.apiUrl || getInitialApiUrl());
   const [email, setEmail] = useState(() => savedAdminSession?.email || "");
   const [password, setPassword] = useState("");
@@ -263,10 +266,18 @@ function AdminPage() {
   useEffect(() => {
     if (canUseAdmin) {
       refreshRecipients();
-      refreshSecurityEvents();
-      refreshAdminSummary();
+      if (isOwnerAdmin) {
+        refreshSecurityEvents();
+        refreshAdminSummary();
+      }
     }
-  }, [canUseAdmin]);
+  }, [canUseAdmin, isOwnerAdmin]);
+
+  useEffect(() => {
+    if (!isOwnerAdmin && adminView !== "aprovacoes") {
+      setAdminView("aprovacoes");
+    }
+  }, [adminView, isOwnerAdmin]);
 
   if (!canAttemptAdminLogin) {
     return (
@@ -303,13 +314,14 @@ function AdminPage() {
     setError("");
     try {
       const logged = await adminLogin(apiUrl, email, password);
+      const loggedRole = logged.role || "owner";
       saveUserSession(logged.email, {
-        name: "Gabriel Mendes",
-        accessMode: "full",
-        accessStatus: "owner",
-        plan: "vip",
+        name: nameFromEmail(logged.email),
+        accessMode: loggedRole === "owner" ? "full" : "pending",
+        accessStatus: loggedRole === "owner" ? "owner" : "admin_approver",
+        plan: loggedRole === "owner" ? "vip" : "free",
         registered: true,
-        approved: true,
+        approved: loggedRole === "owner",
       });
       saveAdminSession(logged);
       setOwnerEmail(logged.email);
@@ -318,8 +330,10 @@ function AdminPage() {
       setEmail(logged.email);
       setPassword("");
       await refreshRecipients(logged);
-      await refreshSecurityEvents(logged);
-      await refreshAdminSummary(logged);
+      if (loggedRole === "owner") {
+        await refreshSecurityEvents(logged);
+        await refreshAdminSummary(logged);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nao foi possivel entrar no admin.");
     } finally {
@@ -634,19 +648,23 @@ function AdminPage() {
       {error && <StatusMessage tone="red" icon={<WifiOff className="size-4" />} text={error} />}
       {exported && <StatusMessage tone="green" icon={<Check className="size-4" />} text={exported} />}
 
-      <div className="grid grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 sm:grid-cols-4">
+      <div className={`grid gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 ${isOwnerAdmin ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-1"}`}>
         <AdminTabButton active={adminView === "aprovacoes"} onClick={() => setAdminView("aprovacoes")}>
           Aprovações
         </AdminTabButton>
-        <AdminTabButton active={adminView === "resumo"} onClick={() => setAdminView("resumo")}>
-          Resumo
-        </AdminTabButton>
-        <AdminTabButton active={adminView === "clientes"} onClick={() => setAdminView("clientes")}>
-          Clientes
-        </AdminTabButton>
-        <AdminTabButton active={adminView === "seguranca"} onClick={() => setAdminView("seguranca")}>
-          Seguranca
-        </AdminTabButton>
+        {isOwnerAdmin && (
+          <>
+            <AdminTabButton active={adminView === "resumo"} onClick={() => setAdminView("resumo")}>
+              Resumo
+            </AdminTabButton>
+            <AdminTabButton active={adminView === "clientes"} onClick={() => setAdminView("clientes")}>
+              Clientes
+            </AdminTabButton>
+            <AdminTabButton active={adminView === "seguranca"} onClick={() => setAdminView("seguranca")}>
+              Seguranca
+            </AdminTabButton>
+          </>
+        )}
       </div>
 
       {adminView === "aprovacoes" && (
@@ -658,8 +676,9 @@ function AdminPage() {
           />
 
           <div className="mb-3 rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
-            Ao aprovar, o painel libera o login do cliente e calcula automaticamente a validade do plano. Você ainda pode editar data,
-            vencimento, status, plano e excluir tudo nesta mesma tela.
+            {isOwnerAdmin
+              ? "Ao aprovar, o painel libera o login do cliente e calcula automaticamente a validade do plano. Você ainda pode editar data, vencimento, status, plano e excluir tudo nesta mesma tela."
+              : "Permissao limitada: este acesso pode apenas aprovar cadastros pendentes como Premium por prazo. Edicao, exclusao e seguranca ficam restritas ao dono."}
           </div>
 
           <div className="space-y-2">
@@ -682,15 +701,16 @@ function AdminPage() {
                 onSave={() => saveEdit(recipient)}
                 onCancel={cancelEdit}
                 saving={saving}
+                canManageFull={isOwnerAdmin}
               />
             ))}
           </div>
         </GlassCard>
       )}
 
-      {adminView === "resumo" && <AdminSummaryPanel summary={adminSummary} />}
+      {isOwnerAdmin && adminView === "resumo" && <AdminSummaryPanel summary={adminSummary} />}
 
-      {adminView === "seguranca" && (
+      {isOwnerAdmin && adminView === "seguranca" && (
       <GlassCard className="py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
@@ -747,7 +767,7 @@ function AdminPage() {
       </GlassCard>
       )}
 
-      {adminView === "clientes" && (
+      {isOwnerAdmin && adminView === "clientes" && (
         <>
       <GlassCard className="py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -950,6 +970,7 @@ function AdminPage() {
                 onSave={() => saveEdit(recipient)}
                 onCancel={cancelEdit}
                 saving={saving}
+                canManageFull
               />
             ))}
           </div>
@@ -1155,6 +1176,7 @@ function RecipientRowV2({
   onSave,
   onCancel,
   saving,
+  canManageFull = true,
 }: {
   recipient: SignalRecipient;
   onToggle: () => void;
@@ -1167,6 +1189,7 @@ function RecipientRowV2({
   onSave: () => void;
   onCancel: () => void;
   saving: boolean;
+  canManageFull?: boolean;
 }) {
   const isPending = recipient.access_status === "pending";
   const expired = isRecipientExpired(recipient);
@@ -1279,36 +1302,38 @@ function RecipientRowV2({
               </div>
               {recipient.notes && <div className="mt-2 text-xs text-muted-foreground">{recipient.notes}</div>}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={onToggle}
-                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-black ${
-                  active
-                    ? "border-warning/40 bg-warning/10 text-warning"
-                    : "border-success/40 bg-success/15 text-success"
-                }`}
-              >
-                <UserCheck className="size-3.5" />
-                {active ? "Pausar" : "Aprovar"}
-              </button>
-              <button
-                type="button"
-                onClick={onEdit}
-                className="inline-flex size-10 items-center justify-center rounded-xl border border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan"
-                aria-label="Editar cadastro"
-              >
-                <Edit3 className="size-4" />
-              </button>
-              <button
-                type="button"
-                onClick={onDelete}
-                className="inline-flex size-10 items-center justify-center rounded-xl border border-destructive/40 bg-destructive/10 text-destructive"
-                aria-label="Remover recebedor"
-              >
-                <Trash2 className="size-4" />
-              </button>
-            </div>
+            {canManageFull && (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={onToggle}
+                  className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-black ${
+                    active
+                      ? "border-warning/40 bg-warning/10 text-warning"
+                      : "border-success/40 bg-success/15 text-success"
+                  }`}
+                >
+                  <UserCheck className="size-3.5" />
+                  {active ? "Pausar" : "Aprovar"}
+                </button>
+                <button
+                  type="button"
+                  onClick={onEdit}
+                  className="inline-flex size-10 items-center justify-center rounded-xl border border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan"
+                  aria-label="Editar cadastro"
+                >
+                  <Edit3 className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  className="inline-flex size-10 items-center justify-center rounded-xl border border-destructive/40 bg-destructive/10 text-destructive"
+                  aria-label="Remover recebedor"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t border-border/50 pt-2">
@@ -1325,13 +1350,15 @@ function RecipientRowV2({
                 Aprovar Premium {months}m
               </button>
             ))}
-            <button
-              type="button"
-              onClick={onEdit}
-              className="rounded-lg border border-gold/25 bg-gold/10 px-2.5 py-1 text-[10px] font-black text-gold"
-            >
-              Editar tudo
-            </button>
+            {canManageFull && (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="rounded-lg border border-gold/25 bg-gold/10 px-2.5 py-1 text-[10px] font-black text-gold"
+              >
+                Editar tudo
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1436,6 +1463,22 @@ function compareRecipientsForAdmin(a: SignalRecipient, b: SignalRecipient) {
   const safeDateA = Number.isFinite(dateA) ? dateA : 0;
   const safeDateB = Number.isFinite(dateB) ? dateB : 0;
   return safeDateB - safeDateA || (a.full_name || a.name || a.email || "").localeCompare(b.full_name || b.name || b.email || "");
+}
+
+function resolveAdminRole(session: AdminSession | null): AdminRole {
+  if (session?.role === "approver") return "approver";
+  return "owner";
+}
+
+function nameFromEmail(email: string) {
+  const localPart = email.split("@")[0]?.trim();
+  if (!localPart) return "Administrador";
+  return localPart
+    .replace(/[._-]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function recipientStatusRank(recipient: SignalRecipient) {

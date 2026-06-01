@@ -66,7 +66,7 @@ export async function adminLogin(apiUrl: string, email: string, password: string
   if (!response.ok) {
     throw new Error(`Email ou senha admin invalidos na API ${normalizedApiUrl}.`);
   }
-  const data = (await response.json()) as { token?: string; email?: string };
+  const data = (await response.json()) as { token?: string; email?: string; role?: AdminSession["role"] };
   if (!data.token) {
     throw new Error("A API nao retornou uma chave de sessao.");
   }
@@ -74,6 +74,7 @@ export async function adminLogin(apiUrl: string, email: string, password: string
     apiUrl: normalizedApiUrl,
     email: data.email || email,
     token: data.token,
+    role: data.role || "owner",
   };
 }
 

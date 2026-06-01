@@ -16,6 +16,7 @@ type LiveDashboardData = DashboardData & {
   strictDailyCounters?: boolean;
 };
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
+type AdminRole = "owner" | "approver";
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
@@ -315,6 +316,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
     return json({
       hasAdminEmail: getAdminEmails(env).length > 0,
+      hasAdminApproverEmail: getAdminApproverEmails(env).length > 0,
       hasAdminPassword: Boolean(getAdminPassword(env)),
       hasAdminToken: Boolean(getAdminToken(env)),
       hasSessionSecret: Boolean(getSessionSecret(env)),
@@ -325,17 +327,16 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (request.method === "POST" && url.pathname === "/admin/login") {
     const body = await request.json().catch(() => ({}));
-    const adminEmails = getAdminEmails(env);
     const loginEmail = readString(body, "email").toLowerCase();
+    const adminRole = getAdminRoleForEmail(env, loginEmail);
     const adminPassword = getAdminPassword(env);
-    const adminToken = getAdminToken(env);
 
-    if (adminEmails.length === 0 || !adminPassword || !adminToken || !getSessionSecret(env)) {
+    if (!adminPassword || !getSessionSecret(env)) {
       return json({ error: "Credenciais admin nao configuradas no servidor." }, 503);
     }
 
     if (
-      adminEmails.includes(loginEmail) &&
+      adminRole &&
       readString(body, "password") === adminPassword
     ) {
       recordAccessEvent("admin_login", {
@@ -345,8 +346,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         country: "",
       });
       await saveLiveState(env);
-      // Admin token is returned only inside a successful admin-login response.
-      return json({ token: adminToken, email: loginEmail });
+      const token = await issueSessionToken(env, {
+        email: loginEmail,
+        scope: adminRole === "owner" ? "owner" : "admin_approver",
+        plan: adminRole === "owner" ? "vip" : "free",
+        approved: adminRole === "owner",
+      });
+      return json({ token, email: loginEmail, role: adminRole });
     }
 
     return json({ error: "Email ou senha admin invalidos." }, 401);
@@ -356,14 +362,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = readRecord(await request.json().catch(() => ({})));
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
-    const adminEmails = getAdminEmails(env);
     const adminPassword = getAdminPassword(env);
+    const adminRole = getAdminRoleForEmail(env, email);
 
     if (!getSessionSecret(env)) {
       return json({ error: "Sessao nao configurada no servidor." }, 503);
     }
 
-    if (adminEmails.includes(email) && adminPassword && password === adminPassword) {
+    if (adminRole === "owner" && adminPassword && password === adminPassword) {
       recordAccessEvent("owner_login", {
         email,
         full_name: nameFromEmail(email),
@@ -372,6 +378,17 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       });
       await saveLiveState(env);
       return json({ access: await ownerAccess(env, email) });
+    }
+
+    if (adminRole === "approver" && adminPassword && password === adminPassword) {
+      recordAccessEvent("admin_approver_login", {
+        email,
+        full_name: nameFromEmail(email),
+        city: "",
+        country: "",
+      });
+      await saveLiveState(env);
+      return json({ access: await approverAccess(env, email) });
     }
 
     const client = liveClients.find((item) => readString(item, "email").toLowerCase() === email);
@@ -475,6 +492,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ valid: true, access: await ownerAccess(env, session.email) });
     }
 
+    if (session.scope === "admin_approver") {
+      return json({ valid: true, access: await approverAccess(env, session.email) });
+    }
+
     const client = liveClients.find(
       (item) => readString(item, "email").toLowerCase() === session.email.toLowerCase(),
     );
@@ -499,11 +520,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     return json({ valid: true, access: await clientAccess(env, client) });
   }
 
-  if (!isAdminAuthorized(request, env)) {
+  const adminRole = await getAdminRequestRole(request, env);
+  if (!adminRole) {
     return json({ error: "Nao autorizado." }, 401);
   }
 
   if (request.method === "GET" && url.pathname === "/admin/summary") {
+    if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
     return json({ summary: buildAdminSummary() });
   }
 
@@ -511,10 +534,16 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (request.method === "GET") {
       const changed = syncRecipientsFromClients();
       if (changed) await saveLiveState(env);
-      return json({ recipients: liveRecipients });
+      return json({
+        recipients:
+          adminRole === "owner"
+            ? liveRecipients
+            : liveRecipients.filter((recipient) => readString(recipient, "access_status") === "pending"),
+      });
     }
 
     if (request.method === "POST") {
+      if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
       const body = readRecord(await request.json().catch(() => ({})));
       const now = new Date().toISOString();
       const recipient = normalizeRecipient({
@@ -550,9 +579,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "PATCH") {
       const body = readRecord(await request.json().catch(() => ({})));
+      const patchBody =
+        adminRole === "owner" ? body : approverPatchForPendingApproval(liveRecipients[index], body);
+      if (!patchBody) return json({ error: "Permissao insuficiente." }, 403);
       const updated = normalizeRecipient({
         ...liveRecipients[index],
-        ...body,
+        ...patchBody,
         id: liveRecipients[index].id,
         created_at: liveRecipients[index].created_at,
         updated_at: new Date().toISOString(),
@@ -561,12 +593,15 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         recipientIndex === index ? updated : recipient,
       );
       upsertClientFromRecipient(updated);
-      await updateClientPasswordFromBody(updated, body);
+      if (adminRole === "owner") {
+        await updateClientPasswordFromBody(updated, body);
+      }
       await saveLiveState(env);
       return json({ recipient: updated });
     }
 
     if (request.method === "DELETE") {
+      if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
       const deletedRecipient = liveRecipients[index];
       const deletedEmail = readString(deletedRecipient, "email").toLowerCase();
       liveRecipients = liveRecipients.filter((recipient) => recipient.id !== recipientId);
@@ -581,6 +616,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (url.pathname === "/module-toggles") {
+    if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
     if (request.method === "GET") {
       return json({ moduleToggles: liveModuleToggles });
     }
@@ -605,6 +641,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "GET" && url.pathname === "/security-events") {
+    if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
     return json({
       events: liveAccessEvents,
       summary: {
@@ -1048,9 +1085,15 @@ function isDashboardAuthorized(request: Request, url: URL, env: unknown) {
   return Boolean(token) && (headerToken === token || url.searchParams.get("token") === token);
 }
 
-function isAdminAuthorized(request: Request, env: unknown) {
+async function getAdminRequestRole(request: Request, env: unknown): Promise<AdminRole | null> {
   const headerToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  return Boolean(headerToken) && headerToken === getAdminToken(env);
+  if (!headerToken) return null;
+  if (headerToken === getAdminToken(env)) return "owner";
+
+  const session = await verifySessionToken(env, headerToken);
+  if (session?.scope === "owner") return "owner";
+  if (session?.scope === "admin_approver") return "approver";
+  return null;
 }
 
 function getAdminToken(env: unknown) {
@@ -1065,6 +1108,23 @@ function getAdminEmails(env: unknown) {
       "",
     )}`,
   );
+}
+
+function getAdminApproverEmails(env: unknown) {
+  return parseEmailList(
+    `${readNamedServerSecret(env, "SNIPER_ADMIN_APPROVER_EMAIL", "")},${readNamedServerSecret(
+      env,
+      "SNIPER_ADMIN_APPROVER_EMAILS",
+      "",
+    )}`,
+  ).filter((email) => !getAdminEmails(env).includes(email));
+}
+
+function getAdminRoleForEmail(env: unknown, email: string): AdminRole | null {
+  const cleanEmail = email.trim().toLowerCase();
+  if (getAdminEmails(env).includes(cleanEmail)) return "owner";
+  if (getAdminApproverEmails(env).includes(cleanEmail)) return "approver";
+  return null;
 }
 
 function getAdminPassword(env: unknown) {
@@ -1201,6 +1261,32 @@ function normalizeRecipient(recipient: Record<string, unknown>) {
   };
 }
 
+function approverPatchForPendingApproval(
+  currentRecipient: Record<string, unknown>,
+  body: Record<string, unknown>,
+) {
+  const currentStatus = readString(currentRecipient, "access_status");
+  const wantsApproval =
+    body.enabled === true &&
+    readString(body, "access_status") === "approved" &&
+    ["premium", "vip"].includes(readString(body, "plan"));
+
+  if (currentStatus !== "pending" || !wantsApproval) return null;
+
+  const startsAt = readString(body, "starts_at") || todayIso();
+  const validityDays = Number(body.validity_days || 30);
+  const expiresAt = readString(body, "expires_at") || addDaysIso(startsAt, validityDays || 30);
+
+  return {
+    enabled: true,
+    access_status: "approved",
+    plan: readString(body, "plan") === "vip" ? "vip" : "premium",
+    starts_at: startsAt,
+    validity_days: Number.isFinite(validityDays) ? validityDays : 30,
+    expires_at: expiresAt,
+  };
+}
+
 async function ownerAccess(env: unknown, email: string) {
   const token = await issueSessionToken(env, {
     email,
@@ -1218,6 +1304,27 @@ async function ownerAccess(env: unknown, email: string) {
     full_name: nameFromEmail(email),
     expires_at: "",
     reason: "Acesso do administrador.",
+    client_token: token,
+  };
+}
+
+async function approverAccess(env: unknown, email: string) {
+  const token = await issueSessionToken(env, {
+    email,
+    scope: "admin_approver",
+    plan: "free",
+    approved: false,
+  });
+  return {
+    registered: true,
+    approved: false,
+    access_mode: "pending",
+    access_status: "admin_approver",
+    plan: "free",
+    email,
+    full_name: nameFromEmail(email),
+    expires_at: "",
+    reason: "Acesso limitado para aprovar clientes.",
     client_token: token,
   };
 }
@@ -1843,7 +1950,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 // ===== Session tokens (HMAC-SHA256 signed) =====
 type SessionPayload = {
   email: string;
-  scope: "client" | "owner";
+  scope: "client" | "owner" | "admin_approver";
   plan: string;
   approved: boolean;
   exp: number; // unix seconds

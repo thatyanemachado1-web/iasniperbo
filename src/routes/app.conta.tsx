@@ -6,7 +6,7 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { Cloud, Database, LogOut, ShieldCheck, Users } from "lucide-react";
 import { clearAdminSession } from "@/lib/adminApi";
 import { accessLabel } from "@/lib/accessApi";
-import { clearUserSession, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
+import { canAccessAdminPanel, clearUserSession, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app/conta")({
   component: ContaPage,
@@ -14,7 +14,7 @@ export const Route = createFileRoute("/app/conta")({
 
 function ContaPage() {
   const userSession = readUserSession();
-  const canSeeAdmin = isAdminOwnerEmail(userSession.email);
+  const canSeeAdmin = canAccessAdminPanel(userSession.email);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

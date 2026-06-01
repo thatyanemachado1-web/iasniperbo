@@ -3,7 +3,7 @@ import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck }
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { accessLabel } from "@/lib/accessApi";
-import { hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
+import { canAccessAdminPanel, hasFullAccess, readUserSession } from "@/lib/userSession";
 import type { ReactNode } from "react";
 
 const navItems = [
@@ -19,7 +19,7 @@ const adminNavItem = { to: "/app/admin", label: "ADM", icon: ShieldCheck } as co
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const userSession = readUserSession();
-  const canSeeAdmin = isAdminOwnerEmail(userSession.email);
+  const canSeeAdmin = canAccessAdminPanel(userSession.email);
   const fullAccess = hasFullAccess(userSession);
   const visibleNavItems = fullAccess ? navItems.filter((item) => item.to !== "/app/planos") : navItems;
   const mobileNavItems = canSeeAdmin ? [...visibleNavItems, adminNavItem] : visibleNavItems;

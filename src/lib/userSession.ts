@@ -19,6 +19,11 @@ export const ADMIN_OWNER_EMAILS = parseAdminEmails(
     (import.meta.env.VITE_ADMIN_OWNER_EMAILS as string | undefined) || ""
   }`,
 );
+export const ADMIN_APPROVER_EMAILS = parseAdminEmails(
+  `${(import.meta.env.VITE_ADMIN_APPROVER_EMAIL as string | undefined) || ""},${
+    (import.meta.env.VITE_ADMIN_APPROVER_EMAILS as string | undefined) || ""
+  }`,
+);
 export const ADMIN_OWNER_EMAIL = ADMIN_OWNER_EMAILS[0] || "";
 
 export function readUserSession(): UserSession {
@@ -93,6 +98,16 @@ export function clearUserSession() {
 export function isAdminOwnerEmail(email?: string | null) {
   if (ADMIN_OWNER_EMAILS.length === 0) return false;
   return ADMIN_OWNER_EMAILS.includes(normalizeEmail(email));
+}
+
+export function isAdminApproverEmail(email?: string | null) {
+  if (ADMIN_APPROVER_EMAILS.length === 0) return false;
+  const cleanEmail = normalizeEmail(email);
+  return !isAdminOwnerEmail(cleanEmail) && ADMIN_APPROVER_EMAILS.includes(cleanEmail);
+}
+
+export function canAccessAdminPanel(email?: string | null) {
+  return isAdminOwnerEmail(email) || isAdminApproverEmail(email);
 }
 
 export function hasFullAccess(session: UserSession = readUserSession()) {
