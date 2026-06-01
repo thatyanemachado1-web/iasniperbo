@@ -25,6 +25,9 @@ const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 const MAX_NARRATION_CHARS = 900;
+const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
+const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
+const RATE_LIMIT_WINDOW_MS = 60_000;
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 let liveDashboardData: LiveDashboardData = {
@@ -42,6 +45,7 @@ let liveModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
 };
+const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
@@ -124,6 +128,9 @@ export default {
       const adminRedirect = redirectLegacyAdminRoute(request);
       if (adminRedirect) return withSecurityHeaders(adminRedirect);
 
+      const rateLimitResponse = handleRateLimit(request);
+      if (rateLimitResponse) return withSecurityHeaders(rateLimitResponse);
+
       await loadLiveState(env);
 
       const voiceResponse = await handleVoiceNarrationRequest(request, env);
@@ -158,6 +165,72 @@ function redirectLegacyAdminRoute(request: Request) {
   return Response.redirect(url.toString(), 302);
 }
 
+function handleRateLimit(request: Request) {
+  if (request.method === "OPTIONS") return null;
+
+  const url = new URL(request.url);
+  const limit = rateLimitForRequest(request.method, url.pathname);
+  if (!limit) return null;
+
+  const now = Date.now();
+  const key = `${getClientIp(request)}:${request.method}:${url.pathname}`;
+  const current = rateLimitBuckets.get(key);
+  const bucket =
+    current && current.resetAt > now
+      ? current
+      : { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+
+  bucket.count += 1;
+  rateLimitBuckets.set(key, bucket);
+
+  if (rateLimitBuckets.size > 5000) {
+    for (const [bucketKey, value] of rateLimitBuckets.entries()) {
+      if (value.resetAt <= now) rateLimitBuckets.delete(bucketKey);
+    }
+  }
+
+  if (bucket.count <= limit) return null;
+
+  return json(
+    {
+      error: "Muitas requisicoes. Aguarde alguns instantes e tente novamente.",
+    },
+    429,
+  );
+}
+
+function rateLimitForRequest(method: string, pathname: string) {
+  if (pathname === "/auth/check" || pathname === "/auth/register" || pathname === "/admin/login") {
+    return 30;
+  }
+  if (pathname === "/auth/verify") return 60;
+  if (pathname === "/voice/narration") return 25;
+  if (pathname === "/dashboard") return method === "GET" ? 120 : 240;
+  if (pathname === "/dashboard/signal") return 240;
+  if (
+    pathname === "/admin/summary" ||
+    pathname === "/telegram-recipients" ||
+    pathname.startsWith("/telegram-recipients/") ||
+    pathname === "/module-toggles" ||
+    pathname === "/security-events" ||
+    pathname === "/voice/diagnostics" ||
+    pathname === "/auth/diagnostics"
+  ) {
+    return 120;
+  }
+  return null;
+}
+
+function getClientIp(request: Request) {
+  const cfIp = request.headers.get("cf-connecting-ip");
+  if (cfIp) return cfIp.trim();
+
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0]?.trim() || "unknown";
+
+  return request.headers.get("x-real-ip")?.trim() || "unknown";
+}
+
 async function handleVoiceNarrationRequest(request: Request, env: unknown) {
   const url = new URL(request.url);
   if (url.pathname !== "/voice/narration") return null;
@@ -170,7 +243,7 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
     return json({ error: "Metodo nao permitido." }, 405);
   }
 
-  if (!isDashboardAuthorized(request, url, env)) {
+  if (!(await isDashboardReadAuthorized(request, url, env))) {
     return json({ error: "Nao autorizado." }, 401);
   }
 
@@ -339,6 +412,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       adminRole &&
       readString(body, "password") === adminPassword
     ) {
+      const binding = await requestSessionBinding(env, request);
       recordAccessEvent("admin_login", {
         email: loginEmail,
         full_name: nameFromEmail(loginEmail),
@@ -351,7 +425,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         scope: adminRole === "owner" ? "owner" : "admin_approver",
         plan: adminRole === "owner" ? "vip" : "free",
         approved: adminRole === "owner",
-      });
+        sid: crypto.randomUUID(),
+        ua: binding.userAgentHash,
+        iph: binding.ipHash,
+      }, ADMIN_SESSION_TTL_SECONDS);
       return json({ token, email: loginEmail, role: adminRole });
     }
 
@@ -377,7 +454,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         country: "",
       });
       await saveLiveState(env);
-      return json({ access: await ownerAccess(env, email) });
+      return json({ access: await ownerAccess(env, email, request) });
     }
 
     if (adminRole === "approver" && adminPassword && password === adminPassword) {
@@ -388,7 +465,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         country: "",
       });
       await saveLiveState(env);
-      return json({ access: await approverAccess(env, email) });
+      return json({ access: await approverAccess(env, email, request) });
     }
 
     const client = liveClients.find((item) => readString(item, "email").toLowerCase() === email);
@@ -426,8 +503,9 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
 
     recordAccessEvent(Boolean(client.enabled) ? "client_login" : "client_pending_login", client);
+    const access = await clientAccess(env, client, request);
     await saveLiveState(env);
-    return json({ access: await clientAccess(env, client) });
+    return json({ access });
   }
 
   if (request.method === "POST" && url.pathname === "/auth/register") {
@@ -473,9 +551,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     upsertRecipientFromClient(client);
     recordAccessEvent(existingIndex >= 0 ? "client_update" : "client_register", client);
+    const access = await clientAccess(env, client, request);
     await saveLiveState(env);
     return json(
-      { access: await clientAccess(env, client) },
+      { access },
       existingIndex >= 0 ? 200 : 201,
     );
   }
@@ -489,11 +568,17 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
 
     if (session.scope === "owner") {
-      return json({ valid: true, access: await ownerAccess(env, session.email) });
+      if (!(await sessionMatchesRequestBinding(env, request, session))) {
+        return json({ valid: false, reason: "Sessao invalida ou usada em outro dispositivo." }, 401);
+      }
+      return json({ valid: true, access: await ownerAccess(env, session.email, request) });
     }
 
     if (session.scope === "admin_approver") {
-      return json({ valid: true, access: await approverAccess(env, session.email) });
+      if (!(await sessionMatchesRequestBinding(env, request, session))) {
+        return json({ valid: false, reason: "Sessao invalida ou usada em outro dispositivo." }, 401);
+      }
+      return json({ valid: true, access: await approverAccess(env, session.email, request) });
     }
 
     const client = liveClients.find(
@@ -517,7 +602,22 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       });
     }
 
-    return json({ valid: true, access: await clientAccess(env, client) });
+    const sessionCheck = await validateClientSessionBinding(env, request, session, client);
+    if (!sessionCheck.ok) {
+      recordAccessEvent("client_session_blocked", {
+        ...client,
+        risk: "high",
+        detail: sessionCheck.reason,
+        ip_hash: sessionCheck.ipHash || "",
+        user_agent_hash: sessionCheck.userAgentHash || "",
+      });
+      await saveLiveState(env);
+      return json({ valid: false, reason: "Sessao invalida ou usada em outro dispositivo." }, 401);
+    }
+
+    const access = await clientAccess(env, client, request, session);
+    await saveLiveState(env);
+    return json({ valid: true, access });
   }
 
   const adminRole = await getAdminRequestRole(request, env);
@@ -642,15 +742,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (request.method === "GET" && url.pathname === "/security-events") {
     if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
+    const summary = summarizeSecurityEvents();
     return json({
       events: liveAccessEvents,
-      summary: {
-        total: liveAccessEvents.length,
-        low: liveAccessEvents.length,
-        medium: 0,
-        high: 0,
-        critical: 0,
-      },
+      summary,
     });
   }
 
@@ -668,6 +763,10 @@ async function handleDashboardRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "GET" && url.pathname === "/dashboard") {
+    if (!(await isDashboardReadAuthorized(request, url, env))) {
+      return json({ error: "Nao autorizado." }, 401);
+    }
+
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
     if (cycle.changed) {
       liveDashboardData = cycle.dashboard;
@@ -1075,14 +1174,33 @@ function clampPercent(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(number)));
 }
 
-function isDashboardAuthorized(request: Request, url: URL, env: unknown) {
+function isDashboardAuthorized(request: Request, _url: URL, env: unknown) {
   const token =
     readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", "") ||
     readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "sniper-local-admin-token");
   const headerToken =
-    request.headers.get("x-sniper-token") ||
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  return Boolean(token) && (headerToken === token || url.searchParams.get("token") === token);
+    request.headers.get("x-sniper-token")?.trim() ||
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
+  return Boolean(token) && headerToken === token;
+}
+
+async function isDashboardReadAuthorized(request: Request, url: URL, env: unknown) {
+  if (isDashboardAuthorized(request, url, env)) return true;
+
+  const token = getBearerToken(request);
+  if (!token) return false;
+
+  const session = await verifySessionToken(env, token);
+  if (!session) return false;
+  if (session.scope === "owner") return sessionMatchesRequestBinding(env, request, session);
+  if (session.scope !== "client") return false;
+
+  const client = findClientByEmail(session.email);
+  if (!client) return false;
+  if (!clientHasLiveAccess(client)) return false;
+
+  const sessionCheck = await validateClientSessionBinding(env, request, session, client);
+  return sessionCheck.ok;
 }
 
 async function getAdminRequestRole(request: Request, env: unknown): Promise<AdminRole | null> {
@@ -1091,9 +1209,24 @@ async function getAdminRequestRole(request: Request, env: unknown): Promise<Admi
   if (headerToken === getAdminToken(env)) return "owner";
 
   const session = await verifySessionToken(env, headerToken);
-  if (session?.scope === "owner") return "owner";
-  if (session?.scope === "admin_approver") return "approver";
+  if (session?.scope === "owner" && (await sessionMatchesRequestBinding(env, request, session))) {
+    return "owner";
+  }
+  if (
+    session?.scope === "admin_approver" &&
+    (await sessionMatchesRequestBinding(env, request, session))
+  ) {
+    return "approver";
+  }
   return null;
+}
+
+function getBearerToken(request: Request) {
+  return (
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ||
+    request.headers.get("x-sniper-token")?.trim() ||
+    ""
+  );
 }
 
 function getAdminToken(env: unknown) {
@@ -1287,13 +1420,84 @@ function approverPatchForPendingApproval(
   };
 }
 
-async function ownerAccess(env: unknown, email: string) {
-  const token = await issueSessionToken(env, {
-    email,
-    scope: "owner",
-    plan: "vip",
-    approved: true,
-  });
+function findClientByEmail(email: string) {
+  const cleanEmail = email.trim().toLowerCase();
+  return liveClients.find((item) => readString(item, "email").toLowerCase() === cleanEmail) || null;
+}
+
+function clientHasLiveAccess(client: Record<string, unknown>) {
+  const enabled = Boolean(client.enabled) || readString(client, "access_status") === "approved";
+  return enabled && !isExpiredIso(readString(client, "expires_at"));
+}
+
+async function validateClientSessionBinding(
+  env: unknown,
+  request: Request,
+  session: SessionPayload,
+  client: Record<string, unknown>,
+) {
+  const binding = await requestSessionBinding(env, request);
+  const activeSessionId = readString(client, "active_session_id");
+  const activeUserAgentHash = readString(client, "active_session_user_agent_hash");
+  const activeIpHash = readString(client, "active_session_ip_hash");
+
+  if (!session.sid || !activeSessionId || session.sid !== activeSessionId) {
+    return { ok: false, reason: "single_session_replaced", ...binding };
+  }
+  if (session.ua && session.ua !== binding.userAgentHash) {
+    return { ok: false, reason: "user_agent_changed", ...binding };
+  }
+  if (session.iph && session.iph !== binding.ipHash) {
+    return { ok: false, reason: "ip_changed", ...binding };
+  }
+  if (activeUserAgentHash && activeUserAgentHash !== binding.userAgentHash) {
+    return { ok: false, reason: "active_user_agent_mismatch", ...binding };
+  }
+  if (activeIpHash && activeIpHash !== binding.ipHash) {
+    return { ok: false, reason: "active_ip_mismatch", ...binding };
+  }
+
+  return { ok: true, reason: "", ...binding };
+}
+
+async function sessionMatchesRequestBinding(env: unknown, request: Request, session: SessionPayload) {
+  if (!session.ua || !session.iph) return false;
+  const binding = await requestSessionBinding(env, request);
+  return session.ua === binding.userAgentHash && session.iph === binding.ipHash;
+}
+
+async function requestSessionBinding(env: unknown, request: Request) {
+  const userAgent = request.headers.get("user-agent") || "unknown";
+  const ip = getClientIp(request);
+  return {
+    userAgentHash: await hashSessionValue(env, `ua:${userAgent}`),
+    ipHash: await hashSessionValue(env, `ip:${ip}`),
+  };
+}
+
+async function hashSessionValue(env: unknown, value: string) {
+  const secret = getSessionSecret(env);
+  if (!secret) return "";
+  return bytesToB64Url(await hmacSign(secret, `session-binding:${value}`)).slice(0, 32);
+}
+
+async function ownerAccess(env: unknown, email: string, request?: Request) {
+  const binding = request
+    ? await requestSessionBinding(env, request)
+    : { userAgentHash: "", ipHash: "" };
+  const token = await issueSessionToken(
+    env,
+    {
+      email,
+      scope: "owner",
+      plan: "vip",
+      approved: true,
+      sid: crypto.randomUUID(),
+      ua: binding.userAgentHash,
+      iph: binding.ipHash,
+    },
+    ADMIN_SESSION_TTL_SECONDS,
+  );
   return {
     registered: true,
     approved: true,
@@ -1308,13 +1512,23 @@ async function ownerAccess(env: unknown, email: string) {
   };
 }
 
-async function approverAccess(env: unknown, email: string) {
-  const token = await issueSessionToken(env, {
-    email,
-    scope: "admin_approver",
-    plan: "free",
-    approved: false,
-  });
+async function approverAccess(env: unknown, email: string, request?: Request) {
+  const binding = request
+    ? await requestSessionBinding(env, request)
+    : { userAgentHash: "", ipHash: "" };
+  const token = await issueSessionToken(
+    env,
+    {
+      email,
+      scope: "admin_approver",
+      plan: "free",
+      approved: false,
+      sid: crypto.randomUUID(),
+      ua: binding.userAgentHash,
+      iph: binding.ipHash,
+    },
+    ADMIN_SESSION_TTL_SECONDS,
+  );
   return {
     registered: true,
     approved: false,
@@ -1329,7 +1543,12 @@ async function approverAccess(env: unknown, email: string) {
   };
 }
 
-async function clientAccess(env: unknown, client: Record<string, unknown>) {
+async function clientAccess(
+  env: unknown,
+  client: Record<string, unknown>,
+  request?: Request,
+  session?: SessionPayload,
+) {
   const enabled = Boolean(client.enabled) || readString(client, "access_status") === "approved";
   const expired = enabled && isExpiredIso(readString(client, "expires_at"));
   const approved = enabled && !expired;
@@ -1338,8 +1557,52 @@ async function clientAccess(env: unknown, client: Record<string, unknown>) {
     ? readString(client, "plan")
     : "free";
   const email = readString(client, "email");
+  const previousSessionId = readString(client, "active_session_id");
+  const sessionId = session?.sid && session.sid === previousSessionId
+    ? session.sid
+    : crypto.randomUUID();
+  const binding = request
+    ? await requestSessionBinding(env, request)
+    : {
+        ipHash: readString(client, "active_session_ip_hash"),
+        userAgentHash: readString(client, "active_session_user_agent_hash"),
+      };
 
-  const token = await issueSessionToken(env, { email, scope: "client", plan, approved });
+  if (request) {
+    if (previousSessionId && previousSessionId !== sessionId) {
+      recordAccessEvent("client_session_replaced", {
+        ...client,
+        risk: "medium",
+        detail: "Nova sessao derrubou a sessao anterior.",
+        ip_hash: binding.ipHash,
+        user_agent_hash: binding.userAgentHash,
+      });
+    }
+
+    const now = new Date().toISOString();
+    client.active_session_id = sessionId;
+    client.active_session_user_agent_hash = binding.userAgentHash;
+    client.active_session_ip_hash = binding.ipHash;
+    client.active_session_started_at =
+      previousSessionId === sessionId
+        ? readString(client, "active_session_started_at") || now
+        : now;
+    client.active_session_last_seen_at = now;
+  }
+
+  const token = await issueSessionToken(
+    env,
+    {
+      email,
+      scope: "client",
+      plan,
+      approved,
+      sid: sessionId,
+      ua: binding.userAgentHash,
+      iph: binding.ipHash,
+    },
+    CLIENT_SESSION_TTL_SECONDS,
+  );
 
   return {
     registered: true,
@@ -1369,8 +1632,24 @@ function recordAccessEvent(type: string, source: Record<string, unknown>) {
     full_name: readString(source, "full_name") || readString(source, "name"),
     city: readString(source, "city"),
     country: readString(source, "country"),
+    risk: readString(source, "risk"),
+    detail: readString(source, "detail"),
+    ip_hash: readString(source, "ip_hash"),
+    user_agent_hash: readString(source, "user_agent_hash"),
   };
   liveAccessEvents = [event, ...liveAccessEvents].slice(0, 200);
+}
+
+function summarizeSecurityEvents() {
+  const summary = { total: liveAccessEvents.length, low: 0, medium: 0, high: 0, critical: 0 };
+  for (const event of liveAccessEvents) {
+    const risk = readString(event, "risk").toLowerCase();
+    if (risk === "critical") summary.critical += 1;
+    else if (risk === "high") summary.high += 1;
+    else if (risk === "medium") summary.medium += 1;
+    else summary.low += 1;
+  }
+  return summary;
 }
 
 function buildAdminSummary() {
@@ -1953,6 +2232,9 @@ type SessionPayload = {
   scope: "client" | "owner" | "admin_approver";
   plan: string;
   approved: boolean;
+  sid?: string;
+  ua?: string;
+  iph?: string;
   exp: number; // unix seconds
 };
 
