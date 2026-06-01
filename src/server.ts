@@ -1177,7 +1177,7 @@ function clampPercent(value: unknown) {
 function isDashboardAuthorized(request: Request, _url: URL, env: unknown) {
   const token =
     readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", "") ||
-    readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "sniper-local-admin-token");
+    readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "");
   const headerToken =
     request.headers.get("x-sniper-token")?.trim() ||
     request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
@@ -1230,7 +1230,7 @@ function getBearerToken(request: Request) {
 }
 
 function getAdminToken(env: unknown) {
-  return readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "sniper-local-admin-token");
+  return readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "");
 }
 
 function getAdminEmails(env: unknown) {
