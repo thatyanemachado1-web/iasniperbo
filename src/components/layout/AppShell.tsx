@@ -2,6 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
+import { readAdminSession } from "@/lib/adminApi";
 import { accessLabel } from "@/lib/accessApi";
 import { canAccessAdminPanel, hasFullAccess, readUserSession } from "@/lib/userSession";
 import type { ReactNode } from "react";
@@ -19,7 +20,10 @@ const adminNavItem = { to: "/app/admin", label: "ADM", icon: ShieldCheck } as co
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const userSession = readUserSession();
-  const canSeeAdmin = canAccessAdminPanel(userSession.email);
+  const adminSession = readAdminSession();
+  const canSeeAdmin =
+    canAccessAdminPanel(userSession.email) ||
+    Boolean(adminSession);
   const fullAccess = hasFullAccess(userSession);
   const visibleNavItems = fullAccess ? navItems.filter((item) => item.to !== "/app/planos") : navItems;
   const mobileNavItems = canSeeAdmin ? [...visibleNavItems, adminNavItem] : visibleNavItems;

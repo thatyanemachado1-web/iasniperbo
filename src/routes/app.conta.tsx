@@ -4,7 +4,7 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { Cloud, Database, LogOut, ShieldCheck, Users } from "lucide-react";
-import { clearAdminSession } from "@/lib/adminApi";
+import { clearAdminSession, readAdminSession } from "@/lib/adminApi";
 import { accessLabel } from "@/lib/accessApi";
 import { canAccessAdminPanel, clearUserSession, readUserSession } from "@/lib/userSession";
 
@@ -14,7 +14,10 @@ export const Route = createFileRoute("/app/conta")({
 
 function ContaPage() {
   const userSession = readUserSession();
-  const canSeeAdmin = canAccessAdminPanel(userSession.email);
+  const adminSession = readAdminSession();
+  const canSeeAdmin =
+    canAccessAdminPanel(userSession.email) ||
+    Boolean(adminSession);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
