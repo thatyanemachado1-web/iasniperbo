@@ -3629,9 +3629,7 @@ function summarizeSecurityEvents() {
 
 function buildAdminSummary() {
   const people = uniquePeople([...liveClients, ...liveRecipients]);
-  const approved = people.filter(
-    (person) => Boolean(person.enabled) || readString(person, "access_status") === "approved",
-  );
+  const approved = people.filter(isActivePaidRecipient);
   const pending = people.filter((person) => readString(person, "access_status") === "pending");
   const paused = people.filter((person) => readString(person, "access_status") === "paused");
   const uniqueAccesses = new Set(
@@ -3657,6 +3655,13 @@ function buildAdminSummary() {
       country: readString(event, "country"),
     })),
   };
+}
+
+function isActivePaidRecipient(person: Record<string, unknown>) {
+  const plan = readString(person, "plan").toLowerCase();
+  if (plan === "free") return false;
+  if (isExpiredIso(readString(person, "expires_at"))) return false;
+  return Boolean(person.enabled) || readString(person, "access_status") === "approved";
 }
 
 function buildAdminPanelOverview(users = syncAdminManagedUsers()) {

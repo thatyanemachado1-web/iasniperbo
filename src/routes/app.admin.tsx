@@ -141,7 +141,7 @@ function AdminPage() {
   });
 
   const activeRecipients = useMemo(
-    () => recipients.filter((recipient) => recipient.enabled),
+    () => recipients.filter((recipient) => recipient.enabled && !isRecipientExpired(recipient)),
     [recipients],
   );
   const activeChatIds = useMemo(
@@ -149,11 +149,11 @@ function AdminPage() {
     [activeRecipients],
   );
   const vipClients = useMemo(
-    () => recipients.filter((recipient) => recipient.plan === "vip" && recipient.enabled),
+    () => recipients.filter((recipient) => recipient.plan === "vip" && recipient.enabled && !isRecipientExpired(recipient)),
     [recipients],
   );
   const premiumClients = useMemo(
-    () => recipients.filter((recipient) => recipient.plan === "premium" && recipient.enabled),
+    () => recipients.filter((recipient) => recipient.plan === "premium" && recipient.enabled && !isRecipientExpired(recipient)),
     [recipients],
   );
   const pendingClients = useMemo(
@@ -907,7 +907,7 @@ function AdminPage() {
         <GlassCard>
           <SectionTitle
             title="Painel de cadastros"
-            subtitle="Aprove, pause, edite validade/data de expiracao, exclua e acompanhe todos em um lugar."
+            subtitle="Aprove, pause, edite validade/data de expiração, exclua e acompanhe todos em um lugar."
             right={
               <button
                 type="button"
@@ -1184,7 +1184,7 @@ function RecipientRow({
             )}
             {recipient.chat_id && <span>Telegram {recipient.chat_id}</span>}
             {recipient.starts_at && <span>Início {formatDateBR(recipient.starts_at)}</span>}
-            {recipient.validity_days ? <span>{recipient.validity_days} dias</span> : null}
+            {recipientValidityLabel(recipient) && <span>{recipientValidityLabel(recipient)}</span>}
             {recipient.expires_at && <span>Expira {formatDateBR(recipient.expires_at)}</span>}
           </div>
           {recipient.notes && <div className="mt-2 text-xs text-muted-foreground">{recipient.notes}</div>}
@@ -1350,7 +1350,7 @@ function RecipientRowV2({
                 )}
                 {recipient.chat_id && <span>Telegram {recipient.chat_id}</span>}
                 {recipient.starts_at && <span>Início {formatDateBR(recipient.starts_at)}</span>}
-                {recipient.validity_days ? <span>{recipient.validity_days} dias</span> : null}
+                {recipientValidityLabel(recipient) && <span>{recipientValidityLabel(recipient)}</span>}
                 {recipient.expires_at && <span>Expira {formatDateBR(recipient.expires_at)}</span>}
               </div>
               {recipient.notes && <div className="mt-2 text-xs text-muted-foreground">{recipient.notes}</div>}
@@ -1517,9 +1517,10 @@ function emptyAdminSummary(): AdminSummary {
 }
 
 function summaryFromRecipients(recipients: SignalRecipient[], securitySummary: SecuritySummary): AdminSummary {
+  const activeClients = recipients.filter((recipient) => isClientRecipient(recipient));
   return {
     totalRegistrations: recipients.length,
-    approved: recipients.filter((recipient) => recipient.enabled || recipient.access_status === "approved").length,
+    approved: activeClients.length,
     pending: recipients.filter((recipient) => recipient.access_status === "pending").length,
     paused: recipients.filter((recipient) => recipient.access_status === "paused").length,
     totalAccesses: securitySummary.total,
@@ -1564,6 +1565,8 @@ function recipientStatusRank(recipient: SignalRecipient) {
 }
 
 function isClientRecipient(recipient: SignalRecipient) {
+  if (isRecipientExpired(recipient)) return false;
+  if (recipient.plan === "free") return false;
   return recipient.access_status === "approved" || recipient.enabled || recipient.plan === "premium" || recipient.plan === "vip";
 }
 
@@ -1620,13 +1623,27 @@ function recipientToEditForm(recipient: SignalRecipient): RecipientEditForm {
     kind: recipient.kind || "user",
     plan: recipient.plan || "free",
     access_status: recipient.access_status || (recipient.enabled ? "approved" : "paused"),
-    starts_at: recipient.starts_at || todayIso(),
+    starts_at: dateInputValue(recipient.starts_at) || todayIso(),
     validity_months: "",
     validity_days: String(recipient.validity_days || 30),
-    expires_at: recipient.expires_at || "",
+    expires_at: dateInputValue(recipient.expires_at),
     password: "",
     notes: recipient.notes || "",
   };
+}
+
+function recipientValidityLabel(recipient: SignalRecipient) {
+  if (recipient.starts_at && recipient.expires_at) {
+    const start = parseRecipientDate(recipient.starts_at, false);
+    const end = parseRecipientDate(recipient.expires_at, true);
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end > start) {
+      const minutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60_000));
+      if (minutes < 60) return `${minutes} min`;
+      if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h`;
+      return `${Math.round(minutes / 1440)} dias`;
+    }
+  }
+  return recipient.validity_days ? `${recipient.validity_days} dias` : "";
 }
 
 function datesFromEditForm(form: RecipientEditForm) {
@@ -1664,7 +1681,7 @@ function daysBetweenIso(startIso: string, endIso: string) {
 
 function isRecipientExpired(recipient: SignalRecipient) {
   if (!recipient.expires_at) return false;
-  const expiration = new Date(`${recipient.expires_at}T23:59:59`);
+  const expiration = parseRecipientDate(recipient.expires_at, true);
   if (Number.isNaN(expiration.getTime())) return false;
   return expiration.getTime() < Date.now();
 }
@@ -1765,9 +1782,22 @@ function todayIso() {
 }
 
 function formatDateBR(value: string) {
-  const [year, month, day] = value.split("-");
-  if (!year || !month || !day) return value;
-  return `${day}/${month}/${year}`;
+  const date = parseRecipientDate(value, false);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("pt-BR");
+}
+
+function dateInputValue(value?: string) {
+  if (!value) return "";
+  const date = parseRecipientDate(value, false);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function parseRecipientDate(value: string, endOfDay: boolean) {
+  if (!value) return new Date(Number.NaN);
+  if (value.includes("T")) return new Date(value);
+  return new Date(`${value}T${endOfDay ? "23:59:59" : "00:00:00"}`);
 }
 
 function formatDateTimeBR(value: string) {
