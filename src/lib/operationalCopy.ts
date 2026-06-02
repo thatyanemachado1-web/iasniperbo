@@ -11,6 +11,10 @@ import type {
 type PaganteKind = "favorable" | "watch" | "risk";
 
 export function buildEngineDecisionCopy(data: DashboardData) {
+  if (data.entryModeFilter?.blocked) {
+    return data.entryModeFilter.reason;
+  }
+
   const signal = data.currentSignal;
   const hasMainEntry =
     (signal.status === "pending" || signal.status === "g1") &&

@@ -1,13 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
-import { Activity, ChevronRight, Crown } from "lucide-react";
+import { ChevronRight, Crown } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { LiveTableView } from "@/components/dashboard/LiveTableView";
 import { SignalCard } from "@/components/dashboard/SignalCard";
 import { TieAlertCard } from "@/components/dashboard/TieAlertCard";
 import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
-import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
 import { ModuleMiniScoreboard } from "@/components/dashboard/ModuleMiniScoreboard";
 import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
 import { AIReadingCard } from "@/components/dashboard/AIReadingCard";
@@ -31,7 +30,6 @@ import {
   calculateSurfResult,
   calculateTieResult,
 } from "@/utils/moduleResults";
-import { accessLabel } from "@/lib/accessApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import { buildSignalCopy } from "@/lib/operationalCopy";
 
@@ -40,10 +38,12 @@ export const Route = createFileRoute("/app/")({
 });
 
 function DashboardPage() {
-  const { data: d, mode } = useDashboardData();
+  const { data: d, mode, entryMode, setEntryMode, setModuleToggles } = useDashboardData();
   const userSession = readUserSession();
   const fullAccess = hasFullAccess(userSession);
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
+  const tieAlertEnabled = d.moduleToggles?.tieAlert !== false;
+  const surfAnalyzerEnabled = d.moduleToggles?.surfAnalyzer !== false;
   const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;
   const mainResult = calculateMainResult(d.mainScoreboard);
   const tieResult = calculateTieResult(d.tieAlertScoreboard);
@@ -56,7 +56,7 @@ function DashboardPage() {
     (d.currentSignal.status === "pending" || d.currentSignal.status === "g1") &&
     (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER");
   const surfSummary =
-    signalHasActiveEntry && (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER")
+    surfAnalyzerEnabled && signalHasActiveEntry && (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER")
       ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
       : undefined;
   const lastRound = d.rounds[d.rounds.length - 1] ?? null;
@@ -77,38 +77,27 @@ function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <div className="text-xs text-muted-foreground">Olá,</div>
           <div className="text-lg font-bold">
             {userSession.name || d.user.name}{" "}
             <span className="text-muted-foreground font-normal text-sm">- painel operacional</span>
           </div>
         </div>
-        {fullAccess ? (
-          <AppBadge tone="green">{userSession.plan === "vip" ? "Conta VIP" : "Conta Premium"}</AppBadge>
-        ) : (
-          <Link
-            to="/app/planos"
-            className="hidden sm:inline-flex items-center gap-1.5 btn-gold-grad rounded-xl px-3 py-2 text-xs font-bold shine"
-          >
-            <Crown className="size-3.5" /> Premium
-          </Link>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-neon-cyan/20 bg-secondary/20 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="inline-flex items-center gap-2 text-xs font-semibold text-neon-cyan">
-          <Activity className="size-4" />
-          Núcleo operacional
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <AppBadge tone={dataModeTone} pulse={mode !== "mock"}>
-            {dataModeLabel}
-          </AppBadge>
-          <AppBadge tone={fullAccess ? "green" : "amber"}>{accessLabel(userSession)}</AppBadge>
-          <AppBadge tone="blue">Entrada em prioridade</AppBadge>
-          <ModuleToggleStrip toggles={d.moduleToggles} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <AppBadge tone="green" pulse>Mesa online</AppBadge>
+          <AppBadge tone="blue" pulse>Engine operacional</AppBadge>
+          {fullAccess ? (
+            <AppBadge tone="green">{userSession.plan === "vip" ? "Conta VIP" : "Conta Premium"}</AppBadge>
+          ) : (
+            <Link
+              to="/app/planos"
+              className="hidden sm:inline-flex items-center gap-1.5 btn-gold-grad rounded-xl px-3 py-2 text-xs font-bold shine"
+            >
+              <Crown className="size-3.5" /> Premium
+            </Link>
+          )}
         </div>
       </div>
 
@@ -123,8 +112,12 @@ function DashboardPage() {
               signal={d.currentSignal}
               neuralReading={d.neuralReading}
               surfSummary={surfSummary}
-              tieAlert={d.currentTieAlert}
+              tieAlert={tieAlertEnabled ? d.currentTieAlert : undefined}
               operationalMessage={buildSignalCopy(d)}
+              entryMode={entryMode}
+              entryModeFilter={d.entryModeFilter}
+              entryModeStats={d.entryModeStats}
+              onEntryModeChange={setEntryMode}
               enableResultFlash={mode === "live"}
               priority
             />
@@ -135,7 +128,11 @@ function DashboardPage() {
             description="Alerta de pressao e risco de empate fica completo apenas no acesso liberado."
             className="order-2"
           >
-            <TieAlertCard alert={d.currentTieAlert} />
+            <TieAlertCard
+              alert={d.currentTieAlert}
+              toggles={d.moduleToggles}
+              onModuleTogglesChange={setModuleToggles}
+            />
           </PremiumFeature>
 
           {surfAlert && (
@@ -144,7 +141,11 @@ function DashboardPage() {
               description="Leitura completa de surf fica bloqueada no demo."
               className="order-7 space-y-2"
             >
-              <SurfAlertCard alert={surfAlert} />
+              <SurfAlertCard
+                alert={surfAlert}
+                toggles={d.moduleToggles}
+                onModuleTogglesChange={setModuleToggles}
+              />
             </PremiumFeature>
           )}
         </div>

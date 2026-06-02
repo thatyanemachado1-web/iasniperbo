@@ -1,7 +1,6 @@
 import { cn } from "@/lib/utils";
-import { readAdminSession, updateModuleToggles } from "@/lib/adminApi";
 import type { ModuleToggles } from "@/types/dashboard";
-import { BrainCircuit, Loader2, Power, Waves } from "lucide-react";
+import { BrainCircuit, Power, Waves } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -10,55 +9,48 @@ const DEFAULT_TOGGLES: ModuleToggles = {
   surfAnalyzer: true,
 };
 
-export function ModuleToggleStrip({ toggles }: { toggles?: ModuleToggles }) {
+export function ModuleToggleStrip({
+  toggles,
+  modules = ["tieAlert", "surfAnalyzer"],
+  onChange,
+}: {
+  toggles?: ModuleToggles;
+  modules?: Array<keyof ModuleToggles>;
+  onChange?: (toggles: ModuleToggles) => void;
+}) {
   const [local, setLocal] = useState<ModuleToggles>(toggles ?? DEFAULT_TOGGLES);
-  const [busyKey, setBusyKey] = useState<keyof ModuleToggles | null>(null);
   const [note, setNote] = useState("");
 
   useEffect(() => {
     if (toggles) setLocal(toggles);
   }, [toggles?.tieAlert, toggles?.surfAnalyzer]);
 
-  async function toggle(key: keyof ModuleToggles) {
-    const session = readAdminSession();
-    if (!session) {
-      setNote("Entre no admin para controlar");
-      window.setTimeout(() => setNote(""), 2200);
-      return;
-    }
-
+  function toggle(key: keyof ModuleToggles) {
     const next = { ...local, [key]: !local[key] };
     setLocal(next);
-    setBusyKey(key);
-    setNote("");
-    try {
-      const saved = await updateModuleToggles(session, { [key]: next[key] });
-      setLocal(saved);
-    } catch (error) {
-      setLocal(local);
-      setNote(error instanceof Error ? error.message : "Não foi possível atualizar");
-      window.setTimeout(() => setNote(""), 2600);
-    } finally {
-      setBusyKey(null);
-    }
+    onChange?.(next);
+    setNote("Preferência salva neste painel");
+    window.setTimeout(() => setNote(""), 1800);
   }
 
   return (
     <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-      <MiniSwitch
-        label="Tie"
-        active={local.tieAlert}
-        busy={busyKey === "tieAlert"}
-        icon={<BrainCircuit className="size-3" />}
-        onClick={() => toggle("tieAlert")}
-      />
-      <MiniSwitch
-        label="Surf"
-        active={local.surfAnalyzer}
-        busy={busyKey === "surfAnalyzer"}
-        icon={<Waves className="size-3" />}
-        onClick={() => toggle("surfAnalyzer")}
-      />
+      {modules.includes("tieAlert") && (
+        <MiniSwitch
+          label="Tie"
+          active={local.tieAlert}
+          icon={<BrainCircuit className="size-3" />}
+          onClick={() => toggle("tieAlert")}
+        />
+      )}
+      {modules.includes("surfAnalyzer") && (
+        <MiniSwitch
+          label="Surf"
+          active={local.surfAnalyzer}
+          icon={<Waves className="size-3" />}
+          onClick={() => toggle("surfAnalyzer")}
+        />
+      )}
       {note && (
         <span className="basis-full text-right text-[9px] font-semibold text-warning sm:basis-auto">
           {note}
@@ -71,13 +63,11 @@ export function ModuleToggleStrip({ toggles }: { toggles?: ModuleToggles }) {
 function MiniSwitch({
   label,
   active,
-  busy,
   icon,
   onClick,
 }: {
   label: string;
   active: boolean;
-  busy: boolean;
   icon: ReactNode;
   onClick: () => void;
 }) {
@@ -96,7 +86,7 @@ function MiniSwitch({
       title={`${active ? "Desativar" : "Ativar"} análise ${label}`}
     >
       <span className="grid size-4 place-items-center rounded-full bg-background/45">
-        {busy ? <Loader2 className="size-3 animate-spin" /> : icon}
+        {icon}
       </span>
       <span>{label}</span>
       <span

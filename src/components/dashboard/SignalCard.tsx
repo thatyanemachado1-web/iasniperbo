@@ -2,10 +2,20 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
+import { EntryModeControl } from "@/components/dashboard/EntryModeControl";
 import { LeituraNeuralMiniCard } from "@/components/dashboard/LeituraNeuralMiniCard";
 import { cn } from "@/lib/utils";
-import type { MainSignal, NeuralReading, SurfEntrySummary, TieAlert } from "@/types/dashboard";
-import { CheckCircle2, Clock3, Radio, ShieldCheck, Target, Zap } from "lucide-react";
+import type {
+  ActiveEntryMode,
+  EntryMode,
+  EntryModeFilter,
+  EntryModeStats,
+  MainSignal,
+  NeuralReading,
+  SurfEntrySummary,
+  TieAlert,
+} from "@/types/dashboard";
+import { CheckCircle2, Clock3, Radio, ShieldAlert, ShieldCheck, Target, Zap } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function SignalCard({
@@ -14,6 +24,10 @@ export function SignalCard({
   surfSummary,
   tieAlert,
   operationalMessage,
+  entryMode = "hunter",
+  entryModeFilter,
+  entryModeStats,
+  onEntryModeChange,
   locked,
   priority = false,
   enableResultFlash = false,
@@ -23,6 +37,10 @@ export function SignalCard({
   surfSummary?: SurfEntrySummary;
   tieAlert?: TieAlert;
   operationalMessage?: string;
+  entryMode?: EntryMode;
+  entryModeFilter?: EntryModeFilter;
+  entryModeStats?: Partial<Record<ActiveEntryMode, EntryModeStats>>;
+  onEntryModeChange?: (mode: EntryMode) => void;
   locked?: boolean;
   priority?: boolean;
   enableResultFlash?: boolean;
@@ -129,6 +147,15 @@ export function SignalCard({
         title={isResultStatus ? "Aguardar análise" : isWaiting ? "Aguardar entrada" : isTieWatch ? "Possível empate" : "Entrada confirmada"}
         right={<AppBadge tone={status.badgeTone} pulse={status.pulse}><StatusIcon className="size-3" /> {status.badge}</AppBadge>}
       />
+      {onEntryModeChange && (
+        <div className="relative mb-3">
+          <EntryModeControl
+            value={entryMode}
+            onChange={onEntryModeChange}
+            stats={entryModeStats}
+          />
+        </div>
+      )}
       <div className="relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
         <div className="min-w-0 pt-0.5">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-neon-cyan/25 bg-background/35 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan">
@@ -149,6 +176,24 @@ export function SignalCard({
           {operationalMessage && (
             <div className="mt-2 max-w-[42rem] text-xs leading-relaxed text-foreground/85">
               {operationalMessage}
+            </div>
+          )}
+          {entryModeFilter?.blocked && (
+            <div className="mt-3 max-w-[42rem] rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">
+              <div className="flex items-start gap-2">
+                <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+                <div>
+                  <div className="font-black uppercase tracking-[0.12em]">
+                    Entrada segurada pelo modo {entryModeLabel(entryModeFilter.mode)}
+                  </div>
+                  <div className="mt-1 text-warning/90">{entryModeFilter.reason}</div>
+                  {entryModeFilter.originalSide && (
+                    <div className="mt-1 text-[11px] text-warning/75">
+                      Sinal original: {entryModeFilter.originalSide} com força {entryModeFilter.originalStrength ?? 0}%.
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -355,6 +400,13 @@ function tieRiskBadge(alert: TieAlert) {
     label: "BAIXO",
     className: "border-success/35 bg-success/15 text-success",
   };
+}
+
+function entryModeLabel(mode: EntryMode) {
+  if (mode === "sniper") return "Sniper";
+  if (mode === "aggressive") return "Agressivo";
+  if (mode === "hunter") return "Caçador";
+  return "Desligado";
 }
 
 function normalizeRisk(level: TieAlert["level"]) {

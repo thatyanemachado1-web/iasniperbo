@@ -61,6 +61,32 @@ export interface ModuleToggles {
   surfAnalyzer: boolean;
 }
 
+export type ActiveEntryMode = "sniper" | "hunter" | "aggressive";
+export type EntryMode = "off" | ActiveEntryMode;
+
+export interface EntryModeFilter {
+  mode: ActiveEntryMode;
+  blocked: boolean;
+  reason: string;
+  originalSide?: CurrentSignalSide;
+  originalStrength?: number;
+}
+
+export interface EntryModeStats {
+  sg?: number;
+  greens?: number;
+  greenSemGale?: number;
+  greensG1?: number;
+  greenG1?: number;
+  totalGreens?: number;
+  emp?: number;
+  ties?: number;
+  reds?: number;
+  totalEntries?: number;
+  total?: number;
+  assertiveness?: number;
+}
+
 export type SurfPhase =
   | "SEM_RISCO"
   | "PRE_SURF"
@@ -233,6 +259,9 @@ export interface DashboardData {
   currentSurfAlert?: SurfAlert;
   neuralReading?: NeuralReading;
   moduleToggles?: ModuleToggles;
+  entryMode?: EntryMode;
+  entryModeFilter?: EntryModeFilter;
+  entryModeStats?: Partial<Record<ActiveEntryMode, EntryModeStats>>;
   engineDecision: EngineDecision;
   mainScoreboard: MainScoreboard;
   tieAlertScoreboard: TieAlertScoreboard;

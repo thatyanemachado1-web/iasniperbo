@@ -1558,6 +1558,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     delete pickedSections.mainScoreboard;
     delete pickedSections.tieAlertScoreboard;
     delete pickedSections.surfAnalyzerScoreboard;
+    delete pickedSections.entryModeStats;
     if (pickedSections.neuralReading) {
       pickedSections.neuralReading = resetNeuralReadingDailyCounters(pickedSections.neuralReading);
     }
@@ -1770,6 +1771,8 @@ function pickDashboardSections(incoming: Record<string, unknown>): Partial<Dashb
   if (incoming.mainScoreboard) out.mainScoreboard = incoming.mainScoreboard as DashboardData["mainScoreboard"];
   if (incoming.tieAlertScoreboard) out.tieAlertScoreboard = incoming.tieAlertScoreboard as DashboardData["tieAlertScoreboard"];
   if (incoming.surfAnalyzerScoreboard) out.surfAnalyzerScoreboard = incoming.surfAnalyzerScoreboard as DashboardData["surfAnalyzerScoreboard"];
+  if (incoming.entryModeStats) out.entryModeStats = incoming.entryModeStats as DashboardData["entryModeStats"];
+  if (incoming.entry_mode_stats) out.entryModeStats = incoming.entry_mode_stats as DashboardData["entryModeStats"];
   return out;
 }
 

@@ -110,6 +110,7 @@ export const mockDashboardData: DashboardData = {
     tieAlert: true,
     surfAnalyzer: true,
   },
+  entryMode: "hunter",
   currentSurfAlert: {
     surf_alert: true,
     surf_phase: "CONTINUIDADE",

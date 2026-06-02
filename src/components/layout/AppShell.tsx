@@ -1,9 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck, ReceiptText } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
-import { AppBadge } from "@/components/ui-app/AppBadge";
 import { canSeeAdminUi } from "@/lib/adminSession";
-import { accessLabel } from "@/lib/accessApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import type { ReactNode } from "react";
 
@@ -36,11 +34,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-3">
             <Logo size={32} />
           </div>
-          <div className="hidden md:flex items-center gap-2">
-            <AppBadge tone="green" pulse>Mesa online</AppBadge>
-            <AppBadge tone="blue" pulse>Engine operacional</AppBadge>
-            <AppBadge tone={fullAccess ? "green" : "amber"}>{accessLabel(userSession)}</AppBadge>
-          </div>
           <div className="flex items-center gap-2">
             <button className="size-9 rounded-xl glass flex items-center justify-center hover:glow-blue">
               <Bell className="size-4 text-neon-cyan" />
@@ -71,12 +64,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             </div>
           </div>
-        </div>
-        {/* mobile status row */}
-        <div className="md:hidden flex items-center gap-2 px-3 pb-2 overflow-x-auto">
-          <AppBadge tone="green" pulse>Mesa online</AppBadge>
-          <AppBadge tone="blue" pulse>Engine operacional</AppBadge>
-          <AppBadge tone={fullAccess ? "green" : "amber"}>{accessLabel(userSession)}</AppBadge>
         </div>
       </header>
 
