@@ -583,7 +583,7 @@ function AdminPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-xs text-muted-foreground">Admin conectado</div>
-          <div className="text-xl font-black">Cantinho do administrador</div>
+          <div className="text-xl font-black">Painel Administrativo</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <AppBadge tone="green" pulse>{activeRecipients.length} liberados</AppBadge>

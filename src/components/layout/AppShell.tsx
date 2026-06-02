@@ -107,7 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               to="/app/admin/users"
               className="mb-2 flex items-center gap-2 rounded-xl border border-neon-cyan/25 bg-neon-cyan/10 px-3 py-2 text-xs font-black text-neon-cyan hover:glow-blue"
             >
-              <ShieldCheck className="size-4" /> Cantinho ADM
+              <ShieldCheck className="size-4" /> Administração
             </Link>
           )}
           <Link to="/app/conta" className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
