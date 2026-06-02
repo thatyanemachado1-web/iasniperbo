@@ -34,13 +34,15 @@ const actions: Array<{ id: QuickAction; label: string; tone: "primary" | "gold" 
 
 export function AdminQuickActions({
   disabled = false,
+  compact = false,
   onAction,
 }: {
   disabled?: boolean;
+  compact?: boolean;
   onAction: (action: QuickAction) => void;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+    <div className={`grid grid-cols-1 gap-2 ${compact ? "sm:grid-cols-2 xl:grid-cols-3" : "sm:grid-cols-2"}`}>
       {actions.map((action) => (
         <button
           key={action.id}

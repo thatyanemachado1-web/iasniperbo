@@ -108,7 +108,7 @@ export function AdminUsersPage() {
     try {
       const updated = await performQuickAction(session, user, action);
       setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      setSelected(updated);
+      if (selected?.id === updated.id) setSelected(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao executar acao.");
     } finally {
@@ -156,10 +156,21 @@ export function AdminUsersPage() {
         {error && <div className="mt-4 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
       </GlassCard>
 
-      <AdminUsersTable users={filteredUsers} onEdit={setSelected} />
+      <AdminUsersTable
+        users={filteredUsers}
+        onEdit={setSelected}
+        onQuickAction={(action, user) => void runQuickAction(action, user)}
+        actionsDisabled={(user) => busy || !canRunUserAction(role, user)}
+      />
       <div className="grid gap-3 lg:hidden">
         {filteredUsers.map((user) => (
-          <AdminUserCard key={user.id} user={user} onEdit={setSelected} />
+          <AdminUserCard
+            key={user.id}
+            user={user}
+            onEdit={setSelected}
+            onQuickAction={(action, item) => void runQuickAction(action, item)}
+            actionsDisabled={busy || !canRunUserAction(role, user)}
+          />
         ))}
       </div>
 
@@ -219,6 +230,10 @@ function applyFilters(users: AdminManagedUser[], filters: FilterState) {
     if (filters.quick === "blocked" && !user.isBlocked) return false;
     return true;
   });
+}
+
+function canRunUserAction(currentAdminRole: "admin" | "owner", user: AdminManagedUser) {
+  return currentAdminRole === "owner" || user.role === "user";
 }
 
 async function performQuickAction(session: AdminSession, user: AdminManagedUser, action: QuickAction) {

@@ -183,6 +183,7 @@ export default {
 
 function redirectLegacyAdminRoute(request: Request) {
   if (request.method !== "GET" && request.method !== "HEAD") return null;
+  if (request.headers.get("authorization") || request.headers.get("x-sniper-token")) return null;
   const url = new URL(request.url);
   const adminPageMap: Record<string, string> = {
     "/admin": "/app/admin",
@@ -481,7 +482,7 @@ async function requireClientBillingSession(request: Request, env: unknown): Prom
     return { ok: false, status: 403, error: "Use uma conta de cliente para assinar." };
   }
 
-  const client = findClientByEmail(session.email);
+  const client = findClientByEmail(session.email) || await hydrateClientFromBilling(env, session.email);
   if (!client) return { ok: false, status: 404, error: "Cliente nao encontrado." };
 
   const sessionCheck = await validateClientSessionBinding(env, request, session, client);
@@ -815,6 +816,7 @@ async function applyHublaWebhookEvent(
 
   let activated = false;
   let deactivated = false;
+  let clientForPersistence = client;
   if (shouldActivate) {
     const updatedClient = {
       ...client,
@@ -834,6 +836,7 @@ async function applyHublaWebhookEvent(
       ...updatedClient,
       detail: `Assinatura ${planConfig.name} ativada via Hubla.`,
     });
+    clientForPersistence = updatedClient;
     activated = true;
   } else if (shouldDeactivate) {
     const updatedClient = {
@@ -851,11 +854,12 @@ async function applyHublaWebhookEvent(
       detail: `Assinatura Hubla desativada por status ${event.status}.`,
       risk: event.status === "chargeback" ? "high" : "medium",
     });
+    clientForPersistence = updatedClient;
     deactivated = true;
   }
 
   await saveLiveState(env);
-  await persistBillingRecords(env, client, subscription, payment);
+  await persistBillingRecords(env, clientForPersistence, subscription, payment);
   return { activated, deactivated };
 }
 
@@ -964,6 +968,7 @@ async function applyMercadoPagoPayment(env: unknown, payment: Record<string, unk
   });
 
   let activated = false;
+  let clientForPersistence = client;
   if (status === "approved") {
     const updatedClient = {
       ...client,
@@ -981,11 +986,12 @@ async function applyMercadoPagoPayment(env: unknown, payment: Record<string, unk
       ...updatedClient,
       detail: `Assinatura ${planConfig.name} ativada via Mercado Pago.`,
     });
+    clientForPersistence = updatedClient;
     activated = true;
   }
 
   await saveLiveState(env);
-  await persistBillingRecords(env, client, subscription, paymentRecord);
+  await persistBillingRecords(env, clientForPersistence, subscription, paymentRecord);
   return { activated, status };
 }
 
@@ -1099,7 +1105,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ access: await approverAccess(env, email, request) });
     }
 
-    const client = liveClients.find((item) => readString(item, "email").toLowerCase() === email);
+    const client = findClientByEmail(email) || await hydrateClientFromBilling(env, email);
     if (!client) {
       return json({
         access: {
@@ -1128,6 +1134,11 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         delete (client as Record<string, unknown>).password;
         await saveLiveState(env);
       }
+    } else if (clientHasLiveAccess(client)) {
+      return json(
+        { error: "Compra localizada. Abra a aba Cadastro e crie sua senha para ativar o login." },
+        401,
+      );
     }
     if (!ok) {
       return json({ error: "Senha invalida." }, 401);
@@ -1150,9 +1161,15 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ error: "Sessao nao configurada no servidor." }, 503);
     }
 
-    const existingIndex = liveClients.findIndex(
+    let existingIndex = liveClients.findIndex(
       (item) => readString(item, "email").toLowerCase() === email,
     );
+    if (existingIndex < 0) {
+      await hydrateClientFromBilling(env, email);
+      existingIndex = liveClients.findIndex(
+        (item) => readString(item, "email").toLowerCase() === email,
+      );
+    }
     const now = new Date().toISOString();
     const passwordHash = await hashPassword(password);
     const client: Record<string, unknown> = {
@@ -1213,9 +1230,9 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ valid: true, access: await approverAccess(env, session.email, request) });
     }
 
-    const client = liveClients.find(
-      (item) => readString(item, "email").toLowerCase() === session.email.toLowerCase(),
-    );
+    const client =
+      findClientByEmail(session.email) ||
+      await hydrateClientFromBilling(env, session.email);
     if (!client) {
       return json({
         valid: true,
@@ -2462,6 +2479,128 @@ function buildPaymentPublic(payment: Record<string, unknown>) {
   };
 }
 
+async function hydrateClientFromBilling(env: unknown, email: string) {
+  const client = await loadBillingClientByEmail(env, email);
+  if (!client) return null;
+
+  upsertLiveClient(client);
+  upsertRecipientFromClient(client);
+  recordAccessEvent("client_hydrated_from_billing", {
+    ...client,
+    detail: "Cliente reconstruido a partir das tabelas de assinatura/pagamento.",
+  });
+  await saveLiveState(env);
+  return findClientByEmail(email) || client;
+}
+
+async function loadBillingClientByEmail(env: unknown, email: string) {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || !getSupabasePersistenceConfig(env)) return null;
+
+  const encodedEmail = encodeURIComponent(cleanEmail);
+  const [users, subscriptions, payments] = await Promise.all([
+    fetchSupabaseRows(env, "users", `select=*&email=ilike.${encodedEmail}&limit=1`),
+    fetchSupabaseRows(
+      env,
+      "subscriptions",
+      `select=*&email=ilike.${encodedEmail}&order=updated_at.desc.nullslast&limit=20`,
+    ),
+    fetchSupabaseRows(
+      env,
+      "payments",
+      `select=*&email=ilike.${encodedEmail}&order=updated_at.desc.nullslast&limit=20`,
+    ),
+  ]);
+
+  const user = users[0] || {};
+  const subscription = pickBillingSubscription(subscriptions);
+  const payment = pickBillingPayment(payments);
+  if (!hasRecordFields(user) && !hasRecordFields(subscription) && !hasRecordFields(payment)) {
+    return null;
+  }
+
+  const paidAt = readString(payment, "paid_at") || readString(payment, "created_at");
+  const startsAt = readString(subscription, "starts_at") || paidAt.slice(0, 10) || todayIso();
+  const plan =
+    normalizeBillingPlanId(readString(subscription, "plan")) ||
+    normalizeBillingPlanId(readString(payment, "plan")) ||
+    getHublaDefaultPlan(env);
+  const planConfig = getBillingPlan(plan, env);
+  const expiresAt =
+    readString(subscription, "expires_at") ||
+    (billingPaymentIsPaid(payment) ? addDaysIso(startsAt, planConfig.durationDays) : "");
+  const subscriptionActive = billingSubscriptionIsActive(subscription, expiresAt);
+  const paymentActive = billingPaymentIsPaid(payment) && Boolean(expiresAt) && !isExpiredIso(expiresAt);
+  const enabled = subscriptionActive || paymentActive;
+  const accessStatus = enabled
+    ? "approved"
+    : isExpiredIso(expiresAt)
+      ? "expired"
+      : readString(subscription, "status") || readString(payment, "status") || "pending";
+
+  return {
+    id:
+      readString(user, "id") ||
+      readString(subscription, "user_id") ||
+      readString(payment, "user_id") ||
+      crypto.randomUUID(),
+    full_name: readString(user, "full_name") || nameFromEmail(cleanEmail),
+    email: cleanEmail,
+    phone: readString(user, "phone"),
+    city: readString(user, "city"),
+    country: readString(user, "country"),
+    password_hash: readString(user, "password_hash"),
+    plan,
+    access_status: accessStatus,
+    enabled,
+    starts_at: startsAt,
+    validity_days: planConfig.durationDays,
+    expires_at: expiresAt,
+    created_at: readString(user, "created_at") || readString(subscription, "created_at") || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function pickBillingSubscription(rows: Record<string, unknown>[]) {
+  const sorted = sortBillingRows(rows).sort(
+    (a, b) => Number(billingSubscriptionIsActive(b)) - Number(billingSubscriptionIsActive(a)),
+  );
+  return sorted[0] || {};
+}
+
+function pickBillingPayment(rows: Record<string, unknown>[]) {
+  const sorted = sortBillingRows(rows).sort(
+    (a, b) => Number(billingPaymentIsPaid(b)) - Number(billingPaymentIsPaid(a)),
+  );
+  return sorted[0] || {};
+}
+
+function sortBillingRows(rows: Record<string, unknown>[]) {
+  return [...rows].sort((a, b) => billingRowTime(b) - billingRowTime(a));
+}
+
+function billingRowTime(row: Record<string, unknown>) {
+  const time = Date.parse(
+    readString(row, "updated_at") ||
+      readString(row, "paid_at") ||
+      readString(row, "created_at") ||
+      readString(row, "starts_at") ||
+      "",
+  );
+  return Number.isFinite(time) ? time : 0;
+}
+
+function billingSubscriptionIsActive(subscription: Record<string, unknown>, fallbackExpiresAt = "") {
+  const status = readString(subscription, "status").toLowerCase();
+  const expiresAt = readString(subscription, "expires_at") || fallbackExpiresAt;
+  return ["active", "approved", "paid"].includes(status) && (!expiresAt || !isExpiredIso(expiresAt));
+}
+
+function billingPaymentIsPaid(payment: Record<string, unknown>) {
+  const status = (readString(payment, "status") || readString(payment, "raw_status")).toLowerCase();
+  return ["approved", "paid"].includes(status);
+}
+
 function refreshExpiredBillingForClient(client: Record<string, unknown>) {
   const expiresAt = readString(client, "expires_at");
   if (!expiresAt || !isExpiredIso(expiresAt)) return false;
@@ -2504,9 +2643,34 @@ async function persistBillingUser(env: unknown, client: Record<string, unknown>)
     phone: readString(client, "phone"),
     city: readString(client, "city"),
     country: readString(client, "country"),
+    password_hash: readString(client, "password_hash"),
     created_at: readString(client, "created_at") || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   });
+}
+
+async function fetchSupabaseRows(env: unknown, table: string, query: string) {
+  const config = getSupabasePersistenceConfig(env);
+  if (!config) return [];
+
+  try {
+    const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
+      headers: supabasePersistenceHeaders(config.key),
+    });
+    if (response.status === 404 || response.status === 406) return [];
+    if (!response.ok) {
+      console.warn(`Nao foi possivel carregar ${table} (${response.status}).`);
+      return [];
+    }
+
+    const rows = await response.json().catch(() => null);
+    return Array.isArray(rows)
+      ? rows.map(readRecord).filter(hasRecordFields)
+      : [];
+  } catch (error) {
+    console.warn(`Nao foi possivel carregar ${table}.`, error);
+    return [];
+  }
 }
 
 async function persistSupabaseRow(env: unknown, table: string, row: Record<string, unknown>) {
