@@ -69,7 +69,7 @@ EXEMPLOS de tom (apenas referencia, NAO copiar literal):
 
 Saida: apenas o texto da narracao, sem prefixos, sem aspas.`;
 
-const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const LOVABLE_MODEL = "google/gemini-3-flash-preview";
 
 export const generateAIReading = createServerFn({ method: "POST" })
@@ -97,7 +97,7 @@ async function runGeminiReading(userPrompt: string) {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) return "";
 
-  const model = (process.env.GEMINI_MODEL_ID || process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL).trim();
+  const model = resolveGeminiModel();
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
   try {
@@ -186,6 +186,14 @@ function readGeminiText(json: GeminiResponse) {
     .map((part) => part.text ?? "")
     .join("")
     .trim();
+}
+
+function resolveGeminiModel() {
+  const model = (process.env.GEMINI_MODEL_ID || process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL).trim();
+  if (!model || model === "gemini-3.5-flash") {
+    return DEFAULT_GEMINI_MODEL;
+  }
+  return model;
 }
 
 function buildLocalReading(data: AIReadingSnapshot) {
