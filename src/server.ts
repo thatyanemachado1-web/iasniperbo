@@ -3,7 +3,15 @@ import "./lib/error-capture";
 import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import type { CurrentSignalSide, DashboardData, SignalStatus } from "./types/dashboard";
+import type {
+  ActiveEntryMode,
+  CurrentSignalSide,
+  DashboardData,
+  EntryModeStats,
+  NeuralReading,
+  SignalSide,
+  SignalStatus,
+} from "./types/dashboard";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -14,6 +22,10 @@ type LiveDashboardData = DashboardData & {
   cycleDate?: string;
   dailyCycleDate?: string;
   strictDailyCounters?: boolean;
+  entryModeSignalModes?: Record<string, ActiveEntryMode[]>;
+  entryModeCountedResults?: Record<string, true>;
+  latestEntryModeSignalId?: string;
+  latestEntryModeSignalModes?: ActiveEntryMode[];
 };
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
 type AdminRole = "owner" | "admin";
@@ -47,6 +59,8 @@ const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
+const ACTIVE_ENTRY_MODES = ["sniper", "hunter", "aggressive"] as const satisfies readonly ActiveEntryMode[];
+const SNIPER_NEURAL_ASSERTIVENESS_MIN = 99;
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 let liveDashboardData: LiveDashboardData = {
@@ -1568,7 +1582,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       ? normalizeRounds(incoming.rounds)
       : currentDashboard.rounds;
 
-  return {
+  const nextDashboard: LiveDashboardData = {
     ...currentDashboard,
     ...pickedSections,
     mockMode: false,
@@ -1589,6 +1603,8 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     dailyCycleDate: cycleDate,
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
   };
+
+  return trackServerEntryModeStats(nextDashboard);
 }
 
 function ensureDashboardDailyCycle(
@@ -1686,6 +1702,11 @@ function resetDashboardDailyCycle(
       sequencePositive: 0,
       sequenceNegative: 0,
     },
+    entryModeStats: emptyServerEntryModeStatsByMode(),
+    entryModeSignalModes: {},
+    entryModeCountedResults: {},
+    latestEntryModeSignalId: undefined,
+    latestEntryModeSignalModes: [],
     tieAlertScoreboard: {
       greenTieAlerts: 0,
       expired: 0,
@@ -1761,8 +1782,8 @@ function currentDashboardCycleDate(now = new Date()) {
   }).format(now);
 }
 
-function pickDashboardSections(incoming: Record<string, unknown>): Partial<DashboardData> {
-  const out: Partial<DashboardData> = {};
+function pickDashboardSections(incoming: Record<string, unknown>): Partial<LiveDashboardData> {
+  const out: Partial<LiveDashboardData> = {};
   if (incoming.currentSurfAlert) out.currentSurfAlert = incoming.currentSurfAlert as DashboardData["currentSurfAlert"];
   if (incoming.surfAlert) out.currentSurfAlert = incoming.surfAlert as DashboardData["currentSurfAlert"];
   if (incoming.neuralReading) out.neuralReading = incoming.neuralReading as DashboardData["neuralReading"];
@@ -1771,8 +1792,14 @@ function pickDashboardSections(incoming: Record<string, unknown>): Partial<Dashb
   if (incoming.mainScoreboard) out.mainScoreboard = incoming.mainScoreboard as DashboardData["mainScoreboard"];
   if (incoming.tieAlertScoreboard) out.tieAlertScoreboard = incoming.tieAlertScoreboard as DashboardData["tieAlertScoreboard"];
   if (incoming.surfAnalyzerScoreboard) out.surfAnalyzerScoreboard = incoming.surfAnalyzerScoreboard as DashboardData["surfAnalyzerScoreboard"];
-  if (incoming.entryModeStats) out.entryModeStats = incoming.entryModeStats as DashboardData["entryModeStats"];
-  if (incoming.entry_mode_stats) out.entryModeStats = incoming.entry_mode_stats as DashboardData["entryModeStats"];
+  const incomingEntryModeStats = normalizeServerIncomingEntryModeStats(
+    incoming.entryModeStats ?? incoming.entry_mode_stats,
+  );
+  if (incomingEntryModeStats) out.entryModeStats = incomingEntryModeStats;
+  if (incoming.entryModeSignalModes) out.entryModeSignalModes = normalizeServerSignalModes(incoming.entryModeSignalModes);
+  if (incoming.entryModeCountedResults) out.entryModeCountedResults = normalizeServerCountedResults(incoming.entryModeCountedResults);
+  if (incoming.latestEntryModeSignalId) out.latestEntryModeSignalId = String(incoming.latestEntryModeSignalId);
+  if (incoming.latestEntryModeSignalModes) out.latestEntryModeSignalModes = normalizeServerModeList(incoming.latestEntryModeSignalModes);
   return out;
 }
 
@@ -1844,6 +1871,374 @@ function normalizeSignal(
 function terminalSignalStatus(status: DashboardData["currentSignal"]["status"]) {
   if (status === "green" || status === "green_g1" || status === "red") return status;
   return null;
+}
+
+function trackServerEntryModeStats(dashboard: LiveDashboardData): LiveDashboardData {
+  const signal = dashboard.currentSignal;
+  const signalModes = normalizeServerSignalModes(dashboard.entryModeSignalModes);
+  const countedResults = normalizeServerCountedResults(dashboard.entryModeCountedResults);
+  const stats = normalizeServerEntryModeStatsByMode(dashboard.entryModeStats);
+  let latestSignalId = String(dashboard.latestEntryModeSignalId || "");
+  let latestSignalModes = normalizeServerModeList(dashboard.latestEntryModeSignalModes);
+
+  if (isServerEntrySide(signal.side) && signal.status === "pending") {
+    const modes = serverModesThatWouldAcceptEntry(dashboard);
+    if (!sameServerModeList(signalModes[signal.id], modes)) {
+      signalModes[signal.id] = modes;
+      latestSignalId = signal.id;
+      latestSignalModes = modes;
+    }
+  }
+
+  const result = signal.lastResult;
+  if (result) {
+    const resultKey = serverEntryModeResultKey(result);
+    if (!countedResults[resultKey]) {
+      const resultModes = signalModes[result.id] ?? latestSignalModes ?? [];
+      for (const mode of resultModes) {
+        incrementServerEntryModeStats(stats, mode, result);
+      }
+      countedResults[resultKey] = true;
+    }
+  }
+
+  return {
+    ...dashboard,
+    entryModeStats: stats,
+    entryModeSignalModes: pruneServerSignalModes(signalModes),
+    entryModeCountedResults: pruneServerCountedResults(countedResults),
+    latestEntryModeSignalId: latestSignalId || undefined,
+    latestEntryModeSignalModes: latestSignalModes,
+  };
+}
+
+function serverModesThatWouldAcceptEntry(data: DashboardData) {
+  return ACTIVE_ENTRY_MODES.filter((mode) => !serverBuildEntryModeFilter(data, mode));
+}
+
+function serverBuildEntryModeFilter(data: DashboardData, mode: ActiveEntryMode) {
+  const signal = data.currentSignal;
+  if (mode === "aggressive") return null;
+  if (signal.status !== "pending" || !isServerEntrySide(signal.side)) return null;
+
+  const confidence = clampPercent(data.engineDecision?.confidence ?? 0);
+  const strength = clampPercent(signal.strength ?? 0);
+  const surfRisk = serverOppositeSurfRisk(data, signal.side);
+  const neuralRisk = serverHasNeuralRisk(data.neuralReading);
+  const sniperNeuralGate = serverReadSniperNeuralGate(data.neuralReading, signal.side);
+  const tieActive = data.currentTieAlert.status === "active";
+  const tieHigh = tieActive && serverNormalizeText(data.currentTieAlert.level).includes("ALTO");
+  const engineConfirmed = data.engineDecision.state === "ENTRADA";
+
+  if (mode === "sniper") {
+    return Boolean(
+      !engineConfirmed ||
+        confidence < 80 ||
+        strength < 78 ||
+        tieActive ||
+        surfRisk >= 40 ||
+        neuralRisk ||
+        !sniperNeuralGate.accepted,
+    );
+  }
+
+  return Boolean(
+    !engineConfirmed ||
+      confidence < 70 ||
+      strength < 70 ||
+      tieHigh ||
+      surfRisk >= 65 ||
+      neuralRisk,
+  );
+}
+
+function incrementServerEntryModeStats(
+  statsByMode: Partial<Record<ActiveEntryMode, EntryModeStats>>,
+  mode: ActiveEntryMode,
+  result: NonNullable<DashboardData["currentSignal"]["lastResult"]>,
+) {
+  const current = normalizeServerEntryModeStatsRecord(statsByMode[mode]);
+  const kind = serverReadEntryModeResultKind(result);
+  const sg = serverSafeCounter(current.greenSemGale ?? current.sg ?? current.greens);
+  const g1 = serverSafeCounter(current.greenG1 ?? current.greensG1);
+  const emp = serverSafeCounter(current.emp ?? current.ties);
+  const reds = serverSafeCounter(current.reds);
+
+  const nextSg = kind === "sg" ? sg + 1 : sg;
+  const nextG1 = kind === "g1" ? g1 + 1 : g1;
+  const nextEmp = kind === "emp" ? emp + 1 : emp;
+  const nextReds = kind === "red" ? reds + 1 : reds;
+  const totalGreens = nextSg + nextG1;
+  const totalEntries = totalGreens + nextReds;
+
+  statsByMode[mode] = {
+    sg: nextSg,
+    greens: nextSg,
+    greenSemGale: nextSg,
+    greenG1: nextG1,
+    greensG1: nextG1,
+    emp: nextEmp,
+    ties: nextEmp,
+    reds: nextReds,
+    totalGreens,
+    totalEntries,
+    total: totalEntries + nextEmp,
+    assertiveness: totalEntries > 0 ? Math.round((totalGreens / totalEntries) * 1000) / 10 : undefined,
+  };
+}
+
+function serverReadEntryModeResultKind(result: NonNullable<DashboardData["currentSignal"]["lastResult"]>) {
+  const record = readRecord(result);
+  const status = serverNormalizeText(readString(record, "status"));
+  const side = serverNormalizeText(readString(record, "side"));
+  const protection = serverNormalizeText(readString(record, "protection"));
+  if (status.includes("TIE") || status.includes("EMPATE") || status.includes("EMP") || side === "TIE" || side === "EMPATE") return "emp";
+  if (status.includes("RED") || status.includes("LOSS")) return "red";
+  if (status.includes("G1") || protection.includes("G1")) return "g1";
+  return "sg";
+}
+
+function serverEntryModeResultKey(result: NonNullable<DashboardData["currentSignal"]["lastResult"]>) {
+  const record = readRecord(result);
+  return [
+    readString(record, "id"),
+    readString(record, "status"),
+    readString(record, "side"),
+    readString(record, "protection"),
+    readString(record, "finishedAt"),
+  ].join(":");
+}
+
+function isServerEntrySide(side: CurrentSignalSide): side is SignalSide {
+  return side === "BANKER" || side === "PLAYER";
+}
+
+function serverOppositeSurfRisk(data: DashboardData, side: SignalSide) {
+  const alert = data.currentSurfAlert;
+  if (!alert) return 0;
+  const surfSide = alert.surf_prediction_side && alert.surf_prediction_side !== "NONE"
+    ? alert.surf_prediction_side
+    : alert.surf_side;
+  if (surfSide === "NONE" || surfSide === side) return 0;
+  return clampPercent(alert.surf_break_risk ?? alert.surf_risk ?? 0);
+}
+
+function serverHasNeuralRisk(reading?: NeuralReading | null) {
+  if (!reading) return false;
+  const status = serverNormalizeText(reading.paganteStatus);
+  return Boolean(
+    reading.isRedAlert ||
+      reading.isSaturated ||
+      status.includes("RISCO") ||
+      status.includes("ESTICADO"),
+  );
+}
+
+function serverReadSniperNeuralGate(reading: NeuralReading | null | undefined, entrySide: SignalSide) {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return { accepted: false };
+  if (reading.origemTipo === "OPOSTO") return { accepted: false };
+  if (serverReadPaganteKind(reading) !== "favorable") return { accepted: false };
+
+  const paganteSide = reading.direcao ?? reading.origem ?? null;
+  if (paganteSide !== entrySide) return { accepted: false };
+
+  const performance = serverReadNeuralPerformance(reading);
+  return { accepted: Boolean(performance && performance.greens > 0 && performance.assertiveness >= SNIPER_NEURAL_ASSERTIVENESS_MIN) };
+}
+
+function serverReadPaganteKind(reading?: NeuralReading | null): "favorable" | "watch" | "risk" {
+  if (!reading) return "watch";
+  const status = serverNormalizeText(reading.paganteStatus);
+  if (
+    reading.isRedAlert ||
+    reading.isSaturated ||
+    status.includes("RISCO") ||
+    status.includes("ESTICADO")
+  ) {
+    return "risk";
+  }
+  if (
+    reading.mode === "OBSERVING" ||
+    status.includes("INICIANTE") ||
+    status.includes("OBSERV") ||
+    status.includes("POS-EMPATE") ||
+    status.includes("POS EMPATE")
+  ) {
+    return "watch";
+  }
+  return "favorable";
+}
+
+function serverReadNeuralPerformance(reading: NeuralReading) {
+  const greenSemGale = serverNumberOrZero(reading.greenSemGale ?? null);
+  const greenG1 = serverNumberOrZero(reading.greenG1 ?? null);
+  const greensFromSplit = greenSemGale + greenG1;
+  const greens = greensFromSplit > 0 ? greensFromSplit : serverNumberOrZero(reading.acertos ?? null);
+  const reds = serverNumberOrZero(reading.reds ?? reading.erros ?? null);
+  const total = greens + reds;
+  const providedAssertiveness = serverReadOptionalNumber(reading.assertividade);
+
+  if (typeof providedAssertiveness === "number") {
+    return {
+      greens,
+      reds,
+      total,
+      assertiveness: serverClampPercentDecimal(providedAssertiveness),
+    };
+  }
+
+  if (total <= 0) return null;
+  return {
+    greens,
+    reds,
+    total,
+    assertiveness: Math.round((greens / total) * 1000) / 10,
+  };
+}
+
+function normalizeServerEntryModeStatsByMode(value: unknown): Partial<Record<ActiveEntryMode, EntryModeStats>> {
+  const record = readRecord(value);
+  const stats: Partial<Record<ActiveEntryMode, EntryModeStats>> = {};
+  for (const mode of ACTIVE_ENTRY_MODES) {
+    stats[mode] = normalizeServerEntryModeStatsRecord(record[mode]);
+  }
+  return stats;
+}
+
+function normalizeServerIncomingEntryModeStats(value: unknown): Partial<Record<ActiveEntryMode, EntryModeStats>> | undefined {
+  const record = readRecord(value);
+  const stats: Partial<Record<ActiveEntryMode, EntryModeStats>> = {};
+  for (const mode of ACTIVE_ENTRY_MODES) {
+    const rawStats = readRecord(record[mode]);
+    if (Object.keys(rawStats).length > 0) {
+      stats[mode] = normalizeServerEntryModeStatsRecord(rawStats);
+    }
+  }
+  return ACTIVE_ENTRY_MODES.some((mode) => hasServerEntryModeStats(stats[mode])) ? stats : undefined;
+}
+
+function normalizeServerEntryModeStatsRecord(value: unknown): EntryModeStats {
+  const record = readRecord(value);
+  const sg = serverReadOptionalNumber(serverFirstDefined(record.sg, record.greenSemGale, record.green_sem_gale, record.greens)) ?? 0;
+  const g1 = serverReadOptionalNumber(serverFirstDefined(record.greenG1, record.green_g1, record.greensG1, record.greens_g1)) ?? 0;
+  const emp = serverReadOptionalNumber(serverFirstDefined(record.emp, record.ties, record.tie, record.empates)) ?? 0;
+  const reds = serverReadOptionalNumber(serverFirstDefined(record.reds, record.red, record.erros)) ?? 0;
+  const totalGreens = serverReadOptionalNumber(serverFirstDefined(record.totalGreens, record.total_greens)) ?? sg + g1;
+  const totalEntries = serverReadOptionalNumber(serverFirstDefined(record.totalEntries, record.total_entries)) ?? totalGreens + reds;
+  const total = serverReadOptionalNumber(record.total) ?? totalEntries + emp;
+  return {
+    sg,
+    greens: sg,
+    greenSemGale: sg,
+    greenG1: g1,
+    greensG1: g1,
+    emp,
+    ties: emp,
+    reds,
+    totalGreens,
+    totalEntries,
+    total,
+    assertiveness: serverReadOptionalNumber(serverFirstDefined(record.assertiveness, record.assertividade)) ?? undefined,
+  };
+}
+
+function hasServerEntryModeStats(stats?: EntryModeStats) {
+  if (!stats) return false;
+  return [
+    stats.sg,
+    stats.greenSemGale,
+    stats.greens,
+    stats.greenG1,
+    stats.greensG1,
+    stats.emp,
+    stats.ties,
+    stats.reds,
+    stats.totalGreens,
+    stats.totalEntries,
+    stats.total,
+  ].some((value) => serverNumberOrZero(serverReadOptionalNumber(value)) > 0);
+}
+
+function emptyServerEntryModeStatsByMode(): Partial<Record<ActiveEntryMode, EntryModeStats>> {
+  return Object.fromEntries(ACTIVE_ENTRY_MODES.map((mode) => [mode, normalizeServerEntryModeStatsRecord({})]));
+}
+
+function normalizeServerSignalModes(value: unknown) {
+  const record = readRecord(value);
+  const modes: Record<string, ActiveEntryMode[]> = {};
+  for (const [key, rawModes] of Object.entries(record)) {
+    const modeList = normalizeServerModeList(rawModes);
+    if (key && modeList.length > 0) modes[key] = modeList;
+  }
+  return modes;
+}
+
+function normalizeServerModeList(value: unknown) {
+  if (value === undefined || value === null || value === "") return [];
+  const values = Array.isArray(value) ? value : [value];
+  const selected = new Set<ActiveEntryMode>();
+  for (const rawMode of values) {
+    const text = String(rawMode || "").trim().toLowerCase();
+    if (text === "sniper") selected.add("sniper");
+    if (text === "hunter" || text === "cacador" || text === "caçador") selected.add("hunter");
+    if (text === "aggressive" || text === "agressivo") selected.add("aggressive");
+  }
+  return ACTIVE_ENTRY_MODES.filter((mode) => selected.has(mode));
+}
+
+function normalizeServerCountedResults(value: unknown) {
+  const record = readRecord(value);
+  return Object.fromEntries(Object.keys(record).filter(Boolean).map((key) => [key, true]));
+}
+
+function sameServerModeList(left: ActiveEntryMode[] | undefined, right: ActiveEntryMode[]) {
+  const safeLeft = left ?? [];
+  if (safeLeft.length !== right.length) return false;
+  return ACTIVE_ENTRY_MODES.every((mode) => safeLeft.includes(mode) === right.includes(mode));
+}
+
+function pruneServerSignalModes(signalModes: Record<string, ActiveEntryMode[]>) {
+  const keys = Object.keys(signalModes);
+  if (keys.length <= 300) return signalModes;
+  return Object.fromEntries(keys.slice(-220).map((key) => [key, signalModes[key]]));
+}
+
+function pruneServerCountedResults(countedResults: Record<string, true>) {
+  const keys = Object.keys(countedResults);
+  if (keys.length <= 300) return countedResults;
+  return Object.fromEntries(keys.slice(-220).map((key) => [key, true]));
+}
+
+function serverFirstDefined(...values: unknown[]) {
+  return values.find((value) => value !== undefined && value !== null && value !== "");
+}
+
+function serverReadOptionalNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const numeric = Number(String(value).replace("%", "").replace(",", ".").trim());
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function serverSafeCounter(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
+}
+
+function serverNumberOrZero(value: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function serverClampPercentDecimal(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(100, Math.round(numeric * 10) / 10));
+}
+
+function serverNormalizeText(value: unknown) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
 }
 
 function normalizeTieAlert(value: unknown, fallback: DashboardData["currentTieAlert"]) {

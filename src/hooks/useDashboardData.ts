@@ -413,9 +413,9 @@ function mergeEntryModeStats(
 ): Partial<Record<ActiveEntryMode, EntryModeStats>> {
   const merged: Partial<Record<ActiveEntryMode, EntryModeStats>> = {};
   for (const mode of ACTIVE_ENTRY_MODES) {
-    merged[mode] = hasEntryModeStats(localStats?.[mode])
-      ? normalizeEntryModeStatsRecord(localStats?.[mode])
-      : normalizeEntryModeStatsRecord(remoteStats?.[mode]);
+    merged[mode] = hasEntryModeStats(remoteStats?.[mode])
+      ? normalizeEntryModeStatsRecord(remoteStats?.[mode])
+      : normalizeEntryModeStatsRecord(localStats?.[mode]);
   }
   return merged;
 }
