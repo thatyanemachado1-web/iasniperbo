@@ -69,6 +69,7 @@ export function AdminUsersPage() {
   }, [canOpen]);
 
   const filteredUsers = useMemo(() => applyFilters(users, filters), [users, filters]);
+  const groupedUsers = useMemo(() => splitClientGroups(filteredUsers), [filteredUsers]);
 
   if (!canOpen) {
     return (
@@ -156,22 +157,25 @@ export function AdminUsersPage() {
         {error && <div className="mt-4 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
       </GlassCard>
 
-      <AdminUsersTable
-        users={filteredUsers}
-        onEdit={setSelected}
-        onQuickAction={(action, user) => void runQuickAction(action, user)}
-        actionsDisabled={(user) => busy || !canRunUserAction(role, user)}
-      />
-      <div className="grid gap-3 lg:hidden">
-        {filteredUsers.map((user) => (
-          <AdminUserCard
-            key={user.id}
-            user={user}
-            onEdit={setSelected}
-            onQuickAction={(action, item) => void runQuickAction(action, item)}
-            actionsDisabled={busy || !canRunUserAction(role, user)}
-          />
-        ))}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <UserGroupSection
+          title="Clientes"
+          subtitle="Pagantes, aprovados ou premium com acesso ativo."
+          users={groupedUsers.clients}
+          emptyMessage="Nenhum cliente pagante encontrado com os filtros atuais."
+          onEdit={setSelected}
+          onQuickAction={(action, user) => void runQuickAction(action, user)}
+          actionsDisabled={(user) => busy || !canRunUserAction(role, user)}
+        />
+        <UserGroupSection
+          title="Nao clientes"
+          subtitle="Free, trial, pendentes ou sem pagamento ativo."
+          users={groupedUsers.nonClients}
+          emptyMessage="Nenhum cadastro free/pendente encontrado com os filtros atuais."
+          onEdit={setSelected}
+          onQuickAction={(action, user) => void runQuickAction(action, user)}
+          actionsDisabled={(user) => busy || !canRunUserAction(role, user)}
+        />
       </div>
 
       {!loading && filteredUsers.length === 0 && (
@@ -190,6 +194,64 @@ export function AdminUsersPage() {
         onQuickAction={runQuickAction}
       />
     </div>
+  );
+}
+
+function UserGroupSection({
+  title,
+  subtitle,
+  users,
+  emptyMessage,
+  onEdit,
+  onQuickAction,
+  actionsDisabled,
+}: {
+  title: string;
+  subtitle: string;
+  users: AdminManagedUser[];
+  emptyMessage: string;
+  onEdit: (user: AdminManagedUser) => void;
+  onQuickAction: (action: QuickAction, user: AdminManagedUser) => void;
+  actionsDisabled: (user: AdminManagedUser) => boolean;
+}) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-end justify-between gap-3 border-b border-border/50 pb-2">
+        <div>
+          <h2 className="text-sm font-black uppercase tracking-[0.18em] text-foreground">{title}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+        </div>
+        <span className="rounded-full border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-1 text-xs font-black text-neon-cyan">
+          {users.length}
+        </span>
+      </div>
+
+      {users.length > 0 ? (
+        <>
+          <AdminUsersTable
+            users={users}
+            onEdit={onEdit}
+            onQuickAction={onQuickAction}
+            actionsDisabled={actionsDisabled}
+          />
+          <div className="grid gap-3 lg:hidden">
+            {users.map((user) => (
+              <AdminUserCard
+                key={user.id}
+                user={user}
+                onEdit={onEdit}
+                onQuickAction={onQuickAction}
+                actionsDisabled={actionsDisabled(user)}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="rounded-2xl border border-border/55 bg-secondary/20 px-4 py-6 text-center text-sm text-muted-foreground">
+          {emptyMessage}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -230,6 +292,27 @@ function applyFilters(users: AdminManagedUser[], filters: FilterState) {
     if (filters.quick === "blocked" && !user.isBlocked) return false;
     return true;
   });
+}
+
+function splitClientGroups(users: AdminManagedUser[]) {
+  return users.reduce(
+    (groups, user) => {
+      if (isPayingClient(user)) {
+        groups.clients.push(user);
+      } else {
+        groups.nonClients.push(user);
+      }
+      return groups;
+    },
+    { clients: [] as AdminManagedUser[], nonClients: [] as AdminManagedUser[] },
+  );
+}
+
+function isPayingClient(user: AdminManagedUser) {
+  if (user.isBlocked) return false;
+  if (Date.parse(user.currentPeriodEnd) <= Date.now()) return false;
+  if (user.subscriptionStatus === "active" || user.subscriptionStatus === "manual_vip") return true;
+  return user.plan === "monthly" || user.plan === "premium" || user.plan === "vip_manual";
 }
 
 function canRunUserAction(currentAdminRole: "admin" | "owner", user: AdminManagedUser) {
