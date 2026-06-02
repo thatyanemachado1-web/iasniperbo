@@ -4021,16 +4021,18 @@ function mergeLiveStates(
   if (!durableState && !cacheState) return null;
   const durable = durableState || {};
   const cache = cacheState || {};
+  const durableSavedAt = stateSavedAtMs(durable);
+  const cacheSavedAt = stateSavedAtMs(cache);
   return {
     ...cache,
     ...durable,
     dashboard: pickDashboardState(durable.dashboard, cache.dashboard),
-    recipients: pickStateArray(durable.recipients, cache.recipients),
-    clients: pickStateArray(durable.clients, cache.clients),
+    recipients: pickStateArrayByFreshness(durable.recipients, cache.recipients, durableSavedAt, cacheSavedAt),
+    clients: pickStateArrayByFreshness(durable.clients, cache.clients, durableSavedAt, cacheSavedAt),
     accessEvents: mergeStateArrays(durable.accessEvents, cache.accessEvents).slice(0, 200),
-    subscriptions: mergeStateArrays(durable.subscriptions, cache.subscriptions).slice(0, 500),
-    payments: mergeStateArrays(durable.payments, cache.payments).slice(0, 1000),
-    adminUsers: mergeStateArrays(durable.adminUsers, cache.adminUsers).slice(0, 1000),
+    subscriptions: pickStateArrayByFreshness(durable.subscriptions, cache.subscriptions, durableSavedAt, cacheSavedAt).slice(0, 500),
+    payments: pickStateArrayByFreshness(durable.payments, cache.payments, durableSavedAt, cacheSavedAt).slice(0, 1000),
+    adminUsers: pickStateArrayByFreshness(durable.adminUsers, cache.adminUsers, durableSavedAt, cacheSavedAt).slice(0, 1000),
     adminActionLogs: mergeStateArrays(durable.adminActionLogs, cache.adminActionLogs).slice(0, 500),
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
     savedAt: readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
@@ -4087,6 +4089,22 @@ function pickStateArray(primary: unknown, secondary: unknown) {
   return first.length >= second.length ? first : second;
 }
 
+function pickStateArrayByFreshness(
+  primary: unknown,
+  secondary: unknown,
+  primarySavedAt: number,
+  secondarySavedAt: number,
+) {
+  const first = Array.isArray(primary) ? primary.map(readRecord).filter(hasRecordFields) : [];
+  const second = Array.isArray(secondary) ? secondary.map(readRecord).filter(hasRecordFields) : [];
+  if (first.length === 0) return second;
+  if (second.length === 0) return first;
+  if (primarySavedAt || secondarySavedAt) {
+    return primarySavedAt >= secondarySavedAt ? first : second;
+  }
+  return first.length >= second.length ? first : second;
+}
+
 function mergeStateArrays(primary: unknown, secondary: unknown) {
   const rows = [...pickStateArray(primary, []), ...pickStateArray(secondary, [])];
   const byKey = new Map<string, Record<string, unknown>>();
@@ -4099,6 +4117,11 @@ function mergeStateArrays(primary: unknown, secondary: unknown) {
 
 function hasRecordFields(record: Record<string, unknown>) {
   return Object.keys(record).length > 0;
+}
+
+function stateSavedAtMs(state: Record<string, unknown>) {
+  const savedAt = Date.parse(readString(state, "savedAt") || "");
+  return Number.isFinite(savedAt) ? savedAt : 0;
 }
 
 function buildLiveStateSnapshot() {
