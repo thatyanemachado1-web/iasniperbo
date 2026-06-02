@@ -37,7 +37,7 @@ function MinhaAssinaturaPage() {
         setPlans(data.plans ?? []);
       } catch (loadError) {
         if (!active) return;
-        setError(loadError instanceof Error ? loadError.message : "Nao foi possivel carregar a assinatura.");
+        setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar a assinatura.");
       } finally {
         if (active) setLoading(false);
       }
@@ -62,7 +62,7 @@ function MinhaAssinaturaPage() {
           </AppBadge>
           <h1 className="mt-3 text-2xl font-extrabold text-gradient-brand">Minha Assinatura</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Acompanhe plano, validade e ultimo pagamento aprovado.
+            Acompanhe plano, validade e último pagamento aprovado.
           </p>
         </div>
         <Link
@@ -70,7 +70,7 @@ function MinhaAssinaturaPage() {
           className="btn-primary-grad inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold"
         >
           <ReceiptText className="size-4" />
-          Historico de pagamentos
+          Histórico de pagamentos
         </Link>
       </div>
 
@@ -112,10 +112,10 @@ function MinhaAssinaturaPage() {
 
             <div className="mt-5 rounded-xl border border-border/70 bg-secondary/20 p-4 text-sm text-muted-foreground">
               {approved
-                ? "Seu acesso premium esta ativo. Se a assinatura vencer, o painel de analises fica bloqueado automaticamente."
+                ? "Seu acesso premium está ativo. Se a assinatura vencer, o painel de análises fica bloqueado automaticamente."
                 : expired
-                ? "Sua assinatura venceu. Renove para liberar novamente o painel de analises."
-                : "Finalize o checkout e aguarde a confirmacao do Mercado Pago para liberar o painel automaticamente."}
+                ? "Sua assinatura venceu. Renove para liberar novamente o painel de análises."
+                : "Finalize o checkout e aguarde a confirmação do Mercado Pago para liberar o painel automaticamente."}
             </div>
 
             {!approved && (
@@ -129,7 +129,7 @@ function MinhaAssinaturaPage() {
           </GlassCard>
 
           <GlassCard>
-            <SectionTitle title="Ultimo pagamento" />
+            <SectionTitle title="Último pagamento" />
             {subscription?.last_payment?.id ? (
               <div className="mt-4 space-y-3 text-sm">
                 <Field label="Status" value={subscription.last_payment.status} />

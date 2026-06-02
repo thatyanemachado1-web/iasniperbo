@@ -16,11 +16,12 @@ import type {
 
 const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const ENTRY_MODE_KEY = "sniper_entry_mode";
-const ENTRY_MODE_COUNTERS_KEY = "sniper_entry_mode_counters_v3";
+const ENTRY_MODE_COUNTERS_KEY = "sniper_entry_mode_counters_v5";
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const LEGACY_ENTRY_MODE_COUNTERS_KEYS = [
   "sniper_entry_mode_counters",
   "sniper_entry_mode_counters_v2",
+  "sniper_entry_mode_counters_v3",
 ];
 const DEFAULT_ENTRY_MODE: EntryMode = "hunter";
 const DEFAULT_MODULE_TOGGLES: ModuleToggles = {
@@ -32,11 +33,14 @@ const ALLOWED_REMOTE_API_HOSTS = new Set([
   "www.sniperbo.com",
 ]);
 const ACTIVE_ENTRY_MODES = ["sniper", "hunter", "aggressive"] as const satisfies readonly ActiveEntryMode[];
+const SNIPER_NEURAL_ASSERTIVENESS_MIN = 99;
 
 type StoredEntryModeCounters = {
   stats: Partial<Record<ActiveEntryMode, EntryModeStats>>;
   signalModes: Record<string, ActiveEntryMode[]>;
   countedResults: Record<string, true>;
+  latestSignalId?: string;
+  latestSignalModes?: ActiveEntryMode[];
 };
 
 function configuredDashboardUrl() {
@@ -259,11 +263,13 @@ function readStoredEntryModeCounters(): StoredEntryModeCounters {
     for (const key of LEGACY_ENTRY_MODE_COUNTERS_KEYS) {
       window.localStorage.removeItem(key);
     }
-    const stored = readRecord(JSON.parse(window.localStorage.getItem(ENTRY_MODE_COUNTERS_KEY) || "{}"));
+    const stored = readRecord(JSON.parse(window.localStorage.getItem(entryModeCountersKey()) || "{}"));
     return {
       stats: normalizeEntryModeStatsByMode(stored.stats),
       signalModes: normalizeSignalModes(stored.signalModes),
       countedResults: normalizeCountedResults(stored.countedResults),
+      latestSignalId: readOptionalString(stored.latestSignalId) ?? undefined,
+      latestSignalModes: normalizeModeList(stored.latestSignalModes),
     };
   } catch {
     return emptyCounters;
@@ -272,7 +278,19 @@ function readStoredEntryModeCounters(): StoredEntryModeCounters {
 
 function writeStoredEntryModeCounters(counters: StoredEntryModeCounters) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(ENTRY_MODE_COUNTERS_KEY, JSON.stringify(counters));
+  window.localStorage.setItem(entryModeCountersKey(), JSON.stringify(counters));
+}
+
+function entryModeCountersKey() {
+  return `${ENTRY_MODE_COUNTERS_KEY}:${localDateKey()}`;
+}
+
+function localDateKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function trackEntryModeCounters(data: DashboardData) {
@@ -284,6 +302,8 @@ function trackEntryModeCounters(data: DashboardData) {
     const signalModes = modesThatWouldAcceptEntry(data);
     if (!sameModeList(counters.signalModes[signal.id], signalModes)) {
       counters.signalModes[signal.id] = signalModes;
+      counters.latestSignalId = signal.id;
+      counters.latestSignalModes = signalModes;
       changed = true;
     }
   }
@@ -292,7 +312,7 @@ function trackEntryModeCounters(data: DashboardData) {
   if (result) {
     const resultKey = entryModeResultKey(result);
     if (!counters.countedResults[resultKey]) {
-      const resultModes = counters.signalModes[result.id] ?? [];
+      const resultModes = counters.signalModes[result.id] ?? counters.latestSignalModes ?? [];
       if (resultModes.length > 0) {
         for (const resultMode of resultModes) {
           incrementEntryModeStats(counters.stats, resultMode, result);
@@ -393,9 +413,9 @@ function mergeEntryModeStats(
 ): Partial<Record<ActiveEntryMode, EntryModeStats>> {
   const merged: Partial<Record<ActiveEntryMode, EntryModeStats>> = {};
   for (const mode of ACTIVE_ENTRY_MODES) {
-    merged[mode] = hasEntryModeStats(remoteStats?.[mode])
-      ? normalizeEntryModeStatsRecord(remoteStats?.[mode])
-      : normalizeEntryModeStatsRecord(localStats?.[mode]);
+    merged[mode] = hasEntryModeStats(localStats?.[mode])
+      ? normalizeEntryModeStatsRecord(localStats?.[mode])
+      : normalizeEntryModeStatsRecord(remoteStats?.[mode]);
   }
   return merged;
 }
@@ -449,9 +469,11 @@ function normalizeSignalModes(value: unknown) {
 }
 
 function normalizeModeList(value: unknown) {
+  if (value === undefined || value === null || value === "") return [];
   const values = Array.isArray(value) ? value : [value];
   const selected = new Set<ActiveEntryMode>();
   for (const rawMode of values) {
+    if (rawMode === undefined || rawMode === null || rawMode === "") continue;
     const mode = normalizeEntryMode(rawMode);
     if (mode !== "off") selected.add(mode);
   }
@@ -464,8 +486,13 @@ function normalizeCountedResults(value: unknown) {
 }
 
 function hasEntryModeStats(value: unknown) {
-  const record = readRecord(value);
-  return Object.keys(record).length > 0;
+  const stats = normalizeEntryModeStatsRecord(value);
+  return (
+    safeCounter(stats.totalEntries) > 0 ||
+    safeCounter(stats.total) > 0 ||
+    safeCounter(stats.emp) > 0 ||
+    safeCounter(stats.ties) > 0
+  );
 }
 
 function safeCounter(value: unknown) {
@@ -526,6 +553,7 @@ function buildEntryModeFilter(data: DashboardData, mode: EntryMode) {
   const strength = clampPercent(signal.strength ?? 0);
   const surfRisk = oppositeSurfRisk(data, signal.side);
   const neuralRisk = hasNeuralRisk(data.neuralReading);
+  const sniperNeuralGate = readSniperNeuralGate(data.neuralReading, signal.side);
   const tieActive = data.currentTieAlert.status === "active";
   const tieHigh = tieActive && normalizeText(data.currentTieAlert.level).includes("ALTO");
   const engineConfirmed = data.engineDecision.state === "ENTRADA";
@@ -537,6 +565,7 @@ function buildEntryModeFilter(data: DashboardData, mode: EntryMode) {
     else if (tieActive) reason = "Modo Sniper segurou: Tie ativo deixa a principal em observação.";
     else if (surfRisk >= 40) reason = "Modo Sniper segurou: Surf mostra risco contrário relevante.";
     else if (neuralRisk) reason = "Modo Sniper segurou: número pagante ou gatilho está em zona de risco.";
+    else if (!sniperNeuralGate.accepted) reason = sniperNeuralGate.reason;
   } else {
     if (!engineConfirmed) reason = "Modo Caçador segurou: a engine ainda está em atenção.";
     else if (confidence < 70 || strength < 70) reason = "Modo Caçador segurou: confiança ou força abaixo do mínimo.";
@@ -580,10 +609,122 @@ function hasNeuralRisk(reading?: NeuralReading | null) {
   );
 }
 
+function readSniperNeuralGate(reading: NeuralReading | null | undefined, entrySide: SignalSide) {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") {
+    return {
+      accepted: false,
+      reason: "Modo Sniper segurou: aguarda número pagante ativo para confirmar a entrada.",
+    };
+  }
+
+  if (reading.origemTipo === "OPOSTO") {
+    return {
+      accepted: false,
+      reason: "Modo Sniper segurou: gatilho oposto não entra como pagante favorável.",
+    };
+  }
+
+  const paganteKind = readPaganteKind(reading);
+  if (paganteKind === "risk") {
+    return {
+      accepted: false,
+      reason: "Modo Sniper segurou: número pagante em risco elevado.",
+    };
+  }
+
+  if (paganteKind === "watch") {
+    return {
+      accepted: false,
+      reason: "Modo Sniper segurou: número pagante ainda está em observação.",
+    };
+  }
+
+  const paganteSide = reading.direcao ?? reading.origem ?? null;
+  if (paganteSide !== entrySide) {
+    return {
+      accepted: false,
+      reason: "Modo Sniper segurou: número pagante não está alinhado com a entrada principal.",
+    };
+  }
+
+  const performance = readNeuralPerformance(reading);
+  if (!performance || performance.greens <= 0) {
+    return {
+      accepted: false,
+      reason: "Modo Sniper segurou: sem histórico real suficiente do pagante hoje.",
+    };
+  }
+
+  if (performance.assertiveness < SNIPER_NEURAL_ASSERTIVENESS_MIN) {
+    return {
+      accepted: false,
+      reason: `Modo Sniper segurou: exige pagante com ${SNIPER_NEURAL_ASSERTIVENESS_MIN}% ou mais de assertividade real.`,
+    };
+  }
+
+  return { accepted: true, reason: "" };
+}
+
+function readPaganteKind(reading?: NeuralReading | null): "favorable" | "watch" | "risk" {
+  if (!reading) return "watch";
+  const status = normalizeText(reading.paganteStatus);
+  if (
+    reading.isRedAlert ||
+    reading.isSaturated ||
+    status.includes("RISCO") ||
+    status.includes("ESTICADO")
+  ) {
+    return "risk";
+  }
+  if (
+    reading.mode === "OBSERVING" ||
+    status.includes("INICIANTE") ||
+    status.includes("OBSERV") ||
+    status.includes("POS-EMPATE") ||
+    status.includes("POS EMPATE")
+  ) {
+    return "watch";
+  }
+  return "favorable";
+}
+
+function readNeuralPerformance(reading: NeuralReading) {
+  const greenSemGale = numberOrZero(reading.greenSemGale ?? null);
+  const greenG1 = numberOrZero(reading.greenG1 ?? null);
+  const greensFromSplit = greenSemGale + greenG1;
+  const greens = greensFromSplit > 0 ? greensFromSplit : numberOrZero(reading.acertos ?? null);
+  const reds = numberOrZero(reading.reds ?? reading.erros ?? null);
+  const total = greens + reds;
+  const providedAssertiveness = readOptionalNumber(reading.assertividade);
+
+  if (typeof providedAssertiveness === "number") {
+    return {
+      greens,
+      reds,
+      total,
+      assertiveness: clampPercentDecimal(providedAssertiveness),
+    };
+  }
+
+  if (total <= 0) return null;
+  return {
+    greens,
+    reds,
+    total,
+    assertiveness: Math.round((greens / total) * 1000) / 10,
+  };
+}
+
 function clampPercent(value: unknown) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function clampPercentDecimal(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(100, Math.round(numeric * 10) / 10));
 }
 
 function normalizeText(value: unknown) {

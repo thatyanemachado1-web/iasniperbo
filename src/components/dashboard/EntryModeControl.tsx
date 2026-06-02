@@ -1,4 +1,4 @@
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type { ActiveEntryMode, EntryMode, EntryModeStats } from "@/types/dashboard";
 import { Crosshair, Flame, HelpCircle, Power, Radar } from "lucide-react";
@@ -15,19 +15,19 @@ const MODE_OPTIONS: ModeOption[] = [
   {
     value: "sniper",
     label: "Sniper",
-    detail: "Exige entrada limpa, confiança alta e mesa sem risco forte antes de mostrar a principal.",
+    detail: "Ultra seletivo: exige pagante ativo, alinhado com a principal, 99% ou mais de assertividade real e mesa sem risco forte.",
     Icon: Crosshair,
   },
   {
     value: "hunter",
     label: "Caçador",
-    detail: "Modo recomendado. Filtra risco alto, mas ainda libera oportunidades boas da engine.",
+    detail: "Modo recomendado. Filtra risco alto, mas ainda acompanha oportunidades boas da engine em paralelo.",
     Icon: Radar,
   },
   {
     value: "aggressive",
     label: "Agressivo",
-    detail: "Mostra quase tudo que o motor liberar. Gera mais oportunidades, mas também aceita mais risco.",
+    detail: "Aceita mais oportunidades do motor e também mais risco. A porcentagem diária mostra se está compensando.",
     Icon: Flame,
   },
 ];
@@ -42,9 +42,9 @@ export function EntryModeControl({
   stats?: Partial<Record<ActiveEntryMode, EntryModeStats>>;
 }) {
   return (
-    <TooltipProvider delayDuration={120}>
-      <div className="flex w-full max-w-full flex-nowrap items-center gap-1 overflow-x-auto whitespace-nowrap pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <span className="inline-flex h-7 shrink-0 items-center rounded-full border border-neon-cyan/25 bg-neon-cyan/5 px-2 text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan sm:h-8 sm:px-3 sm:text-[10px]">
+    <>
+      <div className="grid w-full max-w-full grid-cols-[auto_repeat(3,minmax(0,1fr))] items-center gap-1">
+        <span className="inline-flex h-7 items-center justify-center rounded-full border border-neon-cyan/25 bg-neon-cyan/5 px-2 text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan sm:h-8 sm:px-3 sm:text-[10px]">
           Modo
         </span>
         {MODE_OPTIONS.map(({ value: optionValue, label, detail, Icon }) => {
@@ -57,7 +57,7 @@ export function EntryModeControl({
             <div
               key={optionValue}
               className={cn(
-                "inline-flex h-7 shrink-0 items-center overflow-hidden rounded-full border bg-background/55 text-[9px] uppercase tracking-[0.06em] transition sm:h-8 sm:text-[10px] sm:tracking-[0.12em]",
+                "inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border bg-background/55 text-[8px] uppercase tracking-[0.04em] transition sm:h-8 sm:text-[9px] sm:tracking-[0.08em] xl:text-[10px]",
                 active
                   ? "border-neon-cyan/55 text-neon-cyan shadow-[0_0_18px_-13px_var(--neon-cyan)]"
                   : "border-border/70 text-muted-foreground hover:border-neon-cyan/35 hover:text-neon-cyan/85",
@@ -65,31 +65,27 @@ export function EntryModeControl({
             >
               <span
                 className={cn(
-                  "inline-flex h-full items-center gap-1 px-2 font-black transition sm:gap-1.5 sm:px-2.5",
+                  "inline-flex h-full min-w-0 flex-1 items-center gap-1 px-1.5 font-black transition sm:gap-1.5 sm:px-2",
                   active ? "bg-neon-cyan/10" : "",
                 )}
               >
-                <Icon className="size-3 sm:size-3.5" />
-                {label}
+                <Icon className="size-3 shrink-0 sm:size-3.5" />
+                <span className="min-w-0 truncate">{label}</span>
                 <span
                   className={cn(
-                    "font-black",
-                    percent === null
-                      ? "text-muted-foreground"
-                      : active
-                        ? "text-success"
-                        : "text-neon-cyan/70",
+                    "shrink-0 font-black",
+                    percent === null ? "text-muted-foreground" : active ? "text-success" : "text-neon-cyan/70",
                   )}
                 >
                   {percentLabel}
                 </span>
               </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
+              <Popover>
+                <PopoverTrigger asChild>
                   <button
                     type="button"
                     className={cn(
-                      "grid h-full w-6 place-items-center border-l transition sm:w-7",
+                      "grid h-full w-5 shrink-0 place-items-center border-l transition sm:w-6",
                       "hover:bg-neon-cyan/10 hover:text-neon-cyan",
                       active ? "border-neon-cyan/20 text-neon-cyan" : "border-border/60 text-muted-foreground",
                     )}
@@ -97,10 +93,11 @@ export function EntryModeControl({
                   >
                     <HelpCircle className="size-2.5 sm:size-3" />
                   </button>
-                </TooltipTrigger>
-                <TooltipContent
+                </PopoverTrigger>
+                <PopoverContent
                   side="top"
-                  className="max-w-64 rounded-lg border border-neon-cyan/30 bg-[#061022] px-3 py-2 text-[11px] leading-relaxed text-foreground shadow-[0_0_30px_-16px_var(--neon-cyan)]"
+                  align="center"
+                  className="w-[min(calc(100vw-2rem),18rem)] rounded-lg border border-neon-cyan/30 bg-[#061022] px-3 py-2 text-[11px] leading-relaxed text-foreground shadow-[0_0_30px_-16px_var(--neon-cyan)]"
                 >
                   <div className="font-black uppercase tracking-[0.12em] text-neon-cyan">
                     {label}
@@ -113,15 +110,15 @@ export function EntryModeControl({
                     <ModeCount label="RED" value={counts.reds} tone="text-destructive" />
                   </div>
                   <div className="mt-2 border-t border-neon-cyan/15 pt-2 text-muted-foreground">
-                    {percent === null ? "Aguardando resultado deste modo." : `Assertividade real deste modo: ${percentLabel}.`}
+                    {percent === null ? "Aguardando resultado real deste modo hoje." : `Assertividade diária: ${percentLabel}.`}
                   </div>
-                </TooltipContent>
-              </Tooltip>
+                </PopoverContent>
+              </Popover>
               <button
                 type="button"
                 onClick={() => onChange(active ? "off" : optionValue)}
                 className={cn(
-                  "mr-1 inline-flex h-5 items-center gap-0.5 rounded-full border px-1.5 text-[8px] font-black transition sm:h-6 sm:gap-1 sm:px-2 sm:text-[9px]",
+                  "mr-1 inline-flex h-5 shrink-0 items-center gap-0.5 rounded-full border px-1 text-[8px] font-black transition sm:h-6 sm:gap-1 sm:px-1.5 sm:text-[9px]",
                   "hover:border-neon-cyan/40 hover:bg-neon-cyan/10 hover:text-neon-cyan",
                   active
                     ? "border-success/30 bg-success/15 text-success"
@@ -137,7 +134,7 @@ export function EntryModeControl({
           );
         })}
       </div>
-    </TooltipProvider>
+    </>
   );
 }
 

@@ -21,7 +21,7 @@ function HistoricoPagamentosPage() {
         if (active) setPayments(items);
       })
       .catch((loadError) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : "Nao foi possivel carregar pagamentos.");
+        if (active) setError(loadError instanceof Error ? loadError.message : "Não foi possível carregar pagamentos.");
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -36,7 +36,7 @@ function HistoricoPagamentosPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <AppBadge tone="blue">Mercado Pago</AppBadge>
-          <h1 className="mt-3 text-2xl font-extrabold text-gradient-brand">Historico de Pagamentos</h1>
+          <h1 className="mt-3 text-2xl font-extrabold text-gradient-brand">Histórico de Pagamentos</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Registro dos checkouts criados e pagamentos confirmados.
           </p>
