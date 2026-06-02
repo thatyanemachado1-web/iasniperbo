@@ -23,6 +23,7 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import {
   CalendarDays,
   Check,
+  ChevronDown,
   Copy,
   Download,
   Edit3,
@@ -195,7 +196,7 @@ function AdminPage() {
       const restored = await restoreRecipientsFromBackupIfNeeded(currentSession, fetched);
       setRecipientsWithBackup(restored);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel carregar destinatarios.");
+      setError(err instanceof Error ? err.message : "Não foi possível carregar destinatários.");
       setSession(readAdminSession());
     } finally {
       setLoading(false);
@@ -217,7 +218,7 @@ function AdminPage() {
         },
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel carregar alertas de seguranca.");
+      setError(err instanceof Error ? err.message : "Não foi possível carregar alertas de segurança.");
     }
   }
 
@@ -304,7 +305,7 @@ function AdminPage() {
         await refreshAdminSummary(logged);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel entrar no admin.");
+      setError(err instanceof Error ? err.message : "Não foi possível entrar no admin.");
     } finally {
       setLoading(false);
     }
@@ -344,7 +345,7 @@ function AdminPage() {
       });
       await refreshAdminSummary(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel cadastrar.");
+      setError(err instanceof Error ? err.message : "Não foi possível cadastrar.");
     } finally {
       setSaving(false);
     }
@@ -376,7 +377,7 @@ function AdminPage() {
       );
       await refreshAdminSummary(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel atualizar.");
+      setError(err instanceof Error ? err.message : "Não foi possível atualizar.");
       setRecipientsWithBackup((current) =>
         current.map((item) => (item.id === recipient.id ? recipient : item)),
       );
@@ -392,7 +393,7 @@ function AdminPage() {
       await deleteSignalRecipient(session, recipient.id);
       await refreshAdminSummary(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel remover.");
+      setError(err instanceof Error ? err.message : "Não foi possível remover.");
       setRecipientsWithBackup(previous);
     }
   }
@@ -461,7 +462,7 @@ function AdminPage() {
       cancelEdit();
       await refreshAdminSummary(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel salvar edicao.");
+      setError(err instanceof Error ? err.message : "Não foi possível salvar edição.");
     } finally {
       setSaving(false);
     }
@@ -487,7 +488,7 @@ function AdminPage() {
       );
       await refreshAdminSummary(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel liberar acesso.");
+      setError(err instanceof Error ? err.message : "Não foi possível liberar acesso.");
     } finally {
       setSaving(false);
     }
@@ -630,7 +631,7 @@ function AdminPage() {
               Clientes
             </AdminTabButton>
             <AdminTabButton active={adminView === "seguranca"} onClick={() => setAdminView("seguranca")}>
-              Seguranca
+              Segurança
             </AdminTabButton>
           </>
         )}
@@ -647,7 +648,7 @@ function AdminPage() {
           <div className="mb-3 rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
             {isOwnerAdmin
               ? "Ao aprovar, o painel libera o login do cliente e calcula automaticamente a validade do plano. Você ainda pode editar data, vencimento, status, plano e excluir tudo nesta mesma tela."
-              : "Permissao limitada: este acesso pode apenas aprovar cadastros pendentes como Premium por prazo. Edicao, exclusao e seguranca ficam restritas ao dono."}
+              : "Permissão limitada: este acesso pode apenas aprovar cadastros pendentes como Premium por prazo. Edição, exclusão e segurança ficam restritas ao dono."}
           </div>
 
           <div className="space-y-2">
@@ -684,12 +685,12 @@ function AdminPage() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">
-              Seguranca
+              Segurança
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               <AppBadge tone="muted">{securitySummary.total} rastros</AppBadge>
               <AppBadge tone={securitySummary.critical ? "red" : "muted"}>
-                {securitySummary.critical} criticos
+                {securitySummary.critical} críticos
               </AppBadge>
               <AppBadge tone={securitySummary.high ? "amber" : "muted"}>
                 {securitySummary.high} altos
@@ -877,12 +878,12 @@ function AdminPage() {
             <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
               Vencimento calculado:{" "}
               <span className="font-bold text-neon-cyan">
-                {formDates.expires_at ? formatDateBR(formDates.expires_at) : "informe inicio e meses"}
+                {formDates.expires_at ? formatDateBR(formDates.expires_at) : "informe início e meses"}
               </span>
             </div>
             <label className="block">
               <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                Observacao
+                Observação
               </span>
               <textarea
                 value={form.notes}
@@ -1073,8 +1074,8 @@ function AdminSummaryPanel({ summary }: { summary: AdminSummary }) {
           <LocationList items={summary.cityBreakdown} emptyText="Nenhuma cidade informada ainda." />
         </GlassCard>
         <GlassCard>
-          <SectionTitle title="Paises" subtitle="Resumo por pais informado." right={<Globe2 className="size-4 text-neon-cyan" />} />
-          <LocationList items={summary.countryBreakdown} emptyText="Nenhum pais informado ainda." />
+          <SectionTitle title="Países" subtitle="Resumo por país informado." right={<Globe2 className="size-4 text-neon-cyan" />} />
+          <LocationList items={summary.countryBreakdown} emptyText="Nenhum país informado ainda." />
         </GlassCard>
         <GlassCard>
           <SectionTitle title="Ultimos acessos" subtitle="Log simples desta execucao." right={<Users className="size-4 text-neon-cyan" />} />
@@ -1242,6 +1243,7 @@ function RecipientRowV2({
   saving: boolean;
   canManageFull?: boolean;
 }) {
+  const [quickOpen, setQuickOpen] = useState(false);
   const isPending = recipient.access_status === "pending";
   const expired = isRecipientExpired(recipient);
   const active = recipient.enabled && !expired;
@@ -1266,7 +1268,7 @@ function RecipientRowV2({
             <div>
               <div className="text-sm font-black">Editar cadastro</div>
               <div className="text-[11px] text-muted-foreground">
-                Altere plano, status, inicio, meses e dados do cliente.
+                Altere plano, status, início, meses e dados do cliente.
               </div>
             </div>
             <div className="flex gap-2">
@@ -1274,7 +1276,7 @@ function RecipientRowV2({
                 type="button"
                 onClick={onCancel}
                 className="glass inline-flex size-9 items-center justify-center rounded-xl text-muted-foreground"
-                aria-label="Cancelar edicao"
+                aria-label="Cancelar edição"
               >
                 <X className="size-4" />
               </button>
@@ -1297,7 +1299,7 @@ function RecipientRowV2({
             <AdminInput icon={<Phone className="size-4" />} label="Telefone" value={editForm.phone} onChange={(value) => updateEdit("phone", value)} />
             <AdminInput icon={<Radio className="size-4" />} label="Chat ID Telegram" value={editForm.chat_id} onChange={(value) => updateEdit("chat_id", value)} />
             <AdminInput icon={<MapPin className="size-4" />} label="Cidade" value={editForm.city} onChange={(value) => updateEdit("city", value)} />
-            <AdminInput icon={<Globe2 className="size-4" />} label="Pais" value={editForm.country} onChange={(value) => updateEdit("country", value)} />
+            <AdminInput icon={<Globe2 className="size-4" />} label="País" value={editForm.country} onChange={(value) => updateEdit("country", value)} />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -1308,18 +1310,18 @@ function RecipientRowV2({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <AdminInput icon={<CalendarDays className="size-4" />} label="Data inicio" type="date" value={editForm.starts_at} onChange={(value) => updateEdit("starts_at", value)} />
+            <AdminInput icon={<CalendarDays className="size-4" />} label="Data início" type="date" value={editForm.starts_at} onChange={(value) => updateEdit("starts_at", value)} />
             <AdminInput icon={<CalendarDays className="size-4" />} label="Dias" type="number" value={editForm.validity_days} onChange={(value) => updateEdit("validity_days", value)} />
             <AdminInput icon={<CalendarDays className="size-4" />} label="Expira em" type="date" value={editForm.expires_at} onChange={(value) => updateEdit("expires_at", value)} />
           </div>
 
           <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
-            Se preencher meses, o sistema usa a data de inicio e calcula automaticamente o vencimento.
+            Se preencher meses, o sistema usa a data de início e calcula automaticamente o vencimento.
           </div>
 
           <label className="block">
             <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-              Observacao interna
+              Observação interna
             </span>
             <textarea
               value={editForm.notes}
@@ -1347,7 +1349,7 @@ function RecipientRowV2({
                   <span>{[recipient.city, recipient.country].filter(Boolean).join(" / ")}</span>
                 )}
                 {recipient.chat_id && <span>Telegram {recipient.chat_id}</span>}
-                {recipient.starts_at && <span>Inicio {formatDateBR(recipient.starts_at)}</span>}
+                {recipient.starts_at && <span>Início {formatDateBR(recipient.starts_at)}</span>}
                 {recipient.validity_days ? <span>{recipient.validity_days} dias</span> : null}
                 {recipient.expires_at && <span>Expira {formatDateBR(recipient.expires_at)}</span>}
               </div>
@@ -1387,28 +1389,50 @@ function RecipientRowV2({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-t border-border/50 pt-2">
-            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-              Liberar rapido
-            </span>
-            {[1, 3, 6, 12].map((months) => (
-              <button
-                key={months}
-                type="button"
-                onClick={() => onQuickApprove(months)}
-                className="rounded-lg border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-1 text-[10px] font-black text-neon-cyan hover:bg-neon-cyan/15"
-              >
-                Aprovar Premium {months}m
-              </button>
-            ))}
-            {canManageFull && (
-              <button
-                type="button"
-                onClick={onEdit}
-                className="rounded-lg border border-gold/25 bg-gold/10 px-2.5 py-1 text-[10px] font-black text-gold"
-              >
-                Editar tudo
-              </button>
+          <div className="border-t border-border/50 pt-2">
+            <button
+              type="button"
+              onClick={() => setQuickOpen((current) => !current)}
+              className="flex w-full items-center justify-between gap-3 rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-left transition hover:border-neon-cyan/35 hover:bg-neon-cyan/10"
+              aria-expanded={quickOpen}
+            >
+              <span>
+                <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-neon-cyan">
+                  Liberar rápido
+                </span>
+                <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                  {canManageFull ? "5 atalhos administrativos" : "4 atalhos de aprovação"}
+                </span>
+              </span>
+              <span className="inline-flex size-8 items-center justify-center rounded-lg border border-neon-cyan/25 bg-background/45 text-neon-cyan">
+                <ChevronDown className={`size-4 transition ${quickOpen ? "rotate-180" : ""}`} />
+              </span>
+            </button>
+
+            {quickOpen && (
+              <div className="mt-2 rounded-xl border border-border/55 bg-background/35 p-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {[1, 3, 6, 12].map((months) => (
+                    <button
+                      key={months}
+                      type="button"
+                      onClick={() => onQuickApprove(months)}
+                      className="rounded-lg border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-1 text-[10px] font-black text-neon-cyan hover:bg-neon-cyan/15"
+                    >
+                      Aprovar Premium {months}m
+                    </button>
+                  ))}
+                  {canManageFull && (
+                    <button
+                      type="button"
+                      onClick={onEdit}
+                      className="rounded-lg border border-gold/25 bg-gold/10 px-2.5 py-1 text-[10px] font-black text-gold"
+                    >
+                      Editar tudo
+                    </button>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -1546,7 +1570,7 @@ function isClientRecipient(recipient: SignalRecipient) {
 function locationBreakdown(recipients: SignalRecipient[], field: "city" | "country") {
   const counts = new Map<string, number>();
   for (const recipient of recipients) {
-    const label = String(recipient[field] || "Nao informado").trim();
+    const label = String(recipient[field] || "Não informado").trim();
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   return [...counts.entries()]
@@ -1772,7 +1796,7 @@ function securityTypeLabel(type: string) {
     admin_password_in_client_login: "Senha admin errada",
     client_login_rate_limited: "Cliente bloqueado por excesso",
     client_password_invalid: "Senha de cliente errada",
-    dashboard_unauthorized: "Dashboard sem sessao",
+    dashboard_unauthorized: "Dashboard sem sessão",
     suspicious_probe: "Sondagem suspeita",
   };
   return labels[type] ?? type.replace(/_/g, " ");
