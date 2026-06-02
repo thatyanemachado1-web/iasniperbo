@@ -3398,24 +3398,9 @@ async function validateClientSessionBinding(
   client: Record<string, unknown>,
 ) {
   const binding = await requestSessionBinding(env, request);
-  const activeSessionId = readString(client, "active_session_id");
-  const activeUserAgentHash = readString(client, "active_session_user_agent_hash");
-  const activeIpHash = readString(client, "active_session_ip_hash");
 
-  if (!session.sid || !activeSessionId || session.sid !== activeSessionId) {
-    return { ok: false, reason: "single_session_replaced", ...binding };
-  }
   if (session.ua && session.ua !== binding.userAgentHash) {
     return { ok: false, reason: "user_agent_changed", ...binding };
-  }
-  if (session.iph && session.iph !== binding.ipHash) {
-    return { ok: false, reason: "ip_changed", ...binding };
-  }
-  if (activeUserAgentHash && activeUserAgentHash !== binding.userAgentHash) {
-    return { ok: false, reason: "active_user_agent_mismatch", ...binding };
-  }
-  if (activeIpHash && activeIpHash !== binding.ipHash) {
-    return { ok: false, reason: "active_ip_mismatch", ...binding };
   }
 
   return { ok: true, reason: "", ...binding };
