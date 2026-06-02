@@ -80,6 +80,7 @@ let liveSubscriptions: Array<Record<string, unknown>> = [];
 let livePayments: Array<Record<string, unknown>> = [];
 let liveAdminUsers: Array<Record<string, unknown>> = [];
 let liveAdminActionLogs: Array<Record<string, unknown>> = [];
+let liveDeletedEntities: Array<Record<string, unknown>> = [];
 let liveModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -1215,6 +1216,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       updated_at: now,
     };
 
+    clearDeletedEntityForRecord(client);
     liveClients =
       existingIndex >= 0
         ? liveClients.map((item, index) => (index === existingIndex ? client : item))
@@ -1427,6 +1429,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         created_at: now,
         updated_at: now,
       });
+      clearDeletedEntityForRecord(recipient);
       liveRecipients = [...liveRecipients, recipient];
       upsertClientFromRecipient(recipient);
       await updateClientPasswordFromBody(recipient, body);
@@ -1479,11 +1482,17 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
       const deletedRecipient = liveRecipients[index];
       const deletedEmail = readString(deletedRecipient, "email").toLowerCase();
+      markEntityDeleted(deletedRecipient);
       liveRecipients = liveRecipients.filter((recipient) => recipient.id !== recipientId);
       liveClients = liveClients.filter((client) => {
         const clientId = readString(client, "id");
         const clientEmail = readString(client, "email").toLowerCase();
         return clientId !== recipientId && (!deletedEmail || clientEmail !== deletedEmail);
+      });
+      liveAdminUsers = liveAdminUsers.filter((user) => {
+        const userId = readString(user, "id");
+        const userEmail = readString(user, "email").toLowerCase();
+        return userId !== recipientId && (!deletedEmail || userEmail !== deletedEmail);
       });
       await saveLiveState(env);
       return json({ ok: true });
@@ -3978,6 +3987,7 @@ function upsertAdminManagedUser(user: Record<string, unknown>) {
 
 function applyAdminManagedUserToClient(user: Record<string, unknown>) {
   const client = adminManagedUserToClient(user);
+  clearDeletedEntityForRecord(client);
   upsertLiveClient(client);
   upsertRecipientFromClient(client);
   const email = readString(client, "email").toLowerCase();
@@ -4534,6 +4544,15 @@ function applyLiveState(state: Record<string, unknown>) {
       .slice(0, 500);
   }
 
+  if (Array.isArray(state.deletedEntities)) {
+    liveDeletedEntities = state.deletedEntities
+      .map(readRecord)
+      .filter((entry) => Object.keys(entry).length > 0)
+      .slice(0, 1000);
+  }
+
+  applyDeletedEntityTombstones();
+
   const moduleToggles = readRecord(state.moduleToggles);
   if (Object.keys(moduleToggles).length > 0) {
     liveModuleToggles = restoreModuleToggles(moduleToggles);
@@ -4550,17 +4569,19 @@ function mergeLiveStates(
   const cache = cacheState || {};
   const durableSavedAt = stateSavedAtMs(durable);
   const cacheSavedAt = stateSavedAtMs(cache);
+  const deletedEntities = mergeDeletedEntityStates(durable.deletedEntities, cache.deletedEntities).slice(0, 1000);
   return {
     ...cache,
     ...durable,
     dashboard: pickDashboardState(durable.dashboard, cache.dashboard),
-    recipients: mergeEntityStateArrays(durable.recipients, cache.recipients, durableSavedAt, cacheSavedAt, true),
-    clients: mergeEntityStateArrays(durable.clients, cache.clients, durableSavedAt, cacheSavedAt, true),
+    recipients: filterDeletedEntityRows(mergeEntityStateArrays(durable.recipients, cache.recipients, durableSavedAt, cacheSavedAt, true), deletedEntities),
+    clients: filterDeletedEntityRows(mergeEntityStateArrays(durable.clients, cache.clients, durableSavedAt, cacheSavedAt, true), deletedEntities),
     accessEvents: mergeStateArrays(durable.accessEvents, cache.accessEvents).slice(0, 200),
     subscriptions: mergeEntityStateArrays(durable.subscriptions, cache.subscriptions, durableSavedAt, cacheSavedAt).slice(0, 500),
     payments: mergeEntityStateArrays(durable.payments, cache.payments, durableSavedAt, cacheSavedAt).slice(0, 1000),
-    adminUsers: mergeEntityStateArrays(durable.adminUsers, cache.adminUsers, durableSavedAt, cacheSavedAt).slice(0, 1000),
+    adminUsers: filterDeletedEntityRows(mergeEntityStateArrays(durable.adminUsers, cache.adminUsers, durableSavedAt, cacheSavedAt, true), deletedEntities).slice(0, 1000),
     adminActionLogs: mergeStateArrays(durable.adminActionLogs, cache.adminActionLogs).slice(0, 500),
+    deletedEntities,
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
     savedAt: readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
   };
@@ -4730,6 +4751,84 @@ function isBlankStateValue(value: unknown) {
   return value === undefined || value === null || value === "";
 }
 
+function mergeDeletedEntityStates(primary: unknown, secondary: unknown) {
+  const rows = [...pickStateArray(primary, []), ...pickStateArray(secondary, [])];
+  const byKey = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const key = deletedEntityKey(row);
+    const existing = byKey.get(key);
+    if (!existing || deletedEntityTime(row) >= deletedEntityTime(existing)) {
+      byKey.set(key, normalizeDeletedEntity(row));
+    }
+  }
+  return [...byKey.values()];
+}
+
+function markEntityDeleted(row: Record<string, unknown>) {
+  const deleted = normalizeDeletedEntity({
+    id: readString(row, "id"),
+    email: readString(row, "email").toLowerCase(),
+    deleted_at: new Date().toISOString(),
+  });
+  if (!readString(deleted, "id") && !readString(deleted, "email")) return;
+
+  liveDeletedEntities = [
+    deleted,
+    ...liveDeletedEntities.filter((entry) => !deletedEntitiesMatch(entry, deleted)),
+  ].slice(0, 1000);
+}
+
+function clearDeletedEntityForRecord(row: Record<string, unknown>) {
+  liveDeletedEntities = liveDeletedEntities.filter((entry) => !deletedEntitiesMatch(entry, row));
+}
+
+function applyDeletedEntityTombstones() {
+  liveRecipients = filterDeletedEntityRows(liveRecipients);
+  liveClients = filterDeletedEntityRows(liveClients);
+  liveAdminUsers = filterDeletedEntityRows(liveAdminUsers);
+}
+
+function filterDeletedEntityRows(
+  rows: Record<string, unknown>[],
+  deletedEntities = liveDeletedEntities,
+) {
+  return rows.filter((row) => !isEntityDeleted(row, deletedEntities));
+}
+
+function isEntityDeleted(row: Record<string, unknown>, deletedEntities = liveDeletedEntities) {
+  const rowTime = stateEntityUpdatedAtMs(row);
+  return deletedEntities.some((entry) => {
+    if (!deletedEntitiesMatch(entry, row)) return false;
+    const deletedAt = deletedEntityTime(entry);
+    return !rowTime || !deletedAt || rowTime <= deletedAt;
+  });
+}
+
+function deletedEntitiesMatch(left: Record<string, unknown>, right: Record<string, unknown>) {
+  const leftId = readString(left, "id");
+  const rightId = readString(right, "id");
+  const leftEmail = readString(left, "email").toLowerCase();
+  const rightEmail = readString(right, "email").toLowerCase();
+  return Boolean((leftId && rightId && leftId === rightId) || (leftEmail && rightEmail && leftEmail === rightEmail));
+}
+
+function normalizeDeletedEntity(row: Record<string, unknown>) {
+  return {
+    id: readString(row, "id"),
+    email: readString(row, "email").toLowerCase(),
+    deleted_at: readString(row, "deleted_at") || readString(row, "deletedAt") || new Date().toISOString(),
+  };
+}
+
+function deletedEntityKey(row: Record<string, unknown>) {
+  return readString(row, "email").toLowerCase() || readString(row, "id") || JSON.stringify(row);
+}
+
+function deletedEntityTime(row: Record<string, unknown>) {
+  const time = Date.parse(readString(row, "deleted_at") || readString(row, "deletedAt") || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
 function hasRecordFields(record: Record<string, unknown>) {
   return Object.keys(record).length > 0;
 }
@@ -4749,6 +4848,7 @@ function buildLiveStateSnapshot() {
     payments: livePayments,
     adminUsers: liveAdminUsers,
     adminActionLogs: liveAdminActionLogs,
+    deletedEntities: liveDeletedEntities,
     moduleToggles: liveModuleToggles,
     savedAt: new Date().toISOString(),
   };
