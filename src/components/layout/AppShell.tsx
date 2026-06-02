@@ -10,11 +10,13 @@ import {
   Settings,
   ShieldCheck,
   ReceiptText,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { canSeeAdminUi } from "@/lib/adminSession";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
@@ -30,6 +32,8 @@ const adminNavItem = { to: "/app/admin/users", label: "ADM", icon: ShieldCheck }
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
   const userSession = readUserSession();
   const canSeeAdmin = canSeeAdminUi();
   const fullAccess = hasFullAccess(userSession);
@@ -37,6 +41,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     ? navItems.filter((item) => item.to !== "/app/planos")
     : navItems;
   const mobileNavItems = canSeeAdmin ? [...visibleNavItems, adminNavItem] : visibleNavItems;
+
+  useEffect(() => {
+    const savedPreference = window.localStorage.getItem("sniper_sidebar_collapsed");
+    if (savedPreference) setSidebarCollapsed(savedPreference === "true");
+    setSidebarPreferenceLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarPreferenceLoaded) return;
+    window.localStorage.setItem("sniper_sidebar_collapsed", String(sidebarCollapsed));
+  }, [sidebarCollapsed, sidebarPreferenceLoaded]);
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -81,7 +96,24 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="mx-auto max-w-7xl flex">
         {/* Sidebar desktop */}
-        <aside className="hidden lg:flex flex-col w-60 shrink-0 sticky top-14 self-start h-[calc(100vh-3.5rem)] border-r border-border/60 px-3 py-5">
+        <aside
+          className={`relative hidden lg:flex flex-col shrink-0 sticky top-14 self-start h-[calc(100vh-3.5rem)] border-r border-border/60 py-5 transition-[width,padding] duration-300 ${
+            sidebarCollapsed ? "w-[72px] px-2" : "w-60 px-3"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed((current) => !current)}
+            className="absolute -right-3 top-3 z-20 inline-flex size-6 items-center justify-center rounded-full border border-neon-cyan/35 bg-background/95 text-neon-cyan shadow-[0_0_18px_rgba(0,229,255,0.22)] transition hover:border-neon-cyan hover:bg-neon-cyan/10"
+            aria-label={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
+            title={sidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
+          >
+            {sidebarCollapsed ? (
+              <ChevronRight className="size-3.5" />
+            ) : (
+              <ChevronLeft className="size-3.5" />
+            )}
+          </button>
           <nav className="flex-1 space-y-1">
             {visibleNavItems.map((it) => {
               const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
@@ -89,14 +121,18 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Link
                   key={it.to}
                   to={it.to}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
+                  title={sidebarCollapsed ? it.label : undefined}
+                  aria-label={sidebarCollapsed ? it.label : undefined}
+                  className={`flex h-10 items-center rounded-xl text-sm transition ${
+                    sidebarCollapsed ? "justify-center px-0" : "gap-3 px-3"
+                  } ${
                     active
                       ? "btn-primary-grad font-semibold glow-blue"
                       : "text-muted-foreground hover:text-foreground hover:bg-secondary/40"
                   }`}
                 >
                   <it.icon className="size-4" />
-                  {it.label}
+                  {!sidebarCollapsed && <span>{it.label}</span>}
                 </Link>
               );
             })}
@@ -104,16 +140,26 @@ export function AppShell({ children }: { children: ReactNode }) {
           {canSeeAdmin && (
             <Link
               to="/app/admin/users"
-              className="mb-2 flex items-center gap-2 rounded-xl border border-neon-cyan/25 bg-neon-cyan/10 px-3 py-2 text-xs font-black text-neon-cyan hover:glow-blue"
+              title={sidebarCollapsed ? "Administração" : undefined}
+              aria-label={sidebarCollapsed ? "Administração" : undefined}
+              className={`mb-2 flex h-10 items-center rounded-xl border border-neon-cyan/25 bg-neon-cyan/10 text-xs font-black text-neon-cyan hover:glow-blue ${
+                sidebarCollapsed ? "justify-center px-0" : "gap-2 px-3"
+              }`}
             >
-              <ShieldCheck className="size-4" /> Administração
+              <ShieldCheck className="size-4" />
+              {!sidebarCollapsed && <span>Administração</span>}
             </Link>
           )}
           <Link
             to="/app/conta"
-            className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+            title={sidebarCollapsed ? "Configurações" : undefined}
+            aria-label={sidebarCollapsed ? "Configurações" : undefined}
+            className={`flex h-10 items-center rounded-xl text-xs text-muted-foreground hover:text-foreground ${
+              sidebarCollapsed ? "justify-center px-0" : "gap-2 px-3"
+            }`}
           >
-            <Settings className="size-4" /> Configurações
+            <Settings className="size-4" />
+            {!sidebarCollapsed && <span>Configurações</span>}
           </Link>
         </aside>
 
