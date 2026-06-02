@@ -14,8 +14,10 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppVozRouteImport } from './routes/app.voz'
 import { Route as AppPlanosRouteImport } from './routes/app.planos'
+import { Route as AppPagamentosRouteImport } from './routes/app.pagamentos'
 import { Route as AppIaRouteImport } from './routes/app.ia'
 import { Route as AppContaRouteImport } from './routes/app.conta'
+import { Route as AppAssinaturaRouteImport } from './routes/app.assinatura'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 
 const AppRoute = AppRouteImport.update({
@@ -43,6 +45,11 @@ const AppPlanosRoute = AppPlanosRouteImport.update({
   path: '/planos',
   getParentRoute: () => AppRoute,
 } as any)
+const AppPagamentosRoute = AppPagamentosRouteImport.update({
+  id: '/pagamentos',
+  path: '/pagamentos',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppIaRoute = AppIaRouteImport.update({
   id: '/ia',
   path: '/ia',
@@ -51,6 +58,11 @@ const AppIaRoute = AppIaRouteImport.update({
 const AppContaRoute = AppContaRouteImport.update({
   id: '/conta',
   path: '/conta',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAssinaturaRoute = AppAssinaturaRouteImport.update({
+  id: '/assinatura',
+  path: '/assinatura',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAdminRoute = AppAdminRouteImport.update({
@@ -63,8 +75,10 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/app/admin': typeof AppAdminRoute
+  '/app/assinatura': typeof AppAssinaturaRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
+  '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
@@ -72,8 +86,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/app/admin': typeof AppAdminRoute
+  '/app/assinatura': typeof AppAssinaturaRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
+  '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
   '/app/voz': typeof AppVozRoute
   '/app': typeof AppIndexRoute
@@ -83,8 +99,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/app/admin': typeof AppAdminRoute
+  '/app/assinatura': typeof AppAssinaturaRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
+  '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
@@ -95,8 +113,10 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/app/admin'
+    | '/app/assinatura'
     | '/app/conta'
     | '/app/ia'
+    | '/app/pagamentos'
     | '/app/planos'
     | '/app/voz'
     | '/app/'
@@ -104,8 +124,10 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/app/admin'
+    | '/app/assinatura'
     | '/app/conta'
     | '/app/ia'
+    | '/app/pagamentos'
     | '/app/planos'
     | '/app/voz'
     | '/app'
@@ -114,8 +136,10 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/app/admin'
+    | '/app/assinatura'
     | '/app/conta'
     | '/app/ia'
+    | '/app/pagamentos'
     | '/app/planos'
     | '/app/voz'
     | '/app/'
@@ -163,6 +187,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppPlanosRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/pagamentos': {
+      id: '/app/pagamentos'
+      path: '/pagamentos'
+      fullPath: '/app/pagamentos'
+      preLoaderRoute: typeof AppPagamentosRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/ia': {
       id: '/app/ia'
       path: '/ia'
@@ -177,6 +208,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppContaRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/assinatura': {
+      id: '/app/assinatura'
+      path: '/assinatura'
+      fullPath: '/app/assinatura'
+      preLoaderRoute: typeof AppAssinaturaRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/admin': {
       id: '/app/admin'
       path: '/admin'
@@ -189,8 +227,10 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
+  AppAssinaturaRoute: typeof AppAssinaturaRoute
   AppContaRoute: typeof AppContaRoute
   AppIaRoute: typeof AppIaRoute
+  AppPagamentosRoute: typeof AppPagamentosRoute
   AppPlanosRoute: typeof AppPlanosRoute
   AppVozRoute: typeof AppVozRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -198,8 +238,10 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
+  AppAssinaturaRoute: AppAssinaturaRoute,
   AppContaRoute: AppContaRoute,
   AppIaRoute: AppIaRoute,
+  AppPagamentosRoute: AppPagamentosRoute,
   AppPlanosRoute: AppPlanosRoute,
   AppVozRoute: AppVozRoute,
   AppIndexRoute: AppIndexRoute,
@@ -214,3 +256,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

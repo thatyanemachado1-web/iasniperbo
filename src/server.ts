@@ -17,11 +17,15 @@ type LiveDashboardData = DashboardData & {
 };
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
 type AdminRole = "owner" | "approver";
+type BillingPlanId = "free" | "premium" | "vip";
+type SubscriptionStatus = "free" | "pending" | "active" | "expired" | "cancelled" | "past_due";
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
 const LIVE_STATE_TABLE = "sniper_live_state";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
+const MERCADOPAGO_PREFERENCE_URL = "https://api.mercadopago.com/checkout/preferences";
+const MERCADOPAGO_PAYMENT_URL = "https://api.mercadopago.com/v1/payments";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 const MAX_NARRATION_CHARS = 900;
@@ -41,6 +45,8 @@ let liveDashboardData: LiveDashboardData = {
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
 let liveAccessEvents: Array<Record<string, unknown>> = [];
+let liveSubscriptions: Array<Record<string, unknown>> = [];
+let livePayments: Array<Record<string, unknown>> = [];
 let liveModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -139,6 +145,9 @@ export default {
       const voiceDiagnosticsResponse = await handleVoiceDiagnosticsRequest(request, env);
       if (voiceDiagnosticsResponse) return withSecurityHeaders(voiceDiagnosticsResponse);
 
+      const billingResponse = await handleBillingRequest(request, env);
+      if (billingResponse) return withSecurityHeaders(billingResponse);
+
       const adminApiResponse = await handleAdminApiRequest(request, env);
       if (adminApiResponse) return withSecurityHeaders(adminApiResponse);
 
@@ -203,11 +212,17 @@ function rateLimitForRequest(method: string, pathname: string) {
   if (pathname === "/auth/check" || pathname === "/auth/register" || pathname === "/admin/login") {
     return 30;
   }
+  if (pathname === "/billing/checkout") return 12;
+  if (pathname === "/webhooks/mercadopago") return 240;
+  if (pathname === "/api/webhook/hubla" || pathname === "/api/webhooks/hubla") return 240;
   if (pathname === "/auth/verify") return 60;
   if (pathname === "/voice/narration") return 25;
   if (pathname === "/dashboard") return method === "GET" ? 120 : 240;
   if (pathname === "/dashboard/signal") return 240;
   if (
+    pathname === "/billing/plans" ||
+    pathname === "/billing/subscription" ||
+    pathname === "/billing/payments" ||
     pathname === "/admin/summary" ||
     pathname === "/telegram-recipients" ||
     pathname.startsWith("/telegram-recipients/") ||
@@ -309,7 +324,7 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
       "cache-control": "no-store",
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "POST,OPTIONS",
-      "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token",
+      "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
     },
   });
 }
@@ -361,6 +376,591 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
     provider: "elevenlabs",
     lastElevenLabsStatus,
   });
+}
+
+async function handleBillingRequest(request: Request, env: unknown) {
+  const url = new URL(request.url);
+  const billingPaths = new Set([
+    "/billing/plans",
+    "/billing/checkout",
+    "/billing/subscription",
+    "/billing/payments",
+    "/webhooks/mercadopago",
+    "/api/webhook/hubla",
+    "/api/webhooks/hubla",
+  ]);
+  if (!billingPaths.has(url.pathname)) return null;
+
+  if (request.method === "OPTIONS") {
+    return json(null, 204);
+  }
+
+  if (request.method === "GET" && url.pathname === "/billing/plans") {
+    return json({ plans: getBillingPlans(env) });
+  }
+
+  if (request.method === "POST" && url.pathname === "/webhooks/mercadopago") {
+    return handleMercadoPagoWebhook(request, url, env);
+  }
+
+  if (request.method === "POST" && (url.pathname === "/api/webhook/hubla" || url.pathname === "/api/webhooks/hubla")) {
+    return handleHublaWebhook(request, env);
+  }
+
+  const auth = await requireClientBillingSession(request, env);
+  if (!auth.ok) {
+    return json({ error: auth.error }, auth.status);
+  }
+
+  if (request.method === "GET" && url.pathname === "/billing/subscription") {
+    refreshExpiredBillingForClient(auth.client);
+    await saveLiveState(env);
+    return json({
+      subscription: buildBillingOverview(auth.client),
+      plans: getBillingPlans(env),
+    });
+  }
+
+  if (request.method === "GET" && url.pathname === "/billing/payments") {
+    const email = readString(auth.client, "email").toLowerCase();
+    return json({
+      payments: livePayments
+        .filter((payment) => readString(payment, "email").toLowerCase() === email)
+        .sort((a, b) => readString(b, "created_at").localeCompare(readString(a, "created_at"))),
+    });
+  }
+
+  if (request.method === "POST" && url.pathname === "/billing/checkout") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const plan = normalizeBillingPlanId(body.plan);
+    if (!plan || plan === "free") {
+      return json({ error: "Escolha um plano VIP ou Premium para abrir o checkout." }, 400);
+    }
+    return createMercadoPagoCheckout(request, env, auth.client, plan);
+  }
+
+  return json({ error: "Rota de assinatura nao encontrada." }, 404);
+}
+
+async function requireClientBillingSession(request: Request, env: unknown): Promise<
+  | { ok: true; client: Record<string, unknown>; session: SessionPayload }
+  | { ok: false; status: number; error: string }
+> {
+  const token = getBearerToken(request);
+  if (!token) return { ok: false, status: 401, error: "Sessao obrigatoria." };
+
+  const session = await verifySessionToken(env, token);
+  if (!session) return { ok: false, status: 401, error: "Sessao expirada." };
+  if (session.scope !== "client") {
+    return { ok: false, status: 403, error: "Use uma conta de cliente para assinar." };
+  }
+
+  const client = findClientByEmail(session.email);
+  if (!client) return { ok: false, status: 404, error: "Cliente nao encontrado." };
+
+  const sessionCheck = await validateClientSessionBinding(env, request, session, client);
+  if (!sessionCheck.ok) {
+    recordAccessEvent("client_session_blocked", {
+      ...client,
+      risk: "high",
+      detail: sessionCheck.reason,
+      ip_hash: sessionCheck.ipHash || "",
+      user_agent_hash: sessionCheck.userAgentHash || "",
+    });
+    await saveLiveState(env);
+    return { ok: false, status: 401, error: "Sessao invalida ou usada em outro dispositivo." };
+  }
+
+  return { ok: true, client, session };
+}
+
+async function createMercadoPagoCheckout(
+  request: Request,
+  env: unknown,
+  client: Record<string, unknown>,
+  plan: BillingPlanId,
+) {
+  const hublaCheckoutUrl = getHublaCheckoutUrl(plan, env);
+  if (hublaCheckoutUrl) {
+    const now = new Date().toISOString();
+    const email = readString(client, "email").toLowerCase();
+    const planConfig = getBillingPlan(plan, env);
+    const subscriptionId = crypto.randomUUID();
+    const externalReference = `sniperbo-hubla:${subscriptionId}:${email}:${plan}`;
+    const subscription = upsertSubscriptionRecord({
+      id: subscriptionId,
+      user_id: readString(client, "id"),
+      email,
+      plan,
+      status: "pending",
+      provider: "hubla",
+      provider_preference_id: "",
+      provider_payment_id: "",
+      external_reference: externalReference,
+      starts_at: "",
+      expires_at: "",
+      created_at: now,
+      updated_at: now,
+    });
+    const payment = upsertPaymentRecord({
+      id: crypto.randomUUID(),
+      user_id: readString(client, "id"),
+      subscription_id: subscriptionId,
+      email,
+      plan,
+      provider: "hubla",
+      provider_preference_id: "",
+      provider_payment_id: "",
+      external_reference: externalReference,
+      status: "pending",
+      amount: planConfig.amount,
+      currency: getMercadoPagoCurrency(env),
+      paid_at: "",
+      created_at: now,
+      updated_at: now,
+    });
+
+    await saveLiveState(env);
+    await persistBillingRecords(env, client, subscription, payment);
+    return json({
+      checkout_url: hublaCheckoutUrl,
+      provider: "hubla",
+      subscription: buildSubscriptionPublic(subscription),
+    });
+  }
+
+  const accessToken = getMercadoPagoAccessToken(env);
+  if (!accessToken) {
+    return json({ error: "Checkout Hubla nao configurado. Adicione HUBLA_CHECKOUT_URL ou o link do plano nos Secrets." }, 503);
+  }
+
+  const planConfig = getBillingPlan(plan, env);
+  if (!planConfig || !planConfig.amount || planConfig.amount <= 0) {
+    return json({ error: "Valor do plano nao configurado." }, 503);
+  }
+
+  const now = new Date().toISOString();
+  const email = readString(client, "email").toLowerCase();
+  const subscriptionId = crypto.randomUUID();
+  const externalReference = `sniperbo:${subscriptionId}:${email}:${plan}`;
+  const origin = getPublicAppOrigin(request, env);
+  const successUrl = readNamedServerSecret(env, "MERCADOPAGO_SUCCESS_URL", `${origin}/app/assinatura?status=approved`);
+  const pendingUrl = readNamedServerSecret(env, "MERCADOPAGO_PENDING_URL", `${origin}/app/assinatura?status=pending`);
+  const failureUrl = readNamedServerSecret(env, "MERCADOPAGO_FAILURE_URL", `${origin}/app/assinatura?status=failure`);
+  const preferenceBody = {
+    items: [
+      {
+        id: planConfig.id,
+        title: `SNIPER BO IA - ${planConfig.name}`,
+        description: planConfig.description,
+        quantity: 1,
+        currency_id: getMercadoPagoCurrency(env),
+        unit_price: planConfig.amount,
+      },
+    ],
+    payer: {
+      email,
+      name: readString(client, "full_name") || nameFromEmail(email),
+    },
+    back_urls: {
+      success: successUrl,
+      pending: pendingUrl,
+      failure: failureUrl,
+    },
+    auto_return: "approved",
+    notification_url: `${origin}/webhooks/mercadopago`,
+    external_reference: externalReference,
+    metadata: {
+      email,
+      plan,
+      subscription_id: subscriptionId,
+    },
+  };
+
+  let preference: Record<string, unknown>;
+  try {
+    const response = await fetch(MERCADOPAGO_PREFERENCE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(preferenceBody),
+    });
+    preference = readRecord(await response.json().catch(() => ({})));
+    if (!response.ok) {
+      console.warn(`Mercado Pago preference falhou (${response.status}).`);
+      return json({ error: "Nao foi possivel criar checkout no Mercado Pago." }, 502);
+    }
+  } catch (error) {
+    console.warn("Falha de rede ao criar checkout Mercado Pago.", error);
+    return json({ error: "Mercado Pago indisponivel no momento." }, 502);
+  }
+
+  const preferenceId = readString(preference, "id");
+  const checkoutUrl = readString(preference, "init_point") || readString(preference, "sandbox_init_point");
+  if (!preferenceId || !checkoutUrl) {
+    return json({ error: "Mercado Pago nao retornou o link de checkout." }, 502);
+  }
+
+  const subscription = upsertSubscriptionRecord({
+    id: subscriptionId,
+    user_id: readString(client, "id"),
+    email,
+    plan,
+    status: "pending",
+    provider: "mercadopago",
+    provider_preference_id: preferenceId,
+    external_reference: externalReference,
+    starts_at: "",
+    expires_at: "",
+    created_at: now,
+    updated_at: now,
+  });
+  const payment = upsertPaymentRecord({
+    id: crypto.randomUUID(),
+    user_id: readString(client, "id"),
+    subscription_id: subscriptionId,
+    email,
+    plan,
+    provider: "mercadopago",
+    provider_preference_id: preferenceId,
+    provider_payment_id: "",
+    external_reference: externalReference,
+    status: "pending",
+    amount: planConfig.amount,
+    currency: getMercadoPagoCurrency(env),
+    paid_at: "",
+    created_at: now,
+    updated_at: now,
+  });
+
+  await saveLiveState(env);
+  await persistBillingRecords(env, client, subscription, payment);
+  return json({
+    checkout_url: checkoutUrl,
+    preference_id: preferenceId,
+    subscription: buildSubscriptionPublic(subscription),
+  });
+}
+
+async function handleMercadoPagoWebhook(request: Request, url: URL, env: unknown) {
+  const rawBody = await request.text();
+  const payload = readRecord(parseJsonSafe(rawBody));
+  const paymentId = extractMercadoPagoPaymentId(url, payload);
+  if (!paymentId) {
+    return json({ ok: true, ignored: true });
+  }
+
+  const signatureOk = await validateMercadoPagoWebhookSignature(request, url, payload, env, paymentId);
+  if (!signatureOk) {
+    return json({ error: "Webhook Mercado Pago invalido." }, 401);
+  }
+
+  const payment = await fetchMercadoPagoPayment(env, paymentId);
+  if (!payment.ok) {
+    return json({ error: payment.error }, payment.status);
+  }
+
+  const result = await applyMercadoPagoPayment(env, payment.payment);
+  return json({ ok: true, status: result.status, activated: result.activated });
+}
+
+async function handleHublaWebhook(request: Request, env: unknown) {
+  const rawBody = await request.text();
+  if (!(await validateHublaWebhook(request, rawBody, env))) {
+    return json({ error: "Webhook Hubla invalido." }, 401);
+  }
+
+  const payload = readRecord(parseJsonSafe(rawBody));
+  const event = normalizeHublaWebhookPayload(payload, request, env);
+  if (!event.email || !event.status) {
+    return json({ ok: true, ignored: true, reason: "payload_incompleto" });
+  }
+
+  if (!["paid", "refunded", "chargeback", "canceled"].includes(event.status)) {
+    return json({ ok: true, ignored: true, status: event.status });
+  }
+
+  const result = await applyHublaWebhookEvent(env, event, payload);
+  return json({
+    ok: true,
+    provider: "hubla",
+    status: event.status,
+    activated: result.activated,
+    deactivated: result.deactivated,
+  });
+}
+
+async function validateHublaWebhook(request: Request, rawBody: string, env: unknown) {
+  const token = getHublaWebhookToken(env);
+  const incomingToken = request.headers.get("x-hubla-token")?.trim() || "";
+  if (!token || !incomingToken || !constantTimeStringEqual(token, incomingToken)) {
+    return false;
+  }
+
+  const hmacSecret = getHublaWebhookHmacSecret(env);
+  if (!hmacSecret) return true;
+
+  const signature =
+    request.headers.get("x-hubla-signature")?.trim() ||
+    request.headers.get("x-signature")?.trim() ||
+    "";
+  if (!signature) return false;
+
+  const normalizedSignature = signature.replace(/^sha256=/i, "").trim();
+  const expected = bytesToHex(await hmacSign(hmacSecret, rawBody));
+  return constantTimeStringEqual(expected, normalizedSignature);
+}
+
+async function applyHublaWebhookEvent(
+  env: unknown,
+  event: ReturnType<typeof normalizeHublaWebhookPayload>,
+  rawPayload: Record<string, unknown>,
+) {
+  const now = new Date().toISOString();
+  const email = event.email.toLowerCase();
+  const plan = event.plan || getHublaDefaultPlan(env);
+  const planConfig = getBillingPlan(plan, env);
+  const existingClient = findClientByEmail(email);
+  const client = existingClient || {
+    id: crypto.randomUUID(),
+    full_name: event.fullName || nameFromEmail(email),
+    email,
+    phone: event.phone,
+    city: "",
+    country: "",
+    password_hash: "",
+    created_at: now,
+  };
+  const existingSubscription = latestSubscriptionForEmail(email);
+  const subscriptionId =
+    event.subscriptionId ||
+    readString(existingSubscription, "id") ||
+    crypto.randomUUID();
+  const startsAt = event.paidAt ? event.paidAt.slice(0, 10) : todayIso();
+  const expiresAt =
+    event.expiresAt?.slice(0, 10) ||
+    addDaysIso(startsAt, planConfig.durationDays);
+  const paymentId = event.paymentId || event.idempotencyKey || crypto.randomUUID();
+  const shouldActivate = event.status === "paid";
+  const shouldDeactivate = ["canceled", "refunded", "chargeback"].includes(event.status);
+
+  const subscription = upsertSubscriptionRecord({
+    id: subscriptionId,
+    user_id: readString(client, "id"),
+    email,
+    plan,
+    status: shouldActivate ? "active" : shouldDeactivate ? "cancelled" : "pending",
+    provider: "hubla",
+    provider_preference_id: event.productId,
+    provider_payment_id: paymentId,
+    external_reference: event.eventType,
+    starts_at: shouldActivate ? startsAt : readString(client, "starts_at"),
+    expires_at: shouldActivate ? expiresAt : shouldDeactivate ? todayIso() : readString(client, "expires_at"),
+    metadata: {
+      hubla_event_type: event.eventType,
+      hubla_product_id: event.productId,
+      hubla_subscription_id: event.subscriptionId,
+    },
+    created_at: now,
+    updated_at: now,
+  });
+
+  const payment = upsertPaymentRecord({
+    id: event.idempotencyKey || paymentId,
+    user_id: readString(client, "id"),
+    subscription_id: subscriptionId,
+    email,
+    plan,
+    provider: "hubla",
+    provider_preference_id: event.productId,
+    provider_payment_id: paymentId,
+    external_reference: event.eventType,
+    status: event.status,
+    amount: event.amount,
+    currency: event.currency || "BRL",
+    paid_at: shouldActivate ? event.paidAt || now : "",
+    raw_status: event.status,
+    raw_payload: rawPayload,
+    created_at: event.createdAt || now,
+    updated_at: now,
+  });
+
+  let activated = false;
+  let deactivated = false;
+  if (shouldActivate) {
+    const updatedClient = {
+      ...client,
+      full_name: event.fullName || readString(client, "full_name") || nameFromEmail(email),
+      phone: event.phone || readString(client, "phone"),
+      plan,
+      access_status: "approved",
+      enabled: true,
+      starts_at: startsAt,
+      validity_days: planConfig.durationDays,
+      expires_at: expiresAt,
+      updated_at: now,
+    };
+    upsertLiveClient(updatedClient);
+    upsertRecipientFromClient(updatedClient);
+    recordAccessEvent("hubla_payment_paid", {
+      ...updatedClient,
+      detail: `Assinatura ${planConfig.name} ativada via Hubla.`,
+    });
+    activated = true;
+  } else if (shouldDeactivate) {
+    const updatedClient = {
+      ...client,
+      plan,
+      access_status: "expired",
+      enabled: false,
+      expires_at: todayIso(),
+      updated_at: now,
+    };
+    upsertLiveClient(updatedClient);
+    upsertRecipientFromClient(updatedClient);
+    recordAccessEvent("hubla_payment_reversed", {
+      ...updatedClient,
+      detail: `Assinatura Hubla desativada por status ${event.status}.`,
+      risk: event.status === "chargeback" ? "high" : "medium",
+    });
+    deactivated = true;
+  }
+
+  await saveLiveState(env);
+  await persistBillingRecords(env, client, subscription, payment);
+  return { activated, deactivated };
+}
+
+async function fetchMercadoPagoPayment(env: unknown, paymentId: string): Promise<
+  | { ok: true; payment: Record<string, unknown> }
+  | { ok: false; status: number; error: string }
+> {
+  const accessToken = getMercadoPagoAccessToken(env);
+  if (!accessToken) {
+    return { ok: false, status: 503, error: "Mercado Pago nao configurado no servidor." };
+  }
+
+  try {
+    const response = await fetch(`${MERCADOPAGO_PAYMENT_URL}/${encodeURIComponent(paymentId)}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    });
+    const payment = readRecord(await response.json().catch(() => ({})));
+    if (!response.ok) {
+      console.warn(`Consulta de pagamento Mercado Pago falhou (${response.status}).`);
+      return { ok: false, status: 502, error: "Nao foi possivel confirmar o pagamento." };
+    }
+    return { ok: true, payment };
+  } catch (error) {
+    console.warn("Falha de rede ao consultar pagamento Mercado Pago.", error);
+    return { ok: false, status: 502, error: "Mercado Pago indisponivel no momento." };
+  }
+}
+
+async function applyMercadoPagoPayment(env: unknown, payment: Record<string, unknown>) {
+  const status = readString(payment, "status") || "unknown";
+  const paymentId = readString(payment, "id");
+  const metadata = readRecord(payment.metadata);
+  const externalReference = readString(payment, "external_reference");
+  const parsedReference = parseBillingExternalReference(externalReference);
+  const email = (
+    readString(metadata, "email") ||
+    parsedReference.email ||
+    readString(readRecord(payment.payer), "email")
+  ).toLowerCase();
+  const plan = normalizeBillingPlanId(readString(metadata, "plan") || parsedReference.plan);
+  const subscriptionId = readString(metadata, "subscription_id") || parsedReference.subscriptionId || crypto.randomUUID();
+  const planConfig = plan ? getBillingPlan(plan, env) : null;
+  const amount = Number(readRecord(payment.transaction_amount).value || payment.transaction_amount || 0);
+  const now = new Date().toISOString();
+  const paidAt = readString(payment, "date_approved") || (status === "approved" ? now : "");
+
+  const paymentRecord = upsertPaymentRecord({
+    id: findPaymentId(paymentId, externalReference) || crypto.randomUUID(),
+    user_id: "",
+    subscription_id: subscriptionId,
+    email,
+    plan: plan || "free",
+    provider: "mercadopago",
+    provider_preference_id: readString(payment, "preference_id"),
+    provider_payment_id: paymentId,
+    external_reference: externalReference,
+    status,
+    amount: Number.isFinite(amount) ? amount : planConfig?.amount || 0,
+    currency: readString(payment, "currency_id") || getMercadoPagoCurrency(env),
+    paid_at: paidAt,
+    raw_status: status,
+    created_at: readString(payment, "date_created") || now,
+    updated_at: now,
+  });
+
+  if (!email || !plan || !planConfig) {
+    await saveLiveState(env);
+    return { activated: false, status };
+  }
+
+  const existingClient = findClientByEmail(email);
+  const client = existingClient || {
+    id: crypto.randomUUID(),
+    full_name: nameFromEmail(email),
+    email,
+    phone: "",
+    city: "",
+    country: "",
+    password_hash: "",
+    created_at: now,
+  };
+
+  let subscriptionStatus: SubscriptionStatus = status === "approved" ? "active" : "pending";
+  if (["cancelled", "refunded", "charged_back"].includes(status)) subscriptionStatus = "cancelled";
+  if (["rejected", "in_process", "pending"].includes(status)) subscriptionStatus = "pending";
+
+  const startsAt = todayIso();
+  const expiresAt = status === "approved" ? addDaysIso(startsAt, planConfig.durationDays) : "";
+  const subscription = upsertSubscriptionRecord({
+    id: subscriptionId,
+    user_id: readString(client, "id"),
+    email,
+    plan,
+    status: subscriptionStatus,
+    provider: "mercadopago",
+    provider_preference_id: readString(payment, "preference_id"),
+    provider_payment_id: paymentId,
+    external_reference: externalReference,
+    starts_at: status === "approved" ? startsAt : "",
+    expires_at: expiresAt,
+    created_at: now,
+    updated_at: now,
+  });
+
+  let activated = false;
+  if (status === "approved") {
+    const updatedClient = {
+      ...client,
+      plan,
+      access_status: "approved",
+      enabled: true,
+      starts_at: startsAt,
+      validity_days: planConfig.durationDays,
+      expires_at: expiresAt,
+      updated_at: now,
+    };
+    upsertLiveClient(updatedClient);
+    upsertRecipientFromClient(updatedClient);
+    recordAccessEvent("payment_approved", {
+      ...updatedClient,
+      detail: `Assinatura ${planConfig.name} ativada via Mercado Pago.`,
+    });
+    activated = true;
+  }
+
+  await saveLiveState(env);
+  await persistBillingRecords(env, client, subscription, paymentRecord);
+  return { activated, status };
 }
 
 async function handleAdminApiRequest(request: Request, env: unknown) {
@@ -553,6 +1153,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     recordAccessEvent(existingIndex >= 0 ? "client_update" : "client_register", client);
     const access = await clientAccess(env, client, request);
     await saveLiveState(env);
+    await persistBillingUser(env, client);
     return json(
       { access },
       existingIndex >= 0 ? 200 : 201,
@@ -1264,6 +1865,538 @@ function getAdminPassword(env: unknown) {
   return readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD", "");
 }
 
+function getMercadoPagoAccessToken(env: unknown) {
+  return normalizeSecretValue(readNamedServerSecret(env, "MERCADOPAGO_ACCESS_TOKEN", ""));
+}
+
+function getMercadoPagoWebhookSecret(env: unknown) {
+  return normalizeSecretValue(readNamedServerSecret(env, "MERCADOPAGO_WEBHOOK_SECRET", ""));
+}
+
+function getMercadoPagoCurrency(env: unknown) {
+  return readNamedServerSecret(env, "MERCADOPAGO_CURRENCY", "BRL") || "BRL";
+}
+
+function getHublaWebhookToken(env: unknown) {
+  const mode = readNamedServerSecret(env, "HUBLA_ENVIRONMENT", "production").toLowerCase();
+  const scopedToken = mode === "sandbox"
+    ? readNamedServerSecret(env, "HUBLA_SANDBOX_WEBHOOK_TOKEN", "")
+    : readNamedServerSecret(env, "HUBLA_PRODUCTION_WEBHOOK_TOKEN", "");
+  return normalizeSecretValue(scopedToken || readNamedServerSecret(env, "HUBLA_WEBHOOK_TOKEN", ""));
+}
+
+function getHublaWebhookHmacSecret(env: unknown) {
+  return normalizeSecretValue(readNamedServerSecret(env, "HUBLA_WEBHOOK_HMAC_SECRET", ""));
+}
+
+function getHublaDefaultPlan(env: unknown): BillingPlanId {
+  const plan = normalizeBillingPlanId(readNamedServerSecret(env, "HUBLA_DEFAULT_PLAN", "vip"));
+  return plan && plan !== "free" ? plan : "vip";
+}
+
+function getHublaCheckoutUrl(plan: BillingPlanId, env: unknown) {
+  if (plan === "free") return "";
+  const candidates = plan === "premium"
+    ? [
+        "HUBLA_PREMIUM_CHECKOUT_URL",
+        "HUBLA_ANUAL_CHECKOUT_URL",
+        "HUBLA_CHECKOUT_URL",
+      ]
+    : [
+        "HUBLA_MENSAL_CHECKOUT_URL",
+        "HUBLA_VIP_CHECKOUT_URL",
+        "HUBLA_CHECKOUT_URL",
+      ];
+  for (const key of candidates) {
+    const value = readNamedServerSecret(env, key, "");
+    if (value && /^https?:\/\//i.test(value)) return value;
+  }
+  return "";
+}
+
+function getBillingPlans(env: unknown) {
+  return (["free", "premium", "vip"] as BillingPlanId[]).map((plan) => {
+    const config = getBillingPlan(plan, env);
+    const hublaCheckoutUrl = getHublaCheckoutUrl(config.id, env);
+    return {
+      id: config.id,
+      name: config.name,
+      description: config.description,
+      amount: config.amount,
+      currency: getMercadoPagoCurrency(env),
+      durationDays: config.durationDays,
+      features: config.features,
+      checkoutEnabled: config.id !== "free" && (Boolean(hublaCheckoutUrl) || Boolean(getMercadoPagoAccessToken(env))),
+      checkoutProvider: hublaCheckoutUrl ? "hubla" : getMercadoPagoAccessToken(env) ? "mercadopago" : "",
+    };
+  });
+}
+
+function getBillingPlan(plan: BillingPlanId, env: unknown) {
+  const premiumAmount = readServerNumber(env, "MERCADOPAGO_PREMIUM_PRICE", 497);
+  const vipAmount = readServerNumber(env, "MERCADOPAGO_VIP_PRICE", 297);
+  const plans = {
+    free: {
+      id: "free" as const,
+      name: "Free",
+      description: "Cadastro gratuito com acesso limitado e sem sinais premium.",
+      amount: 0,
+      durationDays: 7,
+      features: ["Cadastro no app", "Acesso a telas basicas", "Sem sinais premium ao vivo"],
+    },
+    vip: {
+      id: "vip" as const,
+      name: "VIP",
+      description: "Acesso VIP mensal ao painel operacional.",
+      amount: vipAmount,
+      durationDays: 30,
+      features: ["Painel ao vivo", "Sinais protegidos", "Surf, Tie e numero pagante", "Assistente IA"],
+    },
+    premium: {
+      id: "premium" as const,
+      name: "Premium",
+      description: "Acesso Premium mensal com recursos completos.",
+      amount: premiumAmount,
+      durationDays: 30,
+      features: ["Tudo do VIP", "Narracao IA", "Leituras completas", "Prioridade operacional"],
+    },
+  };
+  return plans[plan];
+}
+
+function readServerNumber(env: unknown, key: string, fallback: number) {
+  const text = readNamedServerSecret(env, key, "");
+  if (!String(text).trim()) return fallback;
+  const value = Number(String(text).replace(",", "."));
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function normalizeBillingPlanId(value: unknown): BillingPlanId | null {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "free" || text === "premium" || text === "vip") return text;
+  if (text === "mensal" || text === "monthly") return "vip";
+  return null;
+}
+
+function normalizeHublaWebhookPayload(payload: Record<string, unknown>, request: Request, env: unknown) {
+  const event = readRecord(payload.event);
+  const user = readRecord(event.user);
+  const subscription = readRecord(event.subscription);
+  const invoice = readRecord(event.invoice);
+  const member = readRecord(event.member);
+  const customer = readRecord(event.customer);
+  const payment = readRecord(event.payment);
+  const product = readRecord(event.product);
+  const eventType = readString(payload, "type");
+  const email = (
+    readString(user, "email") ||
+    readString(subscription, "email") ||
+    readString(invoice, "email") ||
+    readString(member, "email") ||
+    readString(customer, "email") ||
+    readString(payment, "email") ||
+    readString(payload, "email")
+  ).toLowerCase();
+  const firstName = readString(user, "firstName") || readString(customer, "firstName");
+  const lastName = readString(user, "lastName") || readString(customer, "lastName");
+  const fullName =
+    `${firstName} ${lastName}`.trim() ||
+    readString(user, "name") ||
+    readString(customer, "name") ||
+    readString(payload, "name");
+  return {
+    email,
+    fullName,
+    phone:
+      readString(user, "phone") ||
+      readString(subscription, "phone") ||
+      readString(customer, "phone"),
+    status: normalizeHublaStatus(payload),
+    eventType,
+    idempotencyKey: request.headers.get("x-hubla-idempotency")?.trim() || readString(payload, "idempotencyKey"),
+    productId:
+      readString(product, "id") ||
+      firstHublaProductId(event) ||
+      readString(payload, "productId"),
+    plan: getHublaPlanFromPayload(payload, env),
+    subscriptionId:
+      readString(subscription, "id") ||
+      readString(invoice, "subscriptionId") ||
+      readString(payload, "subscriptionId"),
+    paymentId:
+      readString(invoice, "id") ||
+      readString(payment, "id") ||
+      readString(payload, "paymentId") ||
+      readString(payload, "id"),
+    amount: readHublaAmount(event),
+    currency:
+      readString(invoice, "currency") ||
+      readString(payment, "currency") ||
+      readString(payload, "currency") ||
+      "BRL",
+    paidAt:
+      readString(invoice, "paidAt") ||
+      readString(payment, "paidAt") ||
+      readString(subscription, "activatedAt"),
+    expiresAt:
+      readString(subscription, "expiresAt") ||
+      readString(subscription, "expires_at") ||
+      readString(subscription, "currentPeriodEnd") ||
+      readString(subscription, "current_period_end") ||
+      readString(event, "expiresAt"),
+    createdAt:
+      readString(invoice, "createdAt") ||
+      readString(subscription, "createdAt") ||
+      readString(payload, "createdAt"),
+  };
+}
+
+function normalizeHublaStatus(payload: Record<string, unknown>) {
+  const event = readRecord(payload.event);
+  const text = (
+    readString(payload, "status") ||
+    readString(readRecord(event.invoice), "status") ||
+    readString(readRecord(event.payment), "status") ||
+    readString(readRecord(event.subscription), "status") ||
+    readString(payload, "type")
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/\./g, "_");
+
+  if (["paid", "invoice_paid", "payment_paid", "subscription_activated", "active"].includes(text)) {
+    return "paid";
+  }
+  if (["refunded", "invoice_refunded", "refund_succeeded"].includes(text)) return "refunded";
+  if (["chargeback", "charged_back", "invoice_chargeback"].includes(text)) return "chargeback";
+  if (["canceled", "cancelled", "subscription_deactivated", "deactivated"].includes(text)) {
+    return "canceled";
+  }
+  return text;
+}
+
+function firstHublaProductId(event: Record<string, unknown>) {
+  const products = Array.isArray(event.products) ? event.products.map(readRecord) : [];
+  for (const product of products) {
+    const id = readString(product, "id");
+    if (id) return id;
+  }
+  return "";
+}
+
+function getHublaPlanFromPayload(payload: Record<string, unknown>, env: unknown): BillingPlanId | null {
+  const event = readRecord(payload.event);
+  const product = readRecord(event.product);
+  const productId = readString(product, "id") || firstHublaProductId(event);
+  const productName = (
+    readString(product, "name") ||
+    readString(payload, "productName") ||
+    ""
+  ).toLowerCase();
+
+  if (productName.includes("premium")) return "premium";
+  if (productName.includes("vip") || productName.includes("mensal")) return "vip";
+  if (productName.includes("free") || productName.includes("trial")) return "free";
+
+  if (productId) {
+    const premiumIds = parseCsvList(readNamedServerSecret(env, "HUBLA_PREMIUM_PRODUCT_IDS", ""));
+    const vipIds = parseCsvList(readNamedServerSecret(env, "HUBLA_VIP_PRODUCT_IDS", ""));
+    if (premiumIds.includes(productId)) return "premium";
+    if (vipIds.includes(productId)) return "vip";
+  }
+
+  return null;
+}
+
+function readHublaAmount(event: Record<string, unknown>) {
+  const invoice = readRecord(event.invoice);
+  const payment = readRecord(event.payment);
+  const amount = readRecord(invoice.amount);
+  const candidates = [
+    { value: amount.totalCents, cents: true },
+    { value: amount.subtotalCents, cents: true },
+    { value: amount.total, cents: false },
+    { value: invoice.totalCents, cents: true },
+    { value: invoice.amount, cents: false },
+    { value: invoice.total, cents: false },
+    { value: invoice.totalAmount, cents: false },
+    { value: readRecord(invoice.total).amount, cents: false },
+    { value: readRecord(invoice.total).value, cents: false },
+    { value: payment.amount, cents: false },
+    { value: payment.total, cents: false },
+  ];
+  for (const candidate of candidates) {
+    const value = Number(String(candidate.value ?? "").replace(",", "."));
+    if (Number.isFinite(value)) return candidate.cents ? Number((value / 100).toFixed(2)) : value;
+  }
+  return 0;
+}
+
+function parseCsvList(value: unknown) {
+  return String(value || "")
+    .split(/[,;\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getPublicAppOrigin(request: Request, env: unknown) {
+  const configured = readNamedServerSecret(env, "PUBLIC_APP_URL", "") || readNamedServerSecret(env, "APP_URL", "");
+  if (configured) return configured.replace(/\/+$/, "");
+  const url = new URL(request.url);
+  return `${url.protocol}//${url.host}`;
+}
+
+function extractMercadoPagoPaymentId(url: URL, payload: Record<string, unknown>) {
+  const data = readRecord(payload.data);
+  return (
+    url.searchParams.get("data.id") ||
+    url.searchParams.get("id") ||
+    readString(data, "id") ||
+    readString(payload, "id") ||
+    ""
+  );
+}
+
+async function validateMercadoPagoWebhookSignature(
+  request: Request,
+  _url: URL,
+  _payload: Record<string, unknown>,
+  env: unknown,
+  dataId: string,
+) {
+  const secret = getMercadoPagoWebhookSecret(env);
+  if (!secret) {
+    // The payment is still confirmed server-to-server with Mercado Pago before access is released.
+    return true;
+  }
+
+  const xSignature = request.headers.get("x-signature") || "";
+  const xRequestId = request.headers.get("x-request-id") || "";
+  if (!xSignature || !xRequestId) return false;
+
+  const signatureParts = parseMercadoPagoSignature(xSignature);
+  if (!signatureParts.ts || !signatureParts.v1) return false;
+
+  const manifest = `id:${dataId.toLowerCase()};request-id:${xRequestId};ts:${signatureParts.ts};`;
+  const expected = bytesToHex(await hmacSign(secret, manifest));
+  return constantTimeStringEqual(expected, signatureParts.v1);
+}
+
+function parseMercadoPagoSignature(value: string) {
+  return value.split(",").reduce(
+    (acc, part) => {
+      const [key, raw] = part.split("=");
+      if (key?.trim() === "ts") acc.ts = String(raw || "").trim();
+      if (key?.trim() === "v1") acc.v1 = String(raw || "").trim();
+      return acc;
+    },
+    { ts: "", v1: "" },
+  );
+}
+
+function parseBillingExternalReference(value: string) {
+  const parts = value.split(":");
+  if (parts.length >= 4 && parts[0] === "sniperbo") {
+    return {
+      subscriptionId: parts[1],
+      email: parts[2],
+      plan: parts[3],
+    };
+  }
+  return { subscriptionId: "", email: "", plan: "" };
+}
+
+function upsertLiveClient(client: Record<string, unknown>) {
+  const id = readString(client, "id");
+  const email = readString(client, "email").toLowerCase();
+  const index = liveClients.findIndex((item) => {
+    const sameId = id && readString(item, "id") === id;
+    const sameEmail = email && readString(item, "email").toLowerCase() === email;
+    return sameId || sameEmail;
+  });
+  liveClients = index >= 0
+    ? liveClients.map((item, itemIndex) => (itemIndex === index ? { ...item, ...client } : item))
+    : [...liveClients, client];
+}
+
+function upsertSubscriptionRecord(record: Record<string, unknown>) {
+  const id = readString(record, "id");
+  const paymentId = readString(record, "provider_payment_id");
+  const externalReference = readString(record, "external_reference");
+  const index = liveSubscriptions.findIndex((item) => {
+    return (
+      (id && readString(item, "id") === id) ||
+      (paymentId && readString(item, "provider_payment_id") === paymentId) ||
+      (externalReference && readString(item, "external_reference") === externalReference)
+    );
+  });
+  const merged = {
+    ...(index >= 0 ? liveSubscriptions[index] : {}),
+    ...record,
+    updated_at: readString(record, "updated_at") || new Date().toISOString(),
+  };
+  liveSubscriptions = index >= 0
+    ? liveSubscriptions.map((item, itemIndex) => (itemIndex === index ? merged : item))
+    : [merged, ...liveSubscriptions].slice(0, 500);
+  return merged;
+}
+
+function upsertPaymentRecord(record: Record<string, unknown>) {
+  const id = readString(record, "id");
+  const paymentId = readString(record, "provider_payment_id");
+  const preferenceId = readString(record, "provider_preference_id");
+  const externalReference = readString(record, "external_reference");
+  const index = livePayments.findIndex((item) => {
+    return (
+      (id && readString(item, "id") === id) ||
+      (paymentId && readString(item, "provider_payment_id") === paymentId) ||
+      (!paymentId && preferenceId && readString(item, "provider_preference_id") === preferenceId) ||
+      (!paymentId && externalReference && readString(item, "external_reference") === externalReference)
+    );
+  });
+  const merged = {
+    ...(index >= 0 ? livePayments[index] : {}),
+    ...record,
+    updated_at: readString(record, "updated_at") || new Date().toISOString(),
+  };
+  livePayments = index >= 0
+    ? livePayments.map((item, itemIndex) => (itemIndex === index ? merged : item))
+    : [merged, ...livePayments].slice(0, 1000);
+  return merged;
+}
+
+function findPaymentId(providerPaymentId: string, externalReference: string) {
+  const existing = livePayments.find((payment) => {
+    return (
+      (providerPaymentId && readString(payment, "provider_payment_id") === providerPaymentId) ||
+      (externalReference && readString(payment, "external_reference") === externalReference)
+    );
+  });
+  return existing ? readString(existing, "id") : "";
+}
+
+function buildBillingOverview(client: Record<string, unknown>) {
+  const email = readString(client, "email").toLowerCase();
+  const subscription = latestSubscriptionForEmail(email);
+  const expiresAt = readString(client, "expires_at") || readString(subscription, "expires_at");
+  const expired = isExpiredIso(expiresAt);
+  return {
+    email,
+    plan: readString(client, "plan") || readString(subscription, "plan") || "free",
+    status: expired ? "expired" : readString(subscription, "status") || readString(client, "access_status") || "pending",
+    accessMode: clientHasLiveAccess(client) ? "full" : expired ? "expired" : "pending",
+    approved: clientHasLiveAccess(client),
+    starts_at: readString(client, "starts_at") || readString(subscription, "starts_at"),
+    expires_at: expiresAt,
+    subscription: buildSubscriptionPublic(subscription),
+    last_payment: buildPaymentPublic(
+      livePayments
+        .filter((payment) => readString(payment, "email").toLowerCase() === email)
+        .sort((a, b) => readString(b, "updated_at").localeCompare(readString(a, "updated_at")))[0] || {},
+    ),
+  };
+}
+
+function latestSubscriptionForEmail(email: string) {
+  return liveSubscriptions
+    .filter((subscription) => readString(subscription, "email").toLowerCase() === email)
+    .sort((a, b) => readString(b, "updated_at").localeCompare(readString(a, "updated_at")))[0] || {};
+}
+
+function buildSubscriptionPublic(subscription: Record<string, unknown>) {
+  return {
+    id: readString(subscription, "id"),
+    plan: readString(subscription, "plan") || "free",
+    status: readString(subscription, "status") || "pending",
+    starts_at: readString(subscription, "starts_at"),
+    expires_at: readString(subscription, "expires_at"),
+    provider: readString(subscription, "provider"),
+    provider_preference_id: readString(subscription, "provider_preference_id"),
+  };
+}
+
+function buildPaymentPublic(payment: Record<string, unknown>) {
+  return {
+    id: readString(payment, "id"),
+    plan: readString(payment, "plan") || "free",
+    status: readString(payment, "status"),
+    amount: Number(payment.amount || 0),
+    currency: readString(payment, "currency") || "BRL",
+    paid_at: readString(payment, "paid_at"),
+    created_at: readString(payment, "created_at"),
+    provider_payment_id: readString(payment, "provider_payment_id"),
+  };
+}
+
+function refreshExpiredBillingForClient(client: Record<string, unknown>) {
+  const expiresAt = readString(client, "expires_at");
+  if (!expiresAt || !isExpiredIso(expiresAt)) return false;
+
+  client.enabled = false;
+  client.access_status = "expired";
+  client.updated_at = new Date().toISOString();
+  const email = readString(client, "email").toLowerCase();
+  liveSubscriptions = liveSubscriptions.map((subscription) =>
+    readString(subscription, "email").toLowerCase() === email &&
+    readString(subscription, "status") === "active" &&
+    isExpiredIso(readString(subscription, "expires_at"))
+      ? { ...subscription, status: "expired", updated_at: new Date().toISOString() }
+      : subscription,
+  );
+  upsertRecipientFromClient(client);
+  return true;
+}
+
+async function persistBillingRecords(
+  env: unknown,
+  client: Record<string, unknown>,
+  subscription: Record<string, unknown>,
+  payment: Record<string, unknown>,
+) {
+  await Promise.allSettled([
+    persistBillingUser(env, client),
+    persistSupabaseRow(env, "subscriptions", subscription),
+    persistSupabaseRow(env, "payments", payment),
+  ]);
+}
+
+async function persistBillingUser(env: unknown, client: Record<string, unknown>) {
+  const email = readString(client, "email").toLowerCase();
+  if (!email) return;
+  await persistSupabaseRow(env, "users", {
+    id: readString(client, "id") || crypto.randomUUID(),
+    email,
+    full_name: readString(client, "full_name") || nameFromEmail(email),
+    phone: readString(client, "phone"),
+    city: readString(client, "city"),
+    country: readString(client, "country"),
+    created_at: readString(client, "created_at") || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+}
+
+async function persistSupabaseRow(env: unknown, table: string, row: Record<string, unknown>) {
+  const config = getSupabasePersistenceConfig(env);
+  if (!config || Object.keys(row).length === 0) return;
+
+  try {
+    const response = await fetch(`${config.url}/rest/v1/${table}`, {
+      method: "POST",
+      headers: {
+        ...supabasePersistenceHeaders(config.key),
+        "Content-Type": "application/json",
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(row),
+    });
+    if (!response.ok && response.status !== 404) {
+      console.warn(`Nao foi possivel salvar ${table} (${response.status}).`);
+    }
+  } catch (error) {
+    console.warn(`Nao foi possivel salvar ${table}.`, error);
+  }
+}
+
 function getElevenLabsApiKey(env: unknown) {
   // Only read the canonical secret name to avoid conflicts with legacy values.
   return normalizeSecretValue(readServerEnvString(env, "ELEVENLABS_TTS_API_KEY", ""));
@@ -1915,6 +3048,20 @@ function applyLiveState(state: Record<string, unknown>) {
       .slice(0, 200);
   }
 
+  if (Array.isArray(state.subscriptions)) {
+    liveSubscriptions = state.subscriptions
+      .map(readRecord)
+      .filter((subscription) => Object.keys(subscription).length > 0)
+      .slice(0, 500);
+  }
+
+  if (Array.isArray(state.payments)) {
+    livePayments = state.payments
+      .map(readRecord)
+      .filter((payment) => Object.keys(payment).length > 0)
+      .slice(0, 1000);
+  }
+
   const moduleToggles = readRecord(state.moduleToggles);
   if (Object.keys(moduleToggles).length > 0) {
     liveModuleToggles = restoreModuleToggles(moduleToggles);
@@ -1936,6 +3083,8 @@ function mergeLiveStates(
     recipients: pickStateArray(durable.recipients, cache.recipients),
     clients: pickStateArray(durable.clients, cache.clients),
     accessEvents: mergeStateArrays(durable.accessEvents, cache.accessEvents).slice(0, 200),
+    subscriptions: mergeStateArrays(durable.subscriptions, cache.subscriptions).slice(0, 500),
+    payments: mergeStateArrays(durable.payments, cache.payments).slice(0, 1000),
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
     savedAt: readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
   };
@@ -2011,6 +3160,8 @@ function buildLiveStateSnapshot() {
     recipients: liveRecipients,
     clients: liveClients,
     accessEvents: liveAccessEvents,
+    subscriptions: liveSubscriptions,
+    payments: livePayments,
     moduleToggles: liveModuleToggles,
     savedAt: new Date().toISOString(),
   };
@@ -2149,6 +3300,15 @@ function readRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function parseJsonSafe(value: string) {
+  if (!value) return {};
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return {};
+  }
+}
+
 function json(data: unknown, status = 200) {
   return new Response(status === 204 ? null : JSON.stringify(data), {
     status,
@@ -2158,7 +3318,7 @@ function json(data: unknown, status = 200) {
       pragma: "no-cache",
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
-      "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token",
+      "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
     },
   });
 }
@@ -2171,6 +3331,11 @@ function bytesToB64Url(bytes: Uint8Array) {
   let str = "";
   for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
   return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function bytesToHex(bytes: Uint8Array) {
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 function b64UrlToBytes(s: string) {
   const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
@@ -2185,6 +3350,9 @@ function constantTimeEqual(a: Uint8Array, b: Uint8Array) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
   return diff === 0;
+}
+function constantTimeStringEqual(left: string, right: string) {
+  return constantTimeEqual(new TextEncoder().encode(left), new TextEncoder().encode(right));
 }
 
 export async function hashPassword(password: string): Promise<string> {

@@ -1,111 +1,193 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { GlassCard } from "@/components/ui-app/GlassCard";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { Check, Crown, Sparkles } from "lucide-react";
+import { GlassCard } from "@/components/ui-app/GlassCard";
+import {
+  createBillingCheckout,
+  getBillingPlans,
+  type BillingPlan,
+} from "@/lib/accessApi";
+import { readUserSession } from "@/lib/userSession";
+import { Check, Crown, Loader2, ReceiptText, Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/app/planos")({
   component: PlanosPage,
 });
 
-const plans = [
+const fallbackPlans: BillingPlan[] = [
   {
-    name: "FREE / TRIAL",
-    price: "Grátis",
-    badge: "7 dias",
-    items: [
-      "Acesso ao painel demonstrativo",
-      "Placares limitados",
-      "Assistente IA limitado",
-      "Recursos premium bloqueados",
-    ],
-    cta: "Ativar Trial",
-    tone: "muted" as const,
+    id: "free",
+    name: "Free",
+    description: "Cadastro gratuito com acesso limitado.",
+    amount: 0,
+    currency: "BRL",
+    durationDays: 7,
+    checkoutEnabled: false,
+    features: ["Cadastro no app", "Conta criada", "Sinais premium bloqueados"],
   },
   {
-    name: "MENSAL",
-    price: "R$ 297",
-    suffix: "/mês",
-    items: [
-      "Acesso completo ao painel",
-      "Alertas estatísticos em tempo real",
-      "Tie Alert estatístico",
-      "Histórico completo",
-      "Assistente IA",
-    ],
-    cta: "Selecionar Mensal",
-    tone: "blue" as const,
+    id: "vip",
+    name: "VIP",
+    description: "Painel operacional mensal.",
+    amount: 297,
+    currency: "BRL",
+    durationDays: 30,
+    checkoutEnabled: false,
+    features: ["Dashboard ao vivo", "Surf, Tie e numero pagante", "Assistente IA"],
   },
   {
-    name: "PREMIUM",
-    price: "R$ 497",
-    suffix: "/mês",
-    badge: "Mais completo",
-    items: [
-      "Tudo do Mensal",
-      "Narrador IA",
-      "Configurações avançadas",
-      "Leitura completa da engine",
-      "Suporte prioritário",
-      "Acesso antecipado a novas funções",
-    ],
-    cta: "Desbloquear Premium",
-    tone: "gold" as const,
-    highlight: true,
+    id: "premium",
+    name: "Premium",
+    description: "Acesso completo mensal.",
+    amount: 497,
+    currency: "BRL",
+    durationDays: 30,
+    checkoutEnabled: false,
+    features: ["Tudo do VIP", "Narracao IA", "Prioridade operacional"],
   },
 ];
 
 function PlanosPage() {
+  const [plans, setPlans] = useState<BillingPlan[]>(fallbackPlans);
+  const [loadingPlan, setLoadingPlan] = useState<string>("");
+  const [error, setError] = useState("");
+  const session = readUserSession();
+
+  useEffect(() => {
+    let active = true;
+    getBillingPlans()
+      .then((loadedPlans) => {
+        if (active && loadedPlans.length > 0) setPlans(loadedPlans);
+      })
+      .catch(() => {
+        if (active) setPlans(fallbackPlans);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const orderedPlans = useMemo(() => {
+    const order = new Map([["free", 0], ["vip", 1], ["premium", 2]]);
+    return [...plans].sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
+  }, [plans]);
+
+  async function handleCheckout(plan: BillingPlan) {
+    if (plan.id === "free") return;
+    setError("");
+    setLoadingPlan(plan.id);
+    try {
+      const checkout = await createBillingCheckout(plan.id);
+      window.location.href = checkout.checkout_url;
+    } catch (checkoutError) {
+      setError(checkoutError instanceof Error ? checkoutError.message : "Nao foi possivel abrir o checkout.");
+      setLoadingPlan("");
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div className="text-center max-w-2xl mx-auto">
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-gradient-brand">Escolha seu plano</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Desbloqueie leitura estatística em tempo real, assistente IA e recursos premium.
-        </p>
+      <div className="mx-auto max-w-3xl text-center">
+          <AppBadge tone="blue">Assinatura automatica</AppBadge>
+          <h1 className="mt-3 text-2xl font-extrabold text-gradient-brand sm:text-3xl">
+            Assinar Agora
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+          Escolha o plano, finalize o pagamento na Hubla e o acesso e liberado automaticamente quando o pagamento for aprovado.
+          </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {plans.map((p) => (
-          <GlassCard
-            key={p.name}
-            className={`flex flex-col ${p.highlight ? "border-gold/60 glow-gold relative" : ""}`}
-          >
-            {p.highlight && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <AppBadge tone="gold">Recomendado</AppBadge>
-              </div>
-            )}
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-widest text-neon-cyan/80">{p.name}</div>
-              {p.badge && <AppBadge tone={p.tone}>{p.badge}</AppBadge>}
-            </div>
-            <div className="mt-3 flex items-baseline gap-1">
-              <span className="text-3xl font-extrabold">{p.price}</span>
-              {p.suffix && <span className="text-sm text-muted-foreground">{p.suffix}</span>}
-            </div>
-            <ul className="mt-4 space-y-2 flex-1">
-              {p.items.map((it) => (
-                <li key={it} className="flex items-start gap-2 text-sm">
-                  <Check className={`size-4 mt-0.5 ${p.highlight ? "text-gold" : "text-neon-cyan"}`} />
-                  {it}
-                </li>
-              ))}
-            </ul>
-            <button
-              className={`mt-5 rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5 ${
-                p.highlight ? "btn-gold-grad glow-gold" : "btn-primary-grad"
-              }`}
+      {error && (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {orderedPlans.map((plan) => {
+          const highlighted = plan.id === "premium";
+          const current = session.plan === plan.id && session.accessMode === "full";
+          const paid = plan.id !== "free";
+          return (
+            <GlassCard
+              key={plan.id}
+              className={`flex flex-col ${highlighted ? "relative border-gold/60 glow-gold" : ""}`}
             >
-              {p.highlight ? <Crown className="size-4" /> : <Sparkles className="size-4" />}
-              {p.cta}
-            </button>
-          </GlassCard>
-        ))}
-      </div>
+              {highlighted && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <AppBadge tone="gold">Mais completo</AppBadge>
+                </div>
+              )}
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-widest text-neon-cyan/80">
+                    {plan.name}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">{plan.description}</div>
+                </div>
+                {current && <AppBadge tone="green">Atual</AppBadge>}
+              </div>
 
-      <div className="text-center text-xs text-muted-foreground">
-        Pagamento seguro. Cancele quando quiser.
+              <div className="mt-5 flex items-end gap-1">
+                <span className="text-3xl font-extrabold">
+                  {plan.amount > 0 ? formatMoney(plan.amount, plan.currency) : "Gratis"}
+                </span>
+                {plan.amount > 0 && <span className="pb-1 text-sm text-muted-foreground">/mes</span>}
+              </div>
+
+              <ul className="mt-5 flex-1 space-y-2">
+                {plan.features.map((item) => (
+                  <li key={item} className="flex items-start gap-2 text-sm">
+                    <Check className={`mt-0.5 size-4 ${highlighted ? "text-gold" : "text-neon-cyan"}`} />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+
+              {paid ? (
+                <button
+                  type="button"
+                  onClick={() => handleCheckout(plan)}
+                  disabled={loadingPlan === plan.id || !plan.checkoutEnabled}
+                  className={`mt-5 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold ${
+                    highlighted ? "btn-gold-grad glow-gold" : "btn-primary-grad"
+                  } disabled:cursor-wait disabled:opacity-70`}
+                >
+                  {loadingPlan === plan.id ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : highlighted ? (
+                    <Crown className="size-4" />
+                  ) : (
+                    <Sparkles className="size-4" />
+                  )}
+                  {loadingPlan === plan.id
+                    ? "Abrindo checkout..."
+                    : plan.checkoutEnabled
+                    ? plan.checkoutProvider === "hubla"
+                      ? "Abrir checkout Hubla"
+                      : "Ir para checkout"
+                    : "Checkout nao configurado"}
+                </button>
+              ) : (
+                <Link
+                  to="/app/assinatura"
+                  className="mt-5 inline-flex items-center justify-center gap-2 rounded-xl border border-border/70 px-4 py-3 text-sm font-bold text-muted-foreground hover:text-foreground"
+                >
+                  <ReceiptText className="size-4" />
+                  Ver minha assinatura
+                </Link>
+              )}
+            </GlassCard>
+          );
+        })}
       </div>
     </div>
   );
+}
+
+function formatMoney(amount: number, currency: string) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: currency || "BRL",
+  }).format(amount);
 }

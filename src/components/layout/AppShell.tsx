@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck, ReceiptText } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { readAdminSession } from "@/lib/adminApi";
@@ -11,7 +11,8 @@ const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/voz", label: "Voz", icon: Mic },
   { to: "/app/ia", label: "Assistente IA", icon: Brain },
-  { to: "/app/planos", label: "Planos", icon: Crown },
+  { to: "/app/planos", label: "Assinar", icon: Crown },
+  { to: "/app/assinatura", label: "Assinatura", icon: ReceiptText },
   { to: "/app/conta", label: "Conta", icon: User },
 ] as const;
 
@@ -27,6 +28,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const fullAccess = hasFullAccess(userSession);
   const visibleNavItems = fullAccess ? navItems.filter((item) => item.to !== "/app/planos") : navItems;
   const mobileNavItems = canSeeAdmin ? [...visibleNavItems, adminNavItem] : visibleNavItems;
+  const mobileGridClass =
+    mobileNavItems.length >= 7 ? "grid-cols-7" : mobileNavItems.length === 6 ? "grid-cols-6" : "grid-cols-5";
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -122,7 +125,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Bottom nav mobile */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 glass-strong border-t border-border/60">
-        <div className={`grid ${canSeeAdmin ? "grid-cols-6" : "grid-cols-5"}`}>
+        <div className={`grid ${mobileGridClass}`}>
           {mobileNavItems.map((it) => {
             const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
             return (

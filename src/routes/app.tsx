@@ -14,7 +14,10 @@ function ProtectedAppRoute() {
   const session = readUserSession();
   const isAdminRoute = pathname.startsWith("/app/admin");
   const isAccountRoute = pathname.startsWith("/app/conta");
-  const isCheckoutRoute = pathname.startsWith("/app/planos");
+  const isCheckoutRoute =
+    pathname.startsWith("/app/planos") ||
+    pathname.startsWith("/app/assinatura") ||
+    pathname.startsWith("/app/pagamentos");
   const isOwner = isAdminOwnerEmail(session.email);
   const canOpenApp = session.registered || isOwner;
   const canOpenDashboard =

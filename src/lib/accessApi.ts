@@ -24,6 +24,49 @@ export interface ClientRegistrationPayload {
   [key: string]: unknown;
 }
 
+export interface BillingPlan {
+  id: "free" | "premium" | "vip";
+  name: string;
+  description: string;
+  amount: number;
+  currency: string;
+  durationDays: number;
+  features: string[];
+  checkoutEnabled: boolean;
+  checkoutProvider?: "hubla" | "mercadopago" | "";
+}
+
+export interface BillingSubscriptionOverview {
+  email: string;
+  plan: "free" | "premium" | "vip";
+  status: string;
+  accessMode: ClientAccess["access_mode"];
+  approved: boolean;
+  starts_at: string;
+  expires_at: string;
+  subscription?: {
+    id: string;
+    plan: string;
+    status: string;
+    starts_at: string;
+    expires_at: string;
+    provider: string;
+    provider_preference_id: string;
+  };
+  last_payment?: BillingPayment;
+}
+
+export interface BillingPayment {
+  id: string;
+  plan: "free" | "premium" | "vip";
+  status: string;
+  amount: number;
+  currency: string;
+  paid_at: string;
+  created_at: string;
+  provider_payment_id: string;
+}
+
 export function saveAccessSession(access: ClientAccess, fallbackEmail = "") {
   saveUserSession(access.email || fallbackEmail, {
     name: access.full_name || undefined,
@@ -60,11 +103,58 @@ export async function refreshAccessSession() {
   return data.access;
 }
 
+export async function getBillingPlans() {
+  const data = await apiRequest<{ plans: BillingPlan[] }>("/billing/plans", { method: "GET" });
+  return data.plans ?? [];
+}
+
+export async function getBillingSubscription() {
+  return apiRequest<{ subscription: BillingSubscriptionOverview; plans: BillingPlan[] }>(
+    "/billing/subscription",
+    { method: "GET", authenticated: true },
+  );
+}
+
+export async function getBillingPayments() {
+  const data = await apiRequest<{ payments: BillingPayment[] }>("/billing/payments", {
+    method: "GET",
+    authenticated: true,
+  });
+  return data.payments ?? [];
+}
+
+export async function createBillingCheckout(plan: "premium" | "vip") {
+  return apiRequest<{ checkout_url: string; provider?: string; preference_id?: string; subscription: BillingSubscriptionOverview["subscription"] }>(
+    "/billing/checkout",
+    {
+      method: "POST",
+      authenticated: true,
+      body: { plan },
+    },
+  );
+}
+
 async function publicRequest<T>(path: string, body: Record<string, unknown>) {
+  return apiRequest<T>(path, { method: "POST", body });
+}
+
+async function apiRequest<T>(
+  path: string,
+  init: {
+    method?: "GET" | "POST";
+    body?: Record<string, unknown>;
+    authenticated?: boolean;
+  } = {},
+) {
+  const token = readUserSession().clientToken || "";
   const response = await fetch(`${normalizeBaseUrl(getInitialApiUrl())}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
+    method: init.method || "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(init.authenticated && token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(init.body ? { body: JSON.stringify(init.body) } : {}),
   });
   if (!response.ok) {
     const text = await response.text();
