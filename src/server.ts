@@ -3380,9 +3380,13 @@ function findFreeTrialClaim(email: string, binding: { ipHash: string; userAgentH
     if (!clientHasUsedFreeTrial(client)) return false;
     const trialIpHash = readString(client, "trial_ip_hash");
     const trialUserAgentHash = readString(client, "trial_user_agent_hash");
-    return (
-      (binding.ipHash && trialIpHash && trialIpHash === binding.ipHash) ||
-      (binding.userAgentHash && trialUserAgentHash && trialUserAgentHash === binding.userAgentHash)
+    return Boolean(
+      binding.ipHash &&
+        binding.userAgentHash &&
+        trialIpHash &&
+        trialUserAgentHash &&
+        trialIpHash === binding.ipHash &&
+        trialUserAgentHash === binding.userAgentHash,
     );
   });
 }
