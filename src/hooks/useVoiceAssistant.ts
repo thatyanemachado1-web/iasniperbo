@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardData } from "@/types/dashboard";
 import { getInitialApiUrl, readAdminSession } from "@/lib/adminApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { readVoiceResponseError } from "@/lib/voiceApiError";
 import {
   DEFAULT_VOICE_NARRATION_STYLE,
   buildVoiceEvents,
@@ -118,7 +119,7 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
 
   const speakWithElevenLabs = useCallback(
     async (text: string) => {
-      if (!audioSupported || !ELEVENLABS_ENABLED) return false;
+      if (!audioSupported || !ELEVENLABS_ENABLED) return ELEVENLABS_UNAVAILABLE_MESSAGE;
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -138,10 +139,10 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
           body: JSON.stringify({ text }),
           signal: controller.signal,
         });
-        if (!response.ok) return false;
+        if (!response.ok) return readVoiceResponseError(response, ELEVENLABS_UNAVAILABLE_MESSAGE);
 
         const blob = await response.blob();
-        if (!blob.size) return false;
+        if (!blob.size) return ELEVENLABS_UNAVAILABLE_MESSAGE;
 
         const audioUrl = window.URL.createObjectURL(blob);
         audioUrlRef.current = audioUrl;
@@ -164,8 +165,8 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
 
         return true;
       } catch (error) {
-        if ((error as { name?: string })?.name === "AbortError") return false;
-        return false;
+        if ((error as { name?: string })?.name === "AbortError") return "";
+        return ELEVENLABS_UNAVAILABLE_MESSAGE;
       }
     },
     [audioSupported],
@@ -186,9 +187,9 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
       setVoiceError("");
 
       void (async () => {
-        const played = await speakWithElevenLabs(text);
-        if (!played && playbackIdRef.current === playbackId) {
-          setVoiceError(ELEVENLABS_UNAVAILABLE_MESSAGE);
+        const result = await speakWithElevenLabs(text);
+        if (result !== true && playbackIdRef.current === playbackId && result) {
+          setVoiceError(result);
         }
         finishPlayback(playbackId, updateCooldown);
       })();
@@ -221,7 +222,9 @@ export function useVoiceAssistant(data: DashboardData, mode: DashboardMode) {
 
   const enqueueEvents = useCallback(
     (nextEvents: VoiceEvent[]) => {
-      const unseenEvents = nextEvents.filter((candidate) => !seenKeysRef.current.has(candidate.key));
+      const unseenEvents = nextEvents.filter(
+        (candidate) => !seenKeysRef.current.has(candidate.key),
+      );
       if (!unseenEvents.length) {
         syncQueueLength();
         processQueue();

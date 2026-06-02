@@ -55,6 +55,7 @@ const MERCADOPAGO_PREFERENCE_URL = "https://api.mercadopago.com/checkout/prefere
 const MERCADOPAGO_PAYMENT_URL = "https://api.mercadopago.com/v1/payments";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
+const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
 const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
@@ -2331,7 +2332,13 @@ function isDashboardAuthorized(request: Request, _url: URL, env: unknown) {
   const headerToken =
     request.headers.get("x-sniper-token")?.trim() ||
     request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
-  return Boolean(token) && headerToken === token;
+  if (token) return headerToken === token;
+  return isLocalDevelopmentRequest(request) && headerToken === LOCAL_DEV_DASHBOARD_TOKEN;
+}
+
+function isLocalDevelopmentRequest(request: Request) {
+  const host = new URL(request.url).hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 async function isDashboardReadAuthorized(request: Request, url: URL, env: unknown) {

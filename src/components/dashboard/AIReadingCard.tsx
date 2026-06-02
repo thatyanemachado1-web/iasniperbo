@@ -7,6 +7,7 @@ import { BrainAI } from "@/components/brand/BrainAI";
 import { generateAIReading, type AIReadingSnapshot } from "@/lib/aiReader.functions";
 import { getInitialApiUrl, readAdminSession } from "@/lib/adminApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { readVoiceResponseError } from "@/lib/voiceApiError";
 import type { DashboardData } from "@/types/dashboard";
 import { Sparkles, RefreshCw, Volume2, VolumeX } from "lucide-react";
 
@@ -32,7 +33,10 @@ function buildSnapshot(
   userFirstName: string,
   allowUseName: boolean,
 ): AIReadingSnapshot {
-  const lastRounds = d.rounds.slice(-12).map((r) => r.result).join("");
+  const lastRounds = d.rounds
+    .slice(-12)
+    .map((r) => r.result)
+    .join("");
   return {
     engineState: d.engineDecision.state,
     engineReason: d.engineDecision.reason,
@@ -96,7 +100,11 @@ export function AIReadingCard({ data, mode }: Props) {
 
   const liveReady = mode === "live" && data.mockMode === false;
 
-  const { data: reading, isFetching, refetch } = useQuery({
+  const {
+    data: reading,
+    isFetching,
+    refetch,
+  } = useQuery({
     queryKey: ["ai-reading", stateKey],
     queryFn: () => callReading({ data: snapshot }),
     enabled: liveReady,
@@ -125,7 +133,11 @@ export function AIReadingCard({ data, mode }: Props) {
 
   const speakReading = useCallback(
     async (text: string) => {
-      if (typeof window === "undefined" || typeof window.Audio === "undefined" || typeof window.URL === "undefined") {
+      if (
+        typeof window === "undefined" ||
+        typeof window.Audio === "undefined" ||
+        typeof window.URL === "undefined"
+      ) {
         setVoiceError(VOICE_UNAVAILABLE_MESSAGE);
         return;
       }
@@ -152,7 +164,9 @@ export function AIReadingCard({ data, mode }: Props) {
           body: JSON.stringify({ text }),
         });
 
-        if (!response.ok) throw new Error(VOICE_UNAVAILABLE_MESSAGE);
+        if (!response.ok) {
+          throw new Error(await readVoiceResponseError(response, VOICE_UNAVAILABLE_MESSAGE));
+        }
         const blob = await response.blob();
         if (!blob.size) throw new Error(VOICE_UNAVAILABLE_MESSAGE);
 
@@ -166,9 +180,9 @@ export function AIReadingCard({ data, mode }: Props) {
           audio.onerror = () => reject(new Error(VOICE_UNAVAILABLE_MESSAGE));
           audio.play().catch(reject);
         });
-      } catch {
+      } catch (error) {
         if (playbackIdRef.current === playbackId) {
-          setVoiceError(VOICE_UNAVAILABLE_MESSAGE);
+          setVoiceError((error as Error)?.message || VOICE_UNAVAILABLE_MESSAGE);
         }
       } finally {
         if (playbackIdRef.current === playbackId) {
@@ -219,7 +233,7 @@ export function AIReadingCard({ data, mode }: Props) {
 
       <div className="min-h-[4.5rem] rounded-xl border border-neon-purple/20 bg-background/30 px-3 py-2.5 text-sm leading-relaxed text-foreground">
         {liveReady
-          ? reading?.text ?? "Aguardando primeira leitura da IA..."
+          ? (reading?.text ?? "Aguardando primeira leitura da IA...")
           : "A leitura automatica inicia quando os dados ao vivo estiverem conectados."}
       </div>
 
