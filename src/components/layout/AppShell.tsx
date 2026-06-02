@@ -1,5 +1,16 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck, ReceiptText } from "lucide-react";
+import {
+  LayoutDashboard,
+  Brain,
+  BrainCircuit,
+  Mic,
+  Crown,
+  User,
+  Bell,
+  Settings,
+  ShieldCheck,
+  ReceiptText,
+} from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { canSeeAdminUi } from "@/lib/adminSession";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
@@ -9,6 +20,7 @@ const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/voz", label: "Voz", icon: Mic },
   { to: "/app/ia", label: "Assistente IA", icon: Brain },
+  { to: "/app/padroes", label: "Padrões IA", icon: BrainCircuit },
   { to: "/app/planos", label: "Assinar", icon: Crown },
   { to: "/app/assinatura", label: "Assinatura", icon: ReceiptText },
   { to: "/app/conta", label: "Conta", icon: User },
@@ -21,10 +33,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const userSession = readUserSession();
   const canSeeAdmin = canSeeAdminUi();
   const fullAccess = hasFullAccess(userSession);
-  const visibleNavItems = fullAccess ? navItems.filter((item) => item.to !== "/app/planos") : navItems;
+  const visibleNavItems = fullAccess
+    ? navItems.filter((item) => item.to !== "/app/planos")
+    : navItems;
   const mobileNavItems = canSeeAdmin ? [...visibleNavItems, adminNavItem] : visibleNavItems;
-  const mobileGridClass =
-    mobileNavItems.length >= 7 ? "grid-cols-7" : mobileNavItems.length === 6 ? "grid-cols-6" : "grid-cols-5";
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -97,19 +109,23 @@ export function AppShell({ children }: { children: ReactNode }) {
               <ShieldCheck className="size-4" /> Administração
             </Link>
           )}
-          <Link to="/app/conta" className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
+          <Link
+            to="/app/conta"
+            className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+          >
             <Settings className="size-4" /> Configurações
           </Link>
         </aside>
 
-        <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-24 lg:pb-8">
-          {children}
-        </main>
+        <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-24 lg:pb-8">{children}</main>
       </div>
 
       {/* Bottom nav mobile */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 glass-strong border-t border-border/60">
-        <div className={`grid ${mobileGridClass}`}>
+        <div
+          className="grid"
+          style={{ gridTemplateColumns: `repeat(${mobileNavItems.length}, minmax(0, 1fr))` }}
+        >
           {mobileNavItems.map((it) => {
             const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
             return (

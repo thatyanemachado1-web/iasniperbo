@@ -12,6 +12,7 @@ import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
 import { AIReadingCard } from "@/components/dashboard/AIReadingCard";
 import { RoadmapDots } from "@/components/dashboard/RoadmapDots";
 import { PressureChart } from "@/components/dashboard/PressureChart";
+import { PatternMinerMiniCard } from "@/components/patternMiner/PatternMinerMiniCard";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -32,6 +33,7 @@ import {
 } from "@/utils/moduleResults";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import { buildSignalCopy } from "@/lib/operationalCopy";
+import { usePatternMiner } from "@/hooks/usePatternMiner";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
@@ -41,6 +43,11 @@ function DashboardPage() {
   const { data: d, mode, entryMode, setEntryMode, setModuleToggles } = useDashboardData();
   const userSession = readUserSession();
   const fullAccess = hasFullAccess(userSession);
+  const patternMiner = usePatternMiner({
+    rounds: d.rounds,
+    historyLimit: 15000,
+    enabled: mode === "live" && !d.mockMode,
+  });
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const tieAlertEnabled = d.moduleToggles?.tieAlert !== false;
   const surfAnalyzerEnabled = d.moduleToggles?.surfAnalyzer !== false;
@@ -56,7 +63,9 @@ function DashboardPage() {
     (d.currentSignal.status === "pending" || d.currentSignal.status === "g1") &&
     (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER");
   const surfSummary =
-    surfAnalyzerEnabled && signalHasActiveEntry && (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER")
+    surfAnalyzerEnabled &&
+    signalHasActiveEntry &&
+    (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER")
       ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
       : undefined;
   const lastRound = d.rounds[d.rounds.length - 1] ?? null;
@@ -86,10 +95,16 @@ function DashboardPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <AppBadge tone="green" pulse>Mesa online</AppBadge>
-          <AppBadge tone="blue" pulse>Engine operacional</AppBadge>
+          <AppBadge tone="green" pulse>
+            Mesa online
+          </AppBadge>
+          <AppBadge tone="blue" pulse>
+            Engine operacional
+          </AppBadge>
           {fullAccess ? (
-            <AppBadge tone="green">{userSession.plan === "vip" ? "Conta VIP" : "Conta Premium"}</AppBadge>
+            <AppBadge tone="green">
+              {userSession.plan === "vip" ? "Conta VIP" : "Conta Premium"}
+            </AppBadge>
           ) : (
             <Link
               to="/app/planos"
@@ -166,6 +181,13 @@ function DashboardPage() {
           >
             <AIReadingCard data={d} mode={mode} />
           </PremiumFeature>
+
+          <div className="order-3">
+            <PatternMinerMiniCard
+              snapshot={patternMiner.snapshot}
+              isUsingRealData={patternMiner.isUsingRealData}
+            />
+          </div>
 
           <PremiumFeature
             title="Placares VIP"
@@ -315,7 +337,9 @@ function DashboardPage() {
                 </div>
                 <div className="flex-1">
                   <div className="text-sm font-bold">Plano gratuito</div>
-                  <div className="text-[11px] text-muted-foreground">Recursos premium bloqueados</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Recursos premium bloqueados
+                  </div>
                 </div>
               </div>
               <Link
