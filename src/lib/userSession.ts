@@ -131,6 +131,10 @@ export function hasFullAccess(session: UserSession = readUserSession()) {
   return session.approved || session.accessMode === "full" || isAdminOwnerEmail(session.email);
 }
 
+export function hasSignalAccess(session: UserSession = readUserSession()) {
+  return hasFullAccess(session) || session.accessMode === "demo";
+}
+
 export function isLimitedAccess(session: UserSession = readUserSession()) {
   return !hasFullAccess(session);
 }

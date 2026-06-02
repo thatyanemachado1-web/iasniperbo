@@ -60,6 +60,7 @@ const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
+const FREE_TRIAL_MINUTES = 10;
 const ACTIVE_ENTRY_MODES = ["sniper", "hunter", "aggressive"] as const satisfies readonly ActiveEntryMode[];
 const SNIPER_NEURAL_ASSERTIVENESS_MIN = 99;
 
@@ -1187,23 +1188,30 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
     const now = new Date().toISOString();
     const passwordHash = await hashPassword(password);
+    const existingClient = existingIndex >= 0 ? liveClients[existingIndex] : {};
+    const binding = await requestSessionBinding(env, request);
+    const trialAccess = buildRegistrationTrialAccess(env, email, existingClient, binding, now);
     const client: Record<string, unknown> = {
-      id: existingIndex >= 0 ? liveClients[existingIndex].id : crypto.randomUUID(),
+      ...existingClient,
+      id: existingIndex >= 0 ? existingClient.id : crypto.randomUUID(),
       full_name: readString(body, "full_name") || email,
       email,
       password_hash: passwordHash,
       phone: readString(body, "phone"),
       city: readString(body, "city"),
       country: readString(body, "country"),
-      plan: existingIndex >= 0 ? liveClients[existingIndex].plan || "free" : "free",
-      access_status:
-        existingIndex >= 0 ? liveClients[existingIndex].access_status || "pending" : "pending",
-      enabled: existingIndex >= 0 ? Boolean(liveClients[existingIndex].enabled) : false,
-      starts_at:
-        existingIndex >= 0 ? liveClients[existingIndex].starts_at || todayIso() : todayIso(),
-      validity_days: existingIndex >= 0 ? liveClients[existingIndex].validity_days || 30 : 30,
-      expires_at: existingIndex >= 0 ? liveClients[existingIndex].expires_at || "" : "",
-      created_at: existingIndex >= 0 ? liveClients[existingIndex].created_at || now : now,
+      plan: trialAccess.plan,
+      access_status: trialAccess.accessStatus,
+      enabled: trialAccess.enabled,
+      starts_at: trialAccess.startsAt,
+      validity_days: trialAccess.validityDays,
+      expires_at: trialAccess.expiresAt,
+      trial_started_at: trialAccess.trialStartedAt,
+      trial_expires_at: trialAccess.trialExpiresAt,
+      trial_ip_hash: trialAccess.trialIpHash,
+      trial_user_agent_hash: trialAccess.trialUserAgentHash,
+      trial_blocked_reason: trialAccess.trialBlockedReason,
+      created_at: existingIndex >= 0 ? existingClient.created_at || now : now,
       updated_at: now,
     };
 
@@ -2836,12 +2844,14 @@ function buildBillingOverview(client: Record<string, unknown>) {
   const subscription = latestSubscriptionForEmail(email);
   const expiresAt = readString(client, "expires_at") || readString(subscription, "expires_at");
   const expired = isExpiredIso(expiresAt);
+  const trial = readString(client, "access_status").toLowerCase() === "trial" && !expired;
+  const liveAccess = clientHasLiveAccess(client);
   return {
     email,
     plan: readString(client, "plan") || readString(subscription, "plan") || "free",
     status: expired ? "expired" : readString(subscription, "status") || readString(client, "access_status") || "pending",
-    accessMode: clientHasLiveAccess(client) ? "full" : expired ? "expired" : "pending",
-    approved: clientHasLiveAccess(client),
+    accessMode: trial ? "demo" : liveAccess ? "full" : expired ? "expired" : "pending",
+    approved: liveAccess && !trial,
     starts_at: readString(client, "starts_at") || readString(subscription, "starts_at"),
     expires_at: expiresAt,
     subscription: buildSubscriptionPublic(subscription),
@@ -3274,6 +3284,109 @@ function clientHasLiveAccess(client: Record<string, unknown>) {
   return enabled && !isExpiredIso(readString(client, "expires_at"));
 }
 
+function buildRegistrationTrialAccess(
+  env: unknown,
+  email: string,
+  existingClient: Record<string, unknown>,
+  binding: { ipHash: string; userAgentHash: string },
+  now: string,
+) {
+  const existingStatus = readString(existingClient, "access_status").toLowerCase();
+  const existingPlan = normalizeBillingPlanId(readString(existingClient, "plan"));
+  const existingExpiresAt = readString(existingClient, "expires_at");
+  const existingTrialExpiresAt = readString(existingClient, "trial_expires_at") || existingExpiresAt;
+
+  if (existingPlan && existingPlan !== "free") {
+    return {
+      plan: existingPlan,
+      accessStatus: existingStatus || "pending",
+      enabled: Boolean(existingClient.enabled),
+      startsAt: readString(existingClient, "starts_at") || todayIso(),
+      validityDays: Number(existingClient.validity_days || 30),
+      expiresAt: existingExpiresAt,
+      trialStartedAt: readString(existingClient, "trial_started_at"),
+      trialExpiresAt: readString(existingClient, "trial_expires_at"),
+      trialIpHash: readString(existingClient, "trial_ip_hash"),
+      trialUserAgentHash: readString(existingClient, "trial_user_agent_hash"),
+      trialBlockedReason: readString(existingClient, "trial_blocked_reason"),
+    };
+  }
+
+  if (clientHasUsedFreeTrial(existingClient)) {
+    const activeTrial = existingStatus === "trial" && !isExpiredIso(existingTrialExpiresAt);
+    return {
+      plan: "free" as const,
+      accessStatus: activeTrial ? "trial" : "expired",
+      enabled: activeTrial,
+      startsAt: readString(existingClient, "starts_at") || now,
+      validityDays: 0,
+      expiresAt: existingTrialExpiresAt || now,
+      trialStartedAt: readString(existingClient, "trial_started_at") || now,
+      trialExpiresAt: existingTrialExpiresAt || now,
+      trialIpHash: readString(existingClient, "trial_ip_hash") || binding.ipHash,
+      trialUserAgentHash: readString(existingClient, "trial_user_agent_hash") || binding.userAgentHash,
+      trialBlockedReason: readString(existingClient, "trial_blocked_reason"),
+    };
+  }
+
+  const previousTrial = findFreeTrialClaim(email, binding);
+  if (previousTrial) {
+    return {
+      plan: "free" as const,
+      accessStatus: "expired",
+      enabled: false,
+      startsAt: now,
+      validityDays: 0,
+      expiresAt: now,
+      trialStartedAt: now,
+      trialExpiresAt: now,
+      trialIpHash: binding.ipHash,
+      trialUserAgentHash: binding.userAgentHash,
+      trialBlockedReason: "Teste gratuito ja utilizado neste IP ou dispositivo.",
+    };
+  }
+
+  const trialExpiresAt = addMinutesIso(now, freeTrialMinutes(env));
+  return {
+    plan: "free" as const,
+    accessStatus: "trial",
+    enabled: true,
+    startsAt: now,
+    validityDays: 0,
+    expiresAt: trialExpiresAt,
+    trialStartedAt: now,
+    trialExpiresAt,
+    trialIpHash: binding.ipHash,
+    trialUserAgentHash: binding.userAgentHash,
+    trialBlockedReason: "",
+  };
+}
+
+function clientHasUsedFreeTrial(client: Record<string, unknown>) {
+  return Boolean(
+    readString(client, "trial_started_at") ||
+      readString(client, "trial_expires_at") ||
+      readString(client, "trial_ip_hash") ||
+      readString(client, "trial_user_agent_hash") ||
+      readString(client, "trial_blocked_reason") ||
+      readString(client, "access_status").toLowerCase() === "trial",
+  );
+}
+
+function findFreeTrialClaim(email: string, binding: { ipHash: string; userAgentHash: string }) {
+  const cleanEmail = email.trim().toLowerCase();
+  return liveClients.find((client) => {
+    if (readString(client, "email").toLowerCase() === cleanEmail) return false;
+    if (!clientHasUsedFreeTrial(client)) return false;
+    const trialIpHash = readString(client, "trial_ip_hash");
+    const trialUserAgentHash = readString(client, "trial_user_agent_hash");
+    return (
+      (binding.ipHash && trialIpHash && trialIpHash === binding.ipHash) ||
+      (binding.userAgentHash && trialUserAgentHash && trialUserAgentHash === binding.userAgentHash)
+    );
+  });
+}
+
 async function validateClientSessionBinding(
   env: unknown,
   request: Request,
@@ -3397,6 +3510,7 @@ async function clientAccess(
 ) {
   const rawStatus = readString(client, "access_status").toLowerCase();
   const blocked = Boolean(client.isBlocked) || Boolean(client.is_blocked) || rawStatus === "blocked";
+  const trial = rawStatus === "trial";
   const enabled =
     !blocked &&
     (Boolean(client.enabled) ||
@@ -3405,7 +3519,13 @@ async function clientAccess(
       rawStatus === "manual_vip" ||
       rawStatus === "trial");
   const expired = enabled && isExpiredIso(readString(client, "expires_at"));
-  const approved = enabled && !expired;
+  if (expired && readString(client, "access_status").toLowerCase() !== "expired") {
+    client.enabled = false;
+    client.access_status = "expired";
+    client.updated_at = new Date().toISOString();
+    upsertRecipientFromClient(client);
+  }
+  const approved = enabled && !expired && !trial;
   const accessStatus = blocked ? "blocked" : readString(client, "access_status") || (enabled ? "approved" : "pending");
   const plan = ["premium", "vip"].includes(readString(client, "plan"))
     ? readString(client, "plan")
@@ -3461,7 +3581,7 @@ async function clientAccess(
   return {
     registered: true,
     approved,
-    access_mode: expired ? "expired" : enabled ? "full" : "pending",
+    access_mode: expired ? "expired" : trial && enabled ? "demo" : enabled ? "full" : "pending",
     access_status: expired ? "expired" : accessStatus,
     plan,
     role: normalizeManagedUserRole(client.role),
@@ -3470,7 +3590,9 @@ async function clientAccess(
       readString(client, "full_name") || readString(client, "name") || readString(client, "email"),
     expires_at: readString(client, "expires_at"),
     reason: expired
-      ? "Acesso expirado. Fale com o administrador para renovar."
+      ? "Seu teste gratuito expirou. Atualize seu plano para continuar recebendo sinais."
+      : trial && enabled
+      ? "Teste gratuito ativo por tempo limitado."
       : enabled
       ? "Acesso liberado pelo administrador."
       : "Aguardando liberacao do administrador.",
@@ -4322,6 +4444,17 @@ function addDaysIso(startIso: string, days: number) {
   }
   date.setDate(date.getDate() + Math.max(0, Math.floor(Number(days) || 0)));
   return hasTime ? date.toISOString() : date.toISOString().slice(0, 10);
+}
+
+function addMinutesIso(startIso: string, minutes: number) {
+  const date = new Date(startIso.trim() || new Date().toISOString());
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  safeDate.setMinutes(safeDate.getMinutes() + Math.max(0, Math.floor(Number(minutes) || 0)));
+  return safeDate.toISOString();
+}
+
+function freeTrialMinutes(env: unknown) {
+  return Math.max(1, Math.floor(readServerNumber(env, "SNIPER_FREE_TRIAL_MINUTES", FREE_TRIAL_MINUTES)));
 }
 
 function getLiveStateCache() {

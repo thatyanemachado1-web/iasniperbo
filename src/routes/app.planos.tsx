@@ -52,6 +52,9 @@ function PlanosPage() {
   const [loadingPlan, setLoadingPlan] = useState<string>("");
   const [error, setError] = useState("");
   const session = readUserSession();
+  const trialExpired =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("trial") === "expired";
 
   useEffect(() => {
     let active = true;
@@ -101,6 +104,20 @@ function PlanosPage() {
         <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
+      )}
+
+      {trialExpired && (
+        <GlassCard className="border-gold/50 bg-gold/10">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-black text-gold">Seu teste gratuito expirou.</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Atualize seu plano para continuar recebendo sinais ao vivo.
+              </div>
+            </div>
+            <AppBadge tone="gold">Checkout liberado</AppBadge>
+          </div>
+        </GlassCard>
       )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

@@ -180,6 +180,6 @@ export function accessLabel(session: UserSession) {
   if (session.accessMode === "full") return session.plan === "vip" ? "VIP liberado" : "Premium liberado";
   if (session.accessMode === "pending") return "Aguardando liberacao";
   if (session.accessMode === "expired") return "Acesso expirado";
-  if (session.accessMode === "demo") return "Modo demo";
+  if (session.accessMode === "demo") return "Teste gratuito";
   return "Sem cadastro";
 }

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
-import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { hasSignalAccess, readUserSession } from "@/lib/userSession";
 
 interface PremiumFeatureProps {
   children: ReactNode;
@@ -15,7 +15,7 @@ export function PremiumFeature({
   description = "Entre em contato ou finalize o checkout para liberar.",
   className = "",
 }: PremiumFeatureProps) {
-  const allowed = hasFullAccess(readUserSession());
+  const allowed = hasSignalAccess(readUserSession());
   if (allowed) return className ? <div className={className}>{children}</div> : <>{children}</>;
 
   return (

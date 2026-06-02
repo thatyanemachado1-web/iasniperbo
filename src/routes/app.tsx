@@ -20,9 +20,10 @@ function ProtectedAppRoute() {
     pathname.startsWith("/app/pagamentos");
   const isOwner = isAdminOwnerEmail(session.email);
   const canOpenApp = session.registered || isOwner;
+  const demoExpired = session.accessMode === "demo" && isExpiredAt(session.expiresAt);
   const canOpenDashboard =
     hasFullAccess(session) ||
-    session.accessMode === "demo" ||
+    (session.accessMode === "demo" && !demoExpired) ||
     (session.registered && session.accessMode === "pending");
 
   useEffect(() => {
@@ -37,6 +38,7 @@ function ProtectedAppRoute() {
   }, [
     canOpenApp,
     canOpenDashboard,
+    demoExpired,
     isAccountRoute,
     isAdminRoute,
     isCheckoutRoute,
@@ -102,4 +104,10 @@ function ProtectedAppRoute() {
       <Outlet />
     </AppShell>
   );
+}
+
+function isExpiredAt(value: string) {
+  if (!value) return false;
+  const expires = Date.parse(value);
+  return Number.isFinite(expires) && expires <= Date.now();
 }

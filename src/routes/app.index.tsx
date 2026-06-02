@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight, Crown } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronRight, Clock, Crown } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { LiveTableView } from "@/components/dashboard/LiveTableView";
@@ -95,6 +96,9 @@ function DashboardPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {userSession.accessMode === "demo" && userSession.expiresAt && (
+            <TrialCountdown expiresAt={userSession.expiresAt} />
+          )}
           <AppBadge tone="green" pulse>
             Mesa online
           </AppBadge>
@@ -358,6 +362,46 @@ function DashboardPage() {
 
 function formatCompactCount(value: number) {
   return value >= 0 && value < 10 ? `0${value}` : String(value);
+}
+
+function TrialCountdown({ expiresAt }: { expiresAt: string }) {
+  const [remainingMs, setRemainingMs] = useState(() => trialRemainingMs(expiresAt));
+
+  useEffect(() => {
+    function updateRemaining() {
+      const next = trialRemainingMs(expiresAt);
+      setRemainingMs(next);
+      if (next <= 0) {
+        window.location.href = "/app/planos?trial=expired";
+      }
+    }
+
+    updateRemaining();
+    const interval = window.setInterval(updateRemaining, 1_000);
+    return () => window.clearInterval(interval);
+  }, [expiresAt]);
+
+  if (remainingMs <= 0) return null;
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-gold/40 bg-gold/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-gold">
+      <Clock className="size-3" />
+      Teste {formatTrialTime(remainingMs)}
+    </span>
+  );
+}
+
+function trialRemainingMs(expiresAt: string) {
+  const expires = Date.parse(expiresAt);
+  if (!Number.isFinite(expires)) return 0;
+  return Math.max(0, expires - Date.now());
+}
+
+function formatTrialTime(value: number) {
+  const totalSeconds = Math.ceil(value / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
