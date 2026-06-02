@@ -14,7 +14,7 @@ export interface SignalRecipient {
   kind: RecipientKind;
   enabled: boolean;
   plan: RecipientPlan;
-  access_status?: "approved" | "paused" | "pending";
+  access_status?: "approved" | "paused" | "pending" | "expired" | "blocked" | "trial" | "manual_vip";
   starts_at?: string;
   validity_days?: number;
   expires_at: string;

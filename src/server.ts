@@ -1122,7 +1122,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ access: await approverAccess(env, email, request) });
     }
 
-    const client = findClientByEmail(email) || await hydrateClientFromBilling(env, email);
+    let client = findClientByEmail(email) || await hydrateClientFromBilling(env, email);
+    if (!client && password) {
+      client = await ensureBlockedTrialClientForLogin(env, request, email, password);
+    }
     if (!client) {
       return json({
         access: {
@@ -1255,9 +1258,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ valid: true, access: await approverAccess(env, session.email, request) });
     }
 
-    const client =
+    let client =
       findClientByEmail(session.email) ||
       await hydrateClientFromBilling(env, session.email);
+    if (!client && session.scope === "client") {
+      client = await ensureSessionClientForExpiredTrial(env, request, session);
+    }
     if (!client) {
       return json({
         valid: true,
@@ -3216,6 +3222,10 @@ function normalizeRecipient(recipient: Record<string, unknown>) {
   const startsAt = readString(recipient, "starts_at") || todayIso();
   const validityDays = Number(recipient.validity_days || 30);
   const enabled = Boolean(recipient.enabled);
+  const accessStatus = normalizeRecipientAccessStatus(
+    readString(recipient, "access_status"),
+    enabled,
+  );
 
   return {
     id: readString(recipient, "id") || crypto.randomUUID(),
@@ -3233,13 +3243,7 @@ function normalizeRecipient(recipient: Record<string, unknown>) {
     plan: ["free", "premium", "vip"].includes(readString(recipient, "plan"))
       ? readString(recipient, "plan")
       : "vip",
-    access_status: ["approved", "paused", "pending"].includes(
-      readString(recipient, "access_status"),
-    )
-      ? readString(recipient, "access_status")
-      : enabled
-        ? "approved"
-        : "pending",
+    access_status: accessStatus,
     starts_at: startsAt,
     validity_days: Number.isFinite(validityDays) ? validityDays : 30,
     expires_at: readString(recipient, "expires_at") || addDaysIso(startsAt, validityDays || 30),
@@ -3371,6 +3375,22 @@ function buildRegistrationTrialAccess(
   };
 }
 
+function normalizeRecipientAccessStatus(value: string, enabled: boolean) {
+  const status = value.trim().toLowerCase();
+  if (
+    status === "approved" ||
+    status === "paused" ||
+    status === "pending" ||
+    status === "expired" ||
+    status === "blocked" ||
+    status === "trial" ||
+    status === "manual_vip"
+  ) {
+    return status;
+  }
+  return enabled ? "approved" : "pending";
+}
+
 function clientHasUsedFreeTrial(client: Record<string, unknown>) {
   return Boolean(
     readString(client, "trial_started_at") ||
@@ -3398,6 +3418,101 @@ function findFreeTrialClaim(email: string, binding: { ipHash: string; userAgentH
         trialUserAgentHash === binding.userAgentHash,
     );
   });
+}
+
+async function ensureBlockedTrialClientForLogin(
+  env: unknown,
+  request: Request,
+  email: string,
+  password: string,
+) {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || !password) return null;
+
+  const binding = await requestSessionBinding(env, request);
+  const previousTrial = findFreeTrialClaim(cleanEmail, binding);
+  if (!previousTrial) return null;
+
+  const now = new Date().toISOString();
+  const client = removeLegacyPassword({
+    id: crypto.randomUUID(),
+    full_name: nameFromEmail(cleanEmail),
+    email: cleanEmail,
+    phone: "",
+    city: "",
+    country: "",
+    password_hash: await hashPassword(password),
+    plan: "free",
+    access_status: "expired",
+    enabled: false,
+    starts_at: now,
+    validity_days: 0,
+    expires_at: now,
+    trial_started_at: now,
+    trial_expires_at: now,
+    trial_ip_hash: binding.ipHash,
+    trial_user_agent_hash: binding.userAgentHash,
+    trial_blocked_reason: "Teste gratuito ja utilizado neste IP ou dispositivo.",
+    created_at: now,
+    updated_at: now,
+  });
+
+  clearDeletedEntityForRecord(client);
+  upsertLiveClient(client);
+  upsertRecipientFromClient(client);
+  recordAccessEvent("client_trial_recreated_for_checkout", {
+    ...client,
+    risk: "medium",
+    detail: "Conta recriada como teste expirado para permitir checkout sem novo periodo gratis.",
+  });
+  await saveLiveState(env);
+  await persistBillingUser(env, client);
+  return findClientByEmail(cleanEmail) || client;
+}
+
+async function ensureSessionClientForExpiredTrial(
+  env: unknown,
+  request: Request,
+  session: SessionPayload,
+) {
+  if (session.scope !== "client" || session.approved || session.plan !== "free") return null;
+  if (!(await sessionMatchesRequestBinding(env, request, session))) return null;
+
+  const now = new Date().toISOString();
+  const client = {
+    id: crypto.randomUUID(),
+    full_name: nameFromEmail(session.email),
+    email: session.email,
+    phone: "",
+    city: "",
+    country: "",
+    password_hash: "",
+    plan: "free",
+    access_status: "expired",
+    enabled: false,
+    starts_at: now,
+    validity_days: 0,
+    expires_at: now,
+    trial_started_at: now,
+    trial_expires_at: now,
+    trial_ip_hash: session.iph,
+    trial_user_agent_hash: session.ua,
+    trial_blocked_reason: "Teste gratuito ja utilizado neste IP ou dispositivo.",
+    created_at: now,
+    updated_at: now,
+  };
+
+  clearDeletedEntityForRecord(client);
+  upsertLiveClient(client);
+  upsertRecipientFromClient(client);
+  recordAccessEvent("client_trial_session_recovered", {
+    ...client,
+    risk: "medium",
+    detail: "Sessao de teste expirado recuperada para manter checkout disponivel.",
+  });
+  await saveLiveState(env);
+  await persistBillingUser(env, client);
+  return findClientByEmail(session.email) || client;
 }
 
 async function validateClientSessionBinding(
@@ -3509,6 +3624,7 @@ async function clientAccess(
   const rawStatus = readString(client, "access_status").toLowerCase();
   const blocked = Boolean(client.isBlocked) || Boolean(client.is_blocked) || rawStatus === "blocked";
   const trial = rawStatus === "trial";
+  const expiresAt = readString(client, "expires_at");
   const enabled =
     !blocked &&
     (Boolean(client.enabled) ||
@@ -3516,7 +3632,7 @@ async function clientAccess(
       rawStatus === "active" ||
       rawStatus === "manual_vip" ||
       rawStatus === "trial");
-  const expired = enabled && isExpiredIso(readString(client, "expires_at"));
+  const expired = !blocked && (rawStatus === "expired" || isExpiredIso(expiresAt));
   if (expired && readString(client, "access_status").toLowerCase() !== "expired") {
     client.enabled = false;
     client.access_status = "expired";
@@ -3586,7 +3702,7 @@ async function clientAccess(
     email,
     full_name:
       readString(client, "full_name") || readString(client, "name") || readString(client, "email"),
-    expires_at: readString(client, "expires_at"),
+    expires_at: expiresAt,
     reason: expired
       ? "Seu teste gratuito expirou. Atualize seu plano para continuar recebendo sinais."
       : trial && enabled
