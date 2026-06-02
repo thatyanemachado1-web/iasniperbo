@@ -59,7 +59,7 @@ export function StrategyConclusion({
     <div className={cn("flex flex-wrap items-center gap-1.5", compact ? "text-[11px]" : "text-xs")}>
       <span className="font-semibold">Estratégia:</span>
       <PatternSequence sequence={strategy.sequence} compact={compact} />
-      <span className="text-muted-foreground">= puxou</span>
+      <span className="text-muted-foreground">= PAGANDO</span>
       <span className={cn("font-black", sideTextClass[strategy.expectedResult])}>
         {formatPulledSide(strategy.expectedResult)}
       </span>

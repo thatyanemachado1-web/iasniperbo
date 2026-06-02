@@ -17,7 +17,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { usePatternMiner } from "@/hooks/usePatternMiner";
-import { PATTERN_MINER_HISTORY_OPTIONS } from "@/patternMiner/PatternMinerEngine";
+import {
+  PATTERN_MINER_HISTORY_OPTIONS,
+  PATTERN_MINER_TOP_STRATEGIES_LIMIT,
+} from "@/patternMiner/PatternMinerEngine";
 import { formatPercent } from "@/patternMiner/PatternMinerDisplay";
 import type { PatternMinerHistoryLimit, PatternMinerSnapshot } from "@/types/patternMiner";
 
@@ -119,13 +122,15 @@ function PatternMinerPage() {
         <TabsContent value="hot" className="space-y-3">
           <SectionTitle
             title="🔥 Estratégias Quentes"
-            subtitle="Top estratégias que puxaram resultado com amostra real suficiente."
+            subtitle={`Top ${PATTERN_MINER_TOP_STRATEGIES_LIMIT} estratégias numeradas e pagantes com amostra real suficiente.`}
           />
           {snapshot.hotStrategies.length ? (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              {snapshot.hotStrategies.slice(0, 12).map((strategy) => (
-                <PatternStrategyCard key={strategy.id} strategy={strategy} />
-              ))}
+              {snapshot.hotStrategies
+                .slice(0, PATTERN_MINER_TOP_STRATEGIES_LIMIT)
+                .map((strategy) => (
+                  <PatternStrategyCard key={strategy.id} strategy={strategy} />
+                ))}
             </div>
           ) : (
             <EmptyState text="Nenhuma estratégia quente com amostra suficiente no histórico atual." />
@@ -151,7 +156,7 @@ function PatternMinerPage() {
         <TabsContent value="ranking" className="space-y-3">
           <SectionTitle
             title="🏆 Ranking"
-            subtitle={`Todas as estratégias catalogadas pelo banco próprio. Mostrando ${Math.min(snapshot.ranking.length, 120)} de ${snapshot.ranking.length}.`}
+            subtitle={`Estratégias catalogadas pelo banco próprio, com prioridade para padrões numerados. Mostrando ${Math.min(snapshot.ranking.length, 120)} de ${snapshot.ranking.length}.`}
           />
           {snapshot.ranking.length ? (
             <div className="space-y-3">

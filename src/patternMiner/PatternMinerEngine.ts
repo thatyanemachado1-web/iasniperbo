@@ -12,12 +12,13 @@ import type {
 export const PATTERN_MINER_HISTORY_OPTIONS: PatternMinerHistoryLimit[] = [
   1000, 5000, 10000, 15000, 50000,
 ];
+export const PATTERN_MINER_TOP_STRATEGIES_LIMIT = 30;
 
 export const DEFAULT_PATTERN_MINER_CONFIG: PatternMinerConfig = {
   historyLimit: 15000,
   minOccurrences: 3,
-  minValidated: 3,
-  patternLengths: [2, 3, 4],
+  minValidated: 2,
+  patternLengths: [3, 4, 5],
 };
 
 type ValidationKind = "sg" | "g1" | "red" | "tie" | "pending";
@@ -61,9 +62,15 @@ export class PatternMinerEngine {
     const catalog = this.catalogStrategies(analyzedRounds, updatedAt);
     const ranked = this.rankStrategies(catalog);
     const ranking = ranked.map((strategy, index) => ({ ...strategy, rank: index + 1 }));
-    const hotStrategies = ranking.filter(
+    const strictHotStrategies = ranking.filter(
       (strategy) => strategy.status === "VERY_HOT" || strategy.status === "HOT",
     );
+    const hotStrategies =
+      strictHotStrategies.length >= 20
+        ? strictHotStrategies.slice(0, PATTERN_MINER_TOP_STRATEGIES_LIMIT)
+        : ranking
+            .filter((strategy) => !strategy.insufficientSample)
+            .slice(0, PATTERN_MINER_TOP_STRATEGIES_LIMIT);
     const alerts = this.detectRealtimeAlerts(analyzedRounds, ranking);
     const scoreboard = this.buildScoreboard(ranking);
 
@@ -177,7 +184,12 @@ export class PatternMinerEngine {
       if (a.insufficientSample !== b.insufficientSample) return a.insufficientSample ? 1 : -1;
       const aRate = a.assertiveness ?? -1;
       const bRate = b.assertiveness ?? -1;
-      if (aRate !== bRate) return bRate - aRate;
+      const rateDiff = bRate - aRate;
+      if (Math.abs(rateDiff) > 3) return rateDiff;
+      const aSpecificity = numericSpecificityScore(a.sequence);
+      const bSpecificity = numericSpecificityScore(b.sequence);
+      if (aSpecificity !== bSpecificity) return bSpecificity - aSpecificity;
+      if (aRate !== bRate) return rateDiff;
       if (a.totalValidated !== b.totalValidated) return b.totalValidated - a.totalValidated;
       if (a.occurrences !== b.occurrences) return b.occurrences - a.occurrences;
       return b.id.localeCompare(a.id);
@@ -332,8 +344,8 @@ function buildSequenceVariants(rounds: Round[], start: number, length: number) {
 }
 
 function tokenOptionsForRound(round: Round) {
-  if (round.result === "T") return ["T"];
-  const score = round.result === "B" ? round.bankerScore : round.playerScore;
+  const score = scoreForResult(round, round.result);
+  if (round.result === "T") return [`T${score}`, "T"];
   return [`${round.result}${score}`, round.result];
 }
 
@@ -345,12 +357,24 @@ function matchesSequence(rounds: Round[], sequence: string[]) {
 function matchesToken(round: Round, token: string) {
   const side = token[0] as RoundResult;
   if (round.result !== side) return false;
-  if (side === "T") return token === "T";
   if (token.length === 1) return true;
 
   const score = Number(token.slice(1));
   if (!Number.isFinite(score)) return true;
-  return side === "B" ? round.bankerScore === score : round.playerScore === score;
+  return scoreForResult(round, side) === score;
+}
+
+function scoreForResult(round: Round, side: RoundResult) {
+  if (side === "B") return round.bankerScore;
+  if (side === "P") return round.playerScore;
+  return round.bankerScore === round.playerScore
+    ? round.bankerScore
+    : Math.max(round.bankerScore, round.playerScore);
+}
+
+function numericSpecificityScore(sequence: string[]) {
+  const numericTokens = sequence.filter((token) => /^[BPT]\d+$/.test(token)).length;
+  return numericTokens * 4 + sequence.length;
 }
 
 function calculateAssertiveness(stats: ExpectedStats) {

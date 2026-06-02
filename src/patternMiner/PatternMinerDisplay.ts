@@ -43,7 +43,7 @@ export function formatStrategyConclusion(strategy: PatternMinerStrategy) {
   if (strategy.insufficientSample || !strategy.expectedResult) {
     return `${sequence} = Padrão detectado, mas ainda sem amostra suficiente para dizer o que puxou.`;
   }
-  return `${sequence} = puxou ${formatPulledSide(strategy.expectedResult)}`;
+  return `${sequence} = PAGANDO ${formatPulledSide(strategy.expectedResult)}`;
 }
 
 export function formatPercent(value: number | undefined) {
