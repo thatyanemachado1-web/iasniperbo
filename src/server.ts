@@ -4554,12 +4554,12 @@ function mergeLiveStates(
     ...cache,
     ...durable,
     dashboard: pickDashboardState(durable.dashboard, cache.dashboard),
-    recipients: pickStateArrayByFreshness(durable.recipients, cache.recipients, durableSavedAt, cacheSavedAt),
-    clients: pickStateArrayByFreshness(durable.clients, cache.clients, durableSavedAt, cacheSavedAt),
+    recipients: mergeEntityStateArrays(durable.recipients, cache.recipients, durableSavedAt, cacheSavedAt, true),
+    clients: mergeEntityStateArrays(durable.clients, cache.clients, durableSavedAt, cacheSavedAt, true),
     accessEvents: mergeStateArrays(durable.accessEvents, cache.accessEvents).slice(0, 200),
-    subscriptions: pickStateArrayByFreshness(durable.subscriptions, cache.subscriptions, durableSavedAt, cacheSavedAt).slice(0, 500),
-    payments: pickStateArrayByFreshness(durable.payments, cache.payments, durableSavedAt, cacheSavedAt).slice(0, 1000),
-    adminUsers: pickStateArrayByFreshness(durable.adminUsers, cache.adminUsers, durableSavedAt, cacheSavedAt).slice(0, 1000),
+    subscriptions: mergeEntityStateArrays(durable.subscriptions, cache.subscriptions, durableSavedAt, cacheSavedAt).slice(0, 500),
+    payments: mergeEntityStateArrays(durable.payments, cache.payments, durableSavedAt, cacheSavedAt).slice(0, 1000),
+    adminUsers: mergeEntityStateArrays(durable.adminUsers, cache.adminUsers, durableSavedAt, cacheSavedAt).slice(0, 1000),
     adminActionLogs: mergeStateArrays(durable.adminActionLogs, cache.adminActionLogs).slice(0, 500),
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
     savedAt: readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
@@ -4640,6 +4640,94 @@ function mergeStateArrays(primary: unknown, secondary: unknown) {
     byKey.set(key, { ...(byKey.get(key) || {}), ...row });
   }
   return [...byKey.values()];
+}
+
+function mergeEntityStateArrays(
+  primary: unknown,
+  secondary: unknown,
+  primarySavedAt: number,
+  secondarySavedAt: number,
+  preferEmailKey = false,
+) {
+  const rows = [
+    ...pickStateArray(primary, []).map((row) => ({ row, sourceSavedAt: primarySavedAt })),
+    ...pickStateArray(secondary, []).map((row) => ({ row, sourceSavedAt: secondarySavedAt })),
+  ];
+  const byKey = new Map<string, { row: Record<string, unknown>; sourceSavedAt: number }>();
+
+  for (const item of rows) {
+    const key = stateEntityKey(item.row, preferEmailKey);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, item);
+      continue;
+    }
+
+    const incomingIsNewer =
+      compareStateEntityFreshness(item.row, item.sourceSavedAt, existing.row, existing.sourceSavedAt) >= 0;
+    byKey.set(
+      key,
+      incomingIsNewer
+        ? { row: mergeStateEntityRecord(existing.row, item.row), sourceSavedAt: item.sourceSavedAt }
+        : { row: mergeStateEntityRecord(item.row, existing.row), sourceSavedAt: existing.sourceSavedAt },
+    );
+  }
+
+  return [...byKey.values()].map((item) => item.row);
+}
+
+function stateEntityKey(row: Record<string, unknown>, preferEmailKey = false) {
+  if (preferEmailKey) {
+    return readString(row, "email").toLowerCase() || readString(row, "id") || JSON.stringify(row);
+  }
+
+  return (
+    readString(row, "id") ||
+    readString(row, "provider_payment_id") ||
+    readString(row, "external_reference") ||
+    readString(row, "email").toLowerCase() ||
+    JSON.stringify(row)
+  );
+}
+
+function compareStateEntityFreshness(
+  left: Record<string, unknown>,
+  leftSourceSavedAt: number,
+  right: Record<string, unknown>,
+  rightSourceSavedAt: number,
+) {
+  const leftScore = [stateEntityUpdatedAtMs(left), leftSourceSavedAt];
+  const rightScore = [stateEntityUpdatedAtMs(right), rightSourceSavedAt];
+  for (let index = 0; index < leftScore.length; index += 1) {
+    const diff = leftScore[index] - rightScore[index];
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function stateEntityUpdatedAtMs(row: Record<string, unknown>) {
+  const time = Date.parse(
+    readString(row, "updated_at") ||
+      readString(row, "updatedAt") ||
+      readString(row, "created_at") ||
+      readString(row, "createdAt") ||
+      "",
+  );
+  return Number.isFinite(time) ? time : 0;
+}
+
+function mergeStateEntityRecord(base: Record<string, unknown>, preferred: Record<string, unknown>) {
+  const merged = { ...base, ...preferred };
+  for (const [key, value] of Object.entries(base)) {
+    if (isBlankStateValue(merged[key]) && !isBlankStateValue(value)) {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+function isBlankStateValue(value: unknown) {
+  return value === undefined || value === null || value === "";
 }
 
 function hasRecordFields(record: Record<string, unknown>) {
