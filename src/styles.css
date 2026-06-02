@@ -172,6 +172,24 @@
     background: linear-gradient(135deg, oklch(0.82 0.15 85), oklch(0.7 0.18 50));
     color: #1a1006;
   }
+  .admin-input {
+    width: 100%;
+    border-radius: 0.75rem;
+    border: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+    background: color-mix(in oklab, var(--secondary) 38%, transparent);
+    padding: 0.65rem 0.8rem;
+    font-size: 0.875rem;
+    color: var(--foreground);
+    outline: none;
+  }
+  .admin-input:focus {
+    border-color: color-mix(in oklab, var(--neon-cyan) 68%, transparent);
+    box-shadow: 0 0 22px -14px color-mix(in oklab, var(--neon-cyan) 80%, transparent);
+  }
+  .admin-input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
   .scan-grid {
     background-image:
       linear-gradient(color-mix(in oklab, var(--neon-blue) 12%, transparent) 1px, transparent 1px),

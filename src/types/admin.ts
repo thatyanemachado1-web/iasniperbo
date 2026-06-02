@@ -27,7 +27,7 @@ export interface AdminSession {
   apiUrl: string;
   email: string;
   token: string;
-  role?: "owner" | "approver";
+  role?: "owner" | "admin" | "approver";
 }
 
 export interface SecurityEvent {

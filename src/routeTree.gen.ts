@@ -19,6 +19,10 @@ import { Route as AppIaRouteImport } from './routes/app.ia'
 import { Route as AppContaRouteImport } from './routes/app.conta'
 import { Route as AppAssinaturaRouteImport } from './routes/app.assinatura'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
+import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
+import { Route as AppAdminModulesRouteImport } from './routes/app.admin.modules'
+import { Route as AppAdminLogsRouteImport } from './routes/app.admin.logs'
+import { Route as AppAdminBroadcastRouteImport } from './routes/app.admin.broadcast'
 
 const AppRoute = AppRouteImport.update({
   id: '/app',
@@ -70,11 +74,31 @@ const AppAdminRoute = AppAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminModulesRoute = AppAdminModulesRouteImport.update({
+  id: '/modules',
+  path: '/modules',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminLogsRoute = AppAdminLogsRouteImport.update({
+  id: '/logs',
+  path: '/logs',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminBroadcastRoute = AppAdminBroadcastRouteImport.update({
+  id: '/broadcast',
+  path: '/broadcast',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
-  '/app/admin': typeof AppAdminRoute
+  '/app/admin': typeof AppAdminRouteWithChildren
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
@@ -82,10 +106,14 @@ export interface FileRoutesByFullPath {
   '/app/planos': typeof AppPlanosRoute
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
+  '/app/admin/broadcast': typeof AppAdminBroadcastRoute
+  '/app/admin/logs': typeof AppAdminLogsRoute
+  '/app/admin/modules': typeof AppAdminModulesRoute
+  '/app/admin/users': typeof AppAdminUsersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/app/admin': typeof AppAdminRoute
+  '/app/admin': typeof AppAdminRouteWithChildren
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
@@ -93,12 +121,16 @@ export interface FileRoutesByTo {
   '/app/planos': typeof AppPlanosRoute
   '/app/voz': typeof AppVozRoute
   '/app': typeof AppIndexRoute
+  '/app/admin/broadcast': typeof AppAdminBroadcastRoute
+  '/app/admin/logs': typeof AppAdminLogsRoute
+  '/app/admin/modules': typeof AppAdminModulesRoute
+  '/app/admin/users': typeof AppAdminUsersRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
-  '/app/admin': typeof AppAdminRoute
+  '/app/admin': typeof AppAdminRouteWithChildren
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
@@ -106,6 +138,10 @@ export interface FileRoutesById {
   '/app/planos': typeof AppPlanosRoute
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
+  '/app/admin/broadcast': typeof AppAdminBroadcastRoute
+  '/app/admin/logs': typeof AppAdminLogsRoute
+  '/app/admin/modules': typeof AppAdminModulesRoute
+  '/app/admin/users': typeof AppAdminUsersRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -120,6 +156,10 @@ export interface FileRouteTypes {
     | '/app/planos'
     | '/app/voz'
     | '/app/'
+    | '/app/admin/broadcast'
+    | '/app/admin/logs'
+    | '/app/admin/modules'
+    | '/app/admin/users'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -131,6 +171,10 @@ export interface FileRouteTypes {
     | '/app/planos'
     | '/app/voz'
     | '/app'
+    | '/app/admin/broadcast'
+    | '/app/admin/logs'
+    | '/app/admin/modules'
+    | '/app/admin/users'
   id:
     | '__root__'
     | '/'
@@ -143,6 +187,10 @@ export interface FileRouteTypes {
     | '/app/planos'
     | '/app/voz'
     | '/app/'
+    | '/app/admin/broadcast'
+    | '/app/admin/logs'
+    | '/app/admin/modules'
+    | '/app/admin/users'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -222,11 +270,57 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/admin/users': {
+      id: '/app/admin/users'
+      path: '/users'
+      fullPath: '/app/admin/users'
+      preLoaderRoute: typeof AppAdminUsersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/modules': {
+      id: '/app/admin/modules'
+      path: '/modules'
+      fullPath: '/app/admin/modules'
+      preLoaderRoute: typeof AppAdminModulesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/logs': {
+      id: '/app/admin/logs'
+      path: '/logs'
+      fullPath: '/app/admin/logs'
+      preLoaderRoute: typeof AppAdminLogsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/broadcast': {
+      id: '/app/admin/broadcast'
+      path: '/broadcast'
+      fullPath: '/app/admin/broadcast'
+      preLoaderRoute: typeof AppAdminBroadcastRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
   }
 }
 
+interface AppAdminRouteChildren {
+  AppAdminBroadcastRoute: typeof AppAdminBroadcastRoute
+  AppAdminLogsRoute: typeof AppAdminLogsRoute
+  AppAdminModulesRoute: typeof AppAdminModulesRoute
+  AppAdminUsersRoute: typeof AppAdminUsersRoute
+}
+
+const AppAdminRouteChildren: AppAdminRouteChildren = {
+  AppAdminBroadcastRoute: AppAdminBroadcastRoute,
+  AppAdminLogsRoute: AppAdminLogsRoute,
+  AppAdminModulesRoute: AppAdminModulesRoute,
+  AppAdminUsersRoute: AppAdminUsersRoute,
+}
+
+const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
+  AppAdminRouteChildren,
+)
+
 interface AppRouteChildren {
-  AppAdminRoute: typeof AppAdminRoute
+  AppAdminRoute: typeof AppAdminRouteWithChildren
   AppAssinaturaRoute: typeof AppAssinaturaRoute
   AppContaRoute: typeof AppContaRoute
   AppIaRoute: typeof AppIaRoute
@@ -237,7 +331,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppAdminRoute: AppAdminRoute,
+  AppAdminRoute: AppAdminRouteWithChildren,
   AppAssinaturaRoute: AppAssinaturaRoute,
   AppContaRoute: AppContaRoute,
   AppIaRoute: AppIaRoute,

@@ -2,9 +2,9 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { LayoutDashboard, Brain, Mic, Crown, User, Bell, Settings, ShieldCheck, ReceiptText } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { readAdminSession } from "@/lib/adminApi";
+import { canSeeAdminUi } from "@/lib/adminSession";
 import { accessLabel } from "@/lib/accessApi";
-import { canAccessAdminPanel, hasFullAccess, readUserSession } from "@/lib/userSession";
+import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import type { ReactNode } from "react";
 
 const navItems = [
@@ -16,15 +16,12 @@ const navItems = [
   { to: "/app/conta", label: "Conta", icon: User },
 ] as const;
 
-const adminNavItem = { to: "/app/admin", label: "ADM", icon: ShieldCheck } as const;
+const adminNavItem = { to: "/app/admin/users", label: "ADM", icon: ShieldCheck } as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const userSession = readUserSession();
-  const adminSession = readAdminSession();
-  const canSeeAdmin =
-    canAccessAdminPanel(userSession.email) ||
-    Boolean(adminSession);
+  const canSeeAdmin = canSeeAdminUi();
   const fullAccess = hasFullAccess(userSession);
   const visibleNavItems = fullAccess ? navItems.filter((item) => item.to !== "/app/planos") : navItems;
   const mobileNavItems = canSeeAdmin ? [...visibleNavItems, adminNavItem] : visibleNavItems;
@@ -65,7 +62,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </Link>
                 {canSeeAdmin && (
                   <Link
-                    to="/app/admin"
+                    to="/app/admin/users"
                     className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-neon-cyan hover:bg-neon-cyan/10"
                   >
                     <Settings className="size-4" /> ADM
@@ -107,7 +104,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
           {canSeeAdmin && (
             <Link
-              to="/app/admin"
+              to="/app/admin/users"
               className="mb-2 flex items-center gap-2 rounded-xl border border-neon-cyan/25 bg-neon-cyan/10 px-3 py-2 text-xs font-black text-neon-cyan hover:glow-blue"
             >
               <ShieldCheck className="size-4" /> Cantinho ADM

@@ -1,12 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { AdminPanelCard } from "@/components/admin/AdminPanelCard";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { Cloud, Database, LogOut, ShieldCheck, Users } from "lucide-react";
-import { clearAdminSession, readAdminSession } from "@/lib/adminApi";
+import { LogOut } from "lucide-react";
+import { clearAdminSession } from "@/lib/adminApi";
 import { accessLabel } from "@/lib/accessApi";
-import { canAccessAdminPanel, clearUserSession, readUserSession } from "@/lib/userSession";
+import { canSeeAdminUi } from "@/lib/adminSession";
+import { clearUserSession, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app/conta")({
   component: ContaPage,
@@ -14,68 +16,11 @@ export const Route = createFileRoute("/app/conta")({
 
 function ContaPage() {
   const userSession = readUserSession();
-  const adminSession = readAdminSession();
-  const canSeeAdmin =
-    canAccessAdminPanel(userSession.email) ||
-    Boolean(adminSession);
+  const canSeeAdmin = canSeeAdminUi();
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {canSeeAdmin && (
-        <GlassCard className="md:col-span-2 border-neon-cyan/35">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="size-11 rounded-2xl btn-primary-grad flex items-center justify-center glow-blue">
-                <ShieldCheck className="size-5" />
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.22em] text-neon-cyan/80">
-                  Espaco privado do administrador
-                </div>
-                <h2 className="mt-1 text-xl font-black">Cadastros VIP/Premium</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Gerencie clientes, libere acesso e controle quem recebe os sinais.
-                </p>
-              </div>
-            </div>
-            <Link
-              to="/app/admin"
-              className="btn-primary-grad inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold"
-            >
-              <Users className="size-4" /> Abrir cadastros
-            </Link>
-          </div>
-        </GlassCard>
-      )}
-
-      {canSeeAdmin && (
-        <GlassCard className="md:col-span-2 border-neon-blue/35">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="size-11 rounded-2xl btn-primary-grad flex items-center justify-center glow-blue">
-                <Cloud className="size-5" />
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.22em] text-neon-blue/80">
-                  Infraestrutura
-                </div>
-                <h2 className="mt-1 text-xl font-black">Cloud / Backend</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Acesse banco de dados, secrets, autenticacao e logs do projeto.
-                </p>
-              </div>
-            </div>
-            <a
-              href="https://lovable.dev/projects/9fabd156-55de-4174-b63d-5db254078428/cloud"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-primary-grad inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold"
-            >
-              <Database className="size-4" /> Abrir Cloud
-            </a>
-          </div>
-        </GlassCard>
-      )}
+      {canSeeAdmin && <AdminPanelCard />}
 
       <GlassCard>
         <SectionTitle title="Conta" />

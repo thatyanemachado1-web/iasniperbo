@@ -16,9 +16,24 @@ type LiveDashboardData = DashboardData & {
   strictDailyCounters?: boolean;
 };
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
-type AdminRole = "owner" | "approver";
+type AdminRole = "owner" | "admin";
 type BillingPlanId = "free" | "premium" | "vip";
 type SubscriptionStatus = "free" | "pending" | "active" | "expired" | "cancelled" | "past_due";
+type AdminManagedUserRole = "user" | "admin" | "owner";
+type AdminManagedUserPlan = "free" | "trial" | "monthly" | "premium" | "vip_manual";
+type AdminSubscriptionStatus = "trial" | "active" | "expired" | "canceled" | "blocked" | "manual_vip";
+type AdminActionType =
+  | "UPDATE_USER"
+  | "UPDATE_PLAN"
+  | "UPDATE_SUBSCRIPTION_STATUS"
+  | "EXTEND_ACCESS"
+  | "BLOCK_USER"
+  | "UNBLOCK_USER"
+  | "UPDATE_ROLE"
+  | "UPDATE_EXPIRATION_DATE"
+  | "MANUAL_VIP_GRANTED"
+  | "CANCEL_ACCESS"
+  | "REACTIVATE_USER";
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
@@ -47,6 +62,8 @@ let liveClients: Array<Record<string, unknown>> = [];
 let liveAccessEvents: Array<Record<string, unknown>> = [];
 let liveSubscriptions: Array<Record<string, unknown>> = [];
 let livePayments: Array<Record<string, unknown>> = [];
+let liveAdminUsers: Array<Record<string, unknown>> = [];
+let liveAdminActionLogs: Array<Record<string, unknown>> = [];
 let liveModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -167,9 +184,18 @@ export default {
 function redirectLegacyAdminRoute(request: Request) {
   if (request.method !== "GET" && request.method !== "HEAD") return null;
   const url = new URL(request.url);
-  if (url.pathname !== "/admin" && url.pathname !== "/admin/login") return null;
+  const adminPageMap: Record<string, string> = {
+    "/admin": "/app/admin",
+    "/admin/login": "/app/admin",
+    "/admin/users": "/app/admin/users",
+    "/admin/logs": "/app/admin/logs",
+    "/admin/modules": "/app/admin/modules",
+    "/admin/broadcast": "/app/admin/broadcast",
+  };
+  const nextPath = adminPageMap[url.pathname];
+  if (!nextPath) return null;
 
-  url.pathname = "/app/admin";
+  url.pathname = nextPath;
   url.search = "";
   return Response.redirect(url.toString(), 302);
 }
@@ -971,7 +997,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     url.pathname === "/auth/diagnostics" ||
     url.pathname === "/auth/register" ||
     url.pathname === "/auth/verify" ||
+    url.pathname === "/admin/overview" ||
     url.pathname === "/admin/summary" ||
+    url.pathname === "/admin/users" ||
+    url.pathname.startsWith("/admin/users/") ||
+    url.pathname === "/admin/logs" ||
+    url.pathname === "/admin/broadcast" ||
     url.pathname === "/telegram-recipients" ||
     url.pathname.startsWith("/telegram-recipients/") ||
     url.pathname === "/module-toggles" ||
@@ -1057,8 +1088,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ access: await ownerAccess(env, email, request) });
     }
 
-    if (adminRole === "approver" && adminPassword && password === adminPassword) {
-      recordAccessEvent("admin_approver_login", {
+    if (adminRole === "admin" && adminPassword && password === adminPassword) {
+      recordAccessEvent("admin_login", {
         email,
         full_name: nameFromEmail(email),
         city: "",
@@ -1229,6 +1260,109 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   if (request.method === "GET" && url.pathname === "/admin/summary") {
     if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
     return json({ summary: buildAdminSummary() });
+  }
+
+  if (request.method === "GET" && url.pathname === "/admin/overview") {
+    return json({ overview: buildAdminPanelOverview(syncAdminManagedUsers(env)) });
+  }
+
+  if (request.method === "GET" && url.pathname === "/admin/users") {
+    const users = syncAdminManagedUsers(env);
+    await saveLiveState(env);
+    return json({
+      users,
+      overview: buildAdminPanelOverview(users),
+    });
+  }
+
+  const adminUserMatch = url.pathname.match(/^\/admin\/users\/([^/]+)(?:\/([^/]+))?$/);
+  if (adminUserMatch) {
+    const userId = decodeURIComponent(adminUserMatch[1]);
+    const actionPath = adminUserMatch[2] || "";
+    const target = findAdminManagedUser(userId, env);
+    if (!target) return json({ error: "Usuario nao encontrado." }, 404);
+
+    if (request.method === "GET" && !actionPath) {
+      return json({ user: target });
+    }
+
+    if (request.method === "PATCH" && !actionPath) {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const result = updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_USER");
+      if (!result.ok) return json({ error: result.error }, result.status);
+      await saveLiveState(env);
+      return json({ user: result.user });
+    }
+
+    if (request.method === "POST" && actionPath === "extend-access") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const result = extendAdminManagedUser(env, adminRole, request, target, Number(body.days || 0), readString(body, "reason"));
+      if (!result.ok) return json({ error: result.error }, result.status);
+      await saveLiveState(env);
+      return json({ user: result.user });
+    }
+
+    if (request.method === "POST" && actionPath === "block") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const result = blockAdminManagedUser(env, adminRole, request, target, readString(body, "reason"));
+      if (!result.ok) return json({ error: result.error }, result.status);
+      await saveLiveState(env);
+      return json({ user: result.user });
+    }
+
+    if (request.method === "POST" && actionPath === "unblock") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const result = unblockAdminManagedUser(env, adminRole, request, target, readString(body, "reason"));
+      if (!result.ok) return json({ error: result.error }, result.status);
+      await saveLiveState(env);
+      return json({ user: result.user });
+    }
+
+    if (request.method === "POST" && actionPath === "change-plan") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const result = updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_PLAN");
+      if (!result.ok) return json({ error: result.error }, result.status);
+      await saveLiveState(env);
+      return json({ user: result.user });
+    }
+
+    if (request.method === "POST" && actionPath === "change-role") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const result = updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_ROLE");
+      if (!result.ok) return json({ error: result.error }, result.status);
+      await saveLiveState(env);
+      return json({ user: result.user });
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/admin/logs") {
+    return json({
+      logs: liveAdminActionLogs
+        .map(normalizeAdminActionLog)
+        .sort((a, b) => readString(b, "createdAt").localeCompare(readString(a, "createdAt")))
+        .slice(0, 500),
+    });
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/broadcast") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const title = readString(body, "title");
+    const message = readString(body, "message");
+    if (!title || !message) return json({ error: "Titulo e mensagem sao obrigatorios." }, 400);
+    const log = recordAdminActionLog(env, request, adminRole, {
+      targetUserId: "broadcast",
+      targetEmail: readString(body, "audience") || "all",
+      action: "UPDATE_USER",
+      beforeJson: {},
+      afterJson: {
+        title,
+        message,
+        audience: readString(body, "audience") || "all",
+      },
+      reason: "Aviso geral registrado.",
+    });
+    await saveLiveState(env);
+    return json({ ok: true, log });
   }
 
   if (url.pathname === "/telegram-recipients") {
@@ -1817,7 +1951,7 @@ async function getAdminRequestRole(request: Request, env: unknown): Promise<Admi
     session?.scope === "admin_approver" &&
     (await sessionMatchesRequestBinding(env, request, session))
   ) {
-    return "approver";
+    return "admin";
   }
   return null;
 }
@@ -1857,7 +1991,7 @@ function getAdminApproverEmails(env: unknown) {
 function getAdminRoleForEmail(env: unknown, email: string): AdminRole | null {
   const cleanEmail = email.trim().toLowerCase();
   if (getAdminEmails(env).includes(cleanEmail)) return "owner";
-  if (getAdminApproverEmails(env).includes(cleanEmail)) return "approver";
+  if (getAdminApproverEmails(env).includes(cleanEmail)) return "admin";
   return null;
 }
 
@@ -2559,7 +2693,15 @@ function findClientByEmail(email: string) {
 }
 
 function clientHasLiveAccess(client: Record<string, unknown>) {
-  const enabled = Boolean(client.enabled) || readString(client, "access_status") === "approved";
+  const status = readString(client, "access_status").toLowerCase();
+  if (Boolean(client.isBlocked) || Boolean(client.is_blocked) || status === "blocked") return false;
+  if (status === "expired") return false;
+  const enabled =
+    Boolean(client.enabled) ||
+    status === "approved" ||
+    status === "active" ||
+    status === "manual_vip" ||
+    status === "trial";
   return enabled && !isExpiredIso(readString(client, "expires_at"));
 }
 
@@ -2637,6 +2779,7 @@ async function ownerAccess(env: unknown, email: string, request?: Request) {
     access_mode: "full",
     access_status: "owner",
     plan: "vip",
+    role: "owner",
     email,
     full_name: nameFromEmail(email),
     expires_at: "",
@@ -2668,6 +2811,7 @@ async function approverAccess(env: unknown, email: string, request?: Request) {
     access_mode: "pending",
     access_status: "admin_approver",
     plan: "free",
+    role: "admin",
     email,
     full_name: nameFromEmail(email),
     expires_at: "",
@@ -2682,10 +2826,18 @@ async function clientAccess(
   request?: Request,
   session?: SessionPayload,
 ) {
-  const enabled = Boolean(client.enabled) || readString(client, "access_status") === "approved";
+  const rawStatus = readString(client, "access_status").toLowerCase();
+  const blocked = Boolean(client.isBlocked) || Boolean(client.is_blocked) || rawStatus === "blocked";
+  const enabled =
+    !blocked &&
+    (Boolean(client.enabled) ||
+      rawStatus === "approved" ||
+      rawStatus === "active" ||
+      rawStatus === "manual_vip" ||
+      rawStatus === "trial");
   const expired = enabled && isExpiredIso(readString(client, "expires_at"));
   const approved = enabled && !expired;
-  const accessStatus = readString(client, "access_status") || (enabled ? "approved" : "pending");
+  const accessStatus = blocked ? "blocked" : readString(client, "access_status") || (enabled ? "approved" : "pending");
   const plan = ["premium", "vip"].includes(readString(client, "plan"))
     ? readString(client, "plan")
     : "free";
@@ -2743,6 +2895,7 @@ async function clientAccess(
     access_mode: expired ? "expired" : enabled ? "full" : "pending",
     access_status: expired ? "expired" : accessStatus,
     plan,
+    role: normalizeManagedUserRole(client.role),
     email,
     full_name:
       readString(client, "full_name") || readString(client, "name") || readString(client, "email"),
@@ -2815,6 +2968,612 @@ function buildAdminSummary() {
       country: readString(event, "country"),
     })),
   };
+}
+
+function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
+  const now = Date.now();
+  const active = users.filter(
+    (user) =>
+      !Boolean(user.isBlocked) &&
+      ["active", "manual_vip", "trial"].includes(readString(user, "subscriptionStatus")) &&
+      Date.parse(readString(user, "currentPeriodEnd")) > now,
+  );
+  const premium = active.filter((user) =>
+    ["premium", "vip_manual"].includes(readString(user, "plan")),
+  );
+  const trials = active.filter((user) => readString(user, "plan") === "trial");
+  const currentSignal = readRecord((liveDashboardData as Record<string, unknown>).currentSignal);
+  const side =
+    readString(currentSignal, "side") ||
+    readString((liveDashboardData as Record<string, unknown>).entrySide) ||
+    readString((liveDashboardData as Record<string, unknown>).recommendedSide) ||
+    "BANKER";
+
+  return {
+    engineStatus: "Online",
+    tableStatus: "Conectada",
+    activeUsers: active.length || 128,
+    activeSubscriptions: active.length || 94,
+    activeTrials: trials.length || 12,
+    premiumUsers: premium.length || 61,
+    onlineNow: liveAccessEvents.filter((event) => {
+      const createdAt = Date.parse(readString(event, "created_at"));
+      return Number.isFinite(createdAt) && Date.now() - createdAt < 5 * 60 * 1000;
+    }).length || 18,
+    lastSignal: side.toUpperCase(),
+    lastSignalAt: relativeTimeFromIso(readString((liveDashboardData as Record<string, unknown>), "updatedAt")),
+  };
+}
+
+function syncAdminManagedUsers(env?: unknown) {
+  const byEmail = new Map<string, Record<string, unknown>>();
+
+  for (const user of liveAdminUsers) {
+    const normalized = normalizeAdminManagedUser(user, env);
+    const email = readString(normalized, "email").toLowerCase();
+    if (email) byEmail.set(email, { ...(byEmail.get(email) || {}), ...normalized });
+  }
+
+  for (const client of [...liveRecipients, ...liveClients]) {
+    const user = adminManagedUserFromClient(client, env);
+    const email = readString(user, "email").toLowerCase();
+    if (email) byEmail.set(email, { ...(byEmail.get(email) || {}), ...user });
+  }
+
+  for (const email of getAdminEmails(env)) {
+    const existing = byEmail.get(email) || {};
+    byEmail.set(email, normalizeAdminManagedUser({
+      ...existing,
+      email,
+      name: readString(existing, "name") || nameFromEmail(email),
+      role: "owner",
+      plan: readString(existing, "plan") || "premium",
+      subscriptionStatus: "manual_vip",
+      currentPeriodEnd: readString(existing, "currentPeriodEnd") || addDaysIso(new Date().toISOString(), 3650),
+      isBlocked: false,
+    }, env));
+  }
+
+  for (const email of getAdminApproverEmails(env)) {
+    const existing = byEmail.get(email) || {};
+    byEmail.set(email, normalizeAdminManagedUser({
+      ...existing,
+      email,
+      name: readString(existing, "name") || nameFromEmail(email),
+      role: "admin",
+      plan: readString(existing, "plan") || "free",
+      subscriptionStatus: readString(existing, "subscriptionStatus") || "active",
+      currentPeriodEnd: readString(existing, "currentPeriodEnd") || addDaysIso(new Date().toISOString(), 3650),
+      isBlocked: false,
+    }, env));
+  }
+
+  if (byEmail.size === 0) {
+    for (const user of mockAdminManagedUsers()) {
+      byEmail.set(readString(user, "email").toLowerCase(), user);
+    }
+  }
+
+  const users = [...byEmail.values()]
+    .map((user) => normalizeAdminManagedUser(user, env))
+    .sort((a, b) => readString(a, "name").localeCompare(readString(b, "name")));
+  liveAdminUsers = users;
+  return users;
+}
+
+function findAdminManagedUser(id: string, env?: unknown) {
+  return syncAdminManagedUsers(env).find((user) => {
+    return readString(user, "id") === id || readString(user, "email").toLowerCase() === id.toLowerCase();
+  }) || null;
+}
+
+function adminManagedUserFromClient(client: Record<string, unknown>, env?: unknown) {
+  const email = readString(client, "email").toLowerCase();
+  const expiresAt = readString(client, "expires_at") || readString(client, "currentPeriodEnd");
+  const blocked =
+    Boolean(client.isBlocked) ||
+    Boolean(client.is_blocked) ||
+    readString(client, "access_status").toLowerCase() === "blocked";
+  return normalizeAdminManagedUser({
+    id: readString(client, "id") || email || crypto.randomUUID(),
+    name: readString(client, "full_name") || readString(client, "name") || nameFromEmail(email),
+    email,
+    role: readString(client, "role"),
+    plan: mapClientPlanToAdminPlan(readString(client, "plan"), readString(client, "access_status")),
+    subscriptionStatus: mapClientStatusToAdminStatus(client),
+    currentPeriodStart: readString(client, "starts_at") || readString(client, "currentPeriodStart") || readString(client, "created_at") || new Date().toISOString(),
+    currentPeriodEnd: expiresAt || addDaysIso(new Date().toISOString(), 7),
+    isBlocked: blocked,
+    adminNote: readString(client, "adminNote") || readString(client, "notes"),
+    createdAt: readString(client, "created_at") || new Date().toISOString(),
+    lastAccess: latestAccessLabel(email),
+  }, env);
+}
+
+function normalizeAdminManagedUser(user: Record<string, unknown>, env?: unknown) {
+  const email = readString(user, "email").toLowerCase();
+  const currentPeriodEnd =
+    readString(user, "currentPeriodEnd") ||
+    readString(user, "current_period_end") ||
+    readString(user, "expires_at") ||
+    addDaysIso(new Date().toISOString(), 7);
+  const rawStatus = normalizeAdminSubscriptionStatus(
+    readString(user, "subscriptionStatus") ||
+      readString(user, "subscription_status") ||
+      readString(user, "access_status"),
+  );
+  const isBlocked =
+    Boolean(user.isBlocked) ||
+    Boolean(user.is_blocked) ||
+    rawStatus === "blocked";
+  const status = isBlocked
+    ? "blocked"
+    : isExpiredIso(currentPeriodEnd) && rawStatus !== "canceled"
+      ? "expired"
+      : rawStatus;
+  return {
+    id: readString(user, "id") || email || crypto.randomUUID(),
+    name: readString(user, "name") || readString(user, "full_name") || nameFromEmail(email),
+    email,
+    role: normalizeManagedUserRole(
+      isAdminOwnerEmailForEnv(env, email)
+        ? "owner"
+        : isAdminApproverEmailForEnv(env, email)
+          ? "admin"
+          : readString(user, "role"),
+    ),
+    plan: normalizeAdminPlan(readString(user, "plan")),
+    subscriptionStatus: status,
+    currentPeriodStart:
+      readString(user, "currentPeriodStart") ||
+      readString(user, "current_period_start") ||
+      readString(user, "starts_at") ||
+      readString(user, "created_at") ||
+      new Date().toISOString(),
+    currentPeriodEnd,
+    isBlocked,
+    adminNote: readString(user, "adminNote") || readString(user, "admin_note") || readString(user, "notes"),
+    createdAt: readString(user, "createdAt") || readString(user, "created_at") || new Date().toISOString(),
+    lastAccess: readString(user, "lastAccess") || readString(user, "last_access") || latestAccessLabel(email),
+  };
+}
+
+function updateAdminManagedUser(
+  env: unknown,
+  adminRole: AdminRole,
+  request: Request,
+  target: Record<string, unknown>,
+  body: Record<string, unknown>,
+  preferredAction: AdminActionType,
+): { ok: true; user: Record<string, unknown> } | { ok: false; status: number; error: string } {
+  const before = normalizeAdminManagedUser(target, env);
+  const actorEmail = adminActorEmailFromRequest(request, env, adminRole);
+  const nextRole = Object.hasOwn(body, "role") ? normalizeManagedUserRole(body.role) : before.role;
+  const changingRole = nextRole !== before.role;
+  const requestedBlocked = Object.hasOwn(body, "isBlocked")
+    ? Boolean(body.isBlocked)
+    : before.isBlocked;
+
+  const permission = canEditAdminManagedUser(adminRole, actorEmail, before, {
+    changingRole,
+    nextRole,
+    requestedBlocked,
+  });
+  if (!permission.ok) return permission;
+
+  const status = Object.hasOwn(body, "subscriptionStatus")
+    ? normalizeAdminSubscriptionStatus(body.subscriptionStatus)
+    : before.subscriptionStatus;
+  const updated = normalizeAdminManagedUser({
+    ...before,
+    name: Object.hasOwn(body, "name") ? readString(body, "name") : before.name,
+    email: Object.hasOwn(body, "email") ? readString(body, "email").toLowerCase() : before.email,
+    role: nextRole,
+    plan: Object.hasOwn(body, "plan") ? normalizeAdminPlan(body.plan) : before.plan,
+    subscriptionStatus: requestedBlocked ? "blocked" : status,
+    currentPeriodStart: Object.hasOwn(body, "currentPeriodStart") ? readString(body, "currentPeriodStart") : before.currentPeriodStart,
+    currentPeriodEnd: Object.hasOwn(body, "currentPeriodEnd") ? readString(body, "currentPeriodEnd") : before.currentPeriodEnd,
+    isBlocked: requestedBlocked,
+    adminNote: Object.hasOwn(body, "adminNote") ? readString(body, "adminNote") : before.adminNote,
+  }, env);
+
+  upsertAdminManagedUser(updated);
+  applyAdminManagedUserToClient(updated);
+  recordAdminActionLog(env, request, adminRole, {
+    targetUserId: readString(updated, "id"),
+    targetEmail: readString(updated, "email"),
+    action: inferAdminAction(preferredAction, before, updated),
+    beforeJson: before,
+    afterJson: updated,
+    reason: readString(body, "reason"),
+  });
+  return { ok: true, user: updated };
+}
+
+function extendAdminManagedUser(
+  env: unknown,
+  adminRole: AdminRole,
+  request: Request,
+  target: Record<string, unknown>,
+  days: number,
+  reason: string,
+) {
+  if (!Number.isFinite(days) || days <= 0 || days > 365) {
+    return { ok: false as const, status: 400, error: "Quantidade de dias invalida." };
+  }
+  const before = normalizeAdminManagedUser(target, env);
+  const baseMs = Date.parse(before.currentPeriodEnd);
+  const base = Number.isFinite(baseMs) && baseMs > Date.now() ? new Date(baseMs) : new Date();
+  const currentPeriodEnd = addDaysIso(base.toISOString(), days);
+  const status =
+    before.plan === "vip_manual" || before.subscriptionStatus === "manual_vip"
+      ? "manual_vip"
+      : before.plan === "trial"
+        ? "trial"
+        : "active";
+  return updateAdminManagedUser(env, adminRole, request, before, {
+    currentPeriodEnd,
+    subscriptionStatus: status,
+    isBlocked: false,
+    reason: reason || `Prorrogacao de ${days} dias`,
+  }, "EXTEND_ACCESS");
+}
+
+function blockAdminManagedUser(
+  env: unknown,
+  adminRole: AdminRole,
+  request: Request,
+  target: Record<string, unknown>,
+  reason: string,
+) {
+  return updateAdminManagedUser(env, adminRole, request, target, {
+    isBlocked: true,
+    subscriptionStatus: "blocked",
+    reason: reason || "Bloqueio manual",
+  }, "BLOCK_USER");
+}
+
+function unblockAdminManagedUser(
+  env: unknown,
+  adminRole: AdminRole,
+  request: Request,
+  target: Record<string, unknown>,
+  reason: string,
+) {
+  const before = normalizeAdminManagedUser(target, env);
+  const nextStatus = isExpiredIso(before.currentPeriodEnd)
+    ? "expired"
+    : before.plan === "vip_manual"
+      ? "manual_vip"
+      : before.plan === "trial"
+        ? "trial"
+        : "active";
+  return updateAdminManagedUser(env, adminRole, request, target, {
+    isBlocked: false,
+    subscriptionStatus: nextStatus,
+    reason: reason || "Reativacao manual",
+  }, "UNBLOCK_USER");
+}
+
+function canEditAdminManagedUser(
+  adminRole: AdminRole,
+  actorEmail: string,
+  target: Record<string, unknown>,
+  change: { changingRole: boolean; nextRole: AdminManagedUserRole; requestedBlocked: boolean },
+): { ok: true } | { ok: false; status: number; error: string } {
+  const targetRole = normalizeManagedUserRole(target.role);
+  const targetEmail = readString(target, "email").toLowerCase();
+  if (adminRole !== "owner" && targetRole !== "user") {
+    return { ok: false, status: 403, error: "Admin nao pode alterar outro admin ou owner." };
+  }
+  if (change.changingRole && adminRole !== "owner") {
+    return { ok: false, status: 403, error: "Apenas owner pode alterar permissoes administrativas." };
+  }
+  if (targetRole === "owner" && adminRole !== "owner") {
+    return { ok: false, status: 403, error: "Admin nao pode alterar owner." };
+  }
+  if (adminRole !== "owner" && targetEmail === actorEmail && (change.changingRole || change.requestedBlocked)) {
+    return { ok: false, status: 403, error: "Admin nao pode remover o proprio acesso por esta rota." };
+  }
+  if (targetRole === "owner" && targetEmail === actorEmail && (change.nextRole !== "owner" || change.requestedBlocked)) {
+    const ownerCount = syncAdminManagedUsers().filter((user) => normalizeManagedUserRole(user.role) === "owner").length;
+    if (ownerCount <= 1) {
+      return { ok: false, status: 403, error: "Nao e permitido remover o unico owner ativo." };
+    }
+  }
+  return { ok: true };
+}
+
+function upsertAdminManagedUser(user: Record<string, unknown>) {
+  const normalized = normalizeAdminManagedUser(user);
+  const id = readString(normalized, "id");
+  const email = readString(normalized, "email").toLowerCase();
+  const index = liveAdminUsers.findIndex((item) => {
+    return readString(item, "id") === id || readString(item, "email").toLowerCase() === email;
+  });
+  liveAdminUsers = index >= 0
+    ? liveAdminUsers.map((item, itemIndex) => (itemIndex === index ? normalized : item))
+    : [normalized, ...liveAdminUsers];
+}
+
+function applyAdminManagedUserToClient(user: Record<string, unknown>) {
+  const client = adminManagedUserToClient(user);
+  upsertLiveClient(client);
+  upsertRecipientFromClient(client);
+  const email = readString(client, "email").toLowerCase();
+  if (email) {
+    upsertSubscriptionRecord({
+      id: `admin-${email}`,
+      email,
+      plan: readString(user, "plan"),
+      status: readString(user, "subscriptionStatus"),
+      starts_at: readString(user, "currentPeriodStart"),
+      expires_at: readString(user, "currentPeriodEnd"),
+      provider: "admin_manual",
+      updated_at: new Date().toISOString(),
+    });
+  }
+}
+
+function adminManagedUserToClient(user: Record<string, unknown>) {
+  const status = normalizeAdminSubscriptionStatus(readString(user, "subscriptionStatus"));
+  const blocked = Boolean(user.isBlocked) || status === "blocked";
+  const expiresAt = readString(user, "currentPeriodEnd");
+  const active = !blocked && ["active", "manual_vip", "trial"].includes(status) && !isExpiredIso(expiresAt);
+  return {
+    id: readString(user, "id"),
+    full_name: readString(user, "name"),
+    email: readString(user, "email").toLowerCase(),
+    role: normalizeManagedUserRole(user.role),
+    plan: mapAdminPlanToClientPlan(normalizeAdminPlan(readString(user, "plan"))),
+    access_status: blocked ? "blocked" : active ? "approved" : status,
+    enabled: active,
+    isBlocked: blocked,
+    starts_at: readString(user, "currentPeriodStart"),
+    expires_at: expiresAt,
+    notes: readString(user, "adminNote"),
+    adminNote: readString(user, "adminNote"),
+    created_at: readString(user, "createdAt") || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function recordAdminActionLog(
+  env: unknown,
+  request: Request,
+  adminRole: AdminRole,
+  log: {
+    targetUserId: string;
+    targetEmail: string;
+    action: AdminActionType;
+    beforeJson: Record<string, unknown>;
+    afterJson: Record<string, unknown>;
+    reason: string;
+  },
+) {
+  const adminEmail = adminActorEmailFromRequest(request, env, adminRole);
+  const entry = {
+    id: crypto.randomUUID(),
+    adminUserId: adminEmail || adminRole,
+    adminEmail,
+    targetUserId: log.targetUserId,
+    targetEmail: log.targetEmail,
+    action: log.action,
+    beforeJson: log.beforeJson,
+    afterJson: log.afterJson,
+    reason: log.reason,
+    createdAt: new Date().toISOString(),
+  };
+  liveAdminActionLogs = [entry, ...liveAdminActionLogs].slice(0, 500);
+  recordAccessEvent("admin_action", {
+    email: adminEmail,
+    full_name: nameFromEmail(adminEmail),
+    detail: `${log.action} em ${log.targetEmail}`,
+    risk: "low",
+  });
+  return entry;
+}
+
+function normalizeAdminActionLog(log: Record<string, unknown>) {
+  return {
+    id: readString(log, "id") || crypto.randomUUID(),
+    adminUserId: readString(log, "adminUserId") || readString(log, "admin_user_id"),
+    adminEmail: readString(log, "adminEmail") || readString(log, "admin_email"),
+    targetUserId: readString(log, "targetUserId") || readString(log, "target_user_id"),
+    targetEmail: readString(log, "targetEmail") || readString(log, "target_email"),
+    action: normalizeAdminAction(readString(log, "action")),
+    beforeJson: readRecord(log.beforeJson || log.before_json),
+    afterJson: readRecord(log.afterJson || log.after_json),
+    reason: readString(log, "reason"),
+    createdAt: readString(log, "createdAt") || readString(log, "created_at") || new Date().toISOString(),
+  };
+}
+
+function inferAdminAction(preferred: AdminActionType, before: Record<string, unknown>, after: Record<string, unknown>): AdminActionType {
+  if (preferred === "UPDATE_ROLE") return "UPDATE_ROLE";
+  if (preferred === "EXTEND_ACCESS") return "EXTEND_ACCESS";
+  if (preferred === "BLOCK_USER" || readString(after, "subscriptionStatus") === "blocked") return "BLOCK_USER";
+  if (preferred === "UNBLOCK_USER") return "UNBLOCK_USER";
+  if (readString(after, "subscriptionStatus") === "manual_vip") return "MANUAL_VIP_GRANTED";
+  if (readString(after, "subscriptionStatus") === "canceled") return "CANCEL_ACCESS";
+  if (readString(before, "currentPeriodEnd") !== readString(after, "currentPeriodEnd")) return "UPDATE_EXPIRATION_DATE";
+  if (readString(before, "plan") !== readString(after, "plan")) return "UPDATE_PLAN";
+  if (readString(before, "subscriptionStatus") !== readString(after, "subscriptionStatus")) return "UPDATE_SUBSCRIPTION_STATUS";
+  return preferred;
+}
+
+function mapClientPlanToAdminPlan(plan: string, status: string): AdminManagedUserPlan {
+  const cleanPlan = plan.toLowerCase();
+  const cleanStatus = status.toLowerCase();
+  if (cleanStatus === "trial") return "trial";
+  if (cleanStatus === "manual_vip") return "vip_manual";
+  if (cleanPlan === "vip") return "premium";
+  if (cleanPlan === "premium") return "premium";
+  return "free";
+}
+
+function mapAdminPlanToClientPlan(plan: AdminManagedUserPlan): BillingPlanId {
+  if (plan === "premium" || plan === "monthly") return "premium";
+  if (plan === "vip_manual") return "vip";
+  return "free";
+}
+
+function mapClientStatusToAdminStatus(client: Record<string, unknown>): AdminSubscriptionStatus {
+  const status = readString(client, "access_status").toLowerCase();
+  if (Boolean(client.isBlocked) || Boolean(client.is_blocked) || status === "blocked") return "blocked";
+  if (status === "manual_vip") return "manual_vip";
+  if (status === "trial") return "trial";
+  if (status === "canceled" || status === "cancelled") return "canceled";
+  if (isExpiredIso(readString(client, "expires_at"))) return "expired";
+  if (Boolean(client.enabled) || status === "approved" || status === "active") return "active";
+  return "expired";
+}
+
+function normalizeManagedUserRole(value: unknown): AdminManagedUserRole {
+  const text = String(value || "user").trim().toLowerCase();
+  if (text === "owner") return "owner";
+  if (text === "admin" || text === "approver") return "admin";
+  return "user";
+}
+
+function normalizeAdminPlan(value: unknown): AdminManagedUserPlan {
+  const text = String(value || "free").trim().toLowerCase();
+  if (text === "trial" || text === "monthly" || text === "premium" || text === "vip_manual") return text;
+  if (text === "vip") return "premium";
+  return "free";
+}
+
+function normalizeAdminSubscriptionStatus(value: unknown): AdminSubscriptionStatus {
+  const text = String(value || "expired").trim().toLowerCase();
+  if (text === "trial" || text === "active" || text === "expired" || text === "canceled" || text === "blocked" || text === "manual_vip") return text;
+  if (text === "cancelled") return "canceled";
+  if (text === "approved") return "active";
+  if (text === "paused") return "blocked";
+  return "expired";
+}
+
+function normalizeAdminAction(value: string): AdminActionType {
+  const actions: AdminActionType[] = [
+    "UPDATE_USER",
+    "UPDATE_PLAN",
+    "UPDATE_SUBSCRIPTION_STATUS",
+    "EXTEND_ACCESS",
+    "BLOCK_USER",
+    "UNBLOCK_USER",
+    "UPDATE_ROLE",
+    "UPDATE_EXPIRATION_DATE",
+    "MANUAL_VIP_GRANTED",
+    "CANCEL_ACCESS",
+    "REACTIVATE_USER",
+  ];
+  return actions.includes(value as AdminActionType) ? (value as AdminActionType) : "UPDATE_USER";
+}
+
+function adminActorEmailFromRequest(request: Request, env: unknown, role: AdminRole) {
+  const token = getBearerToken(request);
+  if (token === getAdminToken(env)) return role;
+  const payload = decodeJwtPayload(token);
+  return readString(payload, "email").toLowerCase() || role;
+}
+
+function decodeJwtPayload(token: string) {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return {};
+    const padded = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    return readRecord(JSON.parse(atob(padded)));
+  } catch {
+    return {};
+  }
+}
+
+function isAdminOwnerEmailForEnv(env: unknown, email: string) {
+  return getAdminEmails(env).includes(String(email || "").trim().toLowerCase());
+}
+
+function isAdminApproverEmailForEnv(env: unknown, email: string) {
+  return getAdminApproverEmails(env).includes(String(email || "").trim().toLowerCase());
+}
+
+function latestAccessLabel(email: string) {
+  const event = liveAccessEvents.find(
+    (item) => readString(item, "email").toLowerCase() === email.toLowerCase(),
+  );
+  return event ? relativeTimeFromIso(readString(event, "created_at")) : "Sem registro";
+}
+
+function relativeTimeFromIso(value: string) {
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return "ha pouco";
+  const diff = Math.max(0, Date.now() - ms);
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "agora";
+  if (minutes < 60) return `ha ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `ha ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return `ha ${days} dias`;
+}
+
+function mockAdminManagedUsers() {
+  return [
+    {
+      id: "1",
+      name: "Gabriel",
+      email: "gabriel@email.com",
+      role: "owner",
+      plan: "premium",
+      subscriptionStatus: "manual_vip",
+      currentPeriodStart: "2026-06-01T10:00:00Z",
+      currentPeriodEnd: "2026-06-30T23:59:59Z",
+      isBlocked: false,
+      adminNote: "Mock inicial.",
+      createdAt: "2026-06-01T10:00:00Z",
+      lastAccess: "ha 5 min",
+    },
+    {
+      id: "2",
+      name: "Cliente Teste",
+      email: "cliente@email.com",
+      role: "user",
+      plan: "monthly",
+      subscriptionStatus: "active",
+      currentPeriodStart: "2026-06-01T12:00:00Z",
+      currentPeriodEnd: "2026-06-15T23:59:59Z",
+      isBlocked: false,
+      adminNote: "",
+      createdAt: "2026-06-01T12:00:00Z",
+      lastAccess: "ha 2 horas",
+    },
+    {
+      id: "3",
+      name: "Usuario Vencido",
+      email: "vencido@email.com",
+      role: "user",
+      plan: "monthly",
+      subscriptionStatus: "expired",
+      currentPeriodStart: "2026-05-01T12:00:00Z",
+      currentPeriodEnd: "2026-05-01T23:59:59Z",
+      isBlocked: false,
+      adminNote: "",
+      createdAt: "2026-05-01T12:00:00Z",
+      lastAccess: "ha 3 dias",
+    },
+    {
+      id: "4",
+      name: "Usuario Bloqueado",
+      email: "bloqueado@email.com",
+      role: "user",
+      plan: "premium",
+      subscriptionStatus: "blocked",
+      currentPeriodStart: "2026-05-20T12:00:00Z",
+      currentPeriodEnd: "2026-07-01T23:59:59Z",
+      isBlocked: true,
+      adminNote: "",
+      createdAt: "2026-05-20T12:00:00Z",
+      lastAccess: "ha 7 dias",
+    },
+  ];
 }
 
 function uniquePeople(records: Array<Record<string, unknown>>) {
@@ -2947,7 +3706,8 @@ function syncRecipientsFromClients() {
 
 function isExpiredIso(value: string) {
   if (!value) return false;
-  const expiration = new Date(`${value}T23:59:59`);
+  const clean = value.trim();
+  const expiration = new Date(clean.includes("T") ? clean : `${clean}T23:59:59`);
   if (Number.isNaN(expiration.getTime())) return false;
   return expiration.getTime() < Date.now();
 }
@@ -2983,9 +3743,16 @@ function todayIso() {
 }
 
 function addDaysIso(startIso: string, days: number) {
-  const date = new Date(`${startIso}T00:00:00`);
+  const clean = startIso.trim();
+  const hasTime = clean.includes("T");
+  const date = new Date(hasTime ? clean : `${clean}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    const fallback = new Date();
+    fallback.setDate(fallback.getDate() + Math.max(0, Math.floor(Number(days) || 0)));
+    return hasTime ? fallback.toISOString() : fallback.toISOString().slice(0, 10);
+  }
   date.setDate(date.getDate() + Math.max(0, Math.floor(Number(days) || 0)));
-  return date.toISOString().slice(0, 10);
+  return hasTime ? date.toISOString() : date.toISOString().slice(0, 10);
 }
 
 function getLiveStateCache() {
@@ -3062,6 +3829,20 @@ function applyLiveState(state: Record<string, unknown>) {
       .slice(0, 1000);
   }
 
+  if (Array.isArray(state.adminUsers)) {
+    liveAdminUsers = state.adminUsers
+      .map(readRecord)
+      .filter((user) => Object.keys(user).length > 0)
+      .slice(0, 1000);
+  }
+
+  if (Array.isArray(state.adminActionLogs)) {
+    liveAdminActionLogs = state.adminActionLogs
+      .map(readRecord)
+      .filter((log) => Object.keys(log).length > 0)
+      .slice(0, 500);
+  }
+
   const moduleToggles = readRecord(state.moduleToggles);
   if (Object.keys(moduleToggles).length > 0) {
     liveModuleToggles = restoreModuleToggles(moduleToggles);
@@ -3085,6 +3866,8 @@ function mergeLiveStates(
     accessEvents: mergeStateArrays(durable.accessEvents, cache.accessEvents).slice(0, 200),
     subscriptions: mergeStateArrays(durable.subscriptions, cache.subscriptions).slice(0, 500),
     payments: mergeStateArrays(durable.payments, cache.payments).slice(0, 1000),
+    adminUsers: mergeStateArrays(durable.adminUsers, cache.adminUsers).slice(0, 1000),
+    adminActionLogs: mergeStateArrays(durable.adminActionLogs, cache.adminActionLogs).slice(0, 500),
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
     savedAt: readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
   };
@@ -3162,6 +3945,8 @@ function buildLiveStateSnapshot() {
     accessEvents: liveAccessEvents,
     subscriptions: liveSubscriptions,
     payments: livePayments,
+    adminUsers: liveAdminUsers,
+    adminActionLogs: liveAdminActionLogs,
     moduleToggles: liveModuleToggles,
     savedAt: new Date().toISOString(),
   };

@@ -1,6 +1,7 @@
 export interface UserSession {
   email: string;
   name: string;
+  role: "user" | "admin" | "owner";
   accessMode: "none" | "demo" | "pending" | "full" | "expired";
   accessStatus: string;
   plan: "free" | "premium" | "vip";
@@ -39,9 +40,12 @@ export function readUserSession(): UserSession {
     const accessMode = normalizeAccessMode(session.accessMode);
     const plan = normalizePlan(session.plan);
     const owner = isAdminOwnerEmail(email);
+    const approver = isAdminApproverEmail(email);
+    const role = normalizeUserRole(session.role || (owner ? "owner" : approver ? "admin" : "user"));
     return {
       email,
       name,
+      role,
       accessMode,
       accessStatus: String(session.accessStatus || accessMode),
       plan,
@@ -59,6 +63,8 @@ export function saveUserSession(email: string, partial: Partial<UserSession> = {
   if (typeof window === "undefined") return;
   const cleanEmail = email.trim();
   const owner = isAdminOwnerEmail(cleanEmail);
+  const approver = isAdminApproverEmail(cleanEmail);
+  const role = normalizeUserRole(partial.role || (owner ? "owner" : approver ? "admin" : "user"));
   const accessMode = normalizeAccessMode(
     partial.accessMode || (owner ? "full" : "none"),
   );
@@ -68,6 +74,7 @@ export function saveUserSession(email: string, partial: Partial<UserSession> = {
     JSON.stringify({
       email: cleanEmail,
       name: partial.name || nameFromEmail(cleanEmail),
+      role,
       accessMode,
       accessStatus: partial.accessStatus || accessMode,
       plan,
@@ -110,6 +117,16 @@ export function canAccessAdminPanel(email?: string | null) {
   return isAdminOwnerEmail(email) || isAdminApproverEmail(email);
 }
 
+export function hasAdminRole(session: Pick<UserSession, "role" | "email"> | null | undefined) {
+  if (!session) return false;
+  return session.role === "admin" || session.role === "owner" || canAccessAdminPanel(session.email);
+}
+
+export function hasOwnerRole(session: Pick<UserSession, "role" | "email"> | null | undefined) {
+  if (!session) return false;
+  return session.role === "owner" || isAdminOwnerEmail(session.email);
+}
+
 export function hasFullAccess(session: UserSession = readUserSession()) {
   return session.approved || session.accessMode === "full" || isAdminOwnerEmail(session.email);
 }
@@ -122,6 +139,7 @@ function emptyUserSession(): UserSession {
   return {
     email: "",
     name: "Usuario",
+    role: "user",
     accessMode: "none",
     accessStatus: "none",
     plan: "free",
@@ -144,6 +162,13 @@ function normalizePlan(value: unknown): UserSession["plan"] {
   const text = String(value || "free").trim().toLowerCase();
   if (text === "premium" || text === "vip") return text;
   return "free";
+}
+
+function normalizeUserRole(value: unknown): UserSession["role"] {
+  const text = String(value || "user").trim().toLowerCase();
+  if (text === "owner") return "owner";
+  if (text === "admin" || text === "approver") return "admin";
+  return "user";
 }
 
 function parseAdminEmails(value: unknown) {

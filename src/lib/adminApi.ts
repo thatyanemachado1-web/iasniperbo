@@ -1,4 +1,11 @@
 import type { AdminSession, AdminSummary, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
+import type {
+  AdminActionLog,
+  AdminLogsResponse,
+  AdminManagedUser,
+  AdminPanelOverview,
+  AdminUsersResponse,
+} from "@/types/adminPanel";
 import type { ModuleToggles } from "@/types/dashboard";
 
 const API_URL_KEY = "sniper_admin_api_url";
@@ -74,7 +81,7 @@ export async function adminLogin(apiUrl: string, email: string, password: string
     apiUrl: normalizedApiUrl,
     email: data.email || email,
     token: data.token,
-    role: data.role || "owner",
+    role: normalizeAdminRole(data.role),
   };
 }
 
@@ -130,6 +137,122 @@ export async function getAdminSummary(session: AdminSession) {
   return data.summary;
 }
 
+export async function listAdminUsers(session: AdminSession) {
+  return request<AdminUsersResponse>(session, "/admin/users");
+}
+
+export async function getAdminPanelOverview(session: AdminSession) {
+  const data = await request<{ overview: AdminPanelOverview }>(session, "/admin/overview");
+  return data.overview;
+}
+
+export async function updateAdminUser(
+  session: AdminSession,
+  userId: string,
+  payload: Partial<AdminManagedUser> & { reason?: string },
+) {
+  const data = await request<{ user: AdminManagedUser }>(
+    session,
+    `/admin/users/${encodeURIComponent(userId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+  return data.user;
+}
+
+export async function extendAdminUserAccess(
+  session: AdminSession,
+  userId: string,
+  days: number,
+  reason = "Prorrogacao manual",
+) {
+  const data = await request<{ user: AdminManagedUser }>(
+    session,
+    `/admin/users/${encodeURIComponent(userId)}/extend-access`,
+    {
+      method: "POST",
+      body: JSON.stringify({ days, reason }),
+    },
+  );
+  return data.user;
+}
+
+export async function blockAdminUser(session: AdminSession, userId: string, reason = "Bloqueio manual") {
+  const data = await request<{ user: AdminManagedUser }>(
+    session,
+    `/admin/users/${encodeURIComponent(userId)}/block`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    },
+  );
+  return data.user;
+}
+
+export async function unblockAdminUser(session: AdminSession, userId: string, reason = "Reativacao manual") {
+  const data = await request<{ user: AdminManagedUser }>(
+    session,
+    `/admin/users/${encodeURIComponent(userId)}/unblock`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    },
+  );
+  return data.user;
+}
+
+export async function changeAdminUserPlan(
+  session: AdminSession,
+  userId: string,
+  payload: Pick<AdminManagedUser, "plan" | "subscriptionStatus" | "currentPeriodEnd"> & {
+    reason?: string;
+  },
+) {
+  const data = await request<{ user: AdminManagedUser }>(
+    session,
+    `/admin/users/${encodeURIComponent(userId)}/change-plan`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+  return data.user;
+}
+
+export async function changeAdminUserRole(
+  session: AdminSession,
+  userId: string,
+  role: AdminManagedUser["role"],
+  reason = "Alteracao de permissao",
+) {
+  const data = await request<{ user: AdminManagedUser }>(
+    session,
+    `/admin/users/${encodeURIComponent(userId)}/change-role`,
+    {
+      method: "POST",
+      body: JSON.stringify({ role, reason }),
+    },
+  );
+  return data.user;
+}
+
+export async function listAdminLogs(session: AdminSession) {
+  const data = await request<AdminLogsResponse>(session, "/admin/logs");
+  return data.logs ?? [];
+}
+
+export async function sendAdminBroadcast(
+  session: AdminSession,
+  payload: { title: string; message: string; audience: string },
+) {
+  return request<{ ok: boolean; log?: AdminActionLog }>(session, "/admin/broadcast", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function updateModuleToggles(
   session: AdminSession,
   payload: Partial<ModuleToggles>,
@@ -139,6 +262,11 @@ export async function updateModuleToggles(
     body: JSON.stringify(payload),
   });
   return data.moduleToggles;
+}
+
+function normalizeAdminRole(role: unknown): NonNullable<AdminSession["role"]> {
+  const value = String(role || "owner").trim().toLowerCase();
+  return value === "admin" || value === "approver" ? "admin" : "owner";
 }
 
 async function request<T>(session: AdminSession, path: string, init: RequestInit = {}) {

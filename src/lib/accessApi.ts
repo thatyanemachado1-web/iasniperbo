@@ -12,6 +12,7 @@ export interface ClientAccess {
   expires_at: string;
   reason: string;
   client_token?: string;
+  role?: UserSession["role"];
 }
 
 export interface ClientRegistrationPayload {
@@ -77,6 +78,7 @@ export function saveAccessSession(access: ClientAccess, fallbackEmail = "") {
     registered: access.registered,
     approved: access.approved,
     clientToken: access.client_token || "",
+    role: access.role || undefined,
   });
 }
 

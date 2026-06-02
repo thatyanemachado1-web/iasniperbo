@@ -280,6 +280,7 @@ function AdminPage() {
         accessMode: loggedRole === "owner" ? "full" : "pending",
         accessStatus: loggedRole === "owner" ? "owner" : "admin_approver",
         plan: loggedRole === "owner" ? "vip" : "free",
+        role: loggedRole === "owner" ? "owner" : "admin",
         registered: true,
         approved: loggedRole === "owner",
       });
@@ -1426,7 +1427,7 @@ function compareRecipientsForAdmin(a: SignalRecipient, b: SignalRecipient) {
 }
 
 function resolveAdminRole(session: AdminSession | null): AdminRole {
-  if (session?.role === "approver") return "approver";
+  if (session?.role === "admin" || session?.role === "approver") return "admin";
   return "owner";
 }
 
