@@ -58,7 +58,7 @@ export function AdminUsersPage() {
       setUsers(data.users ?? []);
       setOverview(data.overview);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel carregar usuarios.");
+      setError(err instanceof Error ? err.message : "Não foi possível carregar usuários.");
     } finally {
       setLoading(false);
     }
@@ -70,13 +70,14 @@ export function AdminUsersPage() {
 
   const filteredUsers = useMemo(() => applyFilters(users, filters), [users, filters]);
   const groupedUsers = useMemo(() => splitClientGroups(filteredUsers), [filteredUsers]);
+  const realOverview = useMemo(() => buildOverviewFromUsers(users, overview), [users, overview]);
 
   if (!canOpen) {
     return (
       <GlassCard className="mx-auto max-w-2xl border-destructive/35">
         <SectionTitle title="Acesso administrativo bloqueado" />
         <p className="text-sm text-muted-foreground">
-          Esta area existe somente para usuarios com permissao admin ou owner.
+          Esta área existe somente para usuários com permissão admin ou owner.
         </p>
         <Link to="/app/admin" className="mt-4 inline-flex rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 px-4 py-3 text-sm font-black text-neon-cyan">
           Fazer login administrativo
@@ -96,7 +97,7 @@ export function AdminUsersPage() {
       setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setSelected(updated);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao salvar usuario.");
+      setError(err instanceof Error ? err.message : "Falha ao salvar usuário.");
     } finally {
       setBusy(false);
     }
@@ -111,7 +112,7 @@ export function AdminUsersPage() {
       setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       if (selected?.id === updated.id) setSelected(updated);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao executar acao.");
+      setError(err instanceof Error ? err.message : "Falha ao executar ação.");
     } finally {
       setBusy(false);
     }
@@ -119,12 +120,12 @@ export function AdminUsersPage() {
 
   return (
     <div className="space-y-5">
-      <AdminPanelCard overview={overview} />
+      <AdminPanelCard overview={realOverview} />
 
       <GlassCard className="border-neon-cyan/25">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <SectionTitle
-            title="GERENCIAR USUARIOS"
+            title="GERENCIAR USUÁRIOS"
             subtitle="Busque, filtre, aprove, prorrogue e bloqueie acessos."
             right={<ShieldCheck className="size-5 text-neon-cyan" />}
           />
@@ -150,7 +151,7 @@ export function AdminUsersPage() {
           </label>
           <FilterSelect label="Plano" value={filters.plan} onChange={(plan) => setFilters({ ...filters, plan })} options={["all", "free", "trial", "monthly", "premium", "vip_manual"]} />
           <FilterSelect label="Status" value={filters.status} onChange={(status) => setFilters({ ...filters, status })} options={["all", "trial", "active", "expired", "canceled", "blocked", "manual_vip"]} />
-          <FilterSelect label="Role" value={filters.role} onChange={(roleValue) => setFilters({ ...filters, role: roleValue })} options={["all", "user", "admin", "owner"]} />
+          <FilterSelect label="Perfil" value={filters.role} onChange={(roleValue) => setFilters({ ...filters, role: roleValue })} options={["all", "user", "admin", "owner"]} />
           <FilterSelect label="Filtro" value={filters.quick} onChange={(quick) => setFilters({ ...filters, quick: quick as FilterState["quick"] })} options={["all", "active", "expired", "blocked"]} />
         </div>
 
@@ -168,7 +169,7 @@ export function AdminUsersPage() {
           actionsDisabled={(user) => busy || !canRunUserAction(role, user)}
         />
         <UserGroupSection
-          title="Nao clientes"
+          title="Não clientes"
           subtitle="Free, trial, pendentes ou sem pagamento ativo."
           users={groupedUsers.nonClients}
           emptyMessage="Nenhum cadastro free/pendente encontrado com os filtros atuais."
@@ -180,7 +181,7 @@ export function AdminUsersPage() {
 
       {!loading && filteredUsers.length === 0 && (
         <GlassCard className="text-center text-sm text-muted-foreground">
-          Nenhum usuario encontrado com os filtros atuais.
+          Nenhum usuário encontrado com os filtros atuais.
         </GlassCard>
       )}
 
@@ -195,6 +196,59 @@ export function AdminUsersPage() {
       />
     </div>
   );
+}
+
+function buildOverviewFromUsers(users: AdminManagedUser[], overview?: AdminPanelOverview): AdminPanelOverview {
+  const now = Date.now();
+  const clientUsers = users.filter((user) => user.role === "user");
+  const activeUsers = clientUsers.filter((user) => isActiveUser(user, now));
+  const paidUsers = activeUsers.filter((user) =>
+    user.subscriptionStatus === "active" || user.subscriptionStatus === "manual_vip",
+  );
+  const trialUsers = activeUsers.filter((user) =>
+    user.plan === "trial" || user.subscriptionStatus === "trial",
+  );
+  const premiumUsers = activeUsers.filter((user) =>
+    user.plan === "premium" || user.plan === "vip_manual",
+  );
+
+  return {
+    engineStatus: overview?.engineStatus || "Online",
+    tableStatus: overview?.tableStatus || "Conectada",
+    activeUsers: activeUsers.length,
+    activeSubscriptions: paidUsers.length,
+    activeTrials: trialUsers.length,
+    premiumUsers: premiumUsers.length,
+    onlineNow: countOnlineUsers(clientUsers),
+    lastSignal: overview?.lastSignal || "Aguardando",
+    lastSignalAt: overview?.lastSignalAt || "sem sinal",
+  };
+}
+
+function isActiveUser(user: AdminManagedUser, now = Date.now()) {
+  if (user.isBlocked) return false;
+  if (!["active", "manual_vip", "trial"].includes(user.subscriptionStatus)) return false;
+  return parseAccessDate(user.currentPeriodEnd) > now;
+}
+
+function parseAccessDate(value: string) {
+  if (!value) return 0;
+  const normalized = value.includes("T") ? value : `${value}T23:59:59`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function countOnlineUsers(users: AdminManagedUser[]) {
+  return users.filter((user) => isRecentAccessLabel(user.lastAccess)).length;
+}
+
+function isRecentAccessLabel(value: string) {
+  const label = value.trim().toLowerCase();
+  if (!label) return false;
+  if (label === "agora") return true;
+  const minutes = label.match(/h[aá]\s+(\d+)\s+min/i);
+  if (!minutes) return false;
+  return Number(minutes[1]) < 5;
 }
 
 function UserGroupSection({
@@ -287,8 +341,8 @@ function applyFilters(users: AdminManagedUser[], filters: FilterState) {
     if (filters.plan !== "all" && user.plan !== filters.plan) return false;
     if (filters.status !== "all" && user.subscriptionStatus !== filters.status) return false;
     if (filters.role !== "all" && user.role !== filters.role) return false;
-    if (filters.quick === "active" && (user.isBlocked || Date.parse(user.currentPeriodEnd) <= now)) return false;
-    if (filters.quick === "expired" && Date.parse(user.currentPeriodEnd) > now) return false;
+    if (filters.quick === "active" && (user.isBlocked || parseAccessDate(user.currentPeriodEnd) <= now)) return false;
+    if (filters.quick === "expired" && parseAccessDate(user.currentPeriodEnd) > now) return false;
     if (filters.quick === "blocked" && !user.isBlocked) return false;
     return true;
   });
@@ -310,7 +364,7 @@ function splitClientGroups(users: AdminManagedUser[]) {
 
 function isPayingClient(user: AdminManagedUser) {
   if (user.isBlocked) return false;
-  if (Date.parse(user.currentPeriodEnd) <= Date.now()) return false;
+  if (parseAccessDate(user.currentPeriodEnd) <= Date.now()) return false;
   if (user.subscriptionStatus === "active" || user.subscriptionStatus === "manual_vip") return true;
   return user.plan === "monthly" || user.plan === "premium" || user.plan === "vip_manual";
 }
