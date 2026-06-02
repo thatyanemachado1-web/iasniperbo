@@ -69,18 +69,77 @@ EXEMPLOS de tom (apenas referencia, NAO copiar literal):
 
 Saida: apenas o texto da narracao, sem prefixos, sem aspas.`;
 
+const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+const LOVABLE_MODEL = "google/gemini-3-flash-preview";
+
 export const generateAIReading = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => input as AIReadingSnapshot)
   .handler(async ({ data }) => {
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) {
-      return { text: "Leitura IA indisponivel: LOVABLE_API_KEY ausente.", ok: false as const };
-    }
-
     const userPrompt = `Snapshot atual da mesa (JSON):
 ${JSON.stringify(data, null, 2)}
 
 Gere AGORA a narracao curta, humana e natural seguindo todas as regras do system.`;
+
+    const geminiText = await runGeminiReading(userPrompt);
+    if (geminiText) {
+      return { text: geminiText, ok: true as const };
+    }
+
+    const lovableText = await runLovableReading(userPrompt);
+    if (lovableText) {
+      return { text: lovableText, ok: true as const };
+    }
+
+    return { text: buildLocalReading(data), ok: false as const };
+  });
+
+async function runGeminiReading(userPrompt: string) {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) return "";
+
+  const model = (process.env.GEMINI_MODEL_ID || process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL).trim();
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: SYSTEM_PROMPT }],
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: userPrompt }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.9,
+          maxOutputTokens: 160,
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      console.warn(`Falha no Gemini (${res.status}).`);
+      return "";
+    }
+
+    const json = (await res.json()) as GeminiResponse;
+    return readGeminiText(json);
+  } catch (err) {
+    console.warn(`Erro ao consultar Gemini: ${(err as Error).message}`);
+    return "";
+  }
+}
+
+async function runLovableReading(userPrompt: string) {
+  const apiKey = process.env.LOVABLE_API_KEY?.trim();
+  if (!apiKey) return "";
 
     try {
       const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -90,7 +149,7 @@ Gere AGORA a narracao curta, humana e natural seguindo todas as regras do system
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
+          model: LOVABLE_MODEL,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: userPrompt },
@@ -99,24 +158,94 @@ Gere AGORA a narracao curta, humana e natural seguindo todas as regras do system
       });
 
       if (!res.ok) {
-        const status = res.status;
-        if (status === 429) {
-          return { text: "Limite de requisicoes atingido. Tente novamente em instantes.", ok: false as const };
-        }
-        if (status === 402) {
-          return { text: "Creditos da IA esgotados. Adicione creditos para continuar.", ok: false as const };
-        }
-        const body = await res.text().catch(() => "");
-        return { text: `Falha na leitura IA (${status}). ${body.slice(0, 120)}`, ok: false as const };
+        console.warn(`Falha na leitura IA Lovable (${res.status}).`);
+        return "";
       }
 
       const json = (await res.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
       };
       const text = json.choices?.[0]?.message?.content?.trim() ?? "";
-      if (!text) return { text: "Sem resposta da IA neste ciclo.", ok: false as const };
-      return { text, ok: true as const };
+      return text;
     } catch (err) {
-      return { text: `Erro ao consultar IA: ${(err as Error).message}`, ok: false as const };
+      console.warn(`Erro ao consultar IA Lovable: ${(err as Error).message}`);
+      return "";
     }
-  });
+}
+
+type GeminiResponse = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
+    };
+  }>;
+};
+
+function readGeminiText(json: GeminiResponse) {
+  return (json.candidates?.[0]?.content?.parts ?? [])
+    .map((part) => part.text ?? "")
+    .join("")
+    .trim();
+}
+
+function buildLocalReading(data: AIReadingSnapshot) {
+  const name = data.allowUseName && data.userFirstName ? `${data.userFirstName}, ` : "";
+  const side = normalizeSide(data.signalSide);
+  const status = String(data.signalStatus || "").toLowerCase();
+  const hasEntry = side && side !== "TIE" && ["pending", "g1", "active"].includes(status);
+  const tieActive = String(data.tieStatus || "").toLowerCase().includes("ativo") ||
+    String(data.tieStatus || "").toLowerCase().includes("active");
+  const surfSide = normalizeSide(data.surfSide || "");
+  const surfAgainst = Boolean(hasEntry && surfSide && surfSide !== side);
+  const surfAligned = Boolean(hasEntry && surfSide && surfSide === side);
+  const hasPagante = data.paganteNumero !== null && data.paganteNumero !== undefined;
+  const paganteText = hasPagante
+    ? `numero pagante ${data.paganteNumero}${data.paganteOrigem ? ` em ${normalizeSide(data.paganteOrigem) || data.paganteOrigem}` : ""}`
+    : "";
+
+  if (String(data.engineState || "").toUpperCase().includes("BLOQUE")) {
+    return `${name}essa eu seguraria. A engine bloqueou por risco, entao melhor observar mais uma rodada e manter gestao.`;
+  }
+
+  if (side === "TIE" && ["pending", "g1", "active"].includes(status)) {
+    return `${name}Tie entrou na janela. Ele merece atencao, mas continua sendo leitura de risco e pede mao baixa.`;
+  }
+
+  if (hasEntry) {
+    if (surfAgainst && hasPagante) {
+      return `${name}entrada principal em ${side}, mas tem conflito: surf contra e ${paganteText}. Se for entrar, vai com mao baixa.`;
+    }
+    if (surfAgainst) {
+      return `${name}entrada principal em ${side}, so que o surf esta contra. Eu trataria como mao leve e cuidado na protecao.`;
+    }
+    if (surfAligned && hasPagante) {
+      return `${name}agora ficou mais limpa: entrada em ${side}, surf alinhado e ${paganteText}. Ainda assim, entra com gestao.`;
+    }
+    if (hasPagante) {
+      return `${name}entrada principal em ${side}. Tambem tem ${paganteText} no radar, entao acompanha essa leitura sem forcar a mao.`;
+    }
+    return `${name}entrada principal em ${side}${data.signalProtection ? ` com protecao ${data.signalProtection}` : ""}. Leitura valida, mas sem exagerar na mao.`;
+  }
+
+  if (tieActive) {
+    return `${name}Tie esta pressionando, mas sem entrada principal limpa agora. Melhor observar e esperar alinhamento.`;
+  }
+
+  if (hasPagante) {
+    return `${name}${paganteText} apareceu na leitura. Ainda nao tem entrada principal limpa, entao acompanha sem antecipar.`;
+  }
+
+  if (surfSide) {
+    return `${name}surf esta puxando para ${surfSide}, mas a entrada principal ainda nao confirmou. Melhor aguardar mais uma rodada.`;
+  }
+
+  return `${name}sem entrada boa por enquanto. Mesa em observacao, melhor esperar a proxima confirmacao.`;
+}
+
+function normalizeSide(value: string) {
+  const text = String(value || "").trim().toUpperCase();
+  if (text.includes("BANKER") || text.includes("BANCA")) return "BANKER";
+  if (text.includes("PLAYER")) return "PLAYER";
+  if (text.includes("TIE") || text.includes("EMPATE")) return "TIE";
+  return "";
+}
