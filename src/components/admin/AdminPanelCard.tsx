@@ -8,13 +8,13 @@ import type { AdminPanelOverview } from "@/types/adminPanel";
 const fallbackOverview: AdminPanelOverview = {
   engineStatus: "Online",
   tableStatus: "Conectada",
-  activeUsers: 128,
-  activeSubscriptions: 94,
-  activeTrials: 12,
-  premiumUsers: 61,
-  onlineNow: 18,
-  lastSignal: "BANKER",
-  lastSignalAt: "ha 2 min",
+  activeUsers: 0,
+  activeSubscriptions: 0,
+  activeTrials: 0,
+  premiumUsers: 0,
+  onlineNow: 0,
+  lastSignal: "Aguardando",
+  lastSignalAt: "sem sinal",
 };
 
 export function AdminPanelCard({ overview = fallbackOverview }: { overview?: Partial<AdminPanelOverview> }) {
@@ -34,19 +34,19 @@ export function AdminPanelCard({ overview = fallbackOverview }: { overview?: Par
               </div>
               <h2 className="mt-1 text-2xl font-black tracking-wide">PAINEL ADMINISTRATIVO</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Ferramentas avancadas disponiveis apenas para administradores.
+                Ferramentas avançadas disponíveis apenas para administradores.
               </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <AppBadge tone="green" pulse>Engine: {stats.engineStatus}</AppBadge>
             <AppBadge tone="blue" pulse>Mesa: {stats.tableStatus}</AppBadge>
-            <AppBadge tone="gold">Ultimo sinal: {stats.lastSignal} - {stats.lastSignalAt}</AppBadge>
+            <AppBadge tone="gold">Último sinal: {stats.lastSignal} - {stats.lastSignalAt}</AppBadge>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-          <Metric icon={<Users className="size-4" />} label="Usuarios ativos" value={stats.activeUsers} />
+          <Metric icon={<Users className="size-4" />} label="Usuários ativos" value={stats.activeUsers} />
           <Metric icon={<Cpu className="size-4" />} label="Assinaturas ativas" value={stats.activeSubscriptions} />
           <Metric icon={<Bell className="size-4" />} label="Trials ativos" value={stats.activeTrials} />
           <Metric icon={<ShieldCheck className="size-4" />} label="Premium ativos" value={stats.premiumUsers} />
@@ -54,9 +54,9 @@ export function AdminPanelCard({ overview = fallbackOverview }: { overview?: Par
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <AdminLink to="/app/admin/users" icon={<Users className="size-4" />} label="Gerenciar usuarios" />
+          <AdminLink to="/app/admin/users" icon={<Users className="size-4" />} label="Gerenciar usuários" />
           <AdminLink to="/app/admin/logs" icon={<Logs className="size-4" />} label="Ver logs" />
-          <AdminLink to="/app/admin/modules" icon={<Settings2 className="size-4" />} label="Configurar modulos" />
+          <AdminLink to="/app/admin/modules" icon={<Settings2 className="size-4" />} label="Configurar módulos" />
           <AdminLink to="/app/admin/broadcast" icon={<Megaphone className="size-4" />} label="Enviar aviso geral" />
         </div>
       </div>

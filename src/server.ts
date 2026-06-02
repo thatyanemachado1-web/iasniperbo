@@ -3661,16 +3661,22 @@ function buildAdminSummary() {
 
 function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
   const now = Date.now();
-  const active = users.filter(
+  const clientUsers = users.filter((user) => normalizeManagedUserRole(user.role) === "user");
+  const active = clientUsers.filter(
     (user) =>
       !Boolean(user.isBlocked) &&
       ["active", "manual_vip", "trial"].includes(readString(user, "subscriptionStatus")) &&
       Date.parse(readString(user, "currentPeriodEnd")) > now,
   );
+  const paidActive = active.filter((user) =>
+    ["active", "manual_vip"].includes(readString(user, "subscriptionStatus")),
+  );
   const premium = active.filter((user) =>
     ["premium", "vip_manual"].includes(readString(user, "plan")),
   );
-  const trials = active.filter((user) => readString(user, "plan") === "trial");
+  const trials = active.filter((user) =>
+    readString(user, "plan") === "trial" || readString(user, "subscriptionStatus") === "trial",
+  );
   const currentSignal = readRecord((liveDashboardData as Record<string, unknown>).currentSignal);
   const side =
     readString(currentSignal, "side") ||
@@ -3681,17 +3687,29 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
   return {
     engineStatus: "Online",
     tableStatus: "Conectada",
-    activeUsers: active.length || 128,
-    activeSubscriptions: active.length || 94,
-    activeTrials: trials.length || 12,
-    premiumUsers: premium.length || 61,
-    onlineNow: liveAccessEvents.filter((event) => {
-      const createdAt = Date.parse(readString(event, "created_at"));
-      return Number.isFinite(createdAt) && Date.now() - createdAt < 5 * 60 * 1000;
-    }).length || 18,
+    activeUsers: active.length,
+    activeSubscriptions: paidActive.length,
+    activeTrials: trials.length,
+    premiumUsers: premium.length,
+    onlineNow: countOnlineClientUsers(now),
     lastSignal: side.toUpperCase(),
     lastSignalAt: relativeTimeFromIso(readString((liveDashboardData as Record<string, unknown>), "updatedAt")),
   };
+}
+
+function countOnlineClientUsers(now = Date.now()) {
+  const onlineEmails = new Set<string>();
+  for (const event of liveAccessEvents) {
+    const createdAt = Date.parse(readString(event, "created_at"));
+    if (!Number.isFinite(createdAt) || now - createdAt >= 5 * 60 * 1000) continue;
+
+    const type = readString(event, "type");
+    if (!type.startsWith("client_")) continue;
+
+    const email = readString(event, "email").toLowerCase();
+    if (email) onlineEmails.add(email);
+  }
+  return onlineEmails.size;
 }
 
 function syncAdminManagedUsers(env?: unknown) {
