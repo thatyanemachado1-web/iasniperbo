@@ -163,6 +163,14 @@ function AdminPage() {
     () => [...recipients].sort(compareRecipientsForAdmin),
     [recipients],
   );
+  const clientRecipients = useMemo(
+    () => sortedRecipients.filter(isClientRecipient),
+    [sortedRecipients],
+  );
+  const nonClientRecipients = useMemo(
+    () => sortedRecipients.filter((recipient) => !isClientRecipient(recipient)),
+    [sortedRecipients],
+  );
   const formDates = useMemo(
     () => datesFromNewClientForm(form.starts_at, form.validity_months, form.validity_days),
     [form.starts_at, form.validity_months, form.validity_days],
@@ -911,29 +919,41 @@ function AdminPage() {
             }
           />
 
-          <div className="space-y-2">
-            {recipients.length === 0 && (
-              <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
-                Nenhum cliente cadastrado ainda.
-              </div>
-            )}
-            {sortedRecipients.map((recipient) => (
-              <RecipientRowV2
-                key={recipient.id}
-                recipient={recipient}
-                onToggle={() => toggleRecipient(recipient)}
-                onDelete={() => removeRecipient(recipient)}
-                onEdit={() => startEdit(recipient)}
-                onQuickApprove={(months) => quickApprove(recipient, months)}
-                isEditing={editingId === recipient.id}
-                editForm={editingId === recipient.id ? editForm : null}
-                onEditFormChange={setEditForm}
-                onSave={() => saveEdit(recipient)}
-                onCancel={cancelEdit}
-                saving={saving}
-                canManageFull
-              />
-            ))}
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <RecipientListSection
+              title="Clientes"
+              subtitle="Premium, VIP ou aprovados."
+              count={clientRecipients.length}
+              recipients={clientRecipients}
+              emptyText="Nenhum cliente aprovado, Premium ou VIP ainda."
+              editingId={editingId}
+              editForm={editForm}
+              onEditFormChange={setEditForm}
+              onToggle={toggleRecipient}
+              onDelete={removeRecipient}
+              onEdit={startEdit}
+              onQuickApprove={quickApprove}
+              onSave={saveEdit}
+              onCancel={cancelEdit}
+              saving={saving}
+            />
+            <RecipientListSection
+              title="Clientes sem compra"
+              subtitle="Free, pendentes ou sem pagamento confirmado."
+              count={nonClientRecipients.length}
+              recipients={nonClientRecipients}
+              emptyText="Nenhum cadastro sem compra no momento."
+              editingId={editingId}
+              editForm={editForm}
+              onEditFormChange={setEditForm}
+              onToggle={toggleRecipient}
+              onDelete={removeRecipient}
+              onEdit={startEdit}
+              onQuickApprove={quickApprove}
+              onSave={saveEdit}
+              onCancel={cancelEdit}
+              saving={saving}
+            />
           </div>
         </GlassCard>
       </div>
@@ -962,6 +982,76 @@ function AdminTabButton({
     >
       {children}
     </button>
+  );
+}
+
+function RecipientListSection({
+  title,
+  subtitle,
+  count,
+  recipients,
+  emptyText,
+  editingId,
+  editForm,
+  onEditFormChange,
+  onToggle,
+  onDelete,
+  onEdit,
+  onQuickApprove,
+  onSave,
+  onCancel,
+  saving,
+}: {
+  title: string;
+  subtitle: string;
+  count: number;
+  recipients: SignalRecipient[];
+  emptyText: string;
+  editingId: string;
+  editForm: RecipientEditForm | null;
+  onEditFormChange: (form: RecipientEditForm | null) => void;
+  onToggle: (recipient: SignalRecipient) => void;
+  onDelete: (recipient: SignalRecipient) => void;
+  onEdit: (recipient: SignalRecipient) => void;
+  onQuickApprove: (recipient: SignalRecipient, months: number) => void;
+  onSave: (recipient: SignalRecipient) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-border/60 bg-secondary/15 p-3">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">{title}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
+        </div>
+        <AppBadge tone={count > 0 ? "green" : "muted"}>{count}</AppBadge>
+      </div>
+      <div className="space-y-2">
+        {recipients.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border/70 p-5 text-center text-xs text-muted-foreground">
+            {emptyText}
+          </div>
+        )}
+        {recipients.map((recipient) => (
+          <RecipientRowV2
+            key={recipient.id}
+            recipient={recipient}
+            onToggle={() => onToggle(recipient)}
+            onDelete={() => onDelete(recipient)}
+            onEdit={() => onEdit(recipient)}
+            onQuickApprove={(months) => onQuickApprove(recipient, months)}
+            isEditing={editingId === recipient.id}
+            editForm={editingId === recipient.id ? editForm : null}
+            onEditFormChange={onEditFormChange}
+            onSave={() => onSave(recipient)}
+            onCancel={onCancel}
+            saving={saving}
+            canManageFull
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1447,6 +1537,10 @@ function recipientStatusRank(recipient: SignalRecipient) {
   if (recipient.enabled && !isRecipientExpired(recipient)) return 1;
   if (isRecipientExpired(recipient)) return 2;
   return 3;
+}
+
+function isClientRecipient(recipient: SignalRecipient) {
+  return recipient.access_status === "approved" || recipient.enabled || recipient.plan === "premium" || recipient.plan === "vip";
 }
 
 function locationBreakdown(recipients: SignalRecipient[], field: "city" | "country") {
