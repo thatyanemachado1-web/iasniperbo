@@ -89,6 +89,13 @@ const ELEVENLABS_API_KEY_SECRET_NAMES = [
   "ELEVENLABS_API_KEY_2",
   "ELEVENLABS_API_KEY_3",
 ] as const;
+const ELEVENLABS_VOICE_ID_SECRET_NAMES = [
+  "ELEVENLABS_VOICE_ID",
+  "ELEVENLABS_VOICE_ID_2",
+  "ELEVENLABS_VOICE",
+  "ELEVENLABS_VOICEID",
+  "VOICE_ID",
+] as const;
 const ACTIVE_ENTRY_MODES = [
   "sniper",
   "hunter",
@@ -362,7 +369,7 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
     return json({ error: "ELEVENLABS_API_KEY nao configurada no backend." }, 503);
   }
 
-  const voiceId = readServerEnvString(env, "ELEVENLABS_VOICE_ID", "");
+  const voiceId = getElevenLabsVoiceId(env);
   if (!voiceId) {
     return json({ error: "ELEVENLABS_VOICE_ID nao configurado no backend." }, 503);
   }
@@ -434,7 +441,7 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
 
   const apiKeys = getElevenLabsApiKeys(env);
   const hasElevenLabsKey = apiKeys.length > 0;
-  const hasVoiceId = Boolean(readServerEnvString(env, "ELEVENLABS_VOICE_ID", ""));
+  const hasVoiceId = Boolean(getElevenLabsVoiceId(env));
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
 
   if (url.searchParams.get("check") === "elevenlabs") {
@@ -3505,6 +3512,14 @@ function getElevenLabsApiKeys(env: unknown) {
   return [...new Set(keys)];
 }
 
+function getElevenLabsVoiceId(env: unknown) {
+  for (const name of ELEVENLABS_VOICE_ID_SECRET_NAMES) {
+    const value = normalizeSecretValue(readNamedServerSecret(env, name, ""));
+    if (value) return value;
+  }
+  return "";
+}
+
 let lastElevenLabsStatus: { code: number | "ok" | "network_error"; at: string } | null = null;
 function recordElevenLabsStatus(code: number | "ok" | "network_error") {
   lastElevenLabsStatus = { code, at: new Date().toISOString() };
@@ -3549,6 +3564,10 @@ function normalizeSecretValue(value: unknown) {
     /^ELEVENLABS_TTS_API_KEY\s*[:=]\s*/i,
     /^ELEVENLABS_API_KEY\s*[:=]\s*/i,
     /^ELEVENLABS_SECRET_KEY\s*[:=]\s*/i,
+    /^ELEVENLABS_VOICE_ID\s*[:=]\s*/i,
+    /^ELEVENLABS_VOICEID\s*[:=]\s*/i,
+    /^ELEVENLABS_VOICE\s*[:=]\s*/i,
+    /^VOICE_ID\s*[:=]\s*/i,
     /^Bearer\s+/i,
     /^Token\s+/i,
   ];
