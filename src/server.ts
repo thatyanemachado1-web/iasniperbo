@@ -87,14 +87,7 @@ const ACTIVE_ENTRY_MODES = [
 const SNIPER_NEURAL_ASSERTIVENESS_MIN = 99;
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
-let liveDashboardData: LiveDashboardData = {
-  ...mockDashboardData,
-  mockMode: false,
-  updatedAt: new Date().toISOString(),
-  cycleDate: currentDashboardCycleDate(),
-  dailyCycleDate: currentDashboardCycleDate(),
-  strictDailyCounters: false,
-};
+let liveDashboardData: LiveDashboardData = resetDashboardDailyCycle(mockDashboardData);
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
 let liveAccessEvents: Array<Record<string, unknown>> = [];
