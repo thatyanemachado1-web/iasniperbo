@@ -15,10 +15,23 @@ import {
   saveAdminSession,
   updateAdminSalesSettings,
   updateSignalRecipient,
-  useLocalAdminApiUrl,
+  useLocalAdminApiUrl as activateLocalAdminApiUrl,
 } from "@/lib/adminApi";
-import { canAccessAdminPanel, isAdminOwnerEmail, readUserSession, saveUserSession } from "@/lib/userSession";
-import type { AdminSession, AdminSummary, RecipientKind, RecipientPlan, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
+import {
+  canAccessAdminPanel,
+  isAdminOwnerEmail,
+  readUserSession,
+  saveUserSession,
+} from "@/lib/userSession";
+import type {
+  AdminSession,
+  AdminSummary,
+  RecipientKind,
+  RecipientPlan,
+  SecurityEvent,
+  SecuritySummary,
+  SignalRecipient,
+} from "@/types/admin";
 import type { SalesSettings } from "@/lib/accessApi";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
@@ -154,15 +167,27 @@ function AdminPage() {
     [recipients],
   );
   const activeChatIds = useMemo(
-    () => activeRecipients.map((recipient) => recipient.chat_id).filter(Boolean).join(","),
+    () =>
+      activeRecipients
+        .map((recipient) => recipient.chat_id)
+        .filter(Boolean)
+        .join(","),
     [activeRecipients],
   );
   const vipClients = useMemo(
-    () => recipients.filter((recipient) => recipient.plan === "vip" && recipient.enabled && !isRecipientExpired(recipient)),
+    () =>
+      recipients.filter(
+        (recipient) =>
+          recipient.plan === "vip" && recipient.enabled && !isRecipientExpired(recipient),
+      ),
     [recipients],
   );
   const premiumClients = useMemo(
-    () => recipients.filter((recipient) => recipient.plan === "premium" && recipient.enabled && !isRecipientExpired(recipient)),
+    () =>
+      recipients.filter(
+        (recipient) =>
+          recipient.plan === "premium" && recipient.enabled && !isRecipientExpired(recipient),
+      ),
     [recipients],
   );
   const pendingClients = useMemo(
@@ -202,8 +227,7 @@ function AdminPage() {
     setError("");
     try {
       const fetched = await listSignalRecipients(currentSession);
-      const restored = await restoreRecipientsFromBackupIfNeeded(currentSession, fetched);
-      setRecipientsWithBackup(restored);
+      setRecipientsWithBackup(fetched);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível carregar destinatários.");
       setSession(readAdminSession());
@@ -227,7 +251,9 @@ function AdminPage() {
         },
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível carregar alertas de segurança.");
+      setError(
+        err instanceof Error ? err.message : "Não foi possível carregar alertas de segurança.",
+      );
     }
   }
 
@@ -245,38 +271,12 @@ function AdminPage() {
     try {
       setSalesSettings(await getAdminSalesSettings(currentSession));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível carregar as configurações de vendas.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Não foi possível carregar as configurações de vendas.",
+      );
     }
-  }
-
-  async function restoreRecipientsFromBackupIfNeeded(
-    currentSession: AdminSession,
-    fetched: SignalRecipient[],
-  ) {
-    if (fetched.length > 0) {
-      writeRecipientsBackup(fetched);
-      return fetched;
-    }
-
-    const backup = readRecipientsBackup();
-    if (backup.length === 0) return fetched;
-
-    const restored: SignalRecipient[] = [];
-    for (const recipient of backup) {
-      try {
-        restored.push(await createSignalRecipient(currentSession, recipientPayloadForRestore(recipient)));
-      } catch {
-        // Keep trying the remaining clients so one bad old record does not block the backup.
-      }
-    }
-
-    if (restored.length > 0) {
-      setExported("Backup local de cadastros restaurado no servidor.");
-      writeRecipientsBackup(restored);
-      return restored;
-    }
-
-    return fetched;
   }
 
   useEffect(() => {
@@ -389,7 +389,9 @@ function AdminPage() {
         access_status: nextEnabled ? "approved" : "paused",
         plan: nextEnabled && recipient.plan === "free" ? "premium" : recipient.plan,
         starts_at: startsAt,
-        validity_days: nextEnabled ? daysBetweenIso(startsAt || todayIso(), expiresAt || addMonthsIso(todayIso(), 1)) : recipient.validity_days,
+        validity_days: nextEnabled
+          ? daysBetweenIso(startsAt || todayIso(), expiresAt || addMonthsIso(todayIso(), 1))
+          : recipient.validity_days,
         expires_at: expiresAt,
       });
       setRecipientsWithBackup((current) =>
@@ -411,6 +413,7 @@ function AdminPage() {
     setRecipientsWithBackup((current) => current.filter((item) => item.id !== recipient.id));
     try {
       await deleteSignalRecipient(session, recipient.id);
+      await refreshRecipients(session);
       await refreshAdminSummary(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível remover.");
@@ -427,13 +430,19 @@ function AdminPage() {
 
   function exportClients(kind: "all" | "emails" | "phones") {
     if (kind === "emails") {
-      const content = recipients.map((recipient) => recipient.email).filter(Boolean).join("\n");
+      const content = recipients
+        .map((recipient) => recipient.email)
+        .filter(Boolean)
+        .join("\n");
       downloadText("sniper-clientes-emails.txt", content);
       setExported("Emails exportados");
       return;
     }
     if (kind === "phones") {
-      const content = recipients.map((recipient) => recipient.phone).filter(Boolean).join("\n");
+      const content = recipients
+        .map((recipient) => recipient.phone)
+        .filter(Boolean)
+        .join("\n");
       downloadText("sniper-clientes-telefones.txt", content);
       setExported("Telefones exportados");
       return;
@@ -590,7 +599,7 @@ function AdminPage() {
               onClick={() => {
                 clearAdminSession();
                 setSession(null);
-                setApiUrl(useLocalAdminApiUrl());
+                setApiUrl(activateLocalAdminApiUrl());
                 setError("");
               }}
               className="inline-flex w-full items-center justify-center rounded-xl border border-neon-cyan/30 px-3 py-2 text-xs font-bold text-neon-cyan hover:bg-neon-cyan/10"
@@ -612,13 +621,19 @@ function AdminPage() {
               onChange={setPassword}
               placeholder="Senha cadastrada no bot"
             />
-            {error && <StatusMessage tone="red" icon={<WifiOff className="size-4" />} text={error} />}
+            {error && (
+              <StatusMessage tone="red" icon={<WifiOff className="size-4" />} text={error} />
+            )}
             <button
               type="submit"
               disabled={loading}
               className="btn-primary-grad inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold disabled:opacity-60"
             >
-              {loading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+              {loading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="size-4" />
+              )}
               Entrar no painel
             </button>
           </form>
@@ -635,7 +650,9 @@ function AdminPage() {
           <div className="text-xl font-black">Painel Administrativo</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <AppBadge tone="green" pulse>{activeRecipients.length} liberados</AppBadge>
+          <AppBadge tone="green" pulse>
+            {activeRecipients.length} liberados
+          </AppBadge>
           <AppBadge tone="gold">{vipClients.length} VIP</AppBadge>
           <AppBadge tone="purple">{premiumClients.length} Premium</AppBadge>
           <AppBadge tone="amber">{pendingClients.length} pendentes</AppBadge>
@@ -665,7 +682,9 @@ function AdminPage() {
       </div>
 
       {error && <StatusMessage tone="red" icon={<WifiOff className="size-4" />} text={error} />}
-      {exported && <StatusMessage tone="green" icon={<Check className="size-4" />} text={exported} />}
+      {exported && (
+        <StatusMessage tone="green" icon={<Check className="size-4" />} text={exported} />
+      )}
 
       <SalesSettingsPanel
         settings={salesSettings}
@@ -673,8 +692,13 @@ function AdminPage() {
         onChange={handleSalesSettingsChange}
       />
 
-      <div className={`grid gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 ${isOwnerAdmin ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-1"}`}>
-        <AdminTabButton active={adminView === "aprovacoes"} onClick={() => setAdminView("aprovacoes")}>
+      <div
+        className={`grid gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 ${isOwnerAdmin ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-1"}`}
+      >
+        <AdminTabButton
+          active={adminView === "aprovacoes"}
+          onClick={() => setAdminView("aprovacoes")}
+        >
           Aprovações
         </AdminTabButton>
         {isOwnerAdmin && (
@@ -682,10 +706,16 @@ function AdminPage() {
             <AdminTabButton active={adminView === "resumo"} onClick={() => setAdminView("resumo")}>
               Resumo
             </AdminTabButton>
-            <AdminTabButton active={adminView === "clientes"} onClick={() => setAdminView("clientes")}>
+            <AdminTabButton
+              active={adminView === "clientes"}
+              onClick={() => setAdminView("clientes")}
+            >
               Clientes
             </AdminTabButton>
-            <AdminTabButton active={adminView === "seguranca"} onClick={() => setAdminView("seguranca")}>
+            <AdminTabButton
+              active={adminView === "seguranca"}
+              onClick={() => setAdminView("seguranca")}
+            >
               Segurança
             </AdminTabButton>
           </>
@@ -697,7 +727,11 @@ function AdminPage() {
           <SectionTitle
             title="Aprovações pendentes"
             subtitle="Quem se cadastrou pelo app aparece aqui para você liberar o acesso."
-            right={<AppBadge tone={pendingClients.length > 0 ? "amber" : "green"}>{pendingClients.length} pendentes</AppBadge>}
+            right={
+              <AppBadge tone={pendingClients.length > 0 ? "amber" : "green"}>
+                {pendingClients.length} pendentes
+              </AppBadge>
+            }
           />
 
           <div className="mb-3 rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
@@ -736,283 +770,310 @@ function AdminPage() {
       {isOwnerAdmin && adminView === "resumo" && <AdminSummaryPanel summary={adminSummary} />}
 
       {isOwnerAdmin && adminView === "seguranca" && (
-      <GlassCard className="py-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">
-              Segurança
+        <GlassCard className="py-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">
+                Segurança
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <AppBadge tone="muted">{securitySummary.total} rastros</AppBadge>
+                <AppBadge tone={securitySummary.critical ? "red" : "muted"}>
+                  {securitySummary.critical} críticos
+                </AppBadge>
+                <AppBadge tone={securitySummary.high ? "amber" : "muted"}>
+                  {securitySummary.high} altos
+                </AppBadge>
+              </div>
             </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <AppBadge tone="muted">{securitySummary.total} rastros</AppBadge>
-              <AppBadge tone={securitySummary.critical ? "red" : "muted"}>
-                {securitySummary.critical} críticos
-              </AppBadge>
-              <AppBadge tone={securitySummary.high ? "amber" : "muted"}>
-                {securitySummary.high} altos
-              </AppBadge>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => refreshSecurityEvents()}
-            className="glass inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-neon-cyan hover:glow-blue"
-          >
-            <RefreshCw className="size-3.5" /> Atualizar rastros
-          </button>
-        </div>
-        <div className="mt-3 space-y-2">
-          {securityEvents.length === 0 && (
-            <div className="rounded-xl border border-border/60 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
-              Nenhuma tentativa suspeita registrada nesta execucao da API.
-            </div>
-          )}
-          {securityEvents.slice(0, 5).map((event) => (
-            <div
-              key={event.id}
-              className="rounded-xl border border-border/60 bg-secondary/25 px-3 py-2"
+            <button
+              type="button"
+              onClick={() => refreshSecurityEvents()}
+              className="glass inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-neon-cyan hover:glow-blue"
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <AppBadge tone={securityTone(event.severity)}>{event.severity}</AppBadge>
-                  <span className="truncate text-xs font-bold">{securityTypeLabel(event.type)}</span>
+              <RefreshCw className="size-3.5" /> Atualizar rastros
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {securityEvents.length === 0 && (
+              <div className="rounded-xl border border-border/60 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
+                Nenhuma tentativa suspeita registrada nesta execucao da API.
+              </div>
+            )}
+            {securityEvents.slice(0, 5).map((event) => (
+              <div
+                key={event.id}
+                className="rounded-xl border border-border/60 bg-secondary/25 px-3 py-2"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <AppBadge tone={securityTone(event.severity)}>{event.severity}</AppBadge>
+                    <span className="truncate text-xs font-bold">
+                      {securityTypeLabel(event.type)}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">
+                    {formatDateTimeBR(event.created_at)}
+                  </span>
                 </div>
-                <span className="text-[11px] text-muted-foreground">
-                  {formatDateTimeBR(event.created_at)}
-                </span>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                  <span>IP {event.client_ip || "unknown"}</span>
+                  <span>
+                    {event.method} {event.path}
+                  </span>
+                  {event.email && <span>{event.email}</span>}
+                </div>
+                {event.reason && (
+                  <div className="mt-1 text-[11px] text-muted-foreground">{event.reason}</div>
+                )}
               </div>
-              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                <span>IP {event.client_ip || "unknown"}</span>
-                <span>{event.method} {event.path}</span>
-                {event.email && <span>{event.email}</span>}
-              </div>
-              {event.reason && <div className="mt-1 text-[11px] text-muted-foreground">{event.reason}</div>}
-            </div>
-          ))}
-        </div>
-      </GlassCard>
+            ))}
+          </div>
+        </GlassCard>
       )}
 
       {isOwnerAdmin && adminView === "clientes" && (
         <>
-      <GlassCard className="py-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">
-              Exportacao de clientes
+          <GlassCard className="py-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">
+                  Exportacao de clientes
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Baixe a lista completa em CSV ou gere listas simples de emails e telefones.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => exportClients("all")}
+                  className="glass inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-neon-cyan hover:glow-blue"
+                >
+                  <Download className="size-3.5" /> Todos CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportClients("emails")}
+                  className="glass inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-neon-cyan hover:glow-blue"
+                >
+                  <Mail className="size-3.5" /> Emails
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportClients("phones")}
+                  className="glass inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-neon-cyan hover:glow-blue"
+                >
+                  <Phone className="size-3.5" /> Telefones
+                </button>
+              </div>
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              Baixe a lista completa em CSV ou gere listas simples de emails e telefones.
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => exportClients("all")}
-              className="glass inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-neon-cyan hover:glow-blue"
-            >
-              <Download className="size-3.5" /> Todos CSV
-            </button>
-            <button
-              type="button"
-              onClick={() => exportClients("emails")}
-              className="glass inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-neon-cyan hover:glow-blue"
-            >
-              <Mail className="size-3.5" /> Emails
-            </button>
-            <button
-              type="button"
-              onClick={() => exportClients("phones")}
-              className="glass inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-neon-cyan hover:glow-blue"
-            >
-              <Phone className="size-3.5" /> Telefones
-            </button>
-          </div>
-        </div>
-      </GlassCard>
+          </GlassCard>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[0.78fr_1.22fr] gap-4">
-        <GlassCard>
-          <SectionTitle
-            title="Adicionar cliente"
-            subtitle="Cadastre quem comprou; o painel calcula a validade do plano automaticamente."
-            right={<UserPlus className="size-4 text-neon-cyan" />}
-          />
-          <form className="space-y-3" onSubmit={handleAddRecipient}>
-            <AdminInput
-              icon={<Users className="size-4" />}
-              label="Nome completo"
-              value={form.full_name}
-              onChange={(value) => setForm((current) => ({ ...current, full_name: value }))}
-              placeholder="Nome do cliente"
-            />
-            <AdminInput
-              icon={<Mail className="size-4" />}
-              label="Email"
-              type="email"
-              value={form.email}
-              onChange={(value) => setForm((current) => ({ ...current, email: value }))}
-              placeholder="cliente@email.com"
-            />
-            <AdminInput
-              icon={<KeyRound className="size-4" />}
-              label="Senha opcional"
-              type="password"
-              value={form.password}
-              onChange={(value) => setForm((current) => ({ ...current, password: value }))}
-              placeholder="Defina ou deixe o cliente usar a senha do cadastro"
-            />
-            <AdminInput
-              icon={<Phone className="size-4" />}
-              label="Telefone"
-              value={form.phone}
-              onChange={(value) => setForm((current) => ({ ...current, phone: value }))}
-              placeholder="+55 11 99999-9999"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <AdminInput
-                icon={<MapPin className="size-4" />}
-                label="Cidade"
-                value={form.city}
-                onChange={(value) => setForm((current) => ({ ...current, city: value }))}
-                placeholder="São Paulo"
+          <div className="grid grid-cols-1 xl:grid-cols-[0.78fr_1.22fr] gap-4">
+            <GlassCard>
+              <SectionTitle
+                title="Adicionar cliente"
+                subtitle="Cadastre quem comprou; o painel calcula a validade do plano automaticamente."
+                right={<UserPlus className="size-4 text-neon-cyan" />}
               />
-              <AdminInput
-                icon={<Globe2 className="size-4" />}
-                label="País"
-                value={form.country}
-                onChange={(value) => setForm((current) => ({ ...current, country: value }))}
-                placeholder="Brasil"
-              />
-            </div>
-            <AdminInput
-              icon={<Radio className="size-4" />}
-              label="Chat ID Telegram opcional"
-              value={form.chat_id}
-              onChange={(value) => setForm((current) => ({ ...current, chat_id: value }))}
-              placeholder="-1001234567890 para receber sinais"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <AdminSelect
-                label="Tipo"
-                value={form.kind}
-                onChange={(value) => setForm((current) => ({ ...current, kind: value as RecipientKind }))}
-                options={kindLabels}
-              />
-              <AdminSelect
-                label="Plano"
-                value={form.plan}
-                onChange={(value) => setForm((current) => ({ ...current, plan: value as RecipientPlan }))}
-                options={planLabels}
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <AdminInput
-                icon={<CalendarDays className="size-4" />}
-                label="Data início"
-                type="date"
-                value={form.starts_at}
-                onChange={(value) => setForm((current) => ({ ...current, starts_at: value }))}
-              />
-              <AdminInput
-                icon={<CalendarDays className="size-4" />}
-                label="Meses"
-                type="number"
-                value={form.validity_months}
-                onChange={(value) => setForm((current) => ({ ...current, validity_months: value }))}
-                placeholder="1"
-              />
-              <AdminInput
-                icon={<CalendarDays className="size-4" />}
-                label="Dias"
-                type="number"
-                value={form.validity_days}
-                onChange={(value) => setForm((current) => ({ ...current, validity_days: value }))}
-                placeholder="30"
-              />
-            </div>
-            <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
-              Vencimento calculado:{" "}
-              <span className="font-bold text-neon-cyan">
-                {formDates.expires_at ? formatDateBR(formDates.expires_at) : "informe início e meses"}
-              </span>
-            </div>
-            <label className="block">
-              <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                Observação
-              </span>
-              <textarea
-                value={form.notes}
-                onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-                rows={3}
-                className="w-full resize-none rounded-xl border border-border/60 bg-secondary/35 px-3 py-2 text-sm outline-none focus:border-neon-cyan/70"
-                placeholder="Origem da compra, observações internas, renovação, suporte"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={saving || ![form.full_name, form.email, form.phone, form.chat_id].some((value) => value.trim())}
-              className="btn-primary-grad inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold disabled:opacity-60"
-            >
-              {saving ? <Loader2 className="size-4 animate-spin" /> : <UserCheck className="size-4" />}
-              Adicionar e aprovar plano
-            </button>
-          </form>
-        </GlassCard>
+              <form className="space-y-3" onSubmit={handleAddRecipient}>
+                <AdminInput
+                  icon={<Users className="size-4" />}
+                  label="Nome completo"
+                  value={form.full_name}
+                  onChange={(value) => setForm((current) => ({ ...current, full_name: value }))}
+                  placeholder="Nome do cliente"
+                />
+                <AdminInput
+                  icon={<Mail className="size-4" />}
+                  label="Email"
+                  type="email"
+                  value={form.email}
+                  onChange={(value) => setForm((current) => ({ ...current, email: value }))}
+                  placeholder="cliente@email.com"
+                />
+                <AdminInput
+                  icon={<KeyRound className="size-4" />}
+                  label="Senha opcional"
+                  type="password"
+                  value={form.password}
+                  onChange={(value) => setForm((current) => ({ ...current, password: value }))}
+                  placeholder="Defina ou deixe o cliente usar a senha do cadastro"
+                />
+                <AdminInput
+                  icon={<Phone className="size-4" />}
+                  label="Telefone"
+                  value={form.phone}
+                  onChange={(value) => setForm((current) => ({ ...current, phone: value }))}
+                  placeholder="+55 11 99999-9999"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <AdminInput
+                    icon={<MapPin className="size-4" />}
+                    label="Cidade"
+                    value={form.city}
+                    onChange={(value) => setForm((current) => ({ ...current, city: value }))}
+                    placeholder="São Paulo"
+                  />
+                  <AdminInput
+                    icon={<Globe2 className="size-4" />}
+                    label="País"
+                    value={form.country}
+                    onChange={(value) => setForm((current) => ({ ...current, country: value }))}
+                    placeholder="Brasil"
+                  />
+                </div>
+                <AdminInput
+                  icon={<Radio className="size-4" />}
+                  label="Chat ID Telegram opcional"
+                  value={form.chat_id}
+                  onChange={(value) => setForm((current) => ({ ...current, chat_id: value }))}
+                  placeholder="-1001234567890 para receber sinais"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <AdminSelect
+                    label="Tipo"
+                    value={form.kind}
+                    onChange={(value) =>
+                      setForm((current) => ({ ...current, kind: value as RecipientKind }))
+                    }
+                    options={kindLabels}
+                  />
+                  <AdminSelect
+                    label="Plano"
+                    value={form.plan}
+                    onChange={(value) =>
+                      setForm((current) => ({ ...current, plan: value as RecipientPlan }))
+                    }
+                    options={planLabels}
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <AdminInput
+                    icon={<CalendarDays className="size-4" />}
+                    label="Data início"
+                    type="date"
+                    value={form.starts_at}
+                    onChange={(value) => setForm((current) => ({ ...current, starts_at: value }))}
+                  />
+                  <AdminInput
+                    icon={<CalendarDays className="size-4" />}
+                    label="Meses"
+                    type="number"
+                    value={form.validity_months}
+                    onChange={(value) =>
+                      setForm((current) => ({ ...current, validity_months: value }))
+                    }
+                    placeholder="1"
+                  />
+                  <AdminInput
+                    icon={<CalendarDays className="size-4" />}
+                    label="Dias"
+                    type="number"
+                    value={form.validity_days}
+                    onChange={(value) =>
+                      setForm((current) => ({ ...current, validity_days: value }))
+                    }
+                    placeholder="30"
+                  />
+                </div>
+                <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
+                  Vencimento calculado:{" "}
+                  <span className="font-bold text-neon-cyan">
+                    {formDates.expires_at
+                      ? formatDateBR(formDates.expires_at)
+                      : "informe início e meses"}
+                  </span>
+                </div>
+                <label className="block">
+                  <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                    Observação
+                  </span>
+                  <textarea
+                    value={form.notes}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, notes: event.target.value }))
+                    }
+                    rows={3}
+                    className="w-full resize-none rounded-xl border border-border/60 bg-secondary/35 px-3 py-2 text-sm outline-none focus:border-neon-cyan/70"
+                    placeholder="Origem da compra, observações internas, renovação, suporte"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={
+                    saving ||
+                    ![form.full_name, form.email, form.phone, form.chat_id].some((value) =>
+                      value.trim(),
+                    )
+                  }
+                  className="btn-primary-grad inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold disabled:opacity-60"
+                >
+                  {saving ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <UserCheck className="size-4" />
+                  )}
+                  Adicionar e aprovar plano
+                </button>
+              </form>
+            </GlassCard>
 
-        <GlassCard>
-          <SectionTitle
-            title="Painel de cadastros"
-            subtitle="Aprove, pause, edite validade/data de expiração, exclua e acompanhe todos em um lugar."
-            right={
-              <button
-                type="button"
-                onClick={copyActiveChats}
-                disabled={!activeChatIds}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-neon-cyan/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan disabled:opacity-50"
-              >
-                <Copy className="size-3" /> {copied ? "Copiado" : "Copiar chats"}
-              </button>
-            }
-          />
+            <GlassCard>
+              <SectionTitle
+                title="Painel de cadastros"
+                subtitle="Aprove, pause, edite validade/data de expiração, exclua e acompanhe todos em um lugar."
+                right={
+                  <button
+                    type="button"
+                    onClick={copyActiveChats}
+                    disabled={!activeChatIds}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neon-cyan/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan disabled:opacity-50"
+                  >
+                    <Copy className="size-3" /> {copied ? "Copiado" : "Copiar chats"}
+                  </button>
+                }
+              />
 
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <RecipientListSection
-              title="Clientes"
-              subtitle="Premium, VIP ou aprovados."
-              count={clientRecipients.length}
-              recipients={clientRecipients}
-              emptyText="Nenhum cliente aprovado, Premium ou VIP ainda."
-              editingId={editingId}
-              editForm={editForm}
-              onEditFormChange={setEditForm}
-              onToggle={toggleRecipient}
-              onDelete={removeRecipient}
-              onEdit={startEdit}
-              onQuickApprove={quickApprove}
-              onSave={saveEdit}
-              onCancel={cancelEdit}
-              saving={saving}
-            />
-            <RecipientListSection
-              title="Clientes sem compra"
-              subtitle="Free, pendentes ou sem pagamento confirmado."
-              count={nonClientRecipients.length}
-              recipients={nonClientRecipients}
-              emptyText="Nenhum cadastro sem compra no momento."
-              editingId={editingId}
-              editForm={editForm}
-              onEditFormChange={setEditForm}
-              onToggle={toggleRecipient}
-              onDelete={removeRecipient}
-              onEdit={startEdit}
-              onQuickApprove={quickApprove}
-              onSave={saveEdit}
-              onCancel={cancelEdit}
-              saving={saving}
-            />
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                <RecipientListSection
+                  title="Clientes"
+                  subtitle="Premium, VIP ou aprovados."
+                  count={clientRecipients.length}
+                  recipients={clientRecipients}
+                  emptyText="Nenhum cliente aprovado, Premium ou VIP ainda."
+                  editingId={editingId}
+                  editForm={editForm}
+                  onEditFormChange={setEditForm}
+                  onToggle={toggleRecipient}
+                  onDelete={removeRecipient}
+                  onEdit={startEdit}
+                  onQuickApprove={quickApprove}
+                  onSave={saveEdit}
+                  onCancel={cancelEdit}
+                  saving={saving}
+                />
+                <RecipientListSection
+                  title="Clientes sem compra"
+                  subtitle="Free, pendentes ou sem pagamento confirmado."
+                  count={nonClientRecipients.length}
+                  recipients={nonClientRecipients}
+                  emptyText="Nenhum cadastro sem compra no momento."
+                  editingId={editingId}
+                  editForm={editForm}
+                  onEditFormChange={setEditForm}
+                  onToggle={toggleRecipient}
+                  onDelete={removeRecipient}
+                  onEdit={startEdit}
+                  onQuickApprove={quickApprove}
+                  onSave={saveEdit}
+                  onCancel={cancelEdit}
+                  saving={saving}
+                />
+              </div>
+            </GlassCard>
           </div>
-        </GlassCard>
-      </div>
         </>
       )}
     </div>
@@ -1060,7 +1121,8 @@ function SalesSettingsPanel({
           )}
           {hasPersistenceWarning && (
             <div className="mt-3 rounded-xl border border-warning/35 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
-              {settings.warning || "Atenção: esta chave ainda não foi confirmada em armazenamento fixo."}
+              {settings.warning ||
+                "Atenção: esta chave ainda não foi confirmada em armazenamento fixo."}
             </div>
           )}
         </div>
@@ -1076,7 +1138,11 @@ function SalesSettingsPanel({
                 : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
             }`}
           >
-            {saving && !closed ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            {saving && !closed ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Check className="size-3.5" />
+            )}
             Vendas abertas
           </button>
           <button
@@ -1089,7 +1155,11 @@ function SalesSettingsPanel({
                 : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
             }`}
           >
-            {saving && closed ? <Loader2 className="size-3.5 animate-spin" /> : <Power className="size-3.5" />}
+            {saving && closed ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Power className="size-3.5" />
+            )}
             Vendas encerradas
           </button>
         </div>
@@ -1112,7 +1182,9 @@ function AdminTabButton({
       type="button"
       onClick={onClick}
       className={`rounded-xl px-3 py-2 text-xs font-black transition ${
-        active ? "btn-primary-grad glow-blue" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+        active
+          ? "btn-primary-grad glow-blue"
+          : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
       }`}
     >
       {children}
@@ -1157,7 +1229,9 @@ function RecipientListSection({
     <div className="rounded-2xl border border-border/60 bg-secondary/15 p-3">
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">{title}</div>
+          <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">
+            {title}
+          </div>
           <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
         </div>
         <AppBadge tone={count > 0 ? "green" : "muted"}>{count}</AppBadge>
@@ -1204,15 +1278,27 @@ function AdminSummaryPanel({ summary }: { summary: AdminSummary }) {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <GlassCard>
-          <SectionTitle title="Cidades" subtitle="Onde os cadastros informaram origem." right={<MapPin className="size-4 text-neon-cyan" />} />
+          <SectionTitle
+            title="Cidades"
+            subtitle="Onde os cadastros informaram origem."
+            right={<MapPin className="size-4 text-neon-cyan" />}
+          />
           <LocationList items={summary.cityBreakdown} emptyText="Nenhuma cidade informada ainda." />
         </GlassCard>
         <GlassCard>
-          <SectionTitle title="Países" subtitle="Resumo por país informado." right={<Globe2 className="size-4 text-neon-cyan" />} />
+          <SectionTitle
+            title="Países"
+            subtitle="Resumo por país informado."
+            right={<Globe2 className="size-4 text-neon-cyan" />}
+          />
           <LocationList items={summary.countryBreakdown} emptyText="Nenhum país informado ainda." />
         </GlassCard>
         <GlassCard>
-          <SectionTitle title="Ultimos acessos" subtitle="Log simples desta execucao." right={<Users className="size-4 text-neon-cyan" />} />
+          <SectionTitle
+            title="Ultimos acessos"
+            subtitle="Log simples desta execucao."
+            right={<Users className="size-4 text-neon-cyan" />}
+          />
           <div className="space-y-2">
             {summary.recentAccesses.length === 0 && (
               <div className="rounded-xl border border-dashed border-border/70 p-5 text-center text-xs text-muted-foreground">
@@ -1220,14 +1306,23 @@ function AdminSummaryPanel({ summary }: { summary: AdminSummary }) {
               </div>
             )}
             {summary.recentAccesses.map((event) => (
-              <div key={event.id} className="rounded-xl border border-border/60 bg-secondary/25 px-3 py-2">
+              <div
+                key={event.id}
+                className="rounded-xl border border-border/60 bg-secondary/25 px-3 py-2"
+              >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 truncate text-xs font-bold">{event.full_name || event.email || "Visitante"}</div>
-                  <AppBadge tone={event.type.includes("register") ? "blue" : "green"}>{event.type.includes("register") ? "cadastro" : "acesso"}</AppBadge>
+                  <div className="min-w-0 truncate text-xs font-bold">
+                    {event.full_name || event.email || "Visitante"}
+                  </div>
+                  <AppBadge tone={event.type.includes("register") ? "blue" : "green"}>
+                    {event.type.includes("register") ? "cadastro" : "acesso"}
+                  </AppBadge>
                 </div>
                 <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                   {event.email && <span>{event.email}</span>}
-                  {(event.city || event.country) && <span>{[event.city, event.country].filter(Boolean).join(" / ")}</span>}
+                  {(event.city || event.country) && (
+                    <span>{[event.city, event.country].filter(Boolean).join(" / ")}</span>
+                  )}
                   {event.created_at && <span>{formatDateTimeBR(event.created_at)}</span>}
                 </div>
               </div>
@@ -1270,7 +1365,10 @@ function LocationList({
             <span className="text-neon-cyan font-black">{item.count}</span>
           </div>
           <div className="mt-2 h-1.5 rounded-full bg-secondary/70">
-            <div className="h-full rounded-full bg-neon-cyan" style={{ width: `${Math.max(8, (item.count / max) * 100)}%` }} />
+            <div
+              className="h-full rounded-full bg-neon-cyan"
+              style={{ width: `${Math.max(8, (item.count / max) * 100)}%` }}
+            />
           </div>
         </div>
       ))}
@@ -1290,23 +1388,39 @@ function RecipientRow({
   const isPending = recipient.access_status === "pending";
   const expired = isRecipientExpired(recipient);
   const active = recipient.enabled && !expired;
-  const statusLabel = expired ? "Expirado" : isPending ? "Pendente" : active ? "Liberado" : "Bloqueado";
+  const statusLabel = expired
+    ? "Expirado"
+    : isPending
+      ? "Pendente"
+      : active
+        ? "Liberado"
+        : "Bloqueado";
   const statusTone: "amber" | "green" | "muted" | "red" = expired
     ? "red"
     : isPending
-    ? "amber"
-    : active
-    ? "green"
-    : "muted";
+      ? "amber"
+      : active
+        ? "green"
+        : "muted";
 
   return (
     <div className="rounded-xl border border-border/60 bg-secondary/25 p-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-sm font-bold">{recipient.full_name || recipient.name}</span>
+            <span className="truncate text-sm font-bold">
+              {recipient.full_name || recipient.name}
+            </span>
             <AppBadge tone={statusTone}>{statusLabel}</AppBadge>
-            <AppBadge tone={recipient.plan === "vip" ? "gold" : recipient.plan === "premium" ? "purple" : "muted"}>
+            <AppBadge
+              tone={
+                recipient.plan === "vip"
+                  ? "gold"
+                  : recipient.plan === "premium"
+                    ? "purple"
+                    : "muted"
+              }
+            >
               {planLabels[recipient.plan] ?? recipient.plan}
             </AppBadge>
           </div>
@@ -1321,7 +1435,9 @@ function RecipientRow({
             {recipientValidityLabel(recipient) && <span>{recipientValidityLabel(recipient)}</span>}
             {recipient.expires_at && <span>Expira {formatDateBR(recipient.expires_at)}</span>}
           </div>
-          {recipient.notes && <div className="mt-2 text-xs text-muted-foreground">{recipient.notes}</div>}
+          {recipient.notes && (
+            <div className="mt-2 text-xs text-muted-foreground">{recipient.notes}</div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -1381,14 +1497,20 @@ function RecipientRowV2({
   const isPending = recipient.access_status === "pending";
   const expired = isRecipientExpired(recipient);
   const active = recipient.enabled && !expired;
-  const statusLabel = expired ? "Expirado" : isPending ? "Pendente" : active ? "Liberado" : "Bloqueado";
+  const statusLabel = expired
+    ? "Expirado"
+    : isPending
+      ? "Pendente"
+      : active
+        ? "Liberado"
+        : "Bloqueado";
   const statusTone: "amber" | "green" | "muted" | "red" = expired
     ? "red"
     : isPending
-    ? "amber"
-    : active
-    ? "green"
-    : "muted";
+      ? "amber"
+      : active
+        ? "green"
+        : "muted";
   const updateEdit = (field: keyof RecipientEditForm, value: string) => {
     if (!editForm) return;
     onEditFormChange({ ...editForm, [field]: value });
@@ -1420,37 +1542,120 @@ function RecipientRowV2({
                 disabled={saving}
                 className="btn-primary-grad inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold disabled:opacity-60"
               >
-                {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                {saving ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Save className="size-3.5" />
+                )}
                 Salvar
               </button>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <AdminInput icon={<Users className="size-4" />} label="Nome completo" value={editForm.full_name} onChange={(value) => updateEdit("full_name", value)} />
-            <AdminInput icon={<Mail className="size-4" />} label="Email" type="email" value={editForm.email} onChange={(value) => updateEdit("email", value)} />
-            <AdminInput icon={<KeyRound className="size-4" />} label="Nova senha opcional" type="password" value={editForm.password} onChange={(value) => updateEdit("password", value)} placeholder="Preencha só se quiser trocar" />
-            <AdminInput icon={<Phone className="size-4" />} label="Telefone" value={editForm.phone} onChange={(value) => updateEdit("phone", value)} />
-            <AdminInput icon={<Radio className="size-4" />} label="Chat ID Telegram" value={editForm.chat_id} onChange={(value) => updateEdit("chat_id", value)} />
-            <AdminInput icon={<MapPin className="size-4" />} label="Cidade" value={editForm.city} onChange={(value) => updateEdit("city", value)} />
-            <AdminInput icon={<Globe2 className="size-4" />} label="País" value={editForm.country} onChange={(value) => updateEdit("country", value)} />
+            <AdminInput
+              icon={<Users className="size-4" />}
+              label="Nome completo"
+              value={editForm.full_name}
+              onChange={(value) => updateEdit("full_name", value)}
+            />
+            <AdminInput
+              icon={<Mail className="size-4" />}
+              label="Email"
+              type="email"
+              value={editForm.email}
+              onChange={(value) => updateEdit("email", value)}
+            />
+            <AdminInput
+              icon={<KeyRound className="size-4" />}
+              label="Nova senha opcional"
+              type="password"
+              value={editForm.password}
+              onChange={(value) => updateEdit("password", value)}
+              placeholder="Preencha só se quiser trocar"
+            />
+            <AdminInput
+              icon={<Phone className="size-4" />}
+              label="Telefone"
+              value={editForm.phone}
+              onChange={(value) => updateEdit("phone", value)}
+            />
+            <AdminInput
+              icon={<Radio className="size-4" />}
+              label="Chat ID Telegram"
+              value={editForm.chat_id}
+              onChange={(value) => updateEdit("chat_id", value)}
+            />
+            <AdminInput
+              icon={<MapPin className="size-4" />}
+              label="Cidade"
+              value={editForm.city}
+              onChange={(value) => updateEdit("city", value)}
+            />
+            <AdminInput
+              icon={<Globe2 className="size-4" />}
+              label="País"
+              value={editForm.country}
+              onChange={(value) => updateEdit("country", value)}
+            />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            <AdminSelect label="Tipo" value={editForm.kind} onChange={(value) => updateEdit("kind", value)} options={kindLabels} />
-            <AdminSelect label="Plano" value={editForm.plan} onChange={(value) => updateEdit("plan", value)} options={planLabels} />
-            <AdminSelect label="Status" value={editForm.access_status} onChange={(value) => updateEdit("access_status", value)} options={accessStatusLabels} />
-            <AdminInput icon={<CalendarDays className="size-4" />} label="Meses" type="number" value={editForm.validity_months} onChange={(value) => updateEdit("validity_months", value)} placeholder="1, 3, 6, 12" />
+            <AdminSelect
+              label="Tipo"
+              value={editForm.kind}
+              onChange={(value) => updateEdit("kind", value)}
+              options={kindLabels}
+            />
+            <AdminSelect
+              label="Plano"
+              value={editForm.plan}
+              onChange={(value) => updateEdit("plan", value)}
+              options={planLabels}
+            />
+            <AdminSelect
+              label="Status"
+              value={editForm.access_status}
+              onChange={(value) => updateEdit("access_status", value)}
+              options={accessStatusLabels}
+            />
+            <AdminInput
+              icon={<CalendarDays className="size-4" />}
+              label="Meses"
+              type="number"
+              value={editForm.validity_months}
+              onChange={(value) => updateEdit("validity_months", value)}
+              placeholder="1, 3, 6, 12"
+            />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <AdminInput icon={<CalendarDays className="size-4" />} label="Data início" type="date" value={editForm.starts_at} onChange={(value) => updateEdit("starts_at", value)} />
-            <AdminInput icon={<CalendarDays className="size-4" />} label="Dias" type="number" value={editForm.validity_days} onChange={(value) => updateEdit("validity_days", value)} />
-            <AdminInput icon={<CalendarDays className="size-4" />} label="Expira em" type="date" value={editForm.expires_at} onChange={(value) => updateEdit("expires_at", value)} />
+            <AdminInput
+              icon={<CalendarDays className="size-4" />}
+              label="Data início"
+              type="date"
+              value={editForm.starts_at}
+              onChange={(value) => updateEdit("starts_at", value)}
+            />
+            <AdminInput
+              icon={<CalendarDays className="size-4" />}
+              label="Dias"
+              type="number"
+              value={editForm.validity_days}
+              onChange={(value) => updateEdit("validity_days", value)}
+            />
+            <AdminInput
+              icon={<CalendarDays className="size-4" />}
+              label="Expira em"
+              type="date"
+              value={editForm.expires_at}
+              onChange={(value) => updateEdit("expires_at", value)}
+            />
           </div>
 
           <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs text-muted-foreground">
-            Se preencher meses, o sistema usa a data de início e calcula automaticamente o vencimento.
+            Se preencher meses, o sistema usa a data de início e calcula automaticamente o
+            vencimento.
           </div>
 
           <label className="block">
@@ -1470,9 +1675,19 @@ function RecipientRowV2({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="truncate text-sm font-bold">{recipient.full_name || recipient.name}</span>
+                <span className="truncate text-sm font-bold">
+                  {recipient.full_name || recipient.name}
+                </span>
                 <AppBadge tone={statusTone}>{statusLabel}</AppBadge>
-                <AppBadge tone={recipient.plan === "vip" ? "gold" : recipient.plan === "premium" ? "purple" : "muted"}>
+                <AppBadge
+                  tone={
+                    recipient.plan === "vip"
+                      ? "gold"
+                      : recipient.plan === "premium"
+                        ? "purple"
+                        : "muted"
+                  }
+                >
                   {planLabels[recipient.plan] ?? recipient.plan}
                 </AppBadge>
               </div>
@@ -1484,10 +1699,14 @@ function RecipientRowV2({
                 )}
                 {recipient.chat_id && <span>Telegram {recipient.chat_id}</span>}
                 {recipient.starts_at && <span>Início {formatDateBR(recipient.starts_at)}</span>}
-                {recipientValidityLabel(recipient) && <span>{recipientValidityLabel(recipient)}</span>}
+                {recipientValidityLabel(recipient) && (
+                  <span>{recipientValidityLabel(recipient)}</span>
+                )}
                 {recipient.expires_at && <span>Expira {formatDateBR(recipient.expires_at)}</span>}
               </div>
-              {recipient.notes && <div className="mt-2 text-xs text-muted-foreground">{recipient.notes}</div>}
+              {recipient.notes && (
+                <div className="mt-2 text-xs text-muted-foreground">{recipient.notes}</div>
+              )}
             </div>
             {canManageFull && (
               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1592,7 +1811,9 @@ function AdminInput({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</span>
+      <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </span>
       <span className="flex items-center gap-2 rounded-xl border border-border/60 bg-secondary/35 px-3 py-2 focus-within:border-neon-cyan/70">
         <span className="text-neon-cyan">{icon}</span>
         <input
@@ -1620,7 +1841,9 @@ function AdminSelect({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</span>
+      <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -1650,7 +1873,10 @@ function emptyAdminSummary(): AdminSummary {
   };
 }
 
-function summaryFromRecipients(recipients: SignalRecipient[], securitySummary: SecuritySummary): AdminSummary {
+function summaryFromRecipients(
+  recipients: SignalRecipient[],
+  securitySummary: SecuritySummary,
+): AdminSummary {
   const activeClients = recipients.filter((recipient) => isClientRecipient(recipient));
   return {
     totalRegistrations: recipients.length,
@@ -1672,7 +1898,10 @@ function compareRecipientsForAdmin(a: SignalRecipient, b: SignalRecipient) {
   const dateB = Date.parse(b.created_at || b.updated_at || "");
   const safeDateA = Number.isFinite(dateA) ? dateA : 0;
   const safeDateB = Number.isFinite(dateB) ? dateB : 0;
-  return safeDateB - safeDateA || (a.full_name || a.name || a.email || "").localeCompare(b.full_name || b.name || b.email || "");
+  return (
+    safeDateB - safeDateA ||
+    (a.full_name || a.name || a.email || "").localeCompare(b.full_name || b.name || b.email || "")
+  );
 }
 
 function resolveAdminRole(session: AdminSession | null): AdminRole {
@@ -1701,7 +1930,12 @@ function recipientStatusRank(recipient: SignalRecipient) {
 function isClientRecipient(recipient: SignalRecipient) {
   if (isRecipientExpired(recipient)) return false;
   if (recipient.plan === "free") return false;
-  return recipient.access_status === "approved" || recipient.enabled || recipient.plan === "premium" || recipient.plan === "vip";
+  return (
+    recipient.access_status === "approved" ||
+    recipient.enabled ||
+    recipient.plan === "premium" ||
+    recipient.plan === "vip"
+  );
 }
 
 function locationBreakdown(recipients: SignalRecipient[], field: "city" | "country") {
@@ -1852,18 +2086,6 @@ function recipientsToCsv(recipients: SignalRecipient[]) {
   return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
-function readRecipientsBackup() {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(ADMIN_RECIPIENTS_BACKUP_KEY) || "{}") as {
-      recipients?: SignalRecipient[];
-    };
-    return Array.isArray(parsed.recipients) ? parsed.recipients.filter((recipient) => recipient?.email) : [];
-  } catch {
-    return [];
-  }
-}
-
 function writeRecipientsBackup(recipients: SignalRecipient[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(
@@ -1873,26 +2095,6 @@ function writeRecipientsBackup(recipients: SignalRecipient[]) {
       savedAt: new Date().toISOString(),
     }),
   );
-}
-
-function recipientPayloadForRestore(recipient: SignalRecipient): Partial<SignalRecipient> {
-  return {
-    name: recipient.name,
-    full_name: recipient.full_name || recipient.name,
-    email: recipient.email,
-    phone: recipient.phone,
-    city: recipient.city,
-    country: recipient.country,
-    chat_id: recipient.chat_id,
-    kind: recipient.kind || "user",
-    enabled: recipient.enabled,
-    plan: recipient.plan || "premium",
-    access_status: recipient.access_status || (recipient.enabled ? "approved" : "pending"),
-    starts_at: recipient.starts_at || todayIso(),
-    validity_days: recipient.validity_days || 30,
-    expires_at: recipient.expires_at,
-    notes: recipient.notes,
-  };
 }
 
 function csvCell(value: string) {

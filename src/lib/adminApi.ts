@@ -1,4 +1,10 @@
-import type { AdminSession, AdminSummary, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
+import type {
+  AdminSession,
+  AdminSummary,
+  SecurityEvent,
+  SecuritySummary,
+  SignalRecipient,
+} from "@/types/admin";
 import type {
   AdminActionLog,
   AdminLogsResponse,
@@ -13,15 +19,17 @@ const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
 export const LOCAL_ADMIN_API_URL = "http://127.0.0.1:8787";
 export const PUBLIC_ADMIN_API_URL = "https://sniperbo.com";
-const ALLOWED_REMOTE_API_HOSTS = new Set([
-  "sniperbo.com",
-  "www.sniperbo.com",
-]);
+const ALLOWED_REMOTE_API_HOSTS = new Set(["sniperbo.com", "www.sniperbo.com"]);
 
 const defaultApiUrl = () =>
   (import.meta.env.VITE_SNIPER_API_URL as string | undefined) ||
-  (import.meta.env.VITE_SNIPER_DASHBOARD_URL as string | undefined)?.replace(/\/dashboard\/?$/, "") ||
-  (typeof window !== "undefined" && !isLocalFrontend() ? PUBLIC_ADMIN_API_URL : LOCAL_ADMIN_API_URL);
+  (import.meta.env.VITE_SNIPER_DASHBOARD_URL as string | undefined)?.replace(
+    /\/dashboard\/?$/,
+    "",
+  ) ||
+  (typeof window !== "undefined" && !isLocalFrontend()
+    ? PUBLIC_ADMIN_API_URL
+    : LOCAL_ADMIN_API_URL);
 
 export function getInitialApiUrl() {
   if (typeof window === "undefined") return defaultApiUrl();
@@ -30,7 +38,10 @@ export function getInitialApiUrl() {
     window.localStorage.setItem(API_URL_KEY, LOCAL_ADMIN_API_URL);
     return LOCAL_ADMIN_API_URL;
   }
-  if (!isLocalFrontend() && (!saved || isLocalApiUrl(saved) || isSameOriginApiUrl(saved) || !isAllowedRemoteApiUrl(saved))) {
+  if (
+    !isLocalFrontend() &&
+    (!saved || isLocalApiUrl(saved) || isSameOriginApiUrl(saved) || !isAllowedRemoteApiUrl(saved))
+  ) {
     window.localStorage.setItem(API_URL_KEY, PUBLIC_ADMIN_API_URL);
     return PUBLIC_ADMIN_API_URL;
   }
@@ -74,7 +85,11 @@ export async function adminLogin(apiUrl: string, email: string, password: string
   if (!response.ok) {
     throw new Error(`Email ou senha admin invalidos na API ${normalizedApiUrl}.`);
   }
-  const data = (await response.json()) as { token?: string; email?: string; role?: AdminSession["role"] };
+  const data = (await response.json()) as {
+    token?: string;
+    email?: string;
+    role?: AdminSession["role"];
+  };
   if (!data.token) {
     throw new Error("A API nao retornou uma chave de sessao.");
   }
@@ -119,9 +134,13 @@ export async function updateSignalRecipient(
 }
 
 export async function deleteSignalRecipient(session: AdminSession, recipientId: string) {
-  await request<{ ok: boolean }>(session, `/telegram-recipients/${encodeURIComponent(recipientId)}`, {
-    method: "DELETE",
-  });
+  await request<{ ok: boolean }>(
+    session,
+    `/telegram-recipients/${encodeURIComponent(recipientId)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export async function getModuleToggles(session: AdminSession) {
@@ -146,7 +165,10 @@ export async function updateAdminSalesSettings(
 }
 
 export async function listSecurityEvents(session: AdminSession) {
-  return request<{ events: SecurityEvent[]; summary: SecuritySummary }>(session, "/security-events");
+  return request<{ events: SecurityEvent[]; summary: SecuritySummary }>(
+    session,
+    "/security-events",
+  );
 }
 
 export async function getAdminSummary(session: AdminSession) {
@@ -179,6 +201,17 @@ export async function updateAdminUser(
   return data.user;
 }
 
+export async function deleteAdminUser(
+  session: AdminSession,
+  userId: string,
+  reason = "Exclusao manual",
+) {
+  await request<{ ok: boolean }>(session, `/admin/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ reason }),
+  });
+}
+
 export async function extendAdminUserAccess(
   session: AdminSession,
   userId: string,
@@ -196,7 +229,11 @@ export async function extendAdminUserAccess(
   return data.user;
 }
 
-export async function blockAdminUser(session: AdminSession, userId: string, reason = "Bloqueio manual") {
+export async function blockAdminUser(
+  session: AdminSession,
+  userId: string,
+  reason = "Bloqueio manual",
+) {
   const data = await request<{ user: AdminManagedUser }>(
     session,
     `/admin/users/${encodeURIComponent(userId)}/block`,
@@ -208,7 +245,11 @@ export async function blockAdminUser(session: AdminSession, userId: string, reas
   return data.user;
 }
 
-export async function unblockAdminUser(session: AdminSession, userId: string, reason = "Reativacao manual") {
+export async function unblockAdminUser(
+  session: AdminSession,
+  userId: string,
+  reason = "Reativacao manual",
+) {
   const data = await request<{ user: AdminManagedUser }>(
     session,
     `/admin/users/${encodeURIComponent(userId)}/unblock`,
@@ -270,10 +311,7 @@ export async function sendAdminBroadcast(
   });
 }
 
-export async function updateModuleToggles(
-  session: AdminSession,
-  payload: Partial<ModuleToggles>,
-) {
+export async function updateModuleToggles(session: AdminSession, payload: Partial<ModuleToggles>) {
   const data = await request<{ moduleToggles: ModuleToggles }>(session, "/module-toggles", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -282,7 +320,9 @@ export async function updateModuleToggles(
 }
 
 function normalizeAdminRole(role: unknown): NonNullable<AdminSession["role"]> {
-  const value = String(role || "owner").trim().toLowerCase();
+  const value = String(role || "owner")
+    .trim()
+    .toLowerCase();
   return value === "admin" || value === "approver" ? "admin" : "owner";
 }
 
@@ -353,7 +393,8 @@ function isSameOriginApiUrl(apiUrl: string) {
 function isAllowedRemoteApiUrl(apiUrl: string) {
   try {
     const parsed = new URL(apiUrl);
-    if (typeof window !== "undefined" && parsed.hostname === window.location.hostname) return parsed.protocol === "https:";
+    if (typeof window !== "undefined" && parsed.hostname === window.location.hostname)
+      return parsed.protocol === "https:";
     return parsed.protocol === "https:" && ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname);
   } catch {
     return false;

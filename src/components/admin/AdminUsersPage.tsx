@@ -5,6 +5,7 @@ import {
   blockAdminUser,
   changeAdminUserPlan,
   changeAdminUserRole,
+  deleteAdminUser,
   extendAdminUserAccess,
   listAdminUsers,
   unblockAdminUser,
@@ -79,7 +80,10 @@ export function AdminUsersPage() {
         <p className="text-sm text-muted-foreground">
           Esta área existe somente para usuários com permissão admin ou owner.
         </p>
-        <Link to="/app/admin" className="mt-4 inline-flex rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 px-4 py-3 text-sm font-black text-neon-cyan">
+        <Link
+          to="/app/admin"
+          className="mt-4 inline-flex rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 px-4 py-3 text-sm font-black text-neon-cyan"
+        >
           Fazer login administrativo
         </Link>
       </GlassCard>
@@ -105,9 +109,30 @@ export function AdminUsersPage() {
 
   async function runQuickAction(action: QuickAction, user: AdminManagedUser) {
     if (!session) return;
+    if (action === "deleteUser") {
+      if (role !== "owner") {
+        setError("Apenas owner pode excluir cadastros definitivamente.");
+        return;
+      }
+      const confirmed = window.confirm(
+        `Excluir definitivamente o cadastro de ${user.email}? Esta acao remove o usuario do painel e do banco persistente.`,
+      );
+      if (!confirmed) return;
+    }
     setBusy(true);
     setError("");
     try {
+      if (action === "deleteUser") {
+        await deleteAdminUser(session, user.id, "Excluir cadastro sem pagamento");
+        const deletedEmail = user.email.trim().toLowerCase();
+        setUsers((current) =>
+          current.filter(
+            (item) => item.id !== user.id && item.email.trim().toLowerCase() !== deletedEmail,
+          ),
+        );
+        if (selected?.id === user.id) setSelected(null);
+        return;
+      }
       const updated = await performQuickAction(session, user, action);
       setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       if (selected?.id === updated.id) setSelected(updated);
@@ -149,13 +174,37 @@ export function AdminUsersPage() {
               placeholder="Buscar por nome/email"
             />
           </label>
-          <FilterSelect label="Plano" value={filters.plan} onChange={(plan) => setFilters({ ...filters, plan })} options={["all", "free", "trial", "monthly", "premium", "vip_manual"]} />
-          <FilterSelect label="Status" value={filters.status} onChange={(status) => setFilters({ ...filters, status })} options={["all", "trial", "active", "expired", "canceled", "blocked", "manual_vip"]} />
-          <FilterSelect label="Perfil" value={filters.role} onChange={(roleValue) => setFilters({ ...filters, role: roleValue })} options={["all", "user", "admin", "owner"]} />
-          <FilterSelect label="Filtro" value={filters.quick} onChange={(quick) => setFilters({ ...filters, quick: quick as FilterState["quick"] })} options={["all", "active", "expired", "blocked"]} />
+          <FilterSelect
+            label="Plano"
+            value={filters.plan}
+            onChange={(plan) => setFilters({ ...filters, plan })}
+            options={["all", "free", "trial", "monthly", "premium", "vip_manual"]}
+          />
+          <FilterSelect
+            label="Status"
+            value={filters.status}
+            onChange={(status) => setFilters({ ...filters, status })}
+            options={["all", "trial", "active", "expired", "canceled", "blocked", "manual_vip"]}
+          />
+          <FilterSelect
+            label="Perfil"
+            value={filters.role}
+            onChange={(roleValue) => setFilters({ ...filters, role: roleValue })}
+            options={["all", "user", "admin", "owner"]}
+          />
+          <FilterSelect
+            label="Filtro"
+            value={filters.quick}
+            onChange={(quick) => setFilters({ ...filters, quick: quick as FilterState["quick"] })}
+            options={["all", "active", "expired", "blocked"]}
+          />
         </div>
 
-        {error && <div className="mt-4 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+        {error && (
+          <div className="mt-4 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
       </GlassCard>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -198,18 +247,21 @@ export function AdminUsersPage() {
   );
 }
 
-function buildOverviewFromUsers(users: AdminManagedUser[], overview?: AdminPanelOverview): AdminPanelOverview {
+function buildOverviewFromUsers(
+  users: AdminManagedUser[],
+  overview?: AdminPanelOverview,
+): AdminPanelOverview {
   const now = Date.now();
   const clientUsers = users.filter((user) => user.role === "user");
   const activeUsers = clientUsers.filter((user) => isActiveUser(user, now));
-  const paidUsers = activeUsers.filter((user) =>
-    user.subscriptionStatus === "active" || user.subscriptionStatus === "manual_vip",
+  const paidUsers = activeUsers.filter(
+    (user) => user.subscriptionStatus === "active" || user.subscriptionStatus === "manual_vip",
   );
-  const trialUsers = activeUsers.filter((user) =>
-    user.plan === "trial" || user.subscriptionStatus === "trial",
+  const trialUsers = activeUsers.filter(
+    (user) => user.plan === "trial" || user.subscriptionStatus === "trial",
   );
-  const premiumUsers = activeUsers.filter((user) =>
-    user.plan === "premium" || user.plan === "vip_manual",
+  const premiumUsers = activeUsers.filter(
+    (user) => user.plan === "premium" || user.plan === "vip_manual",
   );
 
   return {
@@ -272,7 +324,9 @@ function UserGroupSection({
     <section className="space-y-3">
       <div className="flex items-end justify-between gap-3 border-b border-border/50 pb-2">
         <div>
-          <h2 className="text-sm font-black uppercase tracking-[0.18em] text-foreground">{title}</h2>
+          <h2 className="text-sm font-black uppercase tracking-[0.18em] text-foreground">
+            {title}
+          </h2>
           <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
         </div>
         <span className="rounded-full border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-1 text-xs font-black text-neon-cyan">
@@ -324,9 +378,15 @@ function FilterSelect({
     <label className="flex items-center gap-2 rounded-xl border border-border/60 bg-secondary/25 px-3 py-2">
       <SlidersHorizontal className="size-4 text-neon-cyan" />
       <span className="sr-only">{label}</span>
-      <select className="w-full bg-transparent text-sm outline-none" value={value} onChange={(event) => onChange(event.target.value)}>
+      <select
+        className="w-full bg-transparent text-sm outline-none"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
         {options.map((option) => (
-          <option key={option} value={option}>{option === "all" ? label : option}</option>
+          <option key={option} value={option}>
+            {option === "all" ? label : option}
+          </option>
         ))}
       </select>
     </label>
@@ -341,7 +401,11 @@ function applyFilters(users: AdminManagedUser[], filters: FilterState) {
     if (filters.plan !== "all" && user.plan !== filters.plan) return false;
     if (filters.status !== "all" && user.subscriptionStatus !== filters.status) return false;
     if (filters.role !== "all" && user.role !== filters.role) return false;
-    if (filters.quick === "active" && (user.isBlocked || parseAccessDate(user.currentPeriodEnd) <= now)) return false;
+    if (
+      filters.quick === "active" &&
+      (user.isBlocked || parseAccessDate(user.currentPeriodEnd) <= now)
+    )
+      return false;
     if (filters.quick === "expired" && parseAccessDate(user.currentPeriodEnd) > now) return false;
     if (filters.quick === "blocked" && !user.isBlocked) return false;
     return true;
@@ -373,26 +437,57 @@ function canRunUserAction(currentAdminRole: "admin" | "owner", user: AdminManage
   return currentAdminRole === "owner" || user.role === "user";
 }
 
-async function performQuickAction(session: AdminSession, user: AdminManagedUser, action: QuickAction) {
+async function performQuickAction(
+  session: AdminSession,
+  user: AdminManagedUser,
+  action: QuickAction,
+) {
   const now = new Date();
   const end = (days: number) => addDays(now, days);
   if (action === "trial7") {
-    return changeAdminUserPlan(session, user.id, { plan: "trial", subscriptionStatus: "trial", currentPeriodEnd: end(7), reason: "Liberar Trial 7 dias" });
+    return changeAdminUserPlan(session, user.id, {
+      plan: "trial",
+      subscriptionStatus: "trial",
+      currentPeriodEnd: end(7),
+      reason: "Liberar Trial 7 dias",
+    });
   }
   if (action === "monthly30") {
-    return changeAdminUserPlan(session, user.id, { plan: "monthly", subscriptionStatus: "active", currentPeriodEnd: end(30), reason: "Liberar Mensal 30 dias" });
+    return changeAdminUserPlan(session, user.id, {
+      plan: "monthly",
+      subscriptionStatus: "active",
+      currentPeriodEnd: end(30),
+      reason: "Liberar Mensal 30 dias",
+    });
   }
   if (action === "premium30") {
-    return changeAdminUserPlan(session, user.id, { plan: "premium", subscriptionStatus: "active", currentPeriodEnd: end(30), reason: "Liberar Premium 30 dias" });
+    return changeAdminUserPlan(session, user.id, {
+      plan: "premium",
+      subscriptionStatus: "active",
+      currentPeriodEnd: end(30),
+      reason: "Liberar Premium 30 dias",
+    });
   }
   if (action === "vip30") {
-    return changeAdminUserPlan(session, user.id, { plan: "vip_manual", subscriptionStatus: "manual_vip", currentPeriodEnd: end(30), reason: "Liberar VIP Manual 30 dias" });
+    return changeAdminUserPlan(session, user.id, {
+      plan: "vip_manual",
+      subscriptionStatus: "manual_vip",
+      currentPeriodEnd: end(30),
+      reason: "Liberar VIP Manual 30 dias",
+    });
   }
   if (action === "extend7") return extendAdminUserAccess(session, user.id, 7, "Prorrogar +7 dias");
-  if (action === "extend15") return extendAdminUserAccess(session, user.id, 15, "Prorrogar +15 dias");
-  if (action === "extend30") return extendAdminUserAccess(session, user.id, 30, "Prorrogar +30 dias");
-  if (action === "extend90") return extendAdminUserAccess(session, user.id, 90, "Prorrogar +90 dias");
-  if (action === "cancel") return updateAdminUser(session, user.id, { subscriptionStatus: "canceled", reason: "Cancelar acesso" });
+  if (action === "extend15")
+    return extendAdminUserAccess(session, user.id, 15, "Prorrogar +15 dias");
+  if (action === "extend30")
+    return extendAdminUserAccess(session, user.id, 30, "Prorrogar +30 dias");
+  if (action === "extend90")
+    return extendAdminUserAccess(session, user.id, 90, "Prorrogar +90 dias");
+  if (action === "cancel")
+    return updateAdminUser(session, user.id, {
+      subscriptionStatus: "canceled",
+      reason: "Cancelar acesso",
+    });
   if (action === "block") return blockAdminUser(session, user.id);
   if (action === "unblock") return unblockAdminUser(session, user.id);
   if (action === "makeAdmin") return changeAdminUserRole(session, user.id, "admin");

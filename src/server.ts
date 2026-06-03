@@ -44,7 +44,13 @@ type LiveStateSaveStatus = {
 };
 type AdminManagedUserRole = "user" | "admin" | "owner";
 type AdminManagedUserPlan = "free" | "trial" | "monthly" | "premium" | "vip_manual";
-type AdminSubscriptionStatus = "trial" | "active" | "expired" | "canceled" | "blocked" | "manual_vip";
+type AdminSubscriptionStatus =
+  | "trial"
+  | "active"
+  | "expired"
+  | "canceled"
+  | "blocked"
+  | "manual_vip";
 type AdminActionType =
   | "UPDATE_USER"
   | "UPDATE_PLAN"
@@ -56,7 +62,8 @@ type AdminActionType =
   | "UPDATE_EXPIRATION_DATE"
   | "MANUAL_VIP_GRANTED"
   | "CANCEL_ACCESS"
-  | "REACTIVATE_USER";
+  | "REACTIVATE_USER"
+  | "DELETE_USER";
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
@@ -72,7 +79,11 @@ const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const FREE_TRIAL_MINUTES = 10;
-const ACTIVE_ENTRY_MODES = ["sniper", "hunter", "aggressive"] as const satisfies readonly ActiveEntryMode[];
+const ACTIVE_ENTRY_MODES = [
+  "sniper",
+  "hunter",
+  "aggressive",
+] as const satisfies readonly ActiveEntryMode[];
 const SNIPER_NEURAL_ASSERTIVENESS_MIN = 99;
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
@@ -254,9 +265,7 @@ function handleRateLimit(request: Request) {
   const key = `${getClientIp(request)}:${request.method}:${url.pathname}`;
   const current = rateLimitBuckets.get(key);
   const bucket =
-    current && current.resetAt > now
-      ? current
-      : { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    current && current.resetAt > now ? current : { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
 
   bucket.count += 1;
   rateLimitBuckets.set(key, bucket);
@@ -339,7 +348,10 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
     return json({ error: "Texto de voz obrigatorio." }, 400);
   }
   if (text.length > MAX_NARRATION_CHARS) {
-    return json({ error: `Texto de voz muito longo. Limite: ${MAX_NARRATION_CHARS} caracteres.` }, 413);
+    return json(
+      { error: `Texto de voz muito longo. Limite: ${MAX_NARRATION_CHARS} caracteres.` },
+      413,
+    );
   }
 
   const apiKey = getElevenLabsApiKey(env);
@@ -394,7 +406,8 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
       "cache-control": "no-store",
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "POST,OPTIONS",
-      "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
+      "access-control-allow-headers":
+        "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
     },
   });
 }
@@ -486,7 +499,10 @@ async function handleBillingRequest(request: Request, env: unknown) {
     return handleMercadoPagoWebhook(request, url, env);
   }
 
-  if (request.method === "POST" && (url.pathname === "/api/webhook/hubla" || url.pathname === "/api/webhooks/hubla")) {
+  if (
+    request.method === "POST" &&
+    (url.pathname === "/api/webhook/hubla" || url.pathname === "/api/webhooks/hubla")
+  ) {
     return handleHublaWebhook(request, env);
   }
 
@@ -532,7 +548,10 @@ async function handleBillingRequest(request: Request, env: unknown) {
   return json({ error: "Rota de assinatura nao encontrada." }, 404);
 }
 
-async function requireClientBillingSession(request: Request, env: unknown): Promise<
+async function requireClientBillingSession(
+  request: Request,
+  env: unknown,
+): Promise<
   | { ok: true; client: Record<string, unknown>; session: SessionPayload }
   | { ok: false; status: number; error: string }
 > {
@@ -545,7 +564,8 @@ async function requireClientBillingSession(request: Request, env: unknown): Prom
     return { ok: false, status: 403, error: "Use uma conta de cliente para assinar." };
   }
 
-  const client = findClientByEmail(session.email) || await hydrateClientFromBilling(env, session.email);
+  const client =
+    findClientByEmail(session.email) || (await hydrateClientFromBilling(env, session.email));
   if (!client) return { ok: false, status: 404, error: "Cliente nao encontrado." };
 
   const sessionCheck = await validateClientSessionBinding(env, request, session, client);
@@ -621,7 +641,13 @@ async function createMercadoPagoCheckout(
 
   const accessToken = getMercadoPagoAccessToken(env);
   if (!accessToken) {
-    return json({ error: "Checkout Hubla nao configurado. Adicione HUBLA_CHECKOUT_URL ou o link do plano nos Secrets." }, 503);
+    return json(
+      {
+        error:
+          "Checkout Hubla nao configurado. Adicione HUBLA_CHECKOUT_URL ou o link do plano nos Secrets.",
+      },
+      503,
+    );
   }
 
   const planConfig = getBillingPlan(plan, env);
@@ -634,9 +660,21 @@ async function createMercadoPagoCheckout(
   const subscriptionId = crypto.randomUUID();
   const externalReference = `sniperbo:${subscriptionId}:${email}:${plan}`;
   const origin = getPublicAppOrigin(request, env);
-  const successUrl = readNamedServerSecret(env, "MERCADOPAGO_SUCCESS_URL", `${origin}/app/assinatura?status=approved`);
-  const pendingUrl = readNamedServerSecret(env, "MERCADOPAGO_PENDING_URL", `${origin}/app/assinatura?status=pending`);
-  const failureUrl = readNamedServerSecret(env, "MERCADOPAGO_FAILURE_URL", `${origin}/app/assinatura?status=failure`);
+  const successUrl = readNamedServerSecret(
+    env,
+    "MERCADOPAGO_SUCCESS_URL",
+    `${origin}/app/assinatura?status=approved`,
+  );
+  const pendingUrl = readNamedServerSecret(
+    env,
+    "MERCADOPAGO_PENDING_URL",
+    `${origin}/app/assinatura?status=pending`,
+  );
+  const failureUrl = readNamedServerSecret(
+    env,
+    "MERCADOPAGO_FAILURE_URL",
+    `${origin}/app/assinatura?status=failure`,
+  );
   const preferenceBody = {
     items: [
       {
@@ -688,7 +726,8 @@ async function createMercadoPagoCheckout(
   }
 
   const preferenceId = readString(preference, "id");
-  const checkoutUrl = readString(preference, "init_point") || readString(preference, "sandbox_init_point");
+  const checkoutUrl =
+    readString(preference, "init_point") || readString(preference, "sandbox_init_point");
   if (!preferenceId || !checkoutUrl) {
     return json({ error: "Mercado Pago nao retornou o link de checkout." }, 502);
   }
@@ -742,7 +781,13 @@ async function handleMercadoPagoWebhook(request: Request, url: URL, env: unknown
     return json({ ok: true, ignored: true });
   }
 
-  const signatureOk = await validateMercadoPagoWebhookSignature(request, url, payload, env, paymentId);
+  const signatureOk = await validateMercadoPagoWebhookSignature(
+    request,
+    url,
+    payload,
+    env,
+    paymentId,
+  );
   if (!signatureOk) {
     return json({ error: "Webhook Mercado Pago invalido." }, 401);
   }
@@ -825,13 +870,9 @@ async function applyHublaWebhookEvent(
   };
   const existingSubscription = latestSubscriptionForEmail(email);
   const subscriptionId =
-    event.subscriptionId ||
-    readString(existingSubscription, "id") ||
-    crypto.randomUUID();
+    event.subscriptionId || readString(existingSubscription, "id") || crypto.randomUUID();
   const startsAt = event.paidAt ? event.paidAt.slice(0, 10) : todayIso();
-  const expiresAt =
-    event.expiresAt?.slice(0, 10) ||
-    addDaysIso(startsAt, planConfig.durationDays);
+  const expiresAt = event.expiresAt?.slice(0, 10) || addDaysIso(startsAt, planConfig.durationDays);
   const paymentId = event.paymentId || event.idempotencyKey || crypto.randomUUID();
   const shouldActivate = event.status === "paid";
   const shouldDeactivate = ["canceled", "refunded", "chargeback"].includes(event.status);
@@ -847,7 +888,11 @@ async function applyHublaWebhookEvent(
     provider_payment_id: paymentId,
     external_reference: event.eventType,
     starts_at: shouldActivate ? startsAt : readString(client, "starts_at"),
-    expires_at: shouldActivate ? expiresAt : shouldDeactivate ? todayIso() : readString(client, "expires_at"),
+    expires_at: shouldActivate
+      ? expiresAt
+      : shouldDeactivate
+        ? todayIso()
+        : readString(client, "expires_at"),
     metadata: {
       hubla_event_type: event.eventType,
       hubla_product_id: event.productId,
@@ -926,9 +971,11 @@ async function applyHublaWebhookEvent(
   return { activated, deactivated };
 }
 
-async function fetchMercadoPagoPayment(env: unknown, paymentId: string): Promise<
-  | { ok: true; payment: Record<string, unknown> }
-  | { ok: false; status: number; error: string }
+async function fetchMercadoPagoPayment(
+  env: unknown,
+  paymentId: string,
+): Promise<
+  { ok: true; payment: Record<string, unknown> } | { ok: false; status: number; error: string }
 > {
   const accessToken = getMercadoPagoAccessToken(env);
   if (!accessToken) {
@@ -966,9 +1013,14 @@ async function applyMercadoPagoPayment(env: unknown, payment: Record<string, unk
     readString(readRecord(payment.payer), "email")
   ).toLowerCase();
   const plan = normalizeBillingPlanId(readString(metadata, "plan") || parsedReference.plan);
-  const subscriptionId = readString(metadata, "subscription_id") || parsedReference.subscriptionId || crypto.randomUUID();
+  const subscriptionId =
+    readString(metadata, "subscription_id") ||
+    parsedReference.subscriptionId ||
+    crypto.randomUUID();
   const planConfig = plan ? getBillingPlan(plan, env) : null;
-  const amount = Number(readRecord(payment.transaction_amount).value || payment.transaction_amount || 0);
+  const amount = Number(
+    readRecord(payment.transaction_amount).value || payment.transaction_amount || 0,
+  );
   const now = new Date().toISOString();
   const paidAt = readString(payment, "date_approved") || (status === "approved" ? now : "");
 
@@ -1109,10 +1161,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ error: "Credenciais admin nao configuradas no servidor." }, 503);
     }
 
-    if (
-      adminRole &&
-      readString(body, "password") === adminPassword
-    ) {
+    if (adminRole && readString(body, "password") === adminPassword) {
       const binding = await requestSessionBinding(env, request);
       recordAccessEvent("admin_login", {
         email: loginEmail,
@@ -1121,15 +1170,19 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         country: "",
       });
       await saveLiveState(env);
-      const token = await issueSessionToken(env, {
-        email: loginEmail,
-        scope: adminRole === "owner" ? "owner" : "admin_approver",
-        plan: adminRole === "owner" ? "vip" : "free",
-        approved: adminRole === "owner",
-        sid: crypto.randomUUID(),
-        ua: binding.userAgentHash,
-        iph: binding.ipHash,
-      }, ADMIN_SESSION_TTL_SECONDS);
+      const token = await issueSessionToken(
+        env,
+        {
+          email: loginEmail,
+          scope: adminRole === "owner" ? "owner" : "admin_approver",
+          plan: adminRole === "owner" ? "vip" : "free",
+          approved: adminRole === "owner",
+          sid: crypto.randomUUID(),
+          ua: binding.userAgentHash,
+          iph: binding.ipHash,
+        },
+        ADMIN_SESSION_TTL_SECONDS,
+      );
       return json({ token, email: loginEmail, role: adminRole });
     }
 
@@ -1169,7 +1222,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ access: await approverAccess(env, email, request) });
     }
 
-    let client = findClientByEmail(email) || await hydrateClientFromBilling(env, email);
+    let client = findClientByEmail(email) || (await hydrateClientFromBilling(env, email));
     if (!client && password) {
       client = await ensureBlockedTrialClientForLogin(env, request, email, password);
     }
@@ -1211,7 +1264,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ error: "Senha invalida." }, 401);
     }
 
-    recordAccessEvent(Boolean(client.enabled) ? "client_login" : "client_pending_login", client);
+    recordAccessEvent(client.enabled ? "client_login" : "client_pending_login", client);
     const access = await clientAccess(env, client, request);
     await saveLiveState(env);
     return json({ access });
@@ -1284,10 +1337,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const access = await clientAccess(env, client, request);
     await saveLiveState(env);
     await persistBillingUser(env, client);
-    return json(
-      { access },
-      existingIndex >= 0 ? 200 : 201,
-    );
+    return json({ access }, existingIndex >= 0 ? 200 : 201);
   }
 
   if (request.method === "POST" && url.pathname === "/auth/verify") {
@@ -1300,21 +1350,26 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (session.scope === "owner") {
       if (!(await sessionMatchesRequestBinding(env, request, session))) {
-        return json({ valid: false, reason: "Sessao invalida ou usada em outro dispositivo." }, 401);
+        return json(
+          { valid: false, reason: "Sessao invalida ou usada em outro dispositivo." },
+          401,
+        );
       }
       return json({ valid: true, access: await ownerAccess(env, session.email, request) });
     }
 
     if (session.scope === "admin_approver") {
       if (!(await sessionMatchesRequestBinding(env, request, session))) {
-        return json({ valid: false, reason: "Sessao invalida ou usada em outro dispositivo." }, 401);
+        return json(
+          { valid: false, reason: "Sessao invalida ou usada em outro dispositivo." },
+          401,
+        );
       }
       return json({ valid: true, access: await approverAccess(env, session.email, request) });
     }
 
     let client =
-      findClientByEmail(session.email) ||
-      await hydrateClientFromBilling(env, session.email);
+      findClientByEmail(session.email) || (await hydrateClientFromBilling(env, session.email));
     if (!client && session.scope === "client") {
       client = await ensureSessionClientForExpiredTrial(env, request, session);
     }
@@ -1366,9 +1421,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "POST") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const nextClosed = typeof body.salesClosed === "boolean"
-        ? body.salesClosed
-        : Boolean(body.salesClosed);
+      const nextClosed =
+        typeof body.salesClosed === "boolean" ? body.salesClosed : Boolean(body.salesClosed);
       liveSalesSettings = {
         salesClosed: nextClosed,
         updated_at: new Date().toISOString(),
@@ -1418,6 +1472,20 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ user: target });
     }
 
+    if (request.method === "DELETE" && !actionPath) {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const result = await deleteAdminManagedUser(
+        env,
+        adminRole,
+        request,
+        target,
+        readString(body, "reason"),
+      );
+      if (!result.ok) return json({ error: result.error }, result.status);
+      await saveLiveState(env);
+      return json({ ok: true, user: result.user });
+    }
+
     if (request.method === "PATCH" && !actionPath) {
       const body = readRecord(await request.json().catch(() => ({})));
       const result = updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_USER");
@@ -1428,7 +1496,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "POST" && actionPath === "extend-access") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = extendAdminManagedUser(env, adminRole, request, target, Number(body.days || 0), readString(body, "reason"));
+      const result = extendAdminManagedUser(
+        env,
+        adminRole,
+        request,
+        target,
+        Number(body.days || 0),
+        readString(body, "reason"),
+      );
       if (!result.ok) return json({ error: result.error }, result.status);
       await saveLiveState(env);
       return json({ user: result.user });
@@ -1436,7 +1511,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "POST" && actionPath === "block") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = blockAdminManagedUser(env, adminRole, request, target, readString(body, "reason"));
+      const result = blockAdminManagedUser(
+        env,
+        adminRole,
+        request,
+        target,
+        readString(body, "reason"),
+      );
       if (!result.ok) return json({ error: result.error }, result.status);
       await saveLiveState(env);
       return json({ user: result.user });
@@ -1444,7 +1525,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "POST" && actionPath === "unblock") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = unblockAdminManagedUser(env, adminRole, request, target, readString(body, "reason"));
+      const result = unblockAdminManagedUser(
+        env,
+        adminRole,
+        request,
+        target,
+        readString(body, "reason"),
+      );
       if (!result.ok) return json({ error: result.error }, result.status);
       await saveLiveState(env);
       return json({ user: result.user });
@@ -1505,7 +1592,9 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         recipients:
           adminRole === "owner"
             ? liveRecipients
-            : liveRecipients.filter((recipient) => readString(recipient, "access_status") === "pending"),
+            : liveRecipients.filter(
+                (recipient) => readString(recipient, "access_status") === "pending",
+              ),
       });
     }
 
@@ -1571,19 +1660,17 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (request.method === "DELETE") {
       if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
       const deletedRecipient = liveRecipients[index];
-      const deletedEmail = readString(deletedRecipient, "email").toLowerCase();
       markEntityDeleted(deletedRecipient);
-      liveRecipients = liveRecipients.filter((recipient) => recipient.id !== recipientId);
-      liveClients = liveClients.filter((client) => {
-        const clientId = readString(client, "id");
-        const clientEmail = readString(client, "email").toLowerCase();
-        return clientId !== recipientId && (!deletedEmail || clientEmail !== deletedEmail);
+      removeUserEntityEverywhere(deletedRecipient);
+      recordAdminActionLog(env, request, adminRole, {
+        targetUserId: readString(deletedRecipient, "id"),
+        targetEmail: readString(deletedRecipient, "email"),
+        action: "DELETE_USER",
+        beforeJson: deletedRecipient,
+        afterJson: { deleted: true },
+        reason: "Exclusao manual de cliente",
       });
-      liveAdminUsers = liveAdminUsers.filter((user) => {
-        const userId = readString(user, "id");
-        const userEmail = readString(user, "email").toLowerCase();
-        return userId !== recipientId && (!deletedEmail || userEmail !== deletedEmail);
-      });
+      await deletePersistedBillingUser(env, deletedRecipient);
       await saveLiveState(env);
       return json({ ok: true });
     }
@@ -1674,7 +1761,8 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   const incomingCycleDate = readDashboardCycleDate(incoming);
   const acceptsCurrentCycle = !incomingCycleDate || incomingCycleDate === cycleDate;
   const acceptsDailyCounters =
-    acceptsCurrentCycle && (!currentDashboard.strictDailyCounters || incomingCycleDate === cycleDate);
+    acceptsCurrentCycle &&
+    (!currentDashboard.strictDailyCounters || incomingCycleDate === cycleDate);
   const pickedSections = acceptsCurrentCycle ? pickDashboardSections(incoming) : {};
   if (!acceptsDailyCounters) {
     delete pickedSections.mainScoreboard;
@@ -1703,9 +1791,10 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       acceptsCurrentCycle ? incoming.currentTieAlert || incoming.tieAlert : {},
       currentDashboard.currentTieAlert,
     ),
-    pressureSeries: acceptsCurrentCycle && Array.isArray(incoming.pressureSeries)
-      ? incoming.pressureSeries
-      : currentDashboard.pressureSeries,
+    pressureSeries:
+      acceptsCurrentCycle && Array.isArray(incoming.pressureSeries)
+        ? incoming.pressureSeries
+        : currentDashboard.pressureSeries,
     updatedAt: new Date().toISOString(),
     cycleDate,
     dailyCycleDate: cycleDate,
@@ -1725,7 +1814,8 @@ function ensureDashboardDailyCycle(
         ...dashboard,
         cycleDate,
         dailyCycleDate: cycleDate,
-        strictDailyCounters: (dashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
+        strictDailyCounters:
+          (dashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
       },
       changed: false,
     };
@@ -1892,22 +1982,35 @@ function currentDashboardCycleDate(now = new Date()) {
 
 function pickDashboardSections(incoming: Record<string, unknown>): Partial<LiveDashboardData> {
   const out: Partial<LiveDashboardData> = {};
-  if (incoming.currentSurfAlert) out.currentSurfAlert = incoming.currentSurfAlert as DashboardData["currentSurfAlert"];
-  if (incoming.surfAlert) out.currentSurfAlert = incoming.surfAlert as DashboardData["currentSurfAlert"];
-  if (incoming.neuralReading) out.neuralReading = incoming.neuralReading as DashboardData["neuralReading"];
-  if (incoming.moduleToggles) out.moduleToggles = incoming.moduleToggles as DashboardData["moduleToggles"];
-  if (incoming.engineDecision) out.engineDecision = incoming.engineDecision as DashboardData["engineDecision"];
-  if (incoming.mainScoreboard) out.mainScoreboard = incoming.mainScoreboard as DashboardData["mainScoreboard"];
-  if (incoming.tieAlertScoreboard) out.tieAlertScoreboard = incoming.tieAlertScoreboard as DashboardData["tieAlertScoreboard"];
-  if (incoming.surfAnalyzerScoreboard) out.surfAnalyzerScoreboard = incoming.surfAnalyzerScoreboard as DashboardData["surfAnalyzerScoreboard"];
+  if (incoming.currentSurfAlert)
+    out.currentSurfAlert = incoming.currentSurfAlert as DashboardData["currentSurfAlert"];
+  if (incoming.surfAlert)
+    out.currentSurfAlert = incoming.surfAlert as DashboardData["currentSurfAlert"];
+  if (incoming.neuralReading)
+    out.neuralReading = incoming.neuralReading as DashboardData["neuralReading"];
+  if (incoming.moduleToggles)
+    out.moduleToggles = incoming.moduleToggles as DashboardData["moduleToggles"];
+  if (incoming.engineDecision)
+    out.engineDecision = incoming.engineDecision as DashboardData["engineDecision"];
+  if (incoming.mainScoreboard)
+    out.mainScoreboard = incoming.mainScoreboard as DashboardData["mainScoreboard"];
+  if (incoming.tieAlertScoreboard)
+    out.tieAlertScoreboard = incoming.tieAlertScoreboard as DashboardData["tieAlertScoreboard"];
+  if (incoming.surfAnalyzerScoreboard)
+    out.surfAnalyzerScoreboard =
+      incoming.surfAnalyzerScoreboard as DashboardData["surfAnalyzerScoreboard"];
   const incomingEntryModeStats = normalizeServerIncomingEntryModeStats(
     incoming.entryModeStats ?? incoming.entry_mode_stats,
   );
   if (incomingEntryModeStats) out.entryModeStats = incomingEntryModeStats;
-  if (incoming.entryModeSignalModes) out.entryModeSignalModes = normalizeServerSignalModes(incoming.entryModeSignalModes);
-  if (incoming.entryModeCountedResults) out.entryModeCountedResults = normalizeServerCountedResults(incoming.entryModeCountedResults);
-  if (incoming.latestEntryModeSignalId) out.latestEntryModeSignalId = String(incoming.latestEntryModeSignalId);
-  if (incoming.latestEntryModeSignalModes) out.latestEntryModeSignalModes = normalizeServerModeList(incoming.latestEntryModeSignalModes);
+  if (incoming.entryModeSignalModes)
+    out.entryModeSignalModes = normalizeServerSignalModes(incoming.entryModeSignalModes);
+  if (incoming.entryModeCountedResults)
+    out.entryModeCountedResults = normalizeServerCountedResults(incoming.entryModeCountedResults);
+  if (incoming.latestEntryModeSignalId)
+    out.latestEntryModeSignalId = String(incoming.latestEntryModeSignalId);
+  if (incoming.latestEntryModeSignalModes)
+    out.latestEntryModeSignalModes = normalizeServerModeList(incoming.latestEntryModeSignalModes);
   return out;
 }
 
@@ -1939,7 +2042,8 @@ function normalizeSignal(
     signal.protection || signal.validade || signal.gale || fallback.protection || "G1",
   );
   const terminalStatus = terminalSignalStatus(status);
-  const incomingLastResult = (signal.lastResult ?? null) as DashboardData["currentSignal"]["lastResult"];
+  const incomingLastResult = (signal.lastResult ??
+    null) as DashboardData["currentSignal"]["lastResult"];
   const lastResult: DashboardData["currentSignal"]["lastResult"] =
     incomingLastResult ||
     fallback.lastResult ||
@@ -1959,7 +2063,9 @@ function normalizeSignal(
       side: "NONE",
       status: "waiting",
       protection: "-",
-      strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
+      strength: clampPercent(
+        signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
+      ),
       lastResult,
     };
   }
@@ -2041,22 +2147,17 @@ function serverBuildEntryModeFilter(data: DashboardData, mode: ActiveEntryMode) 
   if (mode === "sniper") {
     return Boolean(
       !engineConfirmed ||
-        confidence < 80 ||
-        strength < 78 ||
-        tieActive ||
-        surfRisk >= 40 ||
-        neuralRisk ||
-        !sniperNeuralGate.accepted,
+      confidence < 80 ||
+      strength < 78 ||
+      tieActive ||
+      surfRisk >= 40 ||
+      neuralRisk ||
+      !sniperNeuralGate.accepted,
     );
   }
 
   return Boolean(
-    !engineConfirmed ||
-      confidence < 70 ||
-      strength < 70 ||
-      tieHigh ||
-      surfRisk >= 65 ||
-      neuralRisk,
+    !engineConfirmed || confidence < 70 || strength < 70 || tieHigh || surfRisk >= 65 || neuralRisk,
   );
 }
 
@@ -2091,22 +2192,34 @@ function incrementServerEntryModeStats(
     totalGreens,
     totalEntries,
     total: totalEntries + nextEmp,
-    assertiveness: totalEntries > 0 ? Math.round((totalGreens / totalEntries) * 1000) / 10 : undefined,
+    assertiveness:
+      totalEntries > 0 ? Math.round((totalGreens / totalEntries) * 1000) / 10 : undefined,
   };
 }
 
-function serverReadEntryModeResultKind(result: NonNullable<DashboardData["currentSignal"]["lastResult"]>) {
+function serverReadEntryModeResultKind(
+  result: NonNullable<DashboardData["currentSignal"]["lastResult"]>,
+) {
   const record = readRecord(result);
   const status = serverNormalizeText(readString(record, "status"));
   const side = serverNormalizeText(readString(record, "side"));
   const protection = serverNormalizeText(readString(record, "protection"));
-  if (status.includes("TIE") || status.includes("EMPATE") || status.includes("EMP") || side === "TIE" || side === "EMPATE") return "emp";
+  if (
+    status.includes("TIE") ||
+    status.includes("EMPATE") ||
+    status.includes("EMP") ||
+    side === "TIE" ||
+    side === "EMPATE"
+  )
+    return "emp";
   if (status.includes("RED") || status.includes("LOSS")) return "red";
   if (status.includes("G1") || protection.includes("G1")) return "g1";
   return "sg";
 }
 
-function serverEntryModeResultKey(result: NonNullable<DashboardData["currentSignal"]["lastResult"]>) {
+function serverEntryModeResultKey(
+  result: NonNullable<DashboardData["currentSignal"]["lastResult"]>,
+) {
   const record = readRecord(result);
   return [
     readString(record, "id"),
@@ -2124,9 +2237,10 @@ function isServerEntrySide(side: CurrentSignalSide): side is SignalSide {
 function serverOppositeSurfRisk(data: DashboardData, side: SignalSide) {
   const alert = data.currentSurfAlert;
   if (!alert) return 0;
-  const surfSide = alert.surf_prediction_side && alert.surf_prediction_side !== "NONE"
-    ? alert.surf_prediction_side
-    : alert.surf_side;
+  const surfSide =
+    alert.surf_prediction_side && alert.surf_prediction_side !== "NONE"
+      ? alert.surf_prediction_side
+      : alert.surf_side;
   if (surfSide === "NONE" || surfSide === side) return 0;
   return clampPercent(alert.surf_break_risk ?? alert.surf_risk ?? 0);
 }
@@ -2136,14 +2250,18 @@ function serverHasNeuralRisk(reading?: NeuralReading | null) {
   const status = serverNormalizeText(reading.paganteStatus);
   return Boolean(
     reading.isRedAlert ||
-      reading.isSaturated ||
-      status.includes("RISCO") ||
-      status.includes("ESTICADO"),
+    reading.isSaturated ||
+    status.includes("RISCO") ||
+    status.includes("ESTICADO"),
   );
 }
 
-function serverReadSniperNeuralGate(reading: NeuralReading | null | undefined, entrySide: SignalSide) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return { accepted: false };
+function serverReadSniperNeuralGate(
+  reading: NeuralReading | null | undefined,
+  entrySide: SignalSide,
+) {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number")
+    return { accepted: false };
   if (reading.origemTipo === "OPOSTO") return { accepted: false };
   if (serverReadPaganteKind(reading) !== "favorable") return { accepted: false };
 
@@ -2151,7 +2269,13 @@ function serverReadSniperNeuralGate(reading: NeuralReading | null | undefined, e
   if (paganteSide !== entrySide) return { accepted: false };
 
   const performance = serverReadNeuralPerformance(reading);
-  return { accepted: Boolean(performance && performance.greens > 0 && performance.assertiveness >= SNIPER_NEURAL_ASSERTIVENESS_MIN) };
+  return {
+    accepted: Boolean(
+      performance &&
+      performance.greens > 0 &&
+      performance.assertiveness >= SNIPER_NEURAL_ASSERTIVENESS_MIN,
+    ),
+  };
 }
 
 function serverReadPaganteKind(reading?: NeuralReading | null): "favorable" | "watch" | "risk" {
@@ -2181,7 +2305,8 @@ function serverReadNeuralPerformance(reading: NeuralReading) {
   const greenSemGale = serverNumberOrZero(reading.greenSemGale ?? null);
   const greenG1 = serverNumberOrZero(reading.greenG1 ?? null);
   const greensFromSplit = greenSemGale + greenG1;
-  const greens = greensFromSplit > 0 ? greensFromSplit : serverNumberOrZero(reading.acertos ?? null);
+  const greens =
+    greensFromSplit > 0 ? greensFromSplit : serverNumberOrZero(reading.acertos ?? null);
   const reds = serverNumberOrZero(reading.reds ?? reading.erros ?? null);
   const total = greens + reds;
   const providedAssertiveness = serverReadOptionalNumber(reading.assertividade);
@@ -2204,7 +2329,9 @@ function serverReadNeuralPerformance(reading: NeuralReading) {
   };
 }
 
-function normalizeServerEntryModeStatsByMode(value: unknown): Partial<Record<ActiveEntryMode, EntryModeStats>> {
+function normalizeServerEntryModeStatsByMode(
+  value: unknown,
+): Partial<Record<ActiveEntryMode, EntryModeStats>> {
   const record = readRecord(value);
   const stats: Partial<Record<ActiveEntryMode, EntryModeStats>> = {};
   for (const mode of ACTIVE_ENTRY_MODES) {
@@ -2213,7 +2340,9 @@ function normalizeServerEntryModeStatsByMode(value: unknown): Partial<Record<Act
   return stats;
 }
 
-function normalizeServerIncomingEntryModeStats(value: unknown): Partial<Record<ActiveEntryMode, EntryModeStats>> | undefined {
+function normalizeServerIncomingEntryModeStats(
+  value: unknown,
+): Partial<Record<ActiveEntryMode, EntryModeStats>> | undefined {
   const record = readRecord(value);
   const stats: Partial<Record<ActiveEntryMode, EntryModeStats>> = {};
   for (const mode of ACTIVE_ENTRY_MODES) {
@@ -2222,17 +2351,33 @@ function normalizeServerIncomingEntryModeStats(value: unknown): Partial<Record<A
       stats[mode] = normalizeServerEntryModeStatsRecord(rawStats);
     }
   }
-  return ACTIVE_ENTRY_MODES.some((mode) => hasServerEntryModeStats(stats[mode])) ? stats : undefined;
+  return ACTIVE_ENTRY_MODES.some((mode) => hasServerEntryModeStats(stats[mode]))
+    ? stats
+    : undefined;
 }
 
 function normalizeServerEntryModeStatsRecord(value: unknown): EntryModeStats {
   const record = readRecord(value);
-  const sg = serverReadOptionalNumber(serverFirstDefined(record.sg, record.greenSemGale, record.green_sem_gale, record.greens)) ?? 0;
-  const g1 = serverReadOptionalNumber(serverFirstDefined(record.greenG1, record.green_g1, record.greensG1, record.greens_g1)) ?? 0;
-  const emp = serverReadOptionalNumber(serverFirstDefined(record.emp, record.ties, record.tie, record.empates)) ?? 0;
-  const reds = serverReadOptionalNumber(serverFirstDefined(record.reds, record.red, record.erros)) ?? 0;
-  const totalGreens = serverReadOptionalNumber(serverFirstDefined(record.totalGreens, record.total_greens)) ?? sg + g1;
-  const totalEntries = serverReadOptionalNumber(serverFirstDefined(record.totalEntries, record.total_entries)) ?? totalGreens + reds;
+  const sg =
+    serverReadOptionalNumber(
+      serverFirstDefined(record.sg, record.greenSemGale, record.green_sem_gale, record.greens),
+    ) ?? 0;
+  const g1 =
+    serverReadOptionalNumber(
+      serverFirstDefined(record.greenG1, record.green_g1, record.greensG1, record.greens_g1),
+    ) ?? 0;
+  const emp =
+    serverReadOptionalNumber(
+      serverFirstDefined(record.emp, record.ties, record.tie, record.empates),
+    ) ?? 0;
+  const reds =
+    serverReadOptionalNumber(serverFirstDefined(record.reds, record.red, record.erros)) ?? 0;
+  const totalGreens =
+    serverReadOptionalNumber(serverFirstDefined(record.totalGreens, record.total_greens)) ??
+    sg + g1;
+  const totalEntries =
+    serverReadOptionalNumber(serverFirstDefined(record.totalEntries, record.total_entries)) ??
+    totalGreens + reds;
   const total = serverReadOptionalNumber(record.total) ?? totalEntries + emp;
   return {
     sg,
@@ -2246,7 +2391,9 @@ function normalizeServerEntryModeStatsRecord(value: unknown): EntryModeStats {
     totalGreens,
     totalEntries,
     total,
-    assertiveness: serverReadOptionalNumber(serverFirstDefined(record.assertiveness, record.assertividade)) ?? undefined,
+    assertiveness:
+      serverReadOptionalNumber(serverFirstDefined(record.assertiveness, record.assertividade)) ??
+      undefined,
   };
 }
 
@@ -2268,7 +2415,9 @@ function hasServerEntryModeStats(stats?: EntryModeStats) {
 }
 
 function emptyServerEntryModeStatsByMode(): Partial<Record<ActiveEntryMode, EntryModeStats>> {
-  return Object.fromEntries(ACTIVE_ENTRY_MODES.map((mode) => [mode, normalizeServerEntryModeStatsRecord({})]));
+  return Object.fromEntries(
+    ACTIVE_ENTRY_MODES.map((mode) => [mode, normalizeServerEntryModeStatsRecord({})]),
+  );
 }
 
 function normalizeServerSignalModes(value: unknown) {
@@ -2286,7 +2435,9 @@ function normalizeServerModeList(value: unknown) {
   const values = Array.isArray(value) ? value : [value];
   const selected = new Set<ActiveEntryMode>();
   for (const rawMode of values) {
-    const text = String(rawMode || "").trim().toLowerCase();
+    const text = String(rawMode || "")
+      .trim()
+      .toLowerCase();
     if (text === "sniper") selected.add("sniper");
     if (text === "hunter" || text === "cacador" || text === "caçador") selected.add("hunter");
     if (text === "aggressive" || text === "agressivo") selected.add("aggressive");
@@ -2296,7 +2447,11 @@ function normalizeServerModeList(value: unknown) {
 
 function normalizeServerCountedResults(value: unknown) {
   const record = readRecord(value);
-  return Object.fromEntries(Object.keys(record).filter(Boolean).map((key) => [key, true]));
+  return Object.fromEntries(
+    Object.keys(record)
+      .filter(Boolean)
+      .map((key) => [key, true]),
+  );
 }
 
 function sameServerModeList(left: ActiveEntryMode[] | undefined, right: ActiveEntryMode[]) {
@@ -2391,7 +2546,10 @@ function normalizeSignalSide(value: unknown): CurrentSignalSide {
   return "NONE";
 }
 
-function normalizeSignalStatus(value: unknown, side: DashboardData["currentSignal"]["side"]): SignalStatus {
+function normalizeSignalStatus(
+  value: unknown,
+  side: DashboardData["currentSignal"]["side"],
+): SignalStatus {
   const text = String(value || "")
     .trim()
     .toLowerCase();
@@ -2438,7 +2596,10 @@ function isDashboardAuthorized(request: Request, _url: URL, env: unknown) {
     readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "");
   const headerToken =
     request.headers.get("x-sniper-token")?.trim() ||
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
+    request.headers
+      .get("authorization")
+      ?.replace(/^Bearer\s+/i, "")
+      .trim();
   if (token) return headerToken === token;
   return isLocalDevelopmentRequest(request) && headerToken === LOCAL_DEV_DASHBOARD_TOKEN;
 }
@@ -2487,7 +2648,10 @@ async function getAdminRequestRole(request: Request, env: unknown): Promise<Admi
 
 function getBearerToken(request: Request) {
   return (
-    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ||
+    request.headers
+      .get("authorization")
+      ?.replace(/^Bearer\s+/i, "")
+      .trim() ||
     request.headers.get("x-sniper-token")?.trim() ||
     ""
   );
@@ -2542,9 +2706,10 @@ function getMercadoPagoCurrency(env: unknown) {
 
 function getHublaWebhookToken(env: unknown) {
   const mode = readNamedServerSecret(env, "HUBLA_ENVIRONMENT", "production").toLowerCase();
-  const scopedToken = mode === "sandbox"
-    ? readNamedServerSecret(env, "HUBLA_SANDBOX_WEBHOOK_TOKEN", "")
-    : readNamedServerSecret(env, "HUBLA_PRODUCTION_WEBHOOK_TOKEN", "");
+  const scopedToken =
+    mode === "sandbox"
+      ? readNamedServerSecret(env, "HUBLA_SANDBOX_WEBHOOK_TOKEN", "")
+      : readNamedServerSecret(env, "HUBLA_PRODUCTION_WEBHOOK_TOKEN", "");
   return normalizeSecretValue(scopedToken || readNamedServerSecret(env, "HUBLA_WEBHOOK_TOKEN", ""));
 }
 
@@ -2559,17 +2724,10 @@ function getHublaDefaultPlan(env: unknown): BillingPlanId {
 
 function getHublaCheckoutUrl(plan: BillingPlanId, env: unknown) {
   if (plan === "free") return "";
-  const candidates = plan === "premium"
-    ? [
-        "HUBLA_PREMIUM_CHECKOUT_URL",
-        "HUBLA_ANUAL_CHECKOUT_URL",
-        "HUBLA_CHECKOUT_URL",
-      ]
-    : [
-        "HUBLA_MENSAL_CHECKOUT_URL",
-        "HUBLA_VIP_CHECKOUT_URL",
-        "HUBLA_CHECKOUT_URL",
-      ];
+  const candidates =
+    plan === "premium"
+      ? ["HUBLA_PREMIUM_CHECKOUT_URL", "HUBLA_ANUAL_CHECKOUT_URL", "HUBLA_CHECKOUT_URL"]
+      : ["HUBLA_MENSAL_CHECKOUT_URL", "HUBLA_VIP_CHECKOUT_URL", "HUBLA_CHECKOUT_URL"];
   for (const key of candidates) {
     const value = readNamedServerSecret(env, key, "");
     if (value && /^https?:\/\//i.test(value)) return value;
@@ -2589,8 +2747,14 @@ function getBillingPlans(env: unknown) {
       currency: getMercadoPagoCurrency(env),
       durationDays: config.durationDays,
       features: config.features,
-      checkoutEnabled: config.id !== "free" && (Boolean(hublaCheckoutUrl) || Boolean(getMercadoPagoAccessToken(env))),
-      checkoutProvider: hublaCheckoutUrl ? "hubla" : getMercadoPagoAccessToken(env) ? "mercadopago" : "",
+      checkoutEnabled:
+        config.id !== "free" &&
+        (Boolean(hublaCheckoutUrl) || Boolean(getMercadoPagoAccessToken(env))),
+      checkoutProvider: hublaCheckoutUrl
+        ? "hubla"
+        : getMercadoPagoAccessToken(env)
+          ? "mercadopago"
+          : "",
     };
   });
 }
@@ -2613,7 +2777,12 @@ function getBillingPlan(plan: BillingPlanId, env: unknown) {
       description: "Acesso VIP mensal ao painel operacional.",
       amount: vipAmount,
       durationDays: 30,
-      features: ["Painel ao vivo", "Sinais protegidos", "Surf, Tie e numero pagante", "Assistente IA"],
+      features: [
+        "Painel ao vivo",
+        "Sinais protegidos",
+        "Surf, Tie e numero pagante",
+        "Assistente IA",
+      ],
     },
     premium: {
       id: "premium" as const,
@@ -2635,13 +2804,19 @@ function readServerNumber(env: unknown, key: string, fallback: number) {
 }
 
 function normalizeBillingPlanId(value: unknown): BillingPlanId | null {
-  const text = String(value || "").trim().toLowerCase();
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
   if (text === "free" || text === "premium" || text === "vip") return text;
   if (text === "mensal" || text === "monthly") return "vip";
   return null;
 }
 
-function normalizeHublaWebhookPayload(payload: Record<string, unknown>, request: Request, env: unknown) {
+function normalizeHublaWebhookPayload(
+  payload: Record<string, unknown>,
+  request: Request,
+  env: unknown,
+) {
   const event = readRecord(payload.event);
   const user = readRecord(event.user);
   const subscription = readRecord(event.subscription);
@@ -2676,11 +2851,10 @@ function normalizeHublaWebhookPayload(payload: Record<string, unknown>, request:
       readString(customer, "phone"),
     status: normalizeHublaStatus(payload),
     eventType,
-    idempotencyKey: request.headers.get("x-hubla-idempotency")?.trim() || readString(payload, "idempotencyKey"),
+    idempotencyKey:
+      request.headers.get("x-hubla-idempotency")?.trim() || readString(payload, "idempotencyKey"),
     productId:
-      readString(product, "id") ||
-      firstHublaProductId(event) ||
-      readString(payload, "productId"),
+      readString(product, "id") || firstHublaProductId(event) || readString(payload, "productId"),
     plan: getHublaPlanFromPayload(payload, env),
     subscriptionId:
       readString(subscription, "id") ||
@@ -2747,7 +2921,10 @@ function firstHublaProductId(event: Record<string, unknown>) {
   return "";
 }
 
-function getHublaPlanFromPayload(payload: Record<string, unknown>, env: unknown): BillingPlanId | null {
+function getHublaPlanFromPayload(
+  payload: Record<string, unknown>,
+  env: unknown,
+): BillingPlanId | null {
   const event = readRecord(payload.event);
   const product = readRecord(event.product);
   const productId = readString(product, "id") || firstHublaProductId(event);
@@ -2803,7 +2980,8 @@ function parseCsvList(value: unknown) {
 }
 
 function getPublicAppOrigin(request: Request, env: unknown) {
-  const configured = readNamedServerSecret(env, "PUBLIC_APP_URL", "") || readNamedServerSecret(env, "APP_URL", "");
+  const configured =
+    readNamedServerSecret(env, "PUBLIC_APP_URL", "") || readNamedServerSecret(env, "APP_URL", "");
   if (configured) return configured.replace(/\/+$/, "");
   const url = new URL(request.url);
   return `${url.protocol}//${url.host}`;
@@ -2870,6 +3048,7 @@ function parseBillingExternalReference(value: string) {
 }
 
 function upsertLiveClient(client: Record<string, unknown>) {
+  if (isEntityDeleted(client)) return;
   const id = readString(client, "id");
   const email = readString(client, "email").toLowerCase();
   const index = liveClients.findIndex((item) => {
@@ -2877,9 +3056,10 @@ function upsertLiveClient(client: Record<string, unknown>) {
     const sameEmail = email && readString(item, "email").toLowerCase() === email;
     return sameId || sameEmail;
   });
-  liveClients = index >= 0
-    ? liveClients.map((item, itemIndex) => (itemIndex === index ? { ...item, ...client } : item))
-    : [...liveClients, client];
+  liveClients =
+    index >= 0
+      ? liveClients.map((item, itemIndex) => (itemIndex === index ? { ...item, ...client } : item))
+      : [...liveClients, client];
 }
 
 function upsertSubscriptionRecord(record: Record<string, unknown>) {
@@ -2898,9 +3078,10 @@ function upsertSubscriptionRecord(record: Record<string, unknown>) {
     ...record,
     updated_at: readString(record, "updated_at") || new Date().toISOString(),
   };
-  liveSubscriptions = index >= 0
-    ? liveSubscriptions.map((item, itemIndex) => (itemIndex === index ? merged : item))
-    : [merged, ...liveSubscriptions].slice(0, 500);
+  liveSubscriptions =
+    index >= 0
+      ? liveSubscriptions.map((item, itemIndex) => (itemIndex === index ? merged : item))
+      : [merged, ...liveSubscriptions].slice(0, 500);
   return merged;
 }
 
@@ -2914,7 +3095,9 @@ function upsertPaymentRecord(record: Record<string, unknown>) {
       (id && readString(item, "id") === id) ||
       (paymentId && readString(item, "provider_payment_id") === paymentId) ||
       (!paymentId && preferenceId && readString(item, "provider_preference_id") === preferenceId) ||
-      (!paymentId && externalReference && readString(item, "external_reference") === externalReference)
+      (!paymentId &&
+        externalReference &&
+        readString(item, "external_reference") === externalReference)
     );
   });
   const merged = {
@@ -2922,9 +3105,10 @@ function upsertPaymentRecord(record: Record<string, unknown>) {
     ...record,
     updated_at: readString(record, "updated_at") || new Date().toISOString(),
   };
-  livePayments = index >= 0
-    ? livePayments.map((item, itemIndex) => (itemIndex === index ? merged : item))
-    : [merged, ...livePayments].slice(0, 1000);
+  livePayments =
+    index >= 0
+      ? livePayments.map((item, itemIndex) => (itemIndex === index ? merged : item))
+      : [merged, ...livePayments].slice(0, 1000);
   return merged;
 }
 
@@ -2948,7 +3132,9 @@ function buildBillingOverview(client: Record<string, unknown>) {
   return {
     email,
     plan: readString(client, "plan") || readString(subscription, "plan") || "free",
-    status: expired ? "expired" : readString(subscription, "status") || readString(client, "access_status") || "pending",
+    status: expired
+      ? "expired"
+      : readString(subscription, "status") || readString(client, "access_status") || "pending",
     accessMode: trial ? "demo" : liveAccess ? "full" : expired ? "expired" : "pending",
     approved: liveAccess && !trial,
     starts_at: readString(client, "starts_at") || readString(subscription, "starts_at"),
@@ -2957,15 +3143,20 @@ function buildBillingOverview(client: Record<string, unknown>) {
     last_payment: buildPaymentPublic(
       livePayments
         .filter((payment) => readString(payment, "email").toLowerCase() === email)
-        .sort((a, b) => readString(b, "updated_at").localeCompare(readString(a, "updated_at")))[0] || {},
+        .sort((a, b) =>
+          readString(b, "updated_at").localeCompare(readString(a, "updated_at")),
+        )[0] || {},
     ),
   };
 }
 
 function latestSubscriptionForEmail(email: string) {
-  return liveSubscriptions
-    .filter((subscription) => readString(subscription, "email").toLowerCase() === email)
-    .sort((a, b) => readString(b, "updated_at").localeCompare(readString(a, "updated_at")))[0] || {};
+  return (
+    liveSubscriptions
+      .filter((subscription) => readString(subscription, "email").toLowerCase() === email)
+      .sort((a, b) => readString(b, "updated_at").localeCompare(readString(a, "updated_at")))[0] ||
+    {}
+  );
 }
 
 function buildSubscriptionPublic(subscription: Record<string, unknown>) {
@@ -2996,6 +3187,7 @@ function buildPaymentPublic(payment: Record<string, unknown>) {
 async function hydrateClientFromBilling(env: unknown, email: string) {
   const client = await loadBillingClientByEmail(env, email);
   if (!client) return null;
+  if (isEntityDeleted(client)) return null;
 
   upsertLiveClient(client);
   upsertRecipientFromClient(client);
@@ -3044,7 +3236,8 @@ async function loadBillingClientByEmail(env: unknown, email: string) {
     readString(subscription, "expires_at") ||
     (billingPaymentIsPaid(payment) ? addDaysIso(startsAt, planConfig.durationDays) : "");
   const subscriptionActive = billingSubscriptionIsActive(subscription, expiresAt);
-  const paymentActive = billingPaymentIsPaid(payment) && Boolean(expiresAt) && !isExpiredIso(expiresAt);
+  const paymentActive =
+    billingPaymentIsPaid(payment) && Boolean(expiresAt) && !isExpiredIso(expiresAt);
   const enabled = subscriptionActive || paymentActive;
   const accessStatus = enabled
     ? "approved"
@@ -3070,7 +3263,10 @@ async function loadBillingClientByEmail(env: unknown, email: string) {
     starts_at: startsAt,
     validity_days: planConfig.durationDays,
     expires_at: expiresAt,
-    created_at: readString(user, "created_at") || readString(subscription, "created_at") || new Date().toISOString(),
+    created_at:
+      readString(user, "created_at") ||
+      readString(subscription, "created_at") ||
+      new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 }
@@ -3104,10 +3300,15 @@ function billingRowTime(row: Record<string, unknown>) {
   return Number.isFinite(time) ? time : 0;
 }
 
-function billingSubscriptionIsActive(subscription: Record<string, unknown>, fallbackExpiresAt = "") {
+function billingSubscriptionIsActive(
+  subscription: Record<string, unknown>,
+  fallbackExpiresAt = "",
+) {
   const status = readString(subscription, "status").toLowerCase();
   const expiresAt = readString(subscription, "expires_at") || fallbackExpiresAt;
-  return ["active", "approved", "paid"].includes(status) && (!expiresAt || !isExpiredIso(expiresAt));
+  return (
+    ["active", "approved", "paid"].includes(status) && (!expiresAt || !isExpiredIso(expiresAt))
+  );
 }
 
 function billingPaymentIsPaid(payment: Record<string, unknown>) {
@@ -3163,6 +3364,23 @@ async function persistBillingUser(env: unknown, client: Record<string, unknown>)
   });
 }
 
+async function deletePersistedBillingUser(env: unknown, user: Record<string, unknown>) {
+  const email = readString(user, "email").toLowerCase();
+  const id = readString(user, "id");
+  const encodedEmail = encodeURIComponent(email);
+  const encodedId = encodeURIComponent(id);
+  const idFilters = isUuidLike(id) ? [`user_id=eq.${encodedId}`] : [];
+
+  await Promise.allSettled([
+    ...(email ? [deleteSupabaseRows(env, "payments", `email=eq.${encodedEmail}`)] : []),
+    ...idFilters.map((filter) => deleteSupabaseRows(env, "payments", filter)),
+    ...(email ? [deleteSupabaseRows(env, "subscriptions", `email=eq.${encodedEmail}`)] : []),
+    ...idFilters.map((filter) => deleteSupabaseRows(env, "subscriptions", filter)),
+    ...(email ? [deleteSupabaseRows(env, "users", `email=eq.${encodedEmail}`)] : []),
+    ...(isUuidLike(id) ? [deleteSupabaseRows(env, "users", `id=eq.${encodedId}`)] : []),
+  ]);
+}
+
 async function fetchSupabaseRows(env: unknown, table: string, query: string) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return [];
@@ -3178,9 +3396,7 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
     }
 
     const rows = await response.json().catch(() => null);
-    return Array.isArray(rows)
-      ? rows.map(readRecord).filter(hasRecordFields)
-      : [];
+    return Array.isArray(rows) ? rows.map(readRecord).filter(hasRecordFields) : [];
   } catch (error) {
     console.warn(`Nao foi possivel carregar ${table}.`, error);
     return [];
@@ -3209,6 +3425,30 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
   }
 }
 
+async function deleteSupabaseRows(env: unknown, table: string, query: string) {
+  const config = getSupabasePersistenceConfig(env);
+  if (!config || !query) return;
+
+  try {
+    const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
+      method: "DELETE",
+      headers: {
+        ...supabasePersistenceHeaders(config.key),
+        Prefer: "return=minimal",
+      },
+    });
+    if (!response.ok && response.status !== 404) {
+      console.warn(`Nao foi possivel apagar ${table} (${response.status}).`);
+    }
+  } catch (error) {
+    console.warn(`Nao foi possivel apagar ${table}.`, error);
+  }
+}
+
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function getElevenLabsApiKey(env: unknown) {
   // Only read the canonical secret name to avoid conflicts with legacy values.
   return normalizeSecretValue(readServerEnvString(env, "ELEVENLABS_TTS_API_KEY", ""));
@@ -3229,10 +3469,17 @@ function readNamedServerSecret(env: unknown, key: string, fallback: string) {
 }
 
 function stripNamedSecretPrefix(value: unknown, key: string) {
-  let raw = String(value || "").trim().replace(/^["']|["']$/g, "").trim();
+  let raw = String(value || "")
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .trim();
   const prefix = new RegExp(`^${escapeRegExp(key)}\\s*[:=]\\s*`, "i");
   while (prefix.test(raw)) {
-    raw = raw.replace(prefix, "").trim().replace(/^["']|["']$/g, "").trim();
+    raw = raw
+      .replace(prefix, "")
+      .trim()
+      .replace(/^["']|["']$/g, "")
+      .trim();
   }
   return raw;
 }
@@ -3242,7 +3489,10 @@ function escapeRegExp(value: string) {
 }
 
 function normalizeSecretValue(value: unknown) {
-  let raw = String(value || "").trim().replace(/^["']|["']$/g, "").trim();
+  let raw = String(value || "")
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .trim();
   // Strip common accidental prefixes (env var name pasted in, or auth scheme).
   const prefixes = [
     /^ELEVENLABS_TTS_API_KEY\s*[:=]\s*/i,
@@ -3256,7 +3506,11 @@ function normalizeSecretValue(value: unknown) {
     changed = false;
     for (const re of prefixes) {
       if (re.test(raw)) {
-        raw = raw.replace(re, "").trim().replace(/^["']|["']$/g, "").trim();
+        raw = raw
+          .replace(re, "")
+          .trim()
+          .replace(/^["']|["']$/g, "")
+          .trim();
         changed = true;
       }
     }
@@ -3391,7 +3645,8 @@ function buildRegistrationTrialAccess(
   const existingStatus = readString(existingClient, "access_status").toLowerCase();
   const existingPlan = normalizeBillingPlanId(readString(existingClient, "plan"));
   const existingExpiresAt = readString(existingClient, "expires_at");
-  const existingTrialExpiresAt = readString(existingClient, "trial_expires_at") || existingExpiresAt;
+  const existingTrialExpiresAt =
+    readString(existingClient, "trial_expires_at") || existingExpiresAt;
 
   if (existingPlan && existingPlan !== "free") {
     return {
@@ -3421,7 +3676,8 @@ function buildRegistrationTrialAccess(
       trialStartedAt: readString(existingClient, "trial_started_at") || now,
       trialExpiresAt: existingTrialExpiresAt || now,
       trialIpHash: readString(existingClient, "trial_ip_hash") || binding.ipHash,
-      trialUserAgentHash: readString(existingClient, "trial_user_agent_hash") || binding.userAgentHash,
+      trialUserAgentHash:
+        readString(existingClient, "trial_user_agent_hash") || binding.userAgentHash,
       trialBlockedReason: readString(existingClient, "trial_blocked_reason"),
     };
   }
@@ -3478,11 +3734,11 @@ function normalizeRecipientAccessStatus(value: string, enabled: boolean) {
 function clientHasUsedFreeTrial(client: Record<string, unknown>) {
   return Boolean(
     readString(client, "trial_started_at") ||
-      readString(client, "trial_expires_at") ||
-      readString(client, "trial_ip_hash") ||
-      readString(client, "trial_user_agent_hash") ||
-      readString(client, "trial_blocked_reason") ||
-      readString(client, "access_status").toLowerCase() === "trial",
+    readString(client, "trial_expires_at") ||
+    readString(client, "trial_ip_hash") ||
+    readString(client, "trial_user_agent_hash") ||
+    readString(client, "trial_blocked_reason") ||
+    readString(client, "access_status").toLowerCase() === "trial",
   );
 }
 
@@ -3495,11 +3751,11 @@ function findFreeTrialClaim(email: string, binding: { ipHash: string; userAgentH
     const trialUserAgentHash = readString(client, "trial_user_agent_hash");
     return Boolean(
       binding.ipHash &&
-        binding.userAgentHash &&
-        trialIpHash &&
-        trialUserAgentHash &&
-        trialIpHash === binding.ipHash &&
-        trialUserAgentHash === binding.userAgentHash,
+      binding.userAgentHash &&
+      trialIpHash &&
+      trialUserAgentHash &&
+      trialIpHash === binding.ipHash &&
+      trialUserAgentHash === binding.userAgentHash,
     );
   });
 }
@@ -3541,7 +3797,7 @@ async function ensureBlockedTrialClientForLogin(
     updated_at: now,
   });
 
-  clearDeletedEntityForRecord(client);
+  if (isEntityDeleted(client)) return null;
   upsertLiveClient(client);
   upsertRecipientFromClient(client);
   recordAccessEvent("client_trial_recreated_for_checkout", {
@@ -3586,7 +3842,7 @@ async function ensureSessionClientForExpiredTrial(
     updated_at: now,
   };
 
-  clearDeletedEntityForRecord(client);
+  if (isEntityDeleted(client)) return null;
   upsertLiveClient(client);
   upsertRecipientFromClient(client);
   recordAccessEvent("client_trial_session_recovered", {
@@ -3614,7 +3870,11 @@ async function validateClientSessionBinding(
   return { ok: true, reason: "", ...binding };
 }
 
-async function sessionMatchesRequestBinding(env: unknown, request: Request, session: SessionPayload) {
+async function sessionMatchesRequestBinding(
+  env: unknown,
+  request: Request,
+  session: SessionPayload,
+) {
   if (!session.ua || !session.iph) return false;
   const binding = await requestSessionBinding(env, request);
   return session.ua === binding.userAgentHash && session.iph === binding.ipHash;
@@ -3706,7 +3966,8 @@ async function clientAccess(
   session?: SessionPayload,
 ) {
   const rawStatus = readString(client, "access_status").toLowerCase();
-  const blocked = Boolean(client.isBlocked) || Boolean(client.is_blocked) || rawStatus === "blocked";
+  const blocked =
+    Boolean(client.isBlocked) || Boolean(client.is_blocked) || rawStatus === "blocked";
   const trial = rawStatus === "trial";
   const expiresAt = readString(client, "expires_at");
   const enabled =
@@ -3724,15 +3985,16 @@ async function clientAccess(
     upsertRecipientFromClient(client);
   }
   const approved = enabled && !expired && !trial;
-  const accessStatus = blocked ? "blocked" : readString(client, "access_status") || (enabled ? "approved" : "pending");
+  const accessStatus = blocked
+    ? "blocked"
+    : readString(client, "access_status") || (enabled ? "approved" : "pending");
   const plan = ["premium", "vip"].includes(readString(client, "plan"))
     ? readString(client, "plan")
     : "free";
   const email = readString(client, "email");
   const previousSessionId = readString(client, "active_session_id");
-  const sessionId = session?.sid && session.sid === previousSessionId
-    ? session.sid
-    : crypto.randomUUID();
+  const sessionId =
+    session?.sid && session.sid === previousSessionId ? session.sid : crypto.randomUUID();
   const binding = request
     ? await requestSessionBinding(env, request)
     : {
@@ -3790,10 +4052,10 @@ async function clientAccess(
     reason: expired
       ? "Seu teste gratuito expirou. Atualize seu plano para continuar recebendo sinais."
       : trial && enabled
-      ? "Teste gratuito ativo por tempo limitado."
-      : enabled
-      ? "Acesso liberado pelo administrador."
-      : "Aguardando liberacao do administrador.",
+        ? "Teste gratuito ativo por tempo limitado."
+        : enabled
+          ? "Acesso liberado pelo administrador."
+          : "Aguardando liberacao do administrador.",
     client_token: token,
   };
 }
@@ -3869,7 +4131,7 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
   const clientUsers = users.filter((user) => normalizeManagedUserRole(user.role) === "user");
   const active = clientUsers.filter(
     (user) =>
-      !Boolean(user.isBlocked) &&
+      !user.isBlocked &&
       ["active", "manual_vip", "trial"].includes(readString(user, "subscriptionStatus")) &&
       Date.parse(readString(user, "currentPeriodEnd")) > now,
   );
@@ -3879,8 +4141,9 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
   const premium = active.filter((user) =>
     ["premium", "vip_manual"].includes(readString(user, "plan")),
   );
-  const trials = active.filter((user) =>
-    readString(user, "plan") === "trial" || readString(user, "subscriptionStatus") === "trial",
+  const trials = active.filter(
+    (user) =>
+      readString(user, "plan") === "trial" || readString(user, "subscriptionStatus") === "trial",
   );
   const currentSignal = readRecord((liveDashboardData as Record<string, unknown>).currentSignal);
   const side =
@@ -3898,7 +4161,9 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
     premiumUsers: premium.length,
     onlineNow: countOnlineClientUsers(now),
     lastSignal: side.toUpperCase(),
-    lastSignalAt: relativeTimeFromIso(readString((liveDashboardData as Record<string, unknown>), "updatedAt")),
+    lastSignalAt: relativeTimeFromIso(
+      readString(liveDashboardData as Record<string, unknown>, "updatedAt"),
+    ),
   };
 }
 
@@ -3934,30 +4199,44 @@ function syncAdminManagedUsers(env?: unknown) {
 
   for (const email of getAdminEmails(env)) {
     const existing = byEmail.get(email) || {};
-    byEmail.set(email, normalizeAdminManagedUser({
-      ...existing,
+    byEmail.set(
       email,
-      name: readString(existing, "name") || nameFromEmail(email),
-      role: "owner",
-      plan: readString(existing, "plan") || "premium",
-      subscriptionStatus: "manual_vip",
-      currentPeriodEnd: readString(existing, "currentPeriodEnd") || addDaysIso(new Date().toISOString(), 3650),
-      isBlocked: false,
-    }, env));
+      normalizeAdminManagedUser(
+        {
+          ...existing,
+          email,
+          name: readString(existing, "name") || nameFromEmail(email),
+          role: "owner",
+          plan: readString(existing, "plan") || "premium",
+          subscriptionStatus: "manual_vip",
+          currentPeriodEnd:
+            readString(existing, "currentPeriodEnd") || addDaysIso(new Date().toISOString(), 3650),
+          isBlocked: false,
+        },
+        env,
+      ),
+    );
   }
 
   for (const email of getAdminApproverEmails(env)) {
     const existing = byEmail.get(email) || {};
-    byEmail.set(email, normalizeAdminManagedUser({
-      ...existing,
+    byEmail.set(
       email,
-      name: readString(existing, "name") || nameFromEmail(email),
-      role: "admin",
-      plan: readString(existing, "plan") || "free",
-      subscriptionStatus: readString(existing, "subscriptionStatus") || "active",
-      currentPeriodEnd: readString(existing, "currentPeriodEnd") || addDaysIso(new Date().toISOString(), 3650),
-      isBlocked: false,
-    }, env));
+      normalizeAdminManagedUser(
+        {
+          ...existing,
+          email,
+          name: readString(existing, "name") || nameFromEmail(email),
+          role: "admin",
+          plan: readString(existing, "plan") || "free",
+          subscriptionStatus: readString(existing, "subscriptionStatus") || "active",
+          currentPeriodEnd:
+            readString(existing, "currentPeriodEnd") || addDaysIso(new Date().toISOString(), 3650),
+          isBlocked: false,
+        },
+        env,
+      ),
+    );
   }
 
   if (byEmail.size === 0) {
@@ -3974,9 +4253,14 @@ function syncAdminManagedUsers(env?: unknown) {
 }
 
 function findAdminManagedUser(id: string, env?: unknown) {
-  return syncAdminManagedUsers(env).find((user) => {
-    return readString(user, "id") === id || readString(user, "email").toLowerCase() === id.toLowerCase();
-  }) || null;
+  return (
+    syncAdminManagedUsers(env).find((user) => {
+      return (
+        readString(user, "id") === id ||
+        readString(user, "email").toLowerCase() === id.toLowerCase()
+      );
+    }) || null
+  );
 }
 
 function adminManagedUserFromClient(client: Record<string, unknown>, env?: unknown) {
@@ -3986,20 +4270,30 @@ function adminManagedUserFromClient(client: Record<string, unknown>, env?: unkno
     Boolean(client.isBlocked) ||
     Boolean(client.is_blocked) ||
     readString(client, "access_status").toLowerCase() === "blocked";
-  return normalizeAdminManagedUser({
-    id: readString(client, "id") || email || crypto.randomUUID(),
-    name: readString(client, "full_name") || readString(client, "name") || nameFromEmail(email),
-    email,
-    role: readString(client, "role"),
-    plan: mapClientPlanToAdminPlan(readString(client, "plan"), readString(client, "access_status")),
-    subscriptionStatus: mapClientStatusToAdminStatus(client),
-    currentPeriodStart: readString(client, "starts_at") || readString(client, "currentPeriodStart") || readString(client, "created_at") || new Date().toISOString(),
-    currentPeriodEnd: expiresAt || addDaysIso(new Date().toISOString(), 7),
-    isBlocked: blocked,
-    adminNote: readString(client, "adminNote") || readString(client, "notes"),
-    createdAt: readString(client, "created_at") || new Date().toISOString(),
-    lastAccess: latestAccessLabel(email),
-  }, env);
+  return normalizeAdminManagedUser(
+    {
+      id: readString(client, "id") || email || crypto.randomUUID(),
+      name: readString(client, "full_name") || readString(client, "name") || nameFromEmail(email),
+      email,
+      role: readString(client, "role"),
+      plan: mapClientPlanToAdminPlan(
+        readString(client, "plan"),
+        readString(client, "access_status"),
+      ),
+      subscriptionStatus: mapClientStatusToAdminStatus(client),
+      currentPeriodStart:
+        readString(client, "starts_at") ||
+        readString(client, "currentPeriodStart") ||
+        readString(client, "created_at") ||
+        new Date().toISOString(),
+      currentPeriodEnd: expiresAt || addDaysIso(new Date().toISOString(), 7),
+      isBlocked: blocked,
+      adminNote: readString(client, "adminNote") || readString(client, "notes"),
+      createdAt: readString(client, "created_at") || new Date().toISOString(),
+      lastAccess: latestAccessLabel(email),
+    },
+    env,
+  );
 }
 
 function normalizeAdminManagedUser(user: Record<string, unknown>, env?: unknown) {
@@ -4014,10 +4308,7 @@ function normalizeAdminManagedUser(user: Record<string, unknown>, env?: unknown)
       readString(user, "subscription_status") ||
       readString(user, "access_status"),
   );
-  const isBlocked =
-    Boolean(user.isBlocked) ||
-    Boolean(user.is_blocked) ||
-    rawStatus === "blocked";
+  const isBlocked = Boolean(user.isBlocked) || Boolean(user.is_blocked) || rawStatus === "blocked";
   const status = isBlocked
     ? "blocked"
     : isExpiredIso(currentPeriodEnd) && rawStatus !== "canceled"
@@ -4044,9 +4335,12 @@ function normalizeAdminManagedUser(user: Record<string, unknown>, env?: unknown)
       new Date().toISOString(),
     currentPeriodEnd,
     isBlocked,
-    adminNote: readString(user, "adminNote") || readString(user, "admin_note") || readString(user, "notes"),
-    createdAt: readString(user, "createdAt") || readString(user, "created_at") || new Date().toISOString(),
-    lastAccess: readString(user, "lastAccess") || readString(user, "last_access") || latestAccessLabel(email),
+    adminNote:
+      readString(user, "adminNote") || readString(user, "admin_note") || readString(user, "notes"),
+    createdAt:
+      readString(user, "createdAt") || readString(user, "created_at") || new Date().toISOString(),
+    lastAccess:
+      readString(user, "lastAccess") || readString(user, "last_access") || latestAccessLabel(email),
   };
 }
 
@@ -4076,18 +4370,27 @@ function updateAdminManagedUser(
   const status = Object.hasOwn(body, "subscriptionStatus")
     ? normalizeAdminSubscriptionStatus(body.subscriptionStatus)
     : before.subscriptionStatus;
-  const updated = normalizeAdminManagedUser({
-    ...before,
-    name: Object.hasOwn(body, "name") ? readString(body, "name") : before.name,
-    email: Object.hasOwn(body, "email") ? readString(body, "email").toLowerCase() : before.email,
-    role: nextRole,
-    plan: Object.hasOwn(body, "plan") ? normalizeAdminPlan(body.plan) : before.plan,
-    subscriptionStatus: requestedBlocked ? "blocked" : status,
-    currentPeriodStart: Object.hasOwn(body, "currentPeriodStart") ? readString(body, "currentPeriodStart") : before.currentPeriodStart,
-    currentPeriodEnd: Object.hasOwn(body, "currentPeriodEnd") ? readString(body, "currentPeriodEnd") : before.currentPeriodEnd,
-    isBlocked: requestedBlocked,
-    adminNote: Object.hasOwn(body, "adminNote") ? readString(body, "adminNote") : before.adminNote,
-  }, env);
+  const updated = normalizeAdminManagedUser(
+    {
+      ...before,
+      name: Object.hasOwn(body, "name") ? readString(body, "name") : before.name,
+      email: Object.hasOwn(body, "email") ? readString(body, "email").toLowerCase() : before.email,
+      role: nextRole,
+      plan: Object.hasOwn(body, "plan") ? normalizeAdminPlan(body.plan) : before.plan,
+      subscriptionStatus: requestedBlocked ? "blocked" : status,
+      currentPeriodStart: Object.hasOwn(body, "currentPeriodStart")
+        ? readString(body, "currentPeriodStart")
+        : before.currentPeriodStart,
+      currentPeriodEnd: Object.hasOwn(body, "currentPeriodEnd")
+        ? readString(body, "currentPeriodEnd")
+        : before.currentPeriodEnd,
+      isBlocked: requestedBlocked,
+      adminNote: Object.hasOwn(body, "adminNote")
+        ? readString(body, "adminNote")
+        : before.adminNote,
+    },
+    env,
+  );
 
   upsertAdminManagedUser(updated);
   applyAdminManagedUserToClient(updated);
@@ -4123,12 +4426,19 @@ function extendAdminManagedUser(
       : before.plan === "trial"
         ? "trial"
         : "active";
-  return updateAdminManagedUser(env, adminRole, request, before, {
-    currentPeriodEnd,
-    subscriptionStatus: status,
-    isBlocked: false,
-    reason: reason || `Prorrogacao de ${days} dias`,
-  }, "EXTEND_ACCESS");
+  return updateAdminManagedUser(
+    env,
+    adminRole,
+    request,
+    before,
+    {
+      currentPeriodEnd,
+      subscriptionStatus: status,
+      isBlocked: false,
+      reason: reason || `Prorrogacao de ${days} dias`,
+    },
+    "EXTEND_ACCESS",
+  );
 }
 
 function blockAdminManagedUser(
@@ -4138,11 +4448,18 @@ function blockAdminManagedUser(
   target: Record<string, unknown>,
   reason: string,
 ) {
-  return updateAdminManagedUser(env, adminRole, request, target, {
-    isBlocked: true,
-    subscriptionStatus: "blocked",
-    reason: reason || "Bloqueio manual",
-  }, "BLOCK_USER");
+  return updateAdminManagedUser(
+    env,
+    adminRole,
+    request,
+    target,
+    {
+      isBlocked: true,
+      subscriptionStatus: "blocked",
+      reason: reason || "Bloqueio manual",
+    },
+    "BLOCK_USER",
+  );
 }
 
 function unblockAdminManagedUser(
@@ -4160,11 +4477,77 @@ function unblockAdminManagedUser(
       : before.plan === "trial"
         ? "trial"
         : "active";
-  return updateAdminManagedUser(env, adminRole, request, target, {
-    isBlocked: false,
-    subscriptionStatus: nextStatus,
-    reason: reason || "Reativacao manual",
-  }, "UNBLOCK_USER");
+  return updateAdminManagedUser(
+    env,
+    adminRole,
+    request,
+    target,
+    {
+      isBlocked: false,
+      subscriptionStatus: nextStatus,
+      reason: reason || "Reativacao manual",
+    },
+    "UNBLOCK_USER",
+  );
+}
+
+async function deleteAdminManagedUser(
+  env: unknown,
+  adminRole: AdminRole,
+  request: Request,
+  target: Record<string, unknown>,
+  reason: string,
+): Promise<
+  { ok: true; user: Record<string, unknown> } | { ok: false; status: number; error: string }
+> {
+  const before = normalizeAdminManagedUser(target, env);
+  const actorEmail = adminActorEmailFromRequest(request, env, adminRole);
+  const permission = canDeleteAdminManagedUser(adminRole, actorEmail, before);
+  if (!permission.ok) return permission;
+
+  markEntityDeleted(before);
+  removeUserEntityEverywhere(before);
+  recordAdminActionLog(env, request, adminRole, {
+    targetUserId: readString(before, "id"),
+    targetEmail: readString(before, "email"),
+    action: "DELETE_USER",
+    beforeJson: before,
+    afterJson: { deleted: true },
+    reason: reason || "Exclusao manual de cadastro",
+  });
+  await deletePersistedBillingUser(env, before);
+  return { ok: true, user: before };
+}
+
+function canDeleteAdminManagedUser(
+  adminRole: AdminRole,
+  actorEmail: string,
+  target: Record<string, unknown>,
+): { ok: true } | { ok: false; status: number; error: string } {
+  if (adminRole !== "owner") {
+    return { ok: false, status: 403, error: "Apenas owner pode excluir cadastros." };
+  }
+
+  const targetEmail = readString(target, "email").toLowerCase();
+  const targetRole = normalizeManagedUserRole(target.role);
+  if (targetRole === "owner") {
+    const ownerCount = syncAdminManagedUsers().filter(
+      (user) => normalizeManagedUserRole(user.role) === "owner",
+    ).length;
+    if (ownerCount <= 1) {
+      return { ok: false, status: 403, error: "Nao e permitido excluir o unico owner ativo." };
+    }
+  }
+
+  if (targetEmail && targetEmail === actorEmail) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Nao e permitido excluir o proprio cadastro por esta rota.",
+    };
+  }
+
+  return { ok: true };
 }
 
 function canEditAdminManagedUser(
@@ -4179,16 +4562,34 @@ function canEditAdminManagedUser(
     return { ok: false, status: 403, error: "Admin nao pode alterar outro admin ou owner." };
   }
   if (change.changingRole && adminRole !== "owner") {
-    return { ok: false, status: 403, error: "Apenas owner pode alterar permissoes administrativas." };
+    return {
+      ok: false,
+      status: 403,
+      error: "Apenas owner pode alterar permissoes administrativas.",
+    };
   }
   if (targetRole === "owner" && adminRole !== "owner") {
     return { ok: false, status: 403, error: "Admin nao pode alterar owner." };
   }
-  if (adminRole !== "owner" && targetEmail === actorEmail && (change.changingRole || change.requestedBlocked)) {
-    return { ok: false, status: 403, error: "Admin nao pode remover o proprio acesso por esta rota." };
+  if (
+    adminRole !== "owner" &&
+    targetEmail === actorEmail &&
+    (change.changingRole || change.requestedBlocked)
+  ) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Admin nao pode remover o proprio acesso por esta rota.",
+    };
   }
-  if (targetRole === "owner" && targetEmail === actorEmail && (change.nextRole !== "owner" || change.requestedBlocked)) {
-    const ownerCount = syncAdminManagedUsers().filter((user) => normalizeManagedUserRole(user.role) === "owner").length;
+  if (
+    targetRole === "owner" &&
+    targetEmail === actorEmail &&
+    (change.nextRole !== "owner" || change.requestedBlocked)
+  ) {
+    const ownerCount = syncAdminManagedUsers().filter(
+      (user) => normalizeManagedUserRole(user.role) === "owner",
+    ).length;
     if (ownerCount <= 1) {
       return { ok: false, status: 403, error: "Nao e permitido remover o unico owner ativo." };
     }
@@ -4203,9 +4604,10 @@ function upsertAdminManagedUser(user: Record<string, unknown>) {
   const index = liveAdminUsers.findIndex((item) => {
     return readString(item, "id") === id || readString(item, "email").toLowerCase() === email;
   });
-  liveAdminUsers = index >= 0
-    ? liveAdminUsers.map((item, itemIndex) => (itemIndex === index ? normalized : item))
-    : [normalized, ...liveAdminUsers];
+  liveAdminUsers =
+    index >= 0
+      ? liveAdminUsers.map((item, itemIndex) => (itemIndex === index ? normalized : item))
+      : [normalized, ...liveAdminUsers];
 }
 
 function applyAdminManagedUserToClient(user: Record<string, unknown>) {
@@ -4232,7 +4634,8 @@ function adminManagedUserToClient(user: Record<string, unknown>) {
   const status = normalizeAdminSubscriptionStatus(readString(user, "subscriptionStatus"));
   const blocked = Boolean(user.isBlocked) || status === "blocked";
   const expiresAt = readString(user, "currentPeriodEnd");
-  const active = !blocked && ["active", "manual_vip", "trial"].includes(status) && !isExpiredIso(expiresAt);
+  const active =
+    !blocked && ["active", "manual_vip", "trial"].includes(status) && !isExpiredIso(expiresAt);
   return {
     id: readString(user, "id"),
     full_name: readString(user, "name"),
@@ -4298,20 +4701,28 @@ function normalizeAdminActionLog(log: Record<string, unknown>) {
     beforeJson: readRecord(log.beforeJson || log.before_json),
     afterJson: readRecord(log.afterJson || log.after_json),
     reason: readString(log, "reason"),
-    createdAt: readString(log, "createdAt") || readString(log, "created_at") || new Date().toISOString(),
+    createdAt:
+      readString(log, "createdAt") || readString(log, "created_at") || new Date().toISOString(),
   };
 }
 
-function inferAdminAction(preferred: AdminActionType, before: Record<string, unknown>, after: Record<string, unknown>): AdminActionType {
+function inferAdminAction(
+  preferred: AdminActionType,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): AdminActionType {
   if (preferred === "UPDATE_ROLE") return "UPDATE_ROLE";
   if (preferred === "EXTEND_ACCESS") return "EXTEND_ACCESS";
-  if (preferred === "BLOCK_USER" || readString(after, "subscriptionStatus") === "blocked") return "BLOCK_USER";
+  if (preferred === "BLOCK_USER" || readString(after, "subscriptionStatus") === "blocked")
+    return "BLOCK_USER";
   if (preferred === "UNBLOCK_USER") return "UNBLOCK_USER";
   if (readString(after, "subscriptionStatus") === "manual_vip") return "MANUAL_VIP_GRANTED";
   if (readString(after, "subscriptionStatus") === "canceled") return "CANCEL_ACCESS";
-  if (readString(before, "currentPeriodEnd") !== readString(after, "currentPeriodEnd")) return "UPDATE_EXPIRATION_DATE";
+  if (readString(before, "currentPeriodEnd") !== readString(after, "currentPeriodEnd"))
+    return "UPDATE_EXPIRATION_DATE";
   if (readString(before, "plan") !== readString(after, "plan")) return "UPDATE_PLAN";
-  if (readString(before, "subscriptionStatus") !== readString(after, "subscriptionStatus")) return "UPDATE_SUBSCRIPTION_STATUS";
+  if (readString(before, "subscriptionStatus") !== readString(after, "subscriptionStatus"))
+    return "UPDATE_SUBSCRIPTION_STATUS";
   return preferred;
 }
 
@@ -4333,7 +4744,8 @@ function mapAdminPlanToClientPlan(plan: AdminManagedUserPlan): BillingPlanId {
 
 function mapClientStatusToAdminStatus(client: Record<string, unknown>): AdminSubscriptionStatus {
   const status = readString(client, "access_status").toLowerCase();
-  if (Boolean(client.isBlocked) || Boolean(client.is_blocked) || status === "blocked") return "blocked";
+  if (Boolean(client.isBlocked) || Boolean(client.is_blocked) || status === "blocked")
+    return "blocked";
   if (status === "manual_vip") return "manual_vip";
   if (status === "trial") return "trial";
   if (status === "canceled" || status === "cancelled") return "canceled";
@@ -4343,22 +4755,37 @@ function mapClientStatusToAdminStatus(client: Record<string, unknown>): AdminSub
 }
 
 function normalizeManagedUserRole(value: unknown): AdminManagedUserRole {
-  const text = String(value || "user").trim().toLowerCase();
+  const text = String(value || "user")
+    .trim()
+    .toLowerCase();
   if (text === "owner") return "owner";
   if (text === "admin" || text === "approver") return "admin";
   return "user";
 }
 
 function normalizeAdminPlan(value: unknown): AdminManagedUserPlan {
-  const text = String(value || "free").trim().toLowerCase();
-  if (text === "trial" || text === "monthly" || text === "premium" || text === "vip_manual") return text;
+  const text = String(value || "free")
+    .trim()
+    .toLowerCase();
+  if (text === "trial" || text === "monthly" || text === "premium" || text === "vip_manual")
+    return text;
   if (text === "vip") return "premium";
   return "free";
 }
 
 function normalizeAdminSubscriptionStatus(value: unknown): AdminSubscriptionStatus {
-  const text = String(value || "expired").trim().toLowerCase();
-  if (text === "trial" || text === "active" || text === "expired" || text === "canceled" || text === "blocked" || text === "manual_vip") return text;
+  const text = String(value || "expired")
+    .trim()
+    .toLowerCase();
+  if (
+    text === "trial" ||
+    text === "active" ||
+    text === "expired" ||
+    text === "canceled" ||
+    text === "blocked" ||
+    text === "manual_vip"
+  )
+    return text;
   if (text === "cancelled") return "canceled";
   if (text === "approved") return "active";
   if (text === "paused") return "blocked";
@@ -4393,7 +4820,10 @@ function decodeJwtPayload(token: string) {
   try {
     const payload = token.split(".")[1];
     if (!payload) return {};
-    const padded = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    const padded = payload
+      .replace(/-/g, "+")
+      .replace(/_/g, "/")
+      .padEnd(Math.ceil(payload.length / 4) * 4, "=");
     return readRecord(JSON.parse(atob(padded)));
   } catch {
     return {};
@@ -4401,11 +4831,19 @@ function decodeJwtPayload(token: string) {
 }
 
 function isAdminOwnerEmailForEnv(env: unknown, email: string) {
-  return getAdminEmails(env).includes(String(email || "").trim().toLowerCase());
+  return getAdminEmails(env).includes(
+    String(email || "")
+      .trim()
+      .toLowerCase(),
+  );
 }
 
 function isAdminApproverEmailForEnv(env: unknown, email: string) {
-  return getAdminApproverEmails(env).includes(String(email || "").trim().toLowerCase());
+  return getAdminApproverEmails(env).includes(
+    String(email || "")
+      .trim()
+      .toLowerCase(),
+  );
 }
 
 function latestAccessLabel(email: string) {
@@ -4515,6 +4953,7 @@ function buildLocationBreakdown(
 }
 
 function upsertRecipientFromClient(client: Record<string, unknown>) {
+  if (isEntityDeleted(client)) return false;
   const email = readString(client, "email").toLowerCase();
   if (!email) return false;
   const existingIndex = liveRecipients.findIndex(
@@ -4544,6 +4983,7 @@ function upsertRecipientFromClient(client: Record<string, unknown>) {
 }
 
 function upsertClientFromRecipient(recipient: Record<string, unknown>) {
+  if (isEntityDeleted(recipient)) return;
   const email = readString(recipient, "email").toLowerCase();
   if (!email) return;
   const existingIndex = liveClients.findIndex(
@@ -4676,7 +5116,10 @@ function addMinutesIso(startIso: string, minutes: number) {
 }
 
 function freeTrialMinutes(env: unknown) {
-  return Math.max(1, Math.floor(readServerNumber(env, "SNIPER_FREE_TRIAL_MINUTES", FREE_TRIAL_MINUTES)));
+  return Math.max(
+    1,
+    Math.floor(readServerNumber(env, "SNIPER_FREE_TRIAL_MINUTES", FREE_TRIAL_MINUTES)),
+  );
 }
 
 function getLiveStateCache() {
@@ -4731,9 +5174,7 @@ function applyLiveState(state: Record<string, unknown>) {
   }
 
   if (Array.isArray(state.clients)) {
-    liveClients = state.clients
-      .map(readRecord)
-      .filter((client) => Object.keys(client).length > 0);
+    liveClients = state.clients.map(readRecord).filter((client) => Object.keys(client).length > 0);
   }
 
   if (Array.isArray(state.accessEvents)) {
@@ -4801,22 +5242,57 @@ function mergeLiveStates(
   const cache = cacheState || {};
   const durableSavedAt = stateSavedAtMs(durable);
   const cacheSavedAt = stateSavedAtMs(cache);
-  const deletedEntities = mergeDeletedEntityStates(durable.deletedEntities, cache.deletedEntities).slice(0, 1000);
+  const deletedEntities = mergeDeletedEntityStates(
+    durable.deletedEntities,
+    cache.deletedEntities,
+  ).slice(0, 1000);
   return {
     ...cache,
     ...durable,
     dashboard: pickDashboardState(durable.dashboard, cache.dashboard),
-    recipients: filterDeletedEntityRows(mergeEntityStateArrays(durable.recipients, cache.recipients, durableSavedAt, cacheSavedAt, true), deletedEntities),
-    clients: filterDeletedEntityRows(mergeEntityStateArrays(durable.clients, cache.clients, durableSavedAt, cacheSavedAt, true), deletedEntities),
+    recipients: filterDeletedEntityRows(
+      mergeEntityStateArrays(
+        durable.recipients,
+        cache.recipients,
+        durableSavedAt,
+        cacheSavedAt,
+        true,
+      ),
+      deletedEntities,
+    ),
+    clients: filterDeletedEntityRows(
+      mergeEntityStateArrays(durable.clients, cache.clients, durableSavedAt, cacheSavedAt, true),
+      deletedEntities,
+    ),
     accessEvents: mergeStateArrays(durable.accessEvents, cache.accessEvents).slice(0, 200),
-    subscriptions: mergeEntityStateArrays(durable.subscriptions, cache.subscriptions, durableSavedAt, cacheSavedAt).slice(0, 500),
-    payments: mergeEntityStateArrays(durable.payments, cache.payments, durableSavedAt, cacheSavedAt).slice(0, 1000),
-    adminUsers: filterDeletedEntityRows(mergeEntityStateArrays(durable.adminUsers, cache.adminUsers, durableSavedAt, cacheSavedAt, true), deletedEntities).slice(0, 1000),
+    subscriptions: mergeEntityStateArrays(
+      durable.subscriptions,
+      cache.subscriptions,
+      durableSavedAt,
+      cacheSavedAt,
+    ).slice(0, 500),
+    payments: mergeEntityStateArrays(
+      durable.payments,
+      cache.payments,
+      durableSavedAt,
+      cacheSavedAt,
+    ).slice(0, 1000),
+    adminUsers: filterDeletedEntityRows(
+      mergeEntityStateArrays(
+        durable.adminUsers,
+        cache.adminUsers,
+        durableSavedAt,
+        cacheSavedAt,
+        true,
+      ),
+      deletedEntities,
+    ).slice(0, 1000),
     adminActionLogs: mergeStateArrays(durable.adminActionLogs, cache.adminActionLogs).slice(0, 500),
     deletedEntities,
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
     salesSettings: pickStateObjectByUpdatedAt(durable.salesSettings, cache.salesSettings),
-    savedAt: readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
+    savedAt:
+      readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
   };
 }
 
@@ -4908,7 +5384,8 @@ function mergeStateArrays(primary: unknown, secondary: unknown) {
   const rows = [...pickStateArray(primary, []), ...pickStateArray(secondary, [])];
   const byKey = new Map<string, Record<string, unknown>>();
   for (const row of rows) {
-    const key = readString(row, "id") || readString(row, "email").toLowerCase() || JSON.stringify(row);
+    const key =
+      readString(row, "id") || readString(row, "email").toLowerCase() || JSON.stringify(row);
     byKey.set(key, { ...(byKey.get(key) || {}), ...row });
   }
   return [...byKey.values()];
@@ -4936,12 +5413,20 @@ function mergeEntityStateArrays(
     }
 
     const incomingIsNewer =
-      compareStateEntityFreshness(item.row, item.sourceSavedAt, existing.row, existing.sourceSavedAt) >= 0;
+      compareStateEntityFreshness(
+        item.row,
+        item.sourceSavedAt,
+        existing.row,
+        existing.sourceSavedAt,
+      ) >= 0;
     byKey.set(
       key,
       incomingIsNewer
         ? { row: mergeStateEntityRecord(existing.row, item.row), sourceSavedAt: item.sourceSavedAt }
-        : { row: mergeStateEntityRecord(item.row, existing.row), sourceSavedAt: existing.sourceSavedAt },
+        : {
+            row: mergeStateEntityRecord(item.row, existing.row),
+            sourceSavedAt: existing.sourceSavedAt,
+          },
     );
   }
 
@@ -5029,6 +5514,28 @@ function markEntityDeleted(row: Record<string, unknown>) {
   ].slice(0, 1000);
 }
 
+function removeUserEntityEverywhere(row: Record<string, unknown>) {
+  liveRecipients = liveRecipients.filter((recipient) => !userEntityMatches(recipient, row));
+  liveClients = liveClients.filter((client) => !userEntityMatches(client, row));
+  liveAdminUsers = liveAdminUsers.filter((user) => !userEntityMatches(user, row));
+  liveSubscriptions = liveSubscriptions.filter(
+    (subscription) => !userEntityMatches(subscription, row),
+  );
+  livePayments = livePayments.filter((payment) => !userEntityMatches(payment, row));
+}
+
+function userEntityMatches(row: Record<string, unknown>, target: Record<string, unknown>) {
+  const targetId = readString(target, "id");
+  const targetEmail = readString(target, "email").toLowerCase();
+  const rowId = readString(row, "id");
+  const rowUserId = readString(row, "user_id");
+  const rowEmail = readString(row, "email").toLowerCase();
+  return Boolean(
+    (targetId && (rowId === targetId || rowUserId === targetId)) ||
+    (targetEmail && rowEmail === targetEmail),
+  );
+}
+
 function clearDeletedEntityForRecord(row: Record<string, unknown>) {
   liveDeletedEntities = liveDeletedEntities.filter((entry) => !deletedEntitiesMatch(entry, row));
 }
@@ -5060,14 +5567,18 @@ function deletedEntitiesMatch(left: Record<string, unknown>, right: Record<strin
   const rightId = readString(right, "id");
   const leftEmail = readString(left, "email").toLowerCase();
   const rightEmail = readString(right, "email").toLowerCase();
-  return Boolean((leftId && rightId && leftId === rightId) || (leftEmail && rightEmail && leftEmail === rightEmail));
+  return Boolean(
+    (leftId && rightId && leftId === rightId) ||
+    (leftEmail && rightEmail && leftEmail === rightEmail),
+  );
 }
 
 function normalizeDeletedEntity(row: Record<string, unknown>) {
   return {
     id: readString(row, "id"),
     email: readString(row, "email").toLowerCase(),
-    deleted_at: readString(row, "deleted_at") || readString(row, "deletedAt") || new Date().toISOString(),
+    deleted_at:
+      readString(row, "deleted_at") || readString(row, "deletedAt") || new Date().toISOString(),
   };
 }
 
@@ -5220,7 +5731,10 @@ function supabasePersistenceHeaders(key: string) {
 }
 
 function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData {
-  if (compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, value) > 0) {
+  if (
+    compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, value) >
+    0
+  ) {
     return ensureDashboardDailyCycle(liveDashboardData).dashboard;
   }
 
@@ -5251,11 +5765,16 @@ function restoreModuleToggles(value: Record<string, unknown>) {
 
 function restoreSalesSettings(value: Record<string, unknown>): SalesSettings {
   return {
-    salesClosed: typeof value.salesClosed === "boolean"
-      ? value.salesClosed
-      : liveSalesSettings.salesClosed,
-    updated_at: readString(value, "updated_at") || readString(value, "updatedAt") || liveSalesSettings.updated_at,
-    updated_by: readString(value, "updated_by") || readString(value, "updatedBy") || liveSalesSettings.updated_by,
+    salesClosed:
+      typeof value.salesClosed === "boolean" ? value.salesClosed : liveSalesSettings.salesClosed,
+    updated_at:
+      readString(value, "updated_at") ||
+      readString(value, "updatedAt") ||
+      liveSalesSettings.updated_at,
+    updated_by:
+      readString(value, "updated_by") ||
+      readString(value, "updatedBy") ||
+      liveSalesSettings.updated_by,
   };
 }
 
@@ -5267,7 +5786,9 @@ function publicSalesSettings() {
 }
 
 function adminSalesSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
-  const durableConfigured = env ? Boolean(getSupabasePersistenceConfig(env)) : saveStatus.durableConfigured;
+  const durableConfigured = env
+    ? Boolean(getSupabasePersistenceConfig(env))
+    : saveStatus.durableConfigured;
   const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
   const warning = !durableConfigured
     ? "Persistencia fixa nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para a chave nao voltar sozinha."
@@ -5308,7 +5829,8 @@ function json(data: unknown, status = 200) {
       pragma: "no-cache",
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
-      "access-control-allow-headers": "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
+      "access-control-allow-headers":
+        "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
     },
   });
 }
@@ -5416,7 +5938,11 @@ async function hmacSign(secret: string, data: string): Promise<Uint8Array> {
   return new Uint8Array(sig);
 }
 
-export async function issueSessionToken(env: unknown, payload: Omit<SessionPayload, "exp">, ttlSeconds = 60 * 60 * 24): Promise<string> {
+export async function issueSessionToken(
+  env: unknown,
+  payload: Omit<SessionPayload, "exp">,
+  ttlSeconds = 60 * 60 * 24,
+): Promise<string> {
   const secret = getSessionSecret(env);
   if (!secret) return "";
   const full: SessionPayload = { ...payload, exp: Math.floor(Date.now() / 1000) + ttlSeconds };
@@ -5425,7 +5951,10 @@ export async function issueSessionToken(env: unknown, payload: Omit<SessionPaylo
   return `${body}.${sig}`;
 }
 
-export async function verifySessionToken(env: unknown, token: string): Promise<SessionPayload | null> {
+export async function verifySessionToken(
+  env: unknown,
+  token: string,
+): Promise<SessionPayload | null> {
   const secret = getSessionSecret(env);
   if (!secret || !token || !token.includes(".")) return null;
   const [body, sig] = token.split(".");

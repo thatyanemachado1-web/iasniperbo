@@ -19,7 +19,8 @@ export type AdminActionType =
   | "UPDATE_EXPIRATION_DATE"
   | "MANUAL_VIP_GRANTED"
   | "CANCEL_ACCESS"
-  | "REACTIVATE_USER";
+  | "REACTIVATE_USER"
+  | "DELETE_USER";
 
 export interface AdminManagedUser {
   id: string;
