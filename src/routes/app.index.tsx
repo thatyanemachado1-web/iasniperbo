@@ -128,6 +128,7 @@ function DashboardPage() {
             <SignalCard
               signal={d.currentSignal}
               neuralReading={d.neuralReading}
+              neuralScoreboard={d.neuralScoreboard}
               surfSummary={surfSummary}
               tieAlert={tieAlertEnabled ? d.currentTieAlert : undefined}
               operationalMessage={buildSignalCopy(d)}
