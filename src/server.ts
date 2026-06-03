@@ -36,6 +36,12 @@ type SalesSettings = {
   updated_at: string;
   updated_by: string;
 };
+type LiveStateSaveStatus = {
+  durable: boolean;
+  cache: boolean;
+  durableConfigured: boolean;
+  saved_at: string;
+};
 type AdminManagedUserRole = "user" | "admin" | "owner";
 type AdminManagedUserPlan = "free" | "trial" | "monthly" | "premium" | "vip_manual";
 type AdminSubscriptionStatus = "trial" | "active" | "expired" | "canceled" | "blocked" | "manual_vip";
@@ -94,6 +100,12 @@ let liveSalesSettings: SalesSettings = {
   salesClosed: false,
   updated_at: "",
   updated_by: "",
+};
+let liveStateSaveStatus: LiveStateSaveStatus = {
+  durable: false,
+  cache: false,
+  durableConfigured: false,
+  saved_at: "",
 };
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
@@ -1349,7 +1361,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (url.pathname === "/admin/sales-settings") {
     if (request.method === "GET") {
-      return json({ salesSettings: adminSalesSettings() });
+      return json({ salesSettings: adminSalesSettings(env) });
     }
 
     if (request.method === "POST") {
@@ -1367,11 +1379,11 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         targetEmail: "global",
         action: "UPDATE_USER",
         beforeJson: {},
-        afterJson: adminSalesSettings(),
+        afterJson: adminSalesSettings(env),
         reason: nextClosed ? "Vendas encerradas pelo admin." : "Vendas reabertas pelo admin.",
       });
-      await saveLiveState(env);
-      return json({ salesSettings: adminSalesSettings() });
+      const saveStatus = await saveLiveState(env);
+      return json({ salesSettings: adminSalesSettings(env, saveStatus) });
     }
 
     return json({ error: "Metodo nao permitido." }, 405);
@@ -4687,8 +4699,7 @@ async function loadLiveState(env: unknown) {
     if (isSalesSettingsNewer(currentSalesSettings, liveSalesSettings)) {
       liveSalesSettings = currentSalesSettings;
     }
-    const refreshedState = buildLiveStateSnapshot();
-    await Promise.allSettled([saveLiveStateCache(refreshedState), saveDurableLiveState(env, refreshedState)]);
+    await saveLiveState(env);
   }
 }
 
@@ -5095,14 +5106,25 @@ function buildLiveStateSnapshot() {
   };
 }
 
-async function saveLiveState(env: unknown) {
+async function saveLiveState(env: unknown): Promise<LiveStateSaveStatus> {
   const state = buildLiveStateSnapshot();
-  await Promise.allSettled([saveDurableLiveState(env, state), saveLiveStateCache(state)]);
+  const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
+  const [durableResult, cacheResult] = await Promise.allSettled([
+    saveDurableLiveState(env, state),
+    saveLiveStateCache(state),
+  ]);
+  liveStateSaveStatus = {
+    durable: durableResult.status === "fulfilled" && durableResult.value === true,
+    cache: cacheResult.status === "fulfilled" && cacheResult.value === true,
+    durableConfigured,
+    saved_at: new Date().toISOString(),
+  };
+  return liveStateSaveStatus;
 }
 
 async function saveLiveStateCache(state: Record<string, unknown>) {
   const cache = getLiveStateCache();
-  if (!cache) return;
+  if (!cache) return false;
 
   try {
     await cache.put(
@@ -5114,8 +5136,10 @@ async function saveLiveStateCache(state: Record<string, unknown>) {
         },
       }),
     );
+    return true;
   } catch (error) {
     console.warn("Nao foi possivel salvar estado vivo no cache.", error);
+    return false;
   }
 }
 
@@ -5148,10 +5172,10 @@ async function loadDurableLiveState(env: unknown) {
 
 async function saveDurableLiveState(env: unknown, state: Record<string, unknown>) {
   const config = getSupabasePersistenceConfig(env);
-  if (!config) return;
+  if (!config) return false;
 
   try {
-    const response = await fetch(`${config.url}/rest/v1/${LIVE_STATE_TABLE}`, {
+    const response = await fetch(`${config.url}/rest/v1/${LIVE_STATE_TABLE}?on_conflict=id`, {
       method: "POST",
       headers: {
         ...supabasePersistenceHeaders(config.key),
@@ -5166,9 +5190,12 @@ async function saveDurableLiveState(env: unknown, state: Record<string, unknown>
     });
     if (!response.ok) {
       console.warn(`Nao foi possivel salvar estado duravel (${response.status}).`);
+      return false;
     }
+    return true;
   } catch (error) {
     console.warn("Nao foi possivel salvar estado duravel.", error);
+    return false;
   }
 }
 
@@ -5239,11 +5266,21 @@ function publicSalesSettings() {
   };
 }
 
-function adminSalesSettings() {
+function adminSalesSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
+  const durableConfigured = env ? Boolean(getSupabasePersistenceConfig(env)) : saveStatus.durableConfigured;
+  const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
+  const warning = !durableConfigured
+    ? "Persistencia fixa nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para a chave nao voltar sozinha."
+    : saveStatus.saved_at && !saveStatus.durable
+      ? "Nao foi possivel confirmar o salvamento duravel. Verifique a tabela sniper_live_state no Supabase."
+      : "";
   return {
     ...publicSalesSettings(),
     updated_at: liveSalesSettings.updated_at,
     updated_by: liveSalesSettings.updated_by,
+    persistence: durableReady ? "durable" : "temporary",
+    storageReady: durableConfigured,
+    warning,
   };
 }
 

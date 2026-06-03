@@ -532,6 +532,7 @@ function AdminPage() {
           ? "Vendas encerradas. Cadastro novo e checkout foram bloqueados."
           : "Vendas abertas. Planos, preços e checkout foram liberados.",
       );
+      if (updated.warning) setError(updated.warning);
     } catch (err) {
       setSalesSettings(previous);
       setError(err instanceof Error ? err.message : "Não foi possível atualizar as vendas.");
@@ -1028,6 +1029,7 @@ function SalesSettingsPanel({
   onChange: (salesClosed: boolean) => void;
 }) {
   const closed = settings.salesClosed;
+  const hasPersistenceWarning = Boolean(settings.warning || settings.persistence === "temporary");
   return (
     <GlassCard className={`py-4 ${closed ? "border-destructive/35" : "border-success/30"}`}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1054,6 +1056,11 @@ function SalesSettingsPanel({
           {settings.updated_at && (
             <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
               Última alteração: {formatDateTimeBR(settings.updated_at)}
+            </div>
+          )}
+          {hasPersistenceWarning && (
+            <div className="mt-3 rounded-xl border border-warning/35 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
+              {settings.warning || "Atenção: esta chave ainda não foi confirmada em armazenamento fixo."}
             </div>
           )}
         </div>

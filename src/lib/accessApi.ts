@@ -42,6 +42,9 @@ export interface SalesSettings {
   mode: "open" | "closed";
   updated_at?: string;
   updated_by?: string;
+  persistence?: "durable" | "temporary";
+  storageReady?: boolean;
+  warning?: string;
 }
 
 export interface BillingSubscriptionOverview {
