@@ -2,9 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
+import { SalesClosedPanel } from "@/components/ui-app/SalesClosedPanel";
 import {
   createBillingCheckout,
   getBillingPlans,
+  getSalesSettings,
   type BillingPlan,
 } from "@/lib/accessApi";
 import { readUserSession } from "@/lib/userSession";
@@ -51,6 +53,7 @@ function PlanosPage() {
   const [plans, setPlans] = useState<BillingPlan[]>(fallbackPlans);
   const [loadingPlan, setLoadingPlan] = useState<string>("");
   const [error, setError] = useState("");
+  const [salesClosed, setSalesClosed] = useState(false);
   const session = readUserSession();
   const trialExpired =
     typeof window !== "undefined" &&
@@ -58,9 +61,16 @@ function PlanosPage() {
 
   useEffect(() => {
     let active = true;
+    getSalesSettings()
+      .then((settings) => {
+        if (active) setSalesClosed(settings.salesClosed);
+      })
+      .catch(() => {
+        if (active) setSalesClosed(false);
+      });
     getBillingPlans()
       .then((loadedPlans) => {
-        if (active && loadedPlans.length > 0) setPlans(loadedPlans);
+        if (active) setPlans(loadedPlans);
       })
       .catch(() => {
         if (active) setPlans(fallbackPlans);
@@ -77,6 +87,10 @@ function PlanosPage() {
 
   async function handleCheckout(plan: BillingPlan) {
     if (plan.id === "free") return;
+    if (salesClosed) {
+      setError("Vendas encerradas no momento. Entre na fila de espera para a próxima abertura.");
+      return;
+    }
     setError("");
     setLoadingPlan(plan.id);
     try {
@@ -86,6 +100,10 @@ function PlanosPage() {
       setError(checkoutError instanceof Error ? checkoutError.message : "Nao foi possivel abrir o checkout.");
       setLoadingPlan("");
     }
+  }
+
+  if (salesClosed) {
+    return <SalesClosedPanel fullHeight={false} onClientLogin={() => { window.location.href = "/"; }} />;
   }
 
   return (

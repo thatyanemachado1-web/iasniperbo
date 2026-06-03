@@ -7,6 +7,7 @@ import type {
   AdminUsersResponse,
 } from "@/types/adminPanel";
 import type { ModuleToggles } from "@/types/dashboard";
+import type { SalesSettings } from "@/lib/accessApi";
 
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
@@ -126,6 +127,22 @@ export async function deleteSignalRecipient(session: AdminSession, recipientId: 
 export async function getModuleToggles(session: AdminSession) {
   const data = await request<{ moduleToggles: ModuleToggles }>(session, "/module-toggles");
   return data.moduleToggles;
+}
+
+export async function getAdminSalesSettings(session: AdminSession) {
+  const data = await request<{ salesSettings: SalesSettings }>(session, "/admin/sales-settings");
+  return data.salesSettings;
+}
+
+export async function updateAdminSalesSettings(
+  session: AdminSession,
+  payload: Pick<SalesSettings, "salesClosed">,
+) {
+  const data = await request<{ salesSettings: SalesSettings }>(session, "/admin/sales-settings", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.salesSettings;
 }
 
 export async function listSecurityEvents(session: AdminSession) {

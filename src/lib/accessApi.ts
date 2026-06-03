@@ -37,6 +37,13 @@ export interface BillingPlan {
   checkoutProvider?: "hubla" | "mercadopago" | "";
 }
 
+export interface SalesSettings {
+  salesClosed: boolean;
+  mode: "open" | "closed";
+  updated_at?: string;
+  updated_by?: string;
+}
+
 export interface BillingSubscriptionOverview {
   email: string;
   plan: "free" | "premium" | "vip";
@@ -106,8 +113,13 @@ export async function refreshAccessSession() {
 }
 
 export async function getBillingPlans() {
-  const data = await apiRequest<{ plans: BillingPlan[] }>("/billing/plans", { method: "GET" });
+  const data = await apiRequest<{ plans: BillingPlan[]; salesSettings?: SalesSettings }>("/billing/plans", { method: "GET" });
   return data.plans ?? [];
+}
+
+export async function getSalesSettings() {
+  const data = await apiRequest<{ salesSettings: SalesSettings }>("/sales/settings", { method: "GET" });
+  return data.salesSettings ?? { salesClosed: false, mode: "open" as const };
 }
 
 export async function getBillingSubscription() {

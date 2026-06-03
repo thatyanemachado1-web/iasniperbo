@@ -6,17 +6,20 @@ import {
   adminLogin,
   createSignalRecipient,
   deleteSignalRecipient,
+  getAdminSalesSettings,
   getAdminSummary,
   getInitialApiUrl,
   listSecurityEvents,
   listSignalRecipients,
   readAdminSession,
   saveAdminSession,
+  updateAdminSalesSettings,
   updateSignalRecipient,
   useLocalAdminApiUrl,
 } from "@/lib/adminApi";
 import { canAccessAdminPanel, isAdminOwnerEmail, readUserSession, saveUserSession } from "@/lib/userSession";
 import type { AdminSession, AdminSummary, RecipientKind, RecipientPlan, SecurityEvent, SecuritySummary, SignalRecipient } from "@/types/admin";
+import type { SalesSettings } from "@/lib/accessApi";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -38,6 +41,7 @@ import {
   RefreshCw,
   Save,
   Server,
+  Settings2,
   ShieldCheck,
   Trash2,
   UserCheck,
@@ -115,9 +119,14 @@ function AdminPage() {
     critical: 0,
   });
   const [adminSummary, setAdminSummary] = useState<AdminSummary>(() => emptyAdminSummary());
+  const [salesSettings, setSalesSettings] = useState<SalesSettings>({
+    salesClosed: false,
+    mode: "open",
+  });
   const [adminView, setAdminView] = useState<AdminView>("aprovacoes");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [salesSaving, setSalesSaving] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [exported, setExported] = useState("");
@@ -231,6 +240,15 @@ function AdminPage() {
     }
   }
 
+  async function refreshSalesSettings(currentSession = session) {
+    if (!currentSession) return;
+    try {
+      setSalesSettings(await getAdminSalesSettings(currentSession));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível carregar as configurações de vendas.");
+    }
+  }
+
   async function restoreRecipientsFromBackupIfNeeded(
     currentSession: AdminSession,
     fetched: SignalRecipient[],
@@ -264,6 +282,7 @@ function AdminPage() {
   useEffect(() => {
     if (canUseAdmin) {
       refreshRecipients();
+      refreshSalesSettings();
       if (isOwnerAdmin) {
         refreshSecurityEvents();
         refreshAdminSummary();
@@ -300,6 +319,7 @@ function AdminPage() {
       setEmail(logged.email);
       setPassword("");
       await refreshRecipients(logged);
+      await refreshSalesSettings(logged);
       if (loggedRole === "owner") {
         await refreshSecurityEvents(logged);
         await refreshAdminSummary(logged);
@@ -494,6 +514,32 @@ function AdminPage() {
     }
   }
 
+  async function handleSalesSettingsChange(nextClosed: boolean) {
+    if (!session || salesSaving || salesSettings.salesClosed === nextClosed) return;
+    setSalesSaving(true);
+    setError("");
+    const previous = salesSettings;
+    setSalesSettings({
+      ...previous,
+      salesClosed: nextClosed,
+      mode: nextClosed ? "closed" : "open",
+    });
+    try {
+      const updated = await updateAdminSalesSettings(session, { salesClosed: nextClosed });
+      setSalesSettings(updated);
+      setExported(
+        nextClosed
+          ? "Vendas encerradas. Cadastro novo e checkout foram bloqueados."
+          : "Vendas abertas. Planos, preços e checkout foram liberados.",
+      );
+    } catch (err) {
+      setSalesSettings(previous);
+      setError(err instanceof Error ? err.message : "Não foi possível atualizar as vendas.");
+    } finally {
+      setSalesSaving(false);
+    }
+  }
+
   function logout() {
     clearAdminSession();
     setSession(null);
@@ -501,6 +547,7 @@ function AdminPage() {
     setSecurityEvents([]);
     setSecuritySummary({ total: 0, low: 0, medium: 0, high: 0, critical: 0 });
     setAdminSummary(emptyAdminSummary());
+    setSalesSettings({ salesClosed: false, mode: "open" });
   }
 
   if (!session) {
@@ -596,6 +643,7 @@ function AdminPage() {
             type="button"
             onClick={() => {
               refreshRecipients();
+              refreshSalesSettings();
               refreshSecurityEvents();
               refreshAdminSummary();
             }}
@@ -617,6 +665,12 @@ function AdminPage() {
 
       {error && <StatusMessage tone="red" icon={<WifiOff className="size-4" />} text={error} />}
       {exported && <StatusMessage tone="green" icon={<Check className="size-4" />} text={exported} />}
+
+      <SalesSettingsPanel
+        settings={salesSettings}
+        saving={salesSaving}
+        onChange={handleSalesSettingsChange}
+      />
 
       <div className={`grid gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 ${isOwnerAdmin ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-1"}`}>
         <AdminTabButton active={adminView === "aprovacoes"} onClick={() => setAdminView("aprovacoes")}>
@@ -961,6 +1015,79 @@ function AdminPage() {
         </>
       )}
     </div>
+  );
+}
+
+function SalesSettingsPanel({
+  settings,
+  saving,
+  onChange,
+}: {
+  settings: SalesSettings;
+  saving: boolean;
+  onChange: (salesClosed: boolean) => void;
+}) {
+  const closed = settings.salesClosed;
+  return (
+    <GlassCard className={`py-4 ${closed ? "border-destructive/35" : "border-success/30"}`}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex size-9 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 text-neon-cyan">
+              <Settings2 className="size-4" />
+            </div>
+            <SectionTitle
+              title="Configurações de Vendas"
+              subtitle="Controle global para abrir ou encerrar novas assinaturas sem apagar planos, clientes ou configurações."
+              right={
+                <AppBadge tone={closed ? "red" : "green"} pulse>
+                  {closed ? "Vendas encerradas" : "Vendas abertas"}
+                </AppBadge>
+              }
+            />
+          </div>
+          <div className="mt-3 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+            {closed
+              ? "Novos cadastros, planos, preços, botões de compra e checkout ficam ocultos. Clientes Premium com acesso ativo continuam entrando normalmente."
+              : "O site está liberado para cadastro, exibição dos planos e checkout."}
+          </div>
+          {settings.updated_at && (
+            <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
+              Última alteração: {formatDateTimeBR(settings.updated_at)}
+            </div>
+          )}
+        </div>
+
+        <div className="grid min-w-full grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 sm:min-w-[340px]">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => onChange(false)}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black transition disabled:opacity-60 ${
+              !closed
+                ? "bg-success/20 text-success border border-success/40"
+                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+            }`}
+          >
+            {saving && !closed ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            Vendas abertas
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => onChange(true)}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black transition disabled:opacity-60 ${
+              closed
+                ? "bg-destructive/18 text-destructive border border-destructive/40"
+                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+            }`}
+          >
+            {saving && closed ? <Loader2 className="size-3.5 animate-spin" /> : <Power className="size-3.5" />}
+            Vendas encerradas
+          </button>
+        </div>
+      </div>
+    </GlassCard>
   );
 }
 

@@ -1,7 +1,7 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
-import { refreshAccessSession } from "@/lib/accessApi";
+import { getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
 import { hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app")({
@@ -12,6 +12,7 @@ function ProtectedAppRoute() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const session = readUserSession();
+  const [salesClosed, setSalesClosed] = useState(false);
   const isAdminRoute = pathname.startsWith("/app/admin");
   const isAccountRoute = pathname.startsWith("/app/conta");
   const isCheckoutRoute =
@@ -19,15 +20,35 @@ function ProtectedAppRoute() {
     pathname.startsWith("/app/assinatura") ||
     pathname.startsWith("/app/pagamentos");
   const isOwner = isAdminOwnerEmail(session.email);
+  const isAdminUser = session.role === "admin" || session.role === "owner" || isOwner;
+  const fullAccess = hasFullAccess(session);
   const canOpenApp = session.registered || isOwner;
   const demoExpired = session.accessMode === "demo" && isExpiredAt(session.expiresAt);
   const canOpenDashboard =
-    hasFullAccess(session) ||
+    fullAccess ||
     (session.accessMode === "demo" && !demoExpired) ||
     (session.registered && session.accessMode === "pending");
 
   useEffect(() => {
+    let active = true;
+    getSalesSettings()
+      .then((settings) => {
+        if (active) setSalesClosed(settings.salesClosed);
+      })
+      .catch(() => {
+        if (active) setSalesClosed(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (isAdminRoute) return;
+    if (salesClosed && !fullAccess && !isAdminUser) {
+      navigate({ to: "/" });
+      return;
+    }
     if (!session.email || !canOpenApp) {
       navigate({ to: "/" });
       return;
@@ -39,10 +60,13 @@ function ProtectedAppRoute() {
     canOpenApp,
     canOpenDashboard,
     demoExpired,
+    fullAccess,
     isAccountRoute,
+    isAdminUser,
     isAdminRoute,
     isCheckoutRoute,
     navigate,
+    salesClosed,
     session.email,
   ]);
 
@@ -96,6 +120,7 @@ function ProtectedAppRoute() {
     };
   }, [isAdminRoute, isOwner]);
 
+  if (!isAdminRoute && salesClosed && !fullAccess && !isAdminUser) return null;
   if (!isAdminRoute && (!session.email || !canOpenApp)) return null;
   if (!isAdminRoute && !canOpenDashboard && !isCheckoutRoute && !isAccountRoute) return null;
 

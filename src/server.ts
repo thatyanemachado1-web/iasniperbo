@@ -31,6 +31,11 @@ type WorkerCacheStorage = CacheStorage & { default?: Cache };
 type AdminRole = "owner" | "admin";
 type BillingPlanId = "free" | "premium" | "vip";
 type SubscriptionStatus = "free" | "pending" | "active" | "expired" | "cancelled" | "past_due";
+type SalesSettings = {
+  salesClosed: boolean;
+  updated_at: string;
+  updated_by: string;
+};
 type AdminManagedUserRole = "user" | "admin" | "owner";
 type AdminManagedUserPlan = "free" | "trial" | "monthly" | "premium" | "vip_manual";
 type AdminSubscriptionStatus = "trial" | "active" | "expired" | "canceled" | "blocked" | "manual_vip";
@@ -84,6 +89,11 @@ let liveDeletedEntities: Array<Record<string, unknown>> = [];
 let liveModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
+};
+let liveSalesSettings: SalesSettings = {
+  salesClosed: false,
+  updated_at: "",
+  updated_by: "",
 };
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
@@ -179,6 +189,9 @@ export default {
       const voiceDiagnosticsResponse = await handleVoiceDiagnosticsRequest(request, env);
       if (voiceDiagnosticsResponse) return withSecurityHeaders(voiceDiagnosticsResponse);
 
+      const salesSettingsResponse = await handleSalesSettingsRequest(request);
+      if (salesSettingsResponse) return withSecurityHeaders(salesSettingsResponse);
+
       const billingResponse = await handleBillingRequest(request, env);
       if (billingResponse) return withSecurityHeaders(billingResponse);
 
@@ -257,6 +270,7 @@ function rateLimitForRequest(method: string, pathname: string) {
     return 30;
   }
   if (pathname === "/billing/checkout") return 12;
+  if (pathname === "/sales/settings" || pathname === "/admin/sales-settings") return 120;
   if (pathname === "/webhooks/mercadopago") return 240;
   if (pathname === "/api/webhook/hubla" || pathname === "/api/webhooks/hubla") return 240;
   if (pathname === "/auth/verify") return 60;
@@ -422,6 +436,16 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
   });
 }
 
+async function handleSalesSettingsRequest(request: Request) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/sales/settings") return null;
+
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "GET") return json({ error: "Metodo nao permitido." }, 405);
+
+  return json({ salesSettings: publicSalesSettings() });
+}
+
 async function handleBillingRequest(request: Request, env: unknown) {
   const url = new URL(request.url);
   const billingPaths = new Set([
@@ -440,7 +464,10 @@ async function handleBillingRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "GET" && url.pathname === "/billing/plans") {
-    return json({ plans: getBillingPlans(env) });
+    return json({
+      plans: liveSalesSettings.salesClosed ? [] : getBillingPlans(env),
+      salesSettings: publicSalesSettings(),
+    });
   }
 
   if (request.method === "POST" && url.pathname === "/webhooks/mercadopago") {
@@ -461,7 +488,8 @@ async function handleBillingRequest(request: Request, env: unknown) {
     await saveLiveState(env);
     return json({
       subscription: buildBillingOverview(auth.client),
-      plans: getBillingPlans(env),
+      plans: liveSalesSettings.salesClosed ? [] : getBillingPlans(env),
+      salesSettings: publicSalesSettings(),
     });
   }
 
@@ -475,6 +503,12 @@ async function handleBillingRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "POST" && url.pathname === "/billing/checkout") {
+    if (liveSalesSettings.salesClosed) {
+      return json(
+        { error: "Vendas encerradas no momento. Entre na fila de espera para a proxima abertura." },
+        403,
+      );
+    }
     const body = readRecord(await request.json().catch(() => ({})));
     const plan = normalizeBillingPlanId(body.plan);
     if (!plan || plan === "free") {
@@ -1022,6 +1056,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     url.pathname === "/auth/verify" ||
     url.pathname === "/admin/overview" ||
     url.pathname === "/admin/summary" ||
+    url.pathname === "/admin/sales-settings" ||
     url.pathname === "/admin/users" ||
     url.pathname.startsWith("/admin/users/") ||
     url.pathname === "/admin/logs" ||
@@ -1171,6 +1206,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "POST" && url.pathname === "/auth/register") {
+    if (liveSalesSettings.salesClosed) {
+      return json(
+        { error: "Vagas encerradas no momento. Entre na fila de espera para a proxima abertura." },
+        403,
+      );
+    }
+
     const body = readRecord(await request.json().catch(() => ({})));
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
@@ -1303,6 +1345,36 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   const adminRole = await getAdminRequestRole(request, env);
   if (!adminRole) {
     return json({ error: "Nao autorizado." }, 401);
+  }
+
+  if (url.pathname === "/admin/sales-settings") {
+    if (request.method === "GET") {
+      return json({ salesSettings: adminSalesSettings() });
+    }
+
+    if (request.method === "POST") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const nextClosed = typeof body.salesClosed === "boolean"
+        ? body.salesClosed
+        : Boolean(body.salesClosed);
+      liveSalesSettings = {
+        salesClosed: nextClosed,
+        updated_at: new Date().toISOString(),
+        updated_by: adminActorEmailFromRequest(request, env, adminRole),
+      };
+      recordAdminActionLog(env, request, adminRole, {
+        targetUserId: "sales-settings",
+        targetEmail: "global",
+        action: "UPDATE_USER",
+        beforeJson: {},
+        afterJson: adminSalesSettings(),
+        reason: nextClosed ? "Vendas encerradas pelo admin." : "Vendas reabertas pelo admin.",
+      });
+      await saveLiveState(env);
+      return json({ salesSettings: adminSalesSettings() });
+    }
+
+    return json({ error: "Metodo nao permitido." }, 405);
   }
 
   if (request.method === "GET" && url.pathname === "/admin/summary") {
@@ -4697,6 +4769,11 @@ function applyLiveState(state: Record<string, unknown>) {
     liveModuleToggles = restoreModuleToggles(moduleToggles);
     liveDashboardData = { ...liveDashboardData, moduleToggles: liveModuleToggles };
   }
+
+  const salesSettings = readRecord(state.salesSettings);
+  if (Object.keys(salesSettings).length > 0) {
+    liveSalesSettings = restoreSalesSettings(salesSettings);
+  }
 }
 
 function mergeLiveStates(
@@ -4722,6 +4799,7 @@ function mergeLiveStates(
     adminActionLogs: mergeStateArrays(durable.adminActionLogs, cache.adminActionLogs).slice(0, 500),
     deletedEntities,
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
+    salesSettings: pickStateObjectByUpdatedAt(durable.salesSettings, cache.salesSettings),
     savedAt: readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
   };
 }
@@ -4730,6 +4808,17 @@ function pickStateObject(primary: unknown, secondary: unknown) {
   const first = readRecord(primary);
   if (Object.keys(first).length > 0) return first;
   return readRecord(secondary);
+}
+
+function pickStateObjectByUpdatedAt(primary: unknown, secondary: unknown) {
+  const first = readRecord(primary);
+  const second = readRecord(secondary);
+  if (!hasRecordFields(first)) return second;
+  if (!hasRecordFields(second)) return first;
+
+  const firstTime = stateEntityUpdatedAtMs(first);
+  const secondTime = stateEntityUpdatedAtMs(second);
+  return firstTime >= secondTime ? first : second;
 }
 
 function pickDashboardState(primary: unknown, secondary: unknown) {
@@ -4989,6 +5078,7 @@ function buildLiveStateSnapshot() {
     adminActionLogs: liveAdminActionLogs,
     deletedEntities: liveDeletedEntities,
     moduleToggles: liveModuleToggles,
+    salesSettings: liveSalesSettings,
     savedAt: new Date().toISOString(),
   };
 }
@@ -5117,6 +5207,31 @@ function restoreModuleToggles(value: Record<string, unknown>) {
     tieAlert: typeof value.tieAlert === "boolean" ? value.tieAlert : liveModuleToggles.tieAlert,
     surfAnalyzer:
       typeof value.surfAnalyzer === "boolean" ? value.surfAnalyzer : liveModuleToggles.surfAnalyzer,
+  };
+}
+
+function restoreSalesSettings(value: Record<string, unknown>): SalesSettings {
+  return {
+    salesClosed: typeof value.salesClosed === "boolean"
+      ? value.salesClosed
+      : liveSalesSettings.salesClosed,
+    updated_at: readString(value, "updated_at") || readString(value, "updatedAt") || liveSalesSettings.updated_at,
+    updated_by: readString(value, "updated_by") || readString(value, "updatedBy") || liveSalesSettings.updated_by,
+  };
+}
+
+function publicSalesSettings() {
+  return {
+    salesClosed: liveSalesSettings.salesClosed,
+    mode: liveSalesSettings.salesClosed ? "closed" : "open",
+  };
+}
+
+function adminSalesSettings() {
+  return {
+    ...publicSalesSettings(),
+    updated_at: liveSalesSettings.updated_at,
+    updated_by: liveSalesSettings.updated_by,
   };
 }
 

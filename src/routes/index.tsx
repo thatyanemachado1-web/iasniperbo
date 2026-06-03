@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
   AlertCircle,
@@ -20,7 +20,8 @@ import { BrainAI } from "@/components/brand/BrainAI";
 import { NeuralLines } from "@/components/brand/NeuralLines";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { checkClientAccess, registerClient, saveAccessSession, type ClientAccess } from "@/lib/accessApi";
+import { SalesClosedPanel } from "@/components/ui-app/SalesClosedPanel";
+import { checkClientAccess, getSalesSettings, registerClient, saveAccessSession, type ClientAccess } from "@/lib/accessApi";
 import { readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/")({
@@ -63,6 +64,22 @@ function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [pendingAccess, setPendingAccess] = useState<ClientAccess | null>(null);
+  const [salesClosed, setSalesClosed] = useState(false);
+  const [showClosedLogin, setShowClosedLogin] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getSalesSettings()
+      .then((settings) => {
+        if (active) setSalesClosed(settings.salesClosed);
+      })
+      .catch(() => {
+        if (active) setSalesClosed(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -75,8 +92,16 @@ function LoginPage() {
     try {
       const access = await checkClientAccess(email, password);
       if (!access.registered) {
-        setMode("register");
-        setNotice("Email ainda nao cadastrado. Faca seu cadastro para continuar.");
+        if (!salesClosed) setMode("register");
+        setNotice(
+          salesClosed
+            ? "Vagas encerradas no momento. Entre na fila de espera para a próxima abertura."
+            : "Email ainda não cadastrado. Faça seu cadastro para continuar.",
+        );
+        return;
+      }
+      if (salesClosed && !canEnterWhenSalesClosed(access)) {
+        setNotice("Vagas encerradas. Somente clientes Premium com acesso ativo conseguem entrar na plataforma.");
         return;
       }
       saveAccessSession(access, email);
@@ -90,6 +115,10 @@ function LoginPage() {
 
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (salesClosed) {
+      setNotice("Vagas encerradas no momento. Entre na fila de espera para a próxima abertura.");
+      return;
+    }
     setLoading(true);
     setNotice("");
     setPendingAccess(null);
@@ -133,8 +162,23 @@ function LoginPage() {
   }
 
   function goCheckout() {
+    if (salesClosed) {
+      setNotice("Vagas encerradas no momento. Entre na fila de espera para a próxima abertura.");
+      return;
+    }
     if (pendingAccess) saveAccessSession(pendingAccess);
     window.location.href = "/app/planos";
+  }
+
+  if (salesClosed && !showClosedLogin) {
+    return (
+      <SalesClosedPanel
+        onClientLogin={() => {
+          setMode("login");
+          setShowClosedLogin(true);
+        }}
+      />
+    );
   }
 
   return (
@@ -233,7 +277,7 @@ function LoginPage() {
           <GlassCard className="p-6 sm:p-8 rounded-3xl border-neon-blue/25 glow-blue">
             <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-neon-cyan/70 to-transparent" />
 
-            <div className="mb-4 grid grid-cols-2 rounded-2xl border border-border/70 bg-secondary/35 p-1">
+            <div className={`mb-4 grid rounded-2xl border border-border/70 bg-secondary/35 p-1 ${salesClosed ? "grid-cols-1" : "grid-cols-2"}`}>
               <button
                 type="button"
                 onClick={() => setMode("login")}
@@ -241,16 +285,18 @@ function LoginPage() {
               >
                 Entrar
               </button>
-              <button
-                type="button"
-                onClick={() => setMode("register")}
-                className={`rounded-xl py-2 text-xs font-bold transition ${mode === "register" ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                Cadastro
-              </button>
+              {!salesClosed && (
+                <button
+                  type="button"
+                  onClick={() => setMode("register")}
+                  className={`rounded-xl py-2 text-xs font-bold transition ${mode === "register" ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Cadastro
+                </button>
+              )}
             </div>
 
-            {mode === "login" ? (
+            {mode === "login" || salesClosed ? (
               <form onSubmit={handleLogin} className="space-y-4">
                 <LoginField icon={<Mail className="size-4" />} label="Email" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
                 <LoginField icon={<ShieldCheck className="size-4" />} label="Senha" name="password" type="password" placeholder="sua senha" />
@@ -264,10 +310,14 @@ function LoginPage() {
                   <span className="relative">Validar acesso</span>
                 </button>
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Completo so com liberacao ADM.</span>
-                  <button type="button" onClick={() => setMode("register")} className="text-neon-cyan hover:text-neon-blue">
-                    Criar cadastro
-                  </button>
+                  <span className="text-muted-foreground">
+                    {salesClosed ? "Somente clientes ativos." : "Completo só com liberação ADM."}
+                  </span>
+                  {!salesClosed && (
+                    <button type="button" onClick={() => setMode("register")} className="text-neon-cyan hover:text-neon-blue">
+                      Criar cadastro
+                    </button>
+                  )}
                 </div>
               </form>
             ) : (
@@ -300,7 +350,7 @@ function LoginPage() {
               </div>
             )}
 
-            {pendingAccess && (
+            {pendingAccess && !salesClosed && (
               <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -319,10 +369,12 @@ function LoginPage() {
               </div>
             )}
 
-            <div className="mt-5 pt-4 border-t border-border/60 text-[11px] text-center text-muted-foreground flex items-center justify-center gap-1.5">
-              <ShieldCheck className="size-3 text-neon-cyan" />
-              A partir de <span className="text-gold font-semibold">R$ 297/mes</span>. Demo limitado.
-            </div>
+            {!salesClosed && (
+              <div className="mt-5 pt-4 border-t border-border/60 text-[11px] text-center text-muted-foreground flex items-center justify-center gap-1.5">
+                <ShieldCheck className="size-3 text-neon-cyan" />
+                A partir de <span className="text-gold font-semibold">R$ 297/mês</span>. Demo limitado.
+              </div>
+            )}
           </GlassCard>
 
           <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -338,11 +390,22 @@ function LoginPage() {
           </div>
 
           <div className="mt-5 flex justify-center">
-            <AppBadge tone="amber">Cadastro obrigatorio</AppBadge>
+            <AppBadge tone={salesClosed ? "red" : "amber"}>
+              {salesClosed ? "Vagas encerradas" : "Cadastro obrigatório"}
+            </AppBadge>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function canEnterWhenSalesClosed(access: ClientAccess) {
+  return (
+    access.approved ||
+    access.access_mode === "full" ||
+    access.role === "owner" ||
+    access.role === "admin"
   );
 }
 
