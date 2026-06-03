@@ -64,7 +64,7 @@ function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [pendingAccess, setPendingAccess] = useState<ClientAccess | null>(null);
-  const [salesClosed, setSalesClosed] = useState(false);
+  const [salesClosed, setSalesClosed] = useState<boolean | null>(null);
   const [showClosedLogin, setShowClosedLogin] = useState(false);
 
   useEffect(() => {
@@ -168,6 +168,10 @@ function LoginPage() {
     }
     if (pendingAccess) saveAccessSession(pendingAccess);
     window.location.href = "/app/planos";
+  }
+
+  if (salesClosed === null) {
+    return <SalesAccessLoading />;
   }
 
   if (salesClosed && !showClosedLogin) {
@@ -394,6 +398,32 @@ function LoginPage() {
               {salesClosed ? "Vagas encerradas" : "Cadastro obrigatório"}
             </AppBadge>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SalesAccessLoading() {
+  return (
+    <div className="min-h-screen bg-app relative overflow-hidden flex items-center justify-center px-4 py-10">
+      <div className="absolute inset-0 scan-grid opacity-[0.18] pointer-events-none" />
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(ellipse 60% 50% at 20% 30%, color-mix(in oklab, var(--neon-blue) 18%, transparent), transparent 60%), radial-gradient(ellipse 50% 50% at 80% 70%, color-mix(in oklab, var(--neon-purple) 18%, transparent), transparent 60%)",
+        }}
+      />
+      <div className="relative w-full max-w-sm rounded-3xl border border-neon-cyan/30 bg-background/75 p-6 text-center shadow-[0_0_40px_rgba(0,229,255,0.12)] backdrop-blur-xl">
+        <div className="mx-auto mb-4 flex justify-center">
+          <BrainAI size={92} speaking />
+        </div>
+        <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-neon-cyan">SNIPER BO IA</div>
+        <div className="mt-2 text-xl font-black text-white">Verificando acesso</div>
+        <div className="mt-2 text-xs text-muted-foreground">Sincronizando status de vagas...</div>
+        <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-secondary/70">
+          <div className="h-full w-1/2 rounded-full bg-gradient-to-r from-neon-cyan via-neon-blue to-neon-purple animate-pulse" />
         </div>
       </div>
     </div>
