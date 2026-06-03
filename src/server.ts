@@ -5795,6 +5795,10 @@ function supabasePersistenceHeaders(key: string) {
 }
 
 function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData {
+  if (isDefaultMockDashboardState(value)) {
+    return resetDashboardDailyCycle(liveDashboardData);
+  }
+
   if (
     compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, value) >
     0
@@ -5817,6 +5821,24 @@ function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData
     dailyCycleDate: cycleDate,
   };
   return ensureDashboardDailyCycle(restoredWithMetadata).dashboard;
+}
+
+function isDefaultMockDashboardState(value: Record<string, unknown>) {
+  const reading = readRecord(value.neuralReading);
+  const signal = readRecord(value.currentSignal);
+  const rounds = Array.isArray(value.rounds) ? value.rounds : [];
+  return (
+    rounds.length === mockDashboardData.rounds.length &&
+    readString(signal, "id") === "current" &&
+    readString(signal, "side") === "BANKER" &&
+    readString(signal, "status") === "pending" &&
+    serverSafeCounter(signal.strength) === 82 &&
+    serverSafeCounter(reading.alertas) === 177 &&
+    serverSafeCounter(reading.acertos) === 77 &&
+    serverSafeCounter(reading.greenSemGale) === 52 &&
+    serverSafeCounter(reading.greenG1) === 25 &&
+    serverSafeCounter(reading.reds ?? reading.erros) === 100
+  );
 }
 
 function restoreModuleToggles(value: Record<string, unknown>) {

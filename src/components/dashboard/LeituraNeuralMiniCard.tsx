@@ -343,18 +343,19 @@ function buildGeneralScore(
 ): NeuralScoreSummary {
   const sg = optionalNumberFrom(scoreboard?.greenSemGale ?? fallbackReading.greenSemGale);
   const g1 = optionalNumberFrom(scoreboard?.greenG1 ?? fallbackReading.greenG1);
-  const splitGreens = sg !== null || g1 !== null ? numberFrom(sg) + numberFrom(g1) : null;
+  const hasSplitGreens = sg !== null || g1 !== null;
+  const splitGreens = hasSplitGreens ? numberFrom(sg) + numberFrom(g1) : null;
   const greens = optionalNumberFrom(
-    scoreboard?.greens ??
+    splitGreens ??
+      scoreboard?.greens ??
       scoreboard?.acertos ??
-      splitGreens ??
       fallbackReading.acertos ??
       fallbackReading.greenSemGale,
   );
   const reds = optionalNumberFrom(scoreboard?.reds ?? scoreboard?.erros ?? fallbackReading.reds ?? fallbackReading.erros);
   const total = numberFrom(greens) + numberFrom(reds);
-  const totalAlerts = optionalNumberFrom(scoreboard?.totalAlerts ?? fallbackReading.alertas ?? total);
-  const accuracy = optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade) ?? accuracyFrom(null, greens, reds);
+  const totalAlerts = optionalNumberFrom(scoreboard?.totalAlerts ?? fallbackReading.alertas ?? total) ?? total;
+  const accuracy = accuracyFrom(null, greens, reds) ?? optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
 
   return {
     totalAlerts,
