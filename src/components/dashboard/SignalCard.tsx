@@ -4,13 +4,14 @@ import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { LeituraNeuralMiniCard } from "@/components/dashboard/LeituraNeuralMiniCard";
 import { cn } from "@/lib/utils";
-import type { MainSignal, NeuralReading, SurfEntrySummary, TieAlert } from "@/types/dashboard";
+import type { MainSignal, NeuralReading, NeuralScoreboard, SurfEntrySummary, TieAlert } from "@/types/dashboard";
 import { CheckCircle2, Clock3, Radio, ShieldCheck, Target, Zap } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function SignalCard({
   signal,
   neuralReading,
+  neuralScoreboard,
   surfSummary,
   tieAlert,
   operationalMessage,
@@ -20,6 +21,7 @@ export function SignalCard({
 }: {
   signal: MainSignal;
   neuralReading?: NeuralReading;
+  neuralScoreboard?: NeuralScoreboard;
   surfSummary?: SurfEntrySummary;
   tieAlert?: TieAlert;
   operationalMessage?: string;
@@ -192,6 +194,7 @@ export function SignalCard({
         </div>
         <LeituraNeuralMiniCard
           {...(neuralReading ?? { mode: "SCANNING" })}
+          generalScoreboard={neuralScoreboard}
           greenFlash={neuralGreenFlash}
         />
       </div>
