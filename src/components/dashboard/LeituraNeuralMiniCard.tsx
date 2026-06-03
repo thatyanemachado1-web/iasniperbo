@@ -6,13 +6,24 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { NeuralReading, SignalSide } from "@/types/dashboard";
+import type { NeuralReading, NeuralScoreboard, SignalSide } from "@/types/dashboard";
 
 type NeuralSide = SignalSide | "TIE";
+
+interface NeuralScoreSummary {
+  totalAlerts: number | null;
+  greens: number | null;
+  sg: number | null;
+  g1: number | null;
+  reds: number | null;
+  total: number;
+  accuracy: number | null;
+}
 
 type LeituraNeuralMiniCardProps = NeuralReading & {
   className?: string;
   greenFlash?: boolean;
+  generalScoreboard?: NeuralScoreboard;
 };
 
 const SCANNING_READING: NeuralReading = {
@@ -32,6 +43,7 @@ const SCANNING_READING: NeuralReading = {
 export function LeituraNeuralMiniCard({
   className,
   greenFlash = false,
+  generalScoreboard,
   ...reading
 }: LeituraNeuralMiniCardProps) {
   const data = { ...SCANNING_READING, ...reading };
@@ -52,6 +64,7 @@ export function LeituraNeuralMiniCard({
   const pullingSide = data.direcao ?? data.origem;
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
+  const generalScore = buildGeneralScore(generalScoreboard, data);
 
   return (
     <aside
@@ -68,13 +81,7 @@ export function LeituraNeuralMiniCard({
       <div className="absolute -right-5 -top-6 size-16 rounded-full bg-neon-purple/15 blur-2xl" />
       <div className="absolute -bottom-6 -left-5 size-16 rounded-full bg-neon-cyan/15 blur-2xl" />
       <NeuralGeneralScorePopover
-        accuracy={accuracy}
-        totalAlerts={totalAlerts}
-        totalGreens={totalGreens}
-        sg={sg}
-        g1={g1}
-        red={red}
-        resolvedTotal={resolvedTotal}
+        score={generalScore}
         statusKind={statusKind}
         statusLabel={statusLabel(data)}
       />
@@ -189,23 +196,11 @@ export function LeituraNeuralMiniCard({
 }
 
 function NeuralGeneralScorePopover({
-  accuracy,
-  totalAlerts,
-  totalGreens,
-  sg,
-  g1,
-  red,
-  resolvedTotal,
+  score,
   statusKind,
   statusLabel,
 }: {
-  accuracy: number | null;
-  totalAlerts: number | null;
-  totalGreens: number | null;
-  sg: number | null;
-  g1: number | null;
-  red: number | null;
-  resolvedTotal: number;
+  score: NeuralScoreSummary;
   statusKind: "green" | "amber" | "red" | "muted";
   statusLabel: string;
 }) {
@@ -246,17 +241,17 @@ function NeuralGeneralScorePopover({
               </div>
             </div>
             <div className={cn("rounded-full border px-2 py-0.5 text-[9px] font-black", statusPillClass(statusKind))}>
-              {formatPercent(accuracy)}
+              {formatPercent(score.accuracy)}
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-1.5">
-            <ScoreBox label="Green" value={totalGreens} tone="green" />
-            <ScoreBox label="RED" value={red} tone="red" />
-            <ScoreBox label="SG" value={sg} tone="green" />
-            <ScoreBox label="G1" value={g1} tone="cyan" />
-            <ScoreBox label="Alertas" value={totalAlerts ?? resolvedTotal} tone="neutral" />
-            <ScoreBox label="Total" value={resolvedTotal} tone="neutral" />
+            <ScoreBox label="Green geral" value={score.greens} tone="green" />
+            <ScoreBox label="RED geral" value={score.reds} tone="red" />
+            <ScoreBox label="SG geral" value={score.sg} tone="green" />
+            <ScoreBox label="G1 geral" value={score.g1} tone="cyan" />
+            <ScoreBox label="Alertas" value={score.totalAlerts} tone="neutral" />
+            <ScoreBox label="Total" value={score.total} tone="neutral" />
           </div>
         </div>
       </PopoverContent>
@@ -340,6 +335,36 @@ function totalGreensFrom(
   const g1 = optionalNumberFrom(greenG1);
   if (sg === null && g1 === null) return null;
   return numberFrom(sg) + numberFrom(g1);
+}
+
+function buildGeneralScore(
+  scoreboard: NeuralScoreboard | undefined,
+  fallbackReading: NeuralReading,
+): NeuralScoreSummary {
+  const sg = optionalNumberFrom(scoreboard?.greenSemGale ?? fallbackReading.greenSemGale);
+  const g1 = optionalNumberFrom(scoreboard?.greenG1 ?? fallbackReading.greenG1);
+  const splitGreens = sg !== null || g1 !== null ? numberFrom(sg) + numberFrom(g1) : null;
+  const greens = optionalNumberFrom(
+    scoreboard?.greens ??
+      scoreboard?.acertos ??
+      splitGreens ??
+      fallbackReading.acertos ??
+      fallbackReading.greenSemGale,
+  );
+  const reds = optionalNumberFrom(scoreboard?.reds ?? scoreboard?.erros ?? fallbackReading.reds ?? fallbackReading.erros);
+  const total = numberFrom(greens) + numberFrom(reds);
+  const totalAlerts = optionalNumberFrom(scoreboard?.totalAlerts ?? fallbackReading.alertas ?? total);
+  const accuracy = optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade) ?? accuracyFrom(null, greens, reds);
+
+  return {
+    totalAlerts,
+    greens,
+    sg,
+    g1,
+    reds,
+    total,
+    accuracy,
+  };
 }
 
 function optionalNumberFrom(value?: number | null) {
