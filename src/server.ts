@@ -79,6 +79,16 @@ const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const FREE_TRIAL_MINUTES = 10;
+const ELEVENLABS_API_KEY_SECRET_NAMES = [
+  "ELEVENLABS_TTS_API_KEY",
+  "ELEVENLABS_TTS_API_KEY_2",
+  "ELEVENLABS_TTS_API_KEY_3",
+  "ELEVENLABS_TTS_API_KEY_4",
+  "ELEVENLABS_TTS_API_KEY_5",
+  "ELEVENLABS_API_KEY",
+  "ELEVENLABS_API_KEY_2",
+  "ELEVENLABS_API_KEY_3",
+] as const;
 const ACTIVE_ENTRY_MODES = [
   "sniper",
   "hunter",
@@ -347,8 +357,8 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
     );
   }
 
-  const apiKey = getElevenLabsApiKey(env);
-  if (!apiKey) {
+  const apiKeys = getElevenLabsApiKeys(env);
+  if (!apiKeys.length) {
     return json({ error: "ELEVENLABS_API_KEY nao configurada no backend." }, 503);
   }
 
@@ -359,36 +369,42 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
 
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
 
-  const response = await fetch(
-    `${ELEVENLABS_TTS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
-    {
-      method: "POST",
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text,
-        model_id: modelId,
-        voice_settings: {
-          stability: 0.48,
-          similarity_boost: 0.78,
-          style: 0.18,
-          use_speaker_boost: true,
+  let response: Response | null = null;
+  let lastFailureStatus: number | "network_error" | null = null;
+  for (const apiKey of apiKeys) {
+    response = await fetch(
+      `${ELEVENLABS_TTS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
         },
-      }),
-    },
-  ).catch(() => null);
+        body: JSON.stringify({
+          text,
+          model_id: modelId,
+          voice_settings: {
+            stability: 0.48,
+            similarity_boost: 0.78,
+            style: 0.18,
+            use_speaker_boost: true,
+          },
+        }),
+      },
+    ).catch(() => null);
 
-  if (!response) {
-    recordElevenLabsStatus("network_error");
-    return json({ error: "Falha de conexao ao gerar voz ElevenLabs." }, 502);
+    if (response?.ok) break;
+    lastFailureStatus = response?.status ?? "network_error";
+    response = null;
   }
 
-  if (!response.ok) {
-    recordElevenLabsStatus(response.status);
-    console.warn(`Falha ao gerar voz ElevenLabs (${response.status}).`);
-    return json(elevenLabsErrorPayload(response.status), elevenLabsErrorStatus(response.status));
+  if (!response) {
+    recordElevenLabsStatus(lastFailureStatus ?? "network_error");
+    if (typeof lastFailureStatus === "number") {
+      console.warn(`Falha ao gerar voz ElevenLabs (${lastFailureStatus}) em todas as chaves configuradas.`);
+      return json(elevenLabsErrorPayload(lastFailureStatus), elevenLabsErrorStatus(lastFailureStatus));
+    }
+    return json({ error: "Falha de conexao ao gerar voz ElevenLabs." }, 502);
   }
 
   recordElevenLabsStatus("ok");
@@ -416,15 +432,15 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
     return json({ error: "Nao autorizado." }, 401);
   }
 
-  const apiKey = getElevenLabsApiKey(env);
-  const hasElevenLabsKey = Boolean(apiKey);
+  const apiKeys = getElevenLabsApiKeys(env);
+  const hasElevenLabsKey = apiKeys.length > 0;
   const hasVoiceId = Boolean(readServerEnvString(env, "ELEVENLABS_VOICE_ID", ""));
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
 
   if (url.searchParams.get("check") === "elevenlabs") {
     let elevenLabsAuthOk = false;
     let elevenLabsAuthStatus: string | number = "no_api_key";
-    if (apiKey) {
+    for (const apiKey of apiKeys) {
       try {
         const res = await fetch("https://api.elevenlabs.io/v1/user", {
           method: "GET",
@@ -432,6 +448,7 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
         });
         elevenLabsAuthOk = res.ok;
         elevenLabsAuthStatus = res.status;
+        if (res.ok) break;
       } catch {
         elevenLabsAuthStatus = "network_error";
       }
@@ -441,6 +458,7 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
       elevenLabsAuthStatus,
       hasElevenLabsKey,
       hasVoiceId,
+      keyCount: apiKeys.length,
       modelId,
     });
   }
@@ -448,6 +466,7 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
   return json({
     hasElevenLabsKey,
     hasVoiceId,
+    keyCount: apiKeys.length,
     modelId,
     provider: "elevenlabs",
     lastElevenLabsStatus,
@@ -3479,9 +3498,11 @@ function isUuidLike(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function getElevenLabsApiKey(env: unknown) {
-  // Only read the canonical secret name to avoid conflicts with legacy values.
-  return normalizeSecretValue(readServerEnvString(env, "ELEVENLABS_TTS_API_KEY", ""));
+function getElevenLabsApiKeys(env: unknown) {
+  const keys = ELEVENLABS_API_KEY_SECRET_NAMES.map((name) =>
+    normalizeSecretValue(readNamedServerSecret(env, name, "")),
+  ).filter(Boolean);
+  return [...new Set(keys)];
 }
 
 let lastElevenLabsStatus: { code: number | "ok" | "network_error"; at: string } | null = null;
