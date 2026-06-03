@@ -4676,6 +4676,7 @@ function liveStateCacheRequest() {
 }
 
 async function loadLiveState(env: unknown) {
+  const currentSalesSettings = liveSalesSettings;
   const [durableState, cacheState] = await Promise.all([
     loadDurableLiveState(env),
     loadLiveStateCache(),
@@ -4683,7 +4684,11 @@ async function loadLiveState(env: unknown) {
   const state = mergeLiveStates(durableState, cacheState);
   if (state) {
     applyLiveState(state);
-    await Promise.allSettled([saveLiveStateCache(state), saveDurableLiveState(env, state)]);
+    if (isSalesSettingsNewer(currentSalesSettings, liveSalesSettings)) {
+      liveSalesSettings = currentSalesSettings;
+    }
+    const refreshedState = buildLiveStateSnapshot();
+    await Promise.allSettled([saveLiveStateCache(refreshedState), saveDurableLiveState(env, refreshedState)]);
   }
 }
 
@@ -4819,6 +4824,13 @@ function pickStateObjectByUpdatedAt(primary: unknown, secondary: unknown) {
   const firstTime = stateEntityUpdatedAtMs(first);
   const secondTime = stateEntityUpdatedAtMs(second);
   return firstTime >= secondTime ? first : second;
+}
+
+function isSalesSettingsNewer(left: SalesSettings, right: SalesSettings) {
+  const leftTime = stateEntityUpdatedAtMs(left as unknown as Record<string, unknown>);
+  const rightTime = stateEntityUpdatedAtMs(right as unknown as Record<string, unknown>);
+  if (leftTime || rightTime) return leftTime > rightTime;
+  return left.salesClosed !== right.salesClosed && Boolean(left.updated_at);
 }
 
 function pickDashboardState(primary: unknown, secondary: unknown) {
