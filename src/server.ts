@@ -1488,7 +1488,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "PATCH" && !actionPath) {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_USER");
+      const result = await updateAdminManagedUser(
+        env,
+        adminRole,
+        request,
+        target,
+        body,
+        "UPDATE_USER",
+      );
       if (!result.ok) return json({ error: result.error }, result.status);
       await saveLiveState(env);
       return json({ user: result.user });
@@ -1496,7 +1503,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "POST" && actionPath === "extend-access") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = extendAdminManagedUser(
+      const result = await extendAdminManagedUser(
         env,
         adminRole,
         request,
@@ -1511,7 +1518,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "POST" && actionPath === "block") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = blockAdminManagedUser(
+      const result = await blockAdminManagedUser(
         env,
         adminRole,
         request,
@@ -1525,7 +1532,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "POST" && actionPath === "unblock") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = unblockAdminManagedUser(
+      const result = await unblockAdminManagedUser(
         env,
         adminRole,
         request,
@@ -1539,7 +1546,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "POST" && actionPath === "change-plan") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_PLAN");
+      const result = await updateAdminManagedUser(
+        env,
+        adminRole,
+        request,
+        target,
+        body,
+        "UPDATE_PLAN",
+      );
       if (!result.ok) return json({ error: result.error }, result.status);
       await saveLiveState(env);
       return json({ user: result.user });
@@ -1547,7 +1561,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     if (request.method === "POST" && actionPath === "change-role") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_ROLE");
+      const result = await updateAdminManagedUser(
+        env,
+        adminRole,
+        request,
+        target,
+        body,
+        "UPDATE_ROLE",
+      );
       if (!result.ok) return json({ error: result.error }, result.status);
       await saveLiveState(env);
       return json({ user: result.user });
@@ -3063,6 +3084,7 @@ function upsertLiveClient(client: Record<string, unknown>) {
 }
 
 function upsertSubscriptionRecord(record: Record<string, unknown>) {
+  if (isEntityDeleted(record)) return record;
   const id = readString(record, "id");
   const paymentId = readString(record, "provider_payment_id");
   const externalReference = readString(record, "external_reference");
@@ -3086,6 +3108,7 @@ function upsertSubscriptionRecord(record: Record<string, unknown>) {
 }
 
 function upsertPaymentRecord(record: Record<string, unknown>) {
+  if (isEntityDeleted(record)) return record;
   const id = readString(record, "id");
   const paymentId = readString(record, "provider_payment_id");
   const preferenceId = readString(record, "provider_preference_id");
@@ -3365,6 +3388,18 @@ async function persistBillingUser(env: unknown, client: Record<string, unknown>)
 }
 
 async function deletePersistedBillingUser(env: unknown, user: Record<string, unknown>) {
+  await deletePersistedBillingRecords(env, user, true);
+}
+
+async function deletePersistedBillingAccess(env: unknown, user: Record<string, unknown>) {
+  await deletePersistedBillingRecords(env, user, false);
+}
+
+async function deletePersistedBillingRecords(
+  env: unknown,
+  user: Record<string, unknown>,
+  includeUser: boolean,
+) {
   const email = readString(user, "email").toLowerCase();
   const id = readString(user, "id");
   const encodedEmail = encodeURIComponent(email);
@@ -3376,8 +3411,10 @@ async function deletePersistedBillingUser(env: unknown, user: Record<string, unk
     ...idFilters.map((filter) => deleteSupabaseRows(env, "payments", filter)),
     ...(email ? [deleteSupabaseRows(env, "subscriptions", `email=eq.${encodedEmail}`)] : []),
     ...idFilters.map((filter) => deleteSupabaseRows(env, "subscriptions", filter)),
-    ...(email ? [deleteSupabaseRows(env, "users", `email=eq.${encodedEmail}`)] : []),
-    ...(isUuidLike(id) ? [deleteSupabaseRows(env, "users", `id=eq.${encodedId}`)] : []),
+    ...(includeUser && email ? [deleteSupabaseRows(env, "users", `email=eq.${encodedEmail}`)] : []),
+    ...(includeUser && isUuidLike(id)
+      ? [deleteSupabaseRows(env, "users", `id=eq.${encodedId}`)]
+      : []),
   ]);
 }
 
@@ -4344,14 +4381,16 @@ function normalizeAdminManagedUser(user: Record<string, unknown>, env?: unknown)
   };
 }
 
-function updateAdminManagedUser(
+async function updateAdminManagedUser(
   env: unknown,
   adminRole: AdminRole,
   request: Request,
   target: Record<string, unknown>,
   body: Record<string, unknown>,
   preferredAction: AdminActionType,
-): { ok: true; user: Record<string, unknown> } | { ok: false; status: number; error: string } {
+): Promise<
+  { ok: true; user: Record<string, unknown> } | { ok: false; status: number; error: string }
+> {
   const before = normalizeAdminManagedUser(target, env);
   const actorEmail = adminActorEmailFromRequest(request, env, adminRole);
   const nextRole = Object.hasOwn(body, "role") ? normalizeManagedUserRole(body.role) : before.role;
@@ -4367,16 +4406,20 @@ function updateAdminManagedUser(
   });
   if (!permission.ok) return permission;
 
-  const status = Object.hasOwn(body, "subscriptionStatus")
+  const requestedPlan = Object.hasOwn(body, "plan") ? normalizeAdminPlan(body.plan) : before.plan;
+  let status = Object.hasOwn(body, "subscriptionStatus")
     ? normalizeAdminSubscriptionStatus(body.subscriptionStatus)
     : before.subscriptionStatus;
+  if (requestedPlan === "free" && ["active", "manual_vip", "trial"].includes(status)) {
+    status = "canceled";
+  }
   const updated = normalizeAdminManagedUser(
     {
       ...before,
       name: Object.hasOwn(body, "name") ? readString(body, "name") : before.name,
       email: Object.hasOwn(body, "email") ? readString(body, "email").toLowerCase() : before.email,
       role: nextRole,
-      plan: Object.hasOwn(body, "plan") ? normalizeAdminPlan(body.plan) : before.plan,
+      plan: requestedPlan,
       subscriptionStatus: requestedBlocked ? "blocked" : status,
       currentPeriodStart: Object.hasOwn(body, "currentPeriodStart")
         ? readString(body, "currentPeriodStart")
@@ -4394,6 +4437,10 @@ function updateAdminManagedUser(
 
   upsertAdminManagedUser(updated);
   applyAdminManagedUserToClient(updated);
+  if (shouldClearBillingAccessForAdminUpdate(updated)) {
+    clearBillingStateForUser(updated);
+    await deletePersistedBillingAccess(env, updated);
+  }
   recordAdminActionLog(env, request, adminRole, {
     targetUserId: readString(updated, "id"),
     targetEmail: readString(updated, "email"),
@@ -4405,7 +4452,7 @@ function updateAdminManagedUser(
   return { ok: true, user: updated };
 }
 
-function extendAdminManagedUser(
+async function extendAdminManagedUser(
   env: unknown,
   adminRole: AdminRole,
   request: Request,
@@ -4441,7 +4488,7 @@ function extendAdminManagedUser(
   );
 }
 
-function blockAdminManagedUser(
+async function blockAdminManagedUser(
   env: unknown,
   adminRole: AdminRole,
   request: Request,
@@ -4462,7 +4509,7 @@ function blockAdminManagedUser(
   );
 }
 
-function unblockAdminManagedUser(
+async function unblockAdminManagedUser(
   env: unknown,
   adminRole: AdminRole,
   request: Request,
@@ -4615,6 +4662,10 @@ function applyAdminManagedUserToClient(user: Record<string, unknown>) {
   clearDeletedEntityForRecord(client);
   upsertLiveClient(client);
   upsertRecipientFromClient(client);
+  if (shouldClearBillingAccessForAdminUpdate(user)) {
+    clearBillingStateForUser(user);
+    return;
+  }
   const email = readString(client, "email").toLowerCase();
   if (email) {
     upsertSubscriptionRecord({
@@ -4628,6 +4679,18 @@ function applyAdminManagedUserToClient(user: Record<string, unknown>) {
       updated_at: new Date().toISOString(),
     });
   }
+}
+
+function shouldClearBillingAccessForAdminUpdate(user: Record<string, unknown>) {
+  const plan = normalizeAdminPlan(readString(user, "plan"));
+  const status = normalizeAdminSubscriptionStatus(readString(user, "subscriptionStatus"));
+  return (
+    plan === "free" ||
+    plan === "trial" ||
+    status === "canceled" ||
+    status === "blocked" ||
+    status === "expired"
+  );
 }
 
 function adminManagedUserToClient(user: Record<string, unknown>) {
@@ -4805,6 +4868,7 @@ function normalizeAdminAction(value: string): AdminActionType {
     "MANUAL_VIP_GRANTED",
     "CANCEL_ACCESS",
     "REACTIVATE_USER",
+    "DELETE_USER",
   ];
   return actions.includes(value as AdminActionType) ? (value as AdminActionType) : "UPDATE_USER";
 }
@@ -5265,17 +5329,18 @@ function mergeLiveStates(
       deletedEntities,
     ),
     accessEvents: mergeStateArrays(durable.accessEvents, cache.accessEvents).slice(0, 200),
-    subscriptions: mergeEntityStateArrays(
-      durable.subscriptions,
-      cache.subscriptions,
-      durableSavedAt,
-      cacheSavedAt,
+    subscriptions: filterDeletedEntityRows(
+      mergeEntityStateArrays(
+        durable.subscriptions,
+        cache.subscriptions,
+        durableSavedAt,
+        cacheSavedAt,
+      ),
+      deletedEntities,
     ).slice(0, 500),
-    payments: mergeEntityStateArrays(
-      durable.payments,
-      cache.payments,
-      durableSavedAt,
-      cacheSavedAt,
+    payments: filterDeletedEntityRows(
+      mergeEntityStateArrays(durable.payments, cache.payments, durableSavedAt, cacheSavedAt),
+      deletedEntities,
     ).slice(0, 1000),
     adminUsers: filterDeletedEntityRows(
       mergeEntityStateArrays(
@@ -5518,6 +5583,10 @@ function removeUserEntityEverywhere(row: Record<string, unknown>) {
   liveRecipients = liveRecipients.filter((recipient) => !userEntityMatches(recipient, row));
   liveClients = liveClients.filter((client) => !userEntityMatches(client, row));
   liveAdminUsers = liveAdminUsers.filter((user) => !userEntityMatches(user, row));
+  clearBillingStateForUser(row);
+}
+
+function clearBillingStateForUser(row: Record<string, unknown>) {
   liveSubscriptions = liveSubscriptions.filter(
     (subscription) => !userEntityMatches(subscription, row),
   );
@@ -5544,6 +5613,8 @@ function applyDeletedEntityTombstones() {
   liveRecipients = filterDeletedEntityRows(liveRecipients);
   liveClients = filterDeletedEntityRows(liveClients);
   liveAdminUsers = filterDeletedEntityRows(liveAdminUsers);
+  liveSubscriptions = filterDeletedEntityRows(liveSubscriptions);
+  livePayments = filterDeletedEntityRows(livePayments);
 }
 
 function filterDeletedEntityRows(

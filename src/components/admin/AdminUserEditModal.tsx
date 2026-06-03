@@ -50,7 +50,9 @@ export function AdminUserEditModal({
       <section className="max-h-[96vh] w-full overflow-y-auto rounded-t-3xl border border-neon-cyan/25 bg-background shadow-2xl sm:max-w-5xl sm:rounded-3xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-background/95 px-4 py-4 backdrop-blur-xl sm:px-6">
           <div>
-            <div className="text-[11px] uppercase tracking-[0.22em] text-neon-cyan">Editar usuario</div>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-neon-cyan">
+              Editar usuario
+            </div>
             <h2 className="mt-1 text-xl font-black">{user.name}</h2>
           </div>
           <button
@@ -67,48 +69,135 @@ export function AdminUserEditModal({
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Nome">
-                <input className="admin-input" value={draft.name} disabled={!adminCanEditTarget} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+                <input
+                  className="admin-input"
+                  value={draft.name}
+                  disabled={!adminCanEditTarget}
+                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                />
               </Field>
               <Field label="Email">
-                <input className="admin-input" value={draft.email} disabled={!adminCanEditTarget} onChange={(event) => setDraft({ ...draft, email: event.target.value })} />
+                <input
+                  className="admin-input"
+                  value={draft.email}
+                  disabled={!adminCanEditTarget}
+                  onChange={(event) => setDraft({ ...draft, email: event.target.value })}
+                />
               </Field>
               <Field label="Role">
-                <select className="admin-input" value={draft.role} disabled={!adminCanChangeRole} onChange={(event) => setDraft({ ...draft, role: event.target.value as AdminManagedUser["role"] })}>
-                  {roles.map((role) => <option key={role} value={role}>{role}</option>)}
+                <select
+                  className="admin-input"
+                  value={draft.role}
+                  disabled={!adminCanChangeRole}
+                  onChange={(event) =>
+                    setDraft({ ...draft, role: event.target.value as AdminManagedUser["role"] })
+                  }
+                >
+                  {roles.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <Field label="Plano atual">
-                <select className="admin-input" value={draft.plan} disabled={!adminCanEditTarget} onChange={(event) => setDraft({ ...draft, plan: event.target.value as AdminManagedUser["plan"] })}>
-                  {plans.map((plan) => <option key={plan} value={plan}>{plan}</option>)}
+                <select
+                  className="admin-input"
+                  value={draft.plan}
+                  disabled={!adminCanEditTarget}
+                  onChange={(event) => {
+                    const plan = event.target.value as AdminManagedUser["plan"];
+                    setDraft({
+                      ...draft,
+                      plan,
+                      subscriptionStatus: plan === "free" ? "canceled" : draft.subscriptionStatus,
+                    });
+                  }}
+                >
+                  {plans.map((plan) => (
+                    <option key={plan} value={plan}>
+                      {plan}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <Field label="Status da assinatura">
-                <select className="admin-input" value={draft.subscriptionStatus} disabled={!adminCanEditTarget} onChange={(event) => setDraft({ ...draft, subscriptionStatus: event.target.value as AdminManagedUser["subscriptionStatus"] })}>
-                  {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                <select
+                  className="admin-input"
+                  value={draft.subscriptionStatus}
+                  disabled={!adminCanEditTarget}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      subscriptionStatus: event.target
+                        .value as AdminManagedUser["subscriptionStatus"],
+                    })
+                  }
+                >
+                  {statuses.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <Field label="Data de inicio">
-                <input className="admin-input" type="datetime-local" value={toInputDate(draft.currentPeriodStart)} disabled={!adminCanEditTarget} onChange={(event) => setDraft({ ...draft, currentPeriodStart: fromInputDate(event.target.value) })} />
+                <input
+                  className="admin-input"
+                  type="datetime-local"
+                  value={toInputDate(draft.currentPeriodStart)}
+                  disabled={!adminCanEditTarget}
+                  onChange={(event) =>
+                    setDraft({ ...draft, currentPeriodStart: fromInputDate(event.target.value) })
+                  }
+                />
               </Field>
               <Field label="Data de vencimento">
-                <input className="admin-input" type="datetime-local" value={toInputDate(draft.currentPeriodEnd)} disabled={!adminCanEditTarget} onChange={(event) => setDraft({ ...draft, currentPeriodEnd: fromInputDate(event.target.value) })} />
+                <input
+                  className="admin-input"
+                  type="datetime-local"
+                  value={toInputDate(draft.currentPeriodEnd)}
+                  disabled={!adminCanEditTarget}
+                  onChange={(event) =>
+                    setDraft({ ...draft, currentPeriodEnd: fromInputDate(event.target.value) })
+                  }
+                />
               </Field>
               <Field label="Ativo / bloqueado">
                 <label className="flex min-h-11 items-center justify-between rounded-xl border border-border/60 bg-secondary/35 px-3 text-sm">
                   <span>{draft.isBlocked ? "Bloqueado" : "Ativo"}</span>
-                  <input type="checkbox" checked={!draft.isBlocked} disabled={!adminCanEditTarget} onChange={(event) => setDraft({ ...draft, isBlocked: !event.target.checked })} />
+                  <input
+                    type="checkbox"
+                    checked={!draft.isBlocked}
+                    disabled={!adminCanEditTarget}
+                    onChange={(event) => setDraft({ ...draft, isBlocked: !event.target.checked })}
+                  />
                 </label>
               </Field>
             </div>
 
             <Field label="Observacao interna">
-              <textarea className="admin-input min-h-24 resize-none" value={draft.adminNote} disabled={!adminCanEditTarget} onChange={(event) => setDraft({ ...draft, adminNote: event.target.value })} />
+              <textarea
+                className="admin-input min-h-24 resize-none"
+                value={draft.adminNote}
+                disabled={!adminCanEditTarget}
+                onChange={(event) => setDraft({ ...draft, adminNote: event.target.value })}
+              />
             </Field>
             <Field label="Motivo da alteracao">
-              <textarea className="admin-input min-h-20 resize-none" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Opcional, mas recomendado para auditoria." />
+              <textarea
+                className="admin-input min-h-20 resize-none"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="Opcional, mas recomendado para auditoria."
+              />
             </Field>
 
-            {error && <div className="rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+            {error && (
+              <div className="rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </div>
+            )}
 
             <button
               type="button"
@@ -122,7 +211,9 @@ export function AdminUserEditModal({
 
           <div className="space-y-3">
             <div className="rounded-2xl border border-neon-cyan/15 bg-secondary/20 p-4">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-neon-cyan">Acoes rapidas</div>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-neon-cyan">
+                Acoes rapidas
+              </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 Toda acao fica registrada em logs administrativos.
               </p>
