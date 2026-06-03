@@ -40,7 +40,7 @@ export const Route = createFileRoute("/app/")({
 });
 
 function DashboardPage() {
-  const { data: d, mode, entryMode, setEntryMode, setModuleToggles } = useDashboardData();
+  const { data: d, mode, setModuleToggles } = useDashboardData();
   const userSession = readUserSession();
   const fullAccess = hasFullAccess(userSession);
   const patternMiner = usePatternMiner({
@@ -131,10 +131,6 @@ function DashboardPage() {
               surfSummary={surfSummary}
               tieAlert={tieAlertEnabled ? d.currentTieAlert : undefined}
               operationalMessage={buildSignalCopy(d)}
-              entryMode={entryMode}
-              entryModeFilter={d.entryModeFilter}
-              entryModeStats={d.entryModeStats}
-              onEntryModeChange={setEntryMode}
               enableResultFlash={mode === "live"}
               priority
             />

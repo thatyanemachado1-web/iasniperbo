@@ -1,7 +1,5 @@
 import type { DashboardData, Round, MainSignal, TieAlert } from "@/types/dashboard";
-import {
-  buildPressureSeries,
-} from "@/utils/statistics";
+import { buildPressureSeries } from "@/utils/statistics";
 
 export const MOCK_MODE = true;
 
@@ -9,8 +7,36 @@ export const MOCK_MODE = true;
 // B P B B T B P B B P T B B P B
 // P B B T P B P B T B B P T B P
 const ROADMAP: Round["result"][] = [
-  "B","P","B","B","T","B","P","B","B","P","T","B","B","P","B",
-  "P","B","B","T","P","B","P","B","T","B","B","P","T","B","P",
+  "B",
+  "P",
+  "B",
+  "B",
+  "T",
+  "B",
+  "P",
+  "B",
+  "B",
+  "P",
+  "T",
+  "B",
+  "B",
+  "P",
+  "B",
+  "P",
+  "B",
+  "B",
+  "T",
+  "P",
+  "B",
+  "P",
+  "B",
+  "T",
+  "B",
+  "B",
+  "P",
+  "T",
+  "B",
+  "P",
 ];
 
 function randScore(side: Round["result"]) {
@@ -48,26 +74,43 @@ rounds[rounds.length - 1] = {
 // Histórico mockado de sinais (32 greens, 15 g1, 23 reds) — 70 entradas
 const signals: MainSignal[] = [
   ...Array.from({ length: 32 }, (_, i) => ({
-    id: `g-${i}`, side: i % 2 ? "BANKER" : "PLAYER" as MainSignal["side"],
-    status: "green" as const, protection: "G0" as const, strength: 80,
+    id: `g-${i}`,
+    side: i % 2 ? "BANKER" : ("PLAYER" as MainSignal["side"]),
+    status: "green" as const,
+    protection: "G0" as const,
+    strength: 80,
   })),
   ...Array.from({ length: 15 }, (_, i) => ({
-    id: `g1-${i}`, side: i % 2 ? "BANKER" : "PLAYER" as MainSignal["side"],
-    status: "green_g1" as const, protection: "G1" as const, strength: 75,
+    id: `g1-${i}`,
+    side: i % 2 ? "BANKER" : ("PLAYER" as MainSignal["side"]),
+    status: "green_g1" as const,
+    protection: "G1" as const,
+    strength: 75,
   })),
   ...Array.from({ length: 23 }, (_, i) => ({
-    id: `r-${i}`, side: i % 2 ? "BANKER" : "PLAYER" as MainSignal["side"],
-    status: "red" as const, protection: "G1" as const, strength: 60,
+    id: `r-${i}`,
+    side: i % 2 ? "BANKER" : ("PLAYER" as MainSignal["side"]),
+    status: "red" as const,
+    protection: "G1" as const,
+    strength: 60,
   })),
 ];
 
 // Tie Alerts: 18 green + 7 expired = 25
 const tieAlerts: TieAlert[] = [
   ...Array.from({ length: 18 }, (_, i) => ({
-    id: `tg-${i}`, level: "Alto" as const, confidence: 78, validityRounds: 4, status: "green" as const,
+    id: `tg-${i}`,
+    level: "Alto" as const,
+    confidence: 78,
+    validityRounds: 4,
+    status: "green" as const,
   })),
   ...Array.from({ length: 7 }, (_, i) => ({
-    id: `te-${i}`, level: "Médio" as const, confidence: 65, validityRounds: 4, status: "expired" as const,
+    id: `te-${i}`,
+    level: "Médio" as const,
+    confidence: 65,
+    validityRounds: 4,
+    status: "expired" as const,
   })),
 ];
 
@@ -110,7 +153,7 @@ export const mockDashboardData: DashboardData = {
     tieAlert: true,
     surfAnalyzer: true,
   },
-  entryMode: "hunter",
+  entryMode: "off",
   currentSurfAlert: {
     surf_alert: true,
     surf_phase: "CONTINUIDADE",

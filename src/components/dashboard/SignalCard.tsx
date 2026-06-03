@@ -2,20 +2,10 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
-import { EntryModeControl } from "@/components/dashboard/EntryModeControl";
 import { LeituraNeuralMiniCard } from "@/components/dashboard/LeituraNeuralMiniCard";
 import { cn } from "@/lib/utils";
-import type {
-  ActiveEntryMode,
-  EntryMode,
-  EntryModeFilter,
-  EntryModeStats,
-  MainSignal,
-  NeuralReading,
-  SurfEntrySummary,
-  TieAlert,
-} from "@/types/dashboard";
-import { CheckCircle2, Clock3, Radio, ShieldAlert, ShieldCheck, Target, Zap } from "lucide-react";
+import type { MainSignal, NeuralReading, SurfEntrySummary, TieAlert } from "@/types/dashboard";
+import { CheckCircle2, Clock3, Radio, ShieldCheck, Target, Zap } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function SignalCard({
@@ -24,10 +14,6 @@ export function SignalCard({
   surfSummary,
   tieAlert,
   operationalMessage,
-  entryMode = "hunter",
-  entryModeFilter,
-  entryModeStats,
-  onEntryModeChange,
   locked,
   priority = false,
   enableResultFlash = false,
@@ -37,10 +23,6 @@ export function SignalCard({
   surfSummary?: SurfEntrySummary;
   tieAlert?: TieAlert;
   operationalMessage?: string;
-  entryMode?: EntryMode;
-  entryModeFilter?: EntryModeFilter;
-  entryModeStats?: Partial<Record<ActiveEntryMode, EntryModeStats>>;
-  onEntryModeChange?: (mode: EntryMode) => void;
   locked?: boolean;
   priority?: boolean;
   enableResultFlash?: boolean;
@@ -57,10 +39,23 @@ export function SignalCard({
   const isResultStatus =
     signal.status === "green" || signal.status === "green_g1" || signal.status === "red";
   const isTieWatch =
-    !isResultStatus && (signal.status === "tie_watch" || (signal.status === "waiting" && tieAlertIsActive));
+    !isResultStatus &&
+    (signal.status === "tie_watch" || (signal.status === "waiting" && tieAlertIsActive));
   const isWaiting = signal.status === "waiting" || isResultStatus;
-  const sideColor = isBanker ? "text-banker" : isPlayer ? "text-player" : isTieWatch ? "text-tie" : "text-muted-foreground";
-  const beamColor = isBanker ? "from-banker/40" : isPlayer ? "from-player/40" : isTieWatch ? "from-tie/35" : "from-neon-cyan/15";
+  const sideColor = isBanker
+    ? "text-banker"
+    : isPlayer
+      ? "text-player"
+      : isTieWatch
+        ? "text-tie"
+        : "text-muted-foreground";
+  const beamColor = isBanker
+    ? "from-banker/40"
+    : isPlayer
+      ? "from-player/40"
+      : isTieWatch
+        ? "from-tie/35"
+        : "from-neon-cyan/15";
   const displaySide = isResultStatus
     ? "AGUARDAR ANÁLISE"
     : isTieWatch
@@ -68,25 +63,32 @@ export function SignalCard({
       : isWaiting
         ? "AGUARDAR ENTRADA"
         : signal.side;
-  const displaySideClass = isWaiting || isTieWatch ? "text-[1.85rem] leading-none sm:text-3xl" : "text-4xl leading-none sm:text-5xl";
+  const displaySideClass =
+    isWaiting || isTieWatch
+      ? "text-[1.85rem] leading-none sm:text-3xl"
+      : "text-4xl leading-none sm:text-5xl";
   const sideCaption = isResultStatus
     ? "Última entrada finalizada"
     : isTieWatch || isWaiting
       ? "Sem entrada principal"
       : "Lado da entrada";
-  const visibleProtection = isTieWatch && tieAlert ? `${tieAlert.validityRounds} casas` : signal.protection;
+  const visibleProtection =
+    isTieWatch && tieAlert ? `${tieAlert.validityRounds} casas` : signal.protection;
   const visibleStrength = isTieWatch && tieAlert ? tieAlert.confidence : signal.strength;
   const status = signalStatus(signal, tieAlertIsActive, tieAlert?.validityRounds);
   const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
   const lastResultKey = signal.lastResult ? signalResultKey(signal.lastResult) : null;
   const neuralTotals = neuralResultTotals(neuralReading);
+  const neuralGreenCount = neuralTotals.greens;
+  const neuralRedCount = neuralTotals.reds;
   const StatusIcon = status.Icon;
   const tieRisk = !isResultStatus && tieAlert ? tieRiskBadge(tieAlert) : null;
-  const riskTone = surfSummary?.oppositeRiskLevel === "ALTO"
-    ? "text-destructive"
-    : surfSummary?.oppositeRiskLevel === "MEDIO"
-      ? "text-warning"
-      : "text-success";
+  const riskTone =
+    surfSummary?.oppositeRiskLevel === "ALTO"
+      ? "text-destructive"
+      : surfSummary?.oppositeRiskLevel === "MEDIO"
+        ? "text-warning"
+        : "text-success";
 
   useEffect(() => {
     if (!enableResultFlash) {
@@ -116,22 +118,22 @@ export function SignalCard({
   useEffect(() => {
     if (!enableResultFlash) {
       neuralResultSeen.current = false;
-      previousNeuralTotals.current = neuralTotals;
+      previousNeuralTotals.current = { greens: neuralGreenCount, reds: neuralRedCount };
       return;
     }
 
     if (!neuralResultSeen.current) {
       neuralResultSeen.current = true;
-      previousNeuralTotals.current = neuralTotals;
+      previousNeuralTotals.current = { greens: neuralGreenCount, reds: neuralRedCount };
       return;
     }
 
-    if (neuralTotals.greens > previousNeuralTotals.current.greens) {
+    if (neuralGreenCount > previousNeuralTotals.current.greens) {
       pulseGreen(setNeuralGreenFlash);
     }
 
-    previousNeuralTotals.current = neuralTotals;
-  }, [enableResultFlash, neuralTotals.greens, neuralTotals.reds]);
+    previousNeuralTotals.current = { greens: neuralGreenCount, reds: neuralRedCount };
+  }, [enableResultFlash, neuralGreenCount, neuralRedCount]);
 
   return (
     <GlassCard
@@ -140,34 +142,43 @@ export function SignalCard({
         mainGreenFlash && "result-green-flash",
       )}
     >
-      <div className={`absolute inset-x-0 top-0 h-24 bg-gradient-to-b ${beamColor} to-transparent opacity-45`} />
+      <div
+        className={`absolute inset-x-0 top-0 h-24 bg-gradient-to-b ${beamColor} to-transparent opacity-45`}
+      />
       <div className="absolute inset-0 scan-grid opacity-10" />
       <div className="absolute -left-12 -top-16 size-44 rounded-full bg-neon-blue/10 blur-3xl" />
       <SectionTitle
-        title={isResultStatus ? "Aguardar análise" : isWaiting ? "Aguardar entrada" : isTieWatch ? "Possível empate" : "Entrada confirmada"}
-        right={<AppBadge tone={status.badgeTone} pulse={status.pulse}><StatusIcon className="size-3" /> {status.badge}</AppBadge>}
+        title={
+          isResultStatus
+            ? "Aguardar análise"
+            : isWaiting
+              ? "Aguardar entrada"
+              : isTieWatch
+                ? "Possível empate"
+                : "Entrada confirmada"
+        }
+        right={
+          <AppBadge tone={status.badgeTone} pulse={status.pulse}>
+            <StatusIcon className="size-3" /> {status.badge}
+          </AppBadge>
+        }
       />
-      {onEntryModeChange && (
-        <div className="relative mb-3">
-          <EntryModeControl
-            value={entryMode}
-            onChange={onEntryModeChange}
-            stats={entryModeStats}
-          />
-        </div>
-      )}
       <div className="relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
         <div className="min-w-0 pt-0.5">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-neon-cyan/25 bg-background/35 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan">
             <Zap className="size-3" />
-            {isWaiting ? "Monitorando mesa" : isTieWatch ? "Aviso paralelo" : "Prioridade operacional"}
+            {isWaiting
+              ? "Monitorando mesa"
+              : isTieWatch
+                ? "Aviso paralelo"
+                : "Prioridade operacional"}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className={`${displaySideClass} font-extrabold ${sideColor}`}>
-              {displaySide}
-            </div>
+            <div className={`${displaySideClass} font-extrabold ${sideColor}`}>{displaySide}</div>
             {tieRisk && (
-              <span className={`rounded-full border px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide ${tieRisk.className}`}>
+              <span
+                className={`rounded-full border px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide ${tieRisk.className}`}
+              >
                 Risco de empate: {tieRisk.label}
               </span>
             )}
@@ -176,24 +187,6 @@ export function SignalCard({
           {operationalMessage && (
             <div className="mt-2 max-w-[42rem] text-xs leading-relaxed text-foreground/85">
               {operationalMessage}
-            </div>
-          )}
-          {entryModeFilter?.blocked && (
-            <div className="mt-3 max-w-[42rem] rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">
-              <div className="flex items-start gap-2">
-                <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
-                <div>
-                  <div className="font-black uppercase tracking-[0.12em]">
-                    Entrada segurada pelo modo {entryModeLabel(entryModeFilter.mode)}
-                  </div>
-                  <div className="mt-1 text-warning/90">{entryModeFilter.reason}</div>
-                  {entryModeFilter.originalSide && (
-                    <div className="mt-1 text-[11px] text-warning/75">
-                      Sinal original: {entryModeFilter.originalSide} com força {entryModeFilter.originalStrength ?? 0}%.
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
           )}
         </div>
@@ -400,13 +393,6 @@ function tieRiskBadge(alert: TieAlert) {
     label: "BAIXO",
     className: "border-success/35 bg-success/15 text-success",
   };
-}
-
-function entryModeLabel(mode: EntryMode) {
-  if (mode === "sniper") return "Sniper";
-  if (mode === "aggressive") return "Agressivo";
-  if (mode === "hunter") return "Caçador";
-  return "Desligado";
 }
 
 function normalizeRisk(level: TieAlert["level"]) {
