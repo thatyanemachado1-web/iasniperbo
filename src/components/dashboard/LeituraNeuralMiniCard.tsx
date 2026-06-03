@@ -6,6 +6,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useEffect, useMemo, useState } from "react";
 import type { NeuralReading, NeuralScoreboard, SignalSide } from "@/types/dashboard";
 
 type NeuralSide = SignalSide | "TIE";
@@ -39,6 +40,7 @@ const SCANNING_READING: NeuralReading = {
   erros: null,
   assertividade: null,
 };
+const GENERAL_SCORE_STORAGE_KEY = "sniper_neural_general_score";
 
 export function LeituraNeuralMiniCard({
   className,
@@ -65,6 +67,7 @@ export function LeituraNeuralMiniCard({
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(generalScoreboard, data);
+  const progressiveGeneralScore = useProgressiveGeneralScore(generalScore);
 
   return (
     <aside
@@ -81,7 +84,7 @@ export function LeituraNeuralMiniCard({
       <div className="absolute -right-5 -top-6 size-16 rounded-full bg-neon-purple/15 blur-2xl" />
       <div className="absolute -bottom-6 -left-5 size-16 rounded-full bg-neon-cyan/15 blur-2xl" />
       <NeuralGeneralScorePopover
-        score={generalScore}
+        score={progressiveGeneralScore}
         statusKind={statusKind}
         statusLabel={statusLabel(data)}
       />
@@ -365,6 +368,92 @@ function buildGeneralScore(
     total,
     accuracy,
   };
+}
+
+function useProgressiveGeneralScore(incoming: NeuralScoreSummary) {
+  const incomingKey = useMemo(() => scoreKey(incoming), [incoming]);
+  const [score, setScore] = useState<NeuralScoreSummary>(() =>
+    mergeProgressiveScores(readStoredGeneralScore(), incoming),
+  );
+
+  useEffect(() => {
+    setScore((previous) => {
+      const next = mergeProgressiveScores(previous, incoming);
+      writeStoredGeneralScore(next);
+      return scoreKey(next) === scoreKey(previous) ? previous : next;
+    });
+  }, [incoming, incomingKey]);
+
+  return score;
+}
+
+function mergeProgressiveScores(
+  previous: NeuralScoreSummary | null,
+  incoming: NeuralScoreSummary,
+): NeuralScoreSummary {
+  const greens = maxNullable(previous?.greens, incoming.greens);
+  const sg = maxNullable(previous?.sg, incoming.sg);
+  const g1 = maxNullable(previous?.g1, incoming.g1);
+  const reds = maxNullable(previous?.reds, incoming.reds);
+  const resolvedTotal = numberFrom(greens) + numberFrom(reds);
+  const totalAlerts = maxNullable(previous?.totalAlerts, incoming.totalAlerts, resolvedTotal);
+  const total = Math.max(previous?.total ?? 0, incoming.total, resolvedTotal, numberFrom(totalAlerts));
+  const accuracy = resolvedTotal > 0
+    ? (numberFrom(greens) / resolvedTotal) * 100
+    : maxNullable(previous?.accuracy, incoming.accuracy);
+
+  return {
+    totalAlerts,
+    greens,
+    sg,
+    g1,
+    reds,
+    total,
+    accuracy,
+  };
+}
+
+function maxNullable(...values: Array<number | null | undefined>) {
+  const numericValues = values.filter(
+    (value): value is number => typeof value === "number" && Number.isFinite(value),
+  );
+  return numericValues.length ? Math.max(...numericValues) : null;
+}
+
+function readStoredGeneralScore(): NeuralScoreSummary | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(GENERAL_SCORE_STORAGE_KEY) || "null");
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      totalAlerts: optionalNumberFrom(parsed.totalAlerts),
+      greens: optionalNumberFrom(parsed.greens),
+      sg: optionalNumberFrom(parsed.sg),
+      g1: optionalNumberFrom(parsed.g1),
+      reds: optionalNumberFrom(parsed.reds),
+      total: numberFrom(parsed.total),
+      accuracy: optionalNumberFrom(parsed.accuracy),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredGeneralScore(score: NeuralScoreSummary) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(GENERAL_SCORE_STORAGE_KEY, JSON.stringify(score));
+}
+
+function scoreKey(score: NeuralScoreSummary) {
+  return [
+    score.totalAlerts,
+    score.greens,
+    score.sg,
+    score.g1,
+    score.reds,
+    score.total,
+    score.accuracy,
+  ].join(":");
 }
 
 function optionalNumberFrom(value?: number | null) {
