@@ -56,6 +56,17 @@ export interface NeuralReading {
   postTie?: boolean | null;
 }
 
+export interface NeuralScoreboard {
+  totalAlerts?: number | null;
+  acertos?: number | null;
+  greens?: number | null;
+  greenSemGale?: number | null;
+  greenG1?: number | null;
+  erros?: number | null;
+  reds?: number | null;
+  assertividade?: number | null;
+}
+
 export interface ModuleToggles {
   tieAlert: boolean;
   surfAnalyzer: boolean;
@@ -258,6 +269,7 @@ export interface DashboardData {
   currentTieAlert: TieAlert;
   currentSurfAlert?: SurfAlert;
   neuralReading?: NeuralReading;
+  neuralScoreboard?: NeuralScoreboard;
   moduleToggles?: ModuleToggles;
   entryMode?: EntryMode;
   entryModeFilter?: EntryModeFilter;
