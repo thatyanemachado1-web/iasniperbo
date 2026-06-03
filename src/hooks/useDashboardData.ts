@@ -8,7 +8,7 @@ import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } fr
 const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
-const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_v3";
+const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_v4";
 const DEFAULT_MODULE_TOGGLES: ModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -713,6 +713,17 @@ function readNeuralScoreBaseline(key: string): NeuralScoreBaseline | null {
 function writeNeuralScoreBaseline(key: string, baseline: NeuralScoreBaseline) {
   window.localStorage.setItem(key, JSON.stringify(baseline));
   window.localStorage.removeItem("sniper_neural_general_score");
+  window.localStorage.removeItem("sniper_neural_score_baseline_v2");
+  window.localStorage.removeItem("sniper_neural_score_baseline_v3");
+  for (const storageKey of Object.keys(window.localStorage)) {
+    if (
+      storageKey.includes("sniper_neural_general_score") ||
+      storageKey.includes("sniper_neural_score_baseline_v2") ||
+      storageKey.includes("sniper_neural_score_baseline_v3")
+    ) {
+      window.localStorage.removeItem(storageKey);
+    }
+  }
 }
 
 function neuralScoreWentBackwards(current: Omit<NeuralScoreBaseline, "day">, baseline: NeuralScoreBaseline) {
