@@ -12,6 +12,7 @@ export interface UserSession {
 }
 
 const USER_SESSION_KEY = "sniper_user_session";
+const LOCAL_DEMO_TRIAL_MS = 10 * 60 * 1000;
 // Admin owner emails are configured via env var (not hardcoded to avoid leaking PII in the bundle).
 // Leave VITE_ADMIN_OWNER_EMAIL unset to disable client-side owner shortcuts entirely;
 // real authorization must be enforced server-side.
@@ -42,6 +43,7 @@ export function readUserSession(): UserSession {
     const owner = isAdminOwnerEmail(email);
     const approver = isAdminApproverEmail(email);
     const role = normalizeUserRole(session.role || (owner ? "owner" : approver ? "admin" : "user"));
+    const expiresAt = normalizeLocalDemoExpiresAt(session);
     return {
       email,
       name,
@@ -49,7 +51,7 @@ export function readUserSession(): UserSession {
       accessMode,
       accessStatus: String(session.accessStatus || accessMode),
       plan,
-      expiresAt: String(session.expiresAt || ""),
+      expiresAt,
       registered: owner || session.registered === true,
       approved: owner || session.approved === true || accessMode === "full",
       clientToken: typeof session.clientToken === "string" ? session.clientToken : "",
@@ -57,6 +59,27 @@ export function readUserSession(): UserSession {
   } catch {
     return emptyUserSession();
   }
+}
+
+function normalizeLocalDemoExpiresAt(session: Partial<UserSession>) {
+  const expiresAt = String(session.expiresAt || "");
+  if (typeof window === "undefined" || session.accessStatus !== "demo_local") return expiresAt;
+
+  const parsed = Date.parse(expiresAt);
+  if (!Number.isFinite(parsed)) return expiresAt;
+
+  const maxExpiresAt = Date.now() + LOCAL_DEMO_TRIAL_MS;
+  if (parsed <= maxExpiresAt) return expiresAt;
+
+  const nextExpiresAt = new Date(maxExpiresAt).toISOString();
+  window.localStorage.setItem(
+    USER_SESSION_KEY,
+    JSON.stringify({
+      ...session,
+      expiresAt: nextExpiresAt,
+    }),
+  );
+  return nextExpiresAt;
 }
 
 export function saveUserSession(email: string, partial: Partial<UserSession> = {}) {

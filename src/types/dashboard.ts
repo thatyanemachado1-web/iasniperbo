@@ -265,6 +265,7 @@ export interface DashboardData {
   user: { name: string };
   mockMode: boolean;
   rounds: Round[];
+  updatedAt?: string;
   currentSignal: MainSignal;
   currentTieAlert: TieAlert;
   currentSurfAlert?: SurfAlert;

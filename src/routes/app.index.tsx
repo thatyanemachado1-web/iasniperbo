@@ -13,6 +13,7 @@ import { AIReadingCard } from "@/components/dashboard/AIReadingCard";
 import { RoadmapDots } from "@/components/dashboard/RoadmapDots";
 import { PressureChart } from "@/components/dashboard/PressureChart";
 import { PatternMinerMiniCard } from "@/components/patternMiner/PatternMinerMiniCard";
+import { RoundHistoryAuditCard } from "@/components/dashboard/RoundHistoryAuditCard";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -34,6 +35,7 @@ import {
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import { buildSignalCopy } from "@/lib/operationalCopy";
 import { usePatternMiner } from "@/hooks/usePatternMiner";
+import { useRoundHistory } from "@/hooks/useRoundHistory";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
@@ -48,6 +50,7 @@ function DashboardPage() {
     historyLimit: 15000,
     enabled: mode === "live" && !d.mockMode,
   });
+  const { history: roundHistory, resetHistory } = useRoundHistory(d, mode === "live" && !d.mockMode);
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const tieAlertEnabled = d.moduleToggles?.tieAlert !== false;
   const surfAnalyzerEnabled = d.moduleToggles?.surfAnalyzer !== false;
@@ -265,6 +268,8 @@ function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
+          <RoundHistoryAuditCard history={roundHistory} onReset={resetHistory} />
+
           <PremiumFeature
             title="Analise estatistica VIP"
             description="O demo mostra a estrutura, mas bloqueia a leitura completa."

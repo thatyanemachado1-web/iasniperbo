@@ -164,7 +164,7 @@ async function apiRequest<T>(
   } = {},
 ) {
   const token = readUserSession().clientToken || "";
-  const response = await fetch(`${normalizeBaseUrl(getInitialApiUrl())}${path}`, {
+  const response = await fetch(`${publicApiBaseUrl()}${path}`, {
     method: init.method || "GET",
     headers: {
       "Content-Type": "application/json",
@@ -182,9 +182,50 @@ async function apiRequest<T>(
     } catch {
       message = text;
     }
+    if (
+      isLocalFrontend() &&
+      path.startsWith("/auth/") &&
+      response.status === 503 &&
+      message.includes("Sessao nao configurada")
+    ) {
+      return { access: buildLocalDemoAccess(init.body ?? {}) } as T;
+    }
     throw new Error(message || "Nao foi possivel validar o acesso.");
   }
   return (await response.json()) as T;
+}
+
+function publicApiBaseUrl() {
+  if (isLocalFrontend()) {
+    return window.location.origin;
+  }
+  return normalizeBaseUrl(getInitialApiUrl());
+}
+
+function buildLocalDemoAccess(body: Record<string, unknown>): ClientAccess {
+  const email = String(body.email || "").trim().toLowerCase();
+  const name = email.split("@")[0]?.replace(/[._-]+/g, " ") || "Cliente";
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  return {
+    registered: true,
+    approved: false,
+    access_mode: "demo",
+    access_status: "demo_local",
+    plan: "free",
+    email,
+    full_name: name,
+    expires_at: expiresAt,
+    reason: "Sessao local de cliente para teste.",
+    client_token: "sniper-local-admin-token",
+    role: "user",
+  };
+}
+
+function isLocalFrontend() {
+  return (
+    typeof window !== "undefined" &&
+    ["127.0.0.1", "localhost"].includes(window.location.hostname)
+  );
 }
 
 function normalizeBaseUrl(apiUrl: string) {

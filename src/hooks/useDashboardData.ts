@@ -7,6 +7,8 @@ import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } fr
 
 const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
+const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
+const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_v3";
 const DEFAULT_MODULE_TOGGLES: ModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -98,11 +100,18 @@ function defaultDashboardUrl() {
   return `${window.location.origin}/dashboard`;
 }
 
+function localDevDashboardToken() {
+  if (typeof window === "undefined") return "";
+  return ["127.0.0.1", "localhost"].includes(window.location.hostname)
+    ? LOCAL_DEV_DASHBOARD_TOKEN
+    : "";
+}
+
 async function fetchDashboardData(): Promise<DashboardData> {
   const url = configuredDashboardUrl();
   const userSession = readUserSession();
   const adminSession = readAdminSession();
-  const token = adminSession?.token || userSession.clientToken;
+  const token = adminSession?.token || userSession.clientToken || localDevDashboardToken();
   const response = await fetch(url, {
     cache: "no-store",
     headers: {
@@ -219,8 +228,11 @@ function normalizeDashboardData(payload: unknown): DashboardData {
 
   return {
     ...data,
-    neuralReading: normalizeNeuralReading(neuralReading, data.neuralReading),
-    neuralScoreboard: normalizeNeuralScoreboard(neuralScoreboard, data.neuralScoreboard),
+    ...applyNeuralScoreBaseline(
+      normalizeNeuralReading(neuralReading, data.neuralReading),
+      normalizeNeuralScoreboard(neuralScoreboard, data.neuralScoreboard),
+      dashboardDayKey(data),
+    ),
   };
 }
 
@@ -575,4 +587,169 @@ function readOptionalBoolean(value: unknown) {
 
 function numberOrZero(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+interface NeuralScoreBaseline {
+  day: string;
+  alertas: number;
+  acertos: number;
+  greenSemGale: number;
+  greenG1: number;
+  erros: number;
+  reds: number;
+}
+
+function applyNeuralScoreBaseline(
+  reading: NeuralReading,
+  scoreboard: NeuralScoreboard | undefined,
+  day: string,
+): Pick<DashboardData, "neuralReading" | "neuralScoreboard"> {
+  if (typeof window === "undefined") return { neuralReading: reading, neuralScoreboard: scoreboard };
+  const current = neuralScoreFrom(reading, scoreboard);
+  const storageKey = neuralScoreBaselineStorageKey();
+  const baseline = readNeuralScoreBaseline(storageKey);
+
+  if (!baseline || baseline.day !== day || neuralScoreWentBackwards(current, baseline)) {
+    writeNeuralScoreBaseline(storageKey, { day, ...current });
+    const neuralReading = {
+      ...reading,
+      alertas: 0,
+      acertos: 0,
+      greenSemGale: 0,
+      greenG1: 0,
+      erros: 0,
+      reds: 0,
+      assertividade: 0,
+      sequencePositive: 0,
+      sequenceNegative: 0,
+    };
+    return {
+      neuralReading,
+      neuralScoreboard: zeroNeuralScoreboard(scoreboard),
+    };
+  }
+
+  const greenSemGale = Math.max(0, current.greenSemGale - baseline.greenSemGale);
+  const greenG1 = Math.max(0, current.greenG1 - baseline.greenG1);
+  const acertos = Math.max(0, current.acertos - baseline.acertos);
+  const reds = Math.max(0, current.reds - baseline.reds);
+  const erros = Math.max(0, current.erros - baseline.erros);
+  const alertas = Math.max(0, current.alertas - baseline.alertas);
+  const totalGreens = greenSemGale + greenG1 || acertos;
+  const totalLosses = reds || erros;
+  const total = totalGreens + totalLosses;
+
+  const neuralReading = {
+    ...reading,
+    alertas: Math.max(alertas, total),
+    acertos: totalGreens,
+    greenSemGale,
+    greenG1,
+    erros: totalLosses,
+    reds: totalLosses,
+    assertividade: total > 0 ? Math.round((totalGreens / total) * 1000) / 10 : 0,
+    sequencePositive: totalGreens > 0 && totalLosses === 0 ? totalGreens : reading.sequencePositive ?? 0,
+    sequenceNegative: totalLosses > 0 && totalGreens === 0 ? totalLosses : reading.sequenceNegative ?? 0,
+  };
+  return {
+    neuralReading,
+    neuralScoreboard: {
+      ...scoreboard,
+      totalAlerts: Math.max(alertas, total),
+      acertos: totalGreens,
+      greens: totalGreens,
+      greenSemGale,
+      greenG1,
+      erros: totalLosses,
+      reds: totalLosses,
+      assertividade: total > 0 ? Math.round((totalGreens / total) * 1000) / 10 : 0,
+    },
+  };
+}
+
+function neuralScoreFrom(reading: NeuralReading, scoreboard?: NeuralScoreboard) {
+  const greenSemGale = safeCounter(scoreboard?.greenSemGale ?? reading.greenSemGale);
+  const greenG1 = safeCounter(scoreboard?.greenG1 ?? reading.greenG1);
+  const acertos = safeCounter(scoreboard?.acertos ?? scoreboard?.greens ?? reading.acertos ?? greenSemGale + greenG1);
+  const reds = safeCounter(scoreboard?.reds ?? scoreboard?.erros ?? reading.reds ?? reading.erros);
+  const erros = safeCounter(scoreboard?.erros ?? scoreboard?.reds ?? reading.erros ?? reading.reds);
+  const alertas = safeCounter(scoreboard?.totalAlerts ?? reading.alertas ?? acertos + erros);
+  return { alertas, acertos, greenSemGale, greenG1, erros, reds };
+}
+
+function zeroNeuralScoreboard(scoreboard?: NeuralScoreboard): NeuralScoreboard | undefined {
+  if (!scoreboard) return undefined;
+  return {
+    ...scoreboard,
+    totalAlerts: 0,
+    acertos: 0,
+    greens: 0,
+    greenSemGale: 0,
+    greenG1: 0,
+    erros: 0,
+    reds: 0,
+    assertividade: 0,
+  };
+}
+
+function readNeuralScoreBaseline(key: string): NeuralScoreBaseline | null {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || "null") as Partial<NeuralScoreBaseline> | null;
+    if (!parsed || typeof parsed.day !== "string") return null;
+    return {
+      day: parsed.day,
+      alertas: safeCounter(parsed.alertas),
+      acertos: safeCounter(parsed.acertos),
+      greenSemGale: safeCounter(parsed.greenSemGale),
+      greenG1: safeCounter(parsed.greenG1),
+      erros: safeCounter(parsed.erros),
+      reds: safeCounter(parsed.reds),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeNeuralScoreBaseline(key: string, baseline: NeuralScoreBaseline) {
+  window.localStorage.setItem(key, JSON.stringify(baseline));
+  window.localStorage.removeItem("sniper_neural_general_score");
+}
+
+function neuralScoreWentBackwards(current: Omit<NeuralScoreBaseline, "day">, baseline: NeuralScoreBaseline) {
+  return (
+    current.alertas < baseline.alertas ||
+    current.acertos < baseline.acertos ||
+    current.greenSemGale < baseline.greenSemGale ||
+    current.greenG1 < baseline.greenG1 ||
+    current.erros < baseline.erros ||
+    current.reds < baseline.reds
+  );
+}
+
+function neuralScoreBaselineStorageKey() {
+  const email = readUserSession().email.trim().toLowerCase();
+  return email ? `${NEURAL_SCORE_BASELINE_KEY}:${email}` : NEURAL_SCORE_BASELINE_KEY;
+}
+
+function dashboardDayKey(data: DashboardData) {
+  const record = data as unknown as Record<string, unknown>;
+  const explicit = readOptionalString(firstDefined(record.dailyCycleDate, record.cycleDate));
+  if (explicit && /^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit;
+  const updatedAt = readOptionalString(data.updatedAt);
+  if (updatedAt) return localDayKey(updatedAt);
+  return localDayKey(new Date().toISOString());
+}
+
+function localDayKey(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function safeCounter(value: unknown) {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
 }
