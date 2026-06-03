@@ -3,7 +3,7 @@ import { mockDashboardData } from "@/data/mockDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
 import { useEffect, useMemo, useState } from "react";
-import type { DashboardData, ModuleToggles, NeuralReading } from "@/types/dashboard";
+import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } from "@/types/dashboard";
 
 const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
@@ -209,10 +209,102 @@ function normalizeDashboardData(payload: unknown): DashboardData {
     (data as unknown as Record<string, unknown>).neural_reading ??
     (data as unknown as Record<string, unknown>).numeroPagante ??
     (data as unknown as Record<string, unknown>).numero_pagante;
+  const neuralScoreboard =
+    data.neuralScoreboard ??
+    (data as unknown as Record<string, unknown>).neural_scoreboard ??
+    (data as unknown as Record<string, unknown>).paganteScoreboard ??
+    (data as unknown as Record<string, unknown>).pagante_scoreboard ??
+    (data as unknown as Record<string, unknown>).neuralStats ??
+    (data as unknown as Record<string, unknown>).neural_stats;
 
   return {
     ...data,
     neuralReading: normalizeNeuralReading(neuralReading, data.neuralReading),
+    neuralScoreboard: normalizeNeuralScoreboard(neuralScoreboard, data.neuralScoreboard),
+  };
+}
+
+function normalizeNeuralScoreboard(
+  value: unknown,
+  fallback?: NeuralScoreboard,
+): NeuralScoreboard | undefined {
+  const record = readRecord(value);
+  if (!Object.keys(record).length && !fallback) return undefined;
+
+  const greenG1 = readOptionalNumber(
+    firstDefined(
+      record.greenG1,
+      record.green_g1,
+      record.greensG1,
+      record.greens_g1,
+      record.g1,
+      record.greenGale1,
+      record.green_gale_1,
+      fallback?.greenG1,
+    ),
+  );
+  const greenSemGale = readOptionalNumber(
+    firstDefined(
+      record.greenSemGale,
+      record.green_sem_gale,
+      record.greenSG,
+      record.green_sg,
+      record.sg,
+      record.greensSemGale,
+      record.greens_sem_gale,
+      greenG1 !== null ? record.greens : undefined,
+      fallback?.greenSemGale,
+    ),
+  );
+  const splitGreens =
+    greenSemGale !== null || greenG1 !== null
+      ? numberOrZero(greenSemGale) + numberOrZero(greenG1)
+      : undefined;
+
+  return {
+    ...fallback,
+    totalAlerts:
+      readOptionalNumber(
+        firstDefined(record.totalAlerts, record.total_alerts, record.alertas, record.alerts),
+      ) ?? fallback?.totalAlerts ?? null,
+    acertos:
+      readOptionalNumber(
+        firstDefined(
+          record.acertos,
+          record.hits,
+          record.greens,
+          record.totalGreens,
+          record.total_greens,
+          splitGreens,
+        ),
+      ) ?? fallback?.acertos ?? null,
+    greens:
+      readOptionalNumber(
+        firstDefined(record.greens, record.totalGreens, record.total_greens, splitGreens),
+      ) ?? fallback?.greens ?? null,
+    greenSemGale,
+    greenG1,
+    erros:
+      readOptionalNumber(
+        firstDefined(record.erros, record.reds, record.red, record.fails, record.losses),
+      ) ?? fallback?.erros ?? null,
+    reds:
+      readOptionalNumber(
+        firstDefined(record.reds, record.red, record.erros, record.fails, record.losses),
+      ) ?? fallback?.reds ?? null,
+    assertividade:
+      readOptionalNumber(
+        firstDefined(
+          record.assertividade,
+          record.assertiveness,
+          record.accuracy,
+          record.porcentagem,
+          record.percentual,
+          record.percent,
+          record.winRate,
+          record.win_rate,
+        ),
+      ) ?? fallback?.assertividade ?? null,
   };
 }
 
