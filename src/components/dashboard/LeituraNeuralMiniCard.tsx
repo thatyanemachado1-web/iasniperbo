@@ -1,6 +1,11 @@
-import { Sparkles } from "lucide-react";
+import { CircleHelp, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buildNeuralCopy } from "@/lib/operationalCopy";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type { NeuralReading, SignalSide } from "@/types/dashboard";
 
 type NeuralSide = SignalSide | "TIE";
@@ -38,6 +43,7 @@ export function LeituraNeuralMiniCard({
   const g1 = optionalNumberFrom(data.greenG1);
   const red = optionalNumberFrom(data.reds ?? data.erros);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
+  const resolvedTotal = numberFrom(totalGreens) + numberFrom(red);
   const showPayingStats = hasNumber || totalGreens !== null || accuracy !== null || totalAlerts !== null;
   const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
   const postTie = Boolean(data.postTie);
@@ -45,6 +51,7 @@ export function LeituraNeuralMiniCard({
   const originBadge = originBadgeFor(originKind);
   const pullingSide = data.direcao ?? data.origem;
   const message = buildNeuralCopy(data);
+  const statusKind = neuralStatusKind(data);
 
   return (
     <aside
@@ -60,7 +67,17 @@ export function LeituraNeuralMiniCard({
       <div className="absolute inset-0 neural-mini-grid opacity-40" />
       <div className="absolute -right-5 -top-6 size-16 rounded-full bg-neon-purple/15 blur-2xl" />
       <div className="absolute -bottom-6 -left-5 size-16 rounded-full bg-neon-cyan/15 blur-2xl" />
-      <span className="absolute right-2 top-2 size-1.5 rounded-full bg-success shadow-[0_0_12px_var(--success)]" />
+      <NeuralGeneralScorePopover
+        accuracy={accuracy}
+        totalAlerts={totalAlerts}
+        totalGreens={totalGreens}
+        sg={sg}
+        g1={g1}
+        red={red}
+        resolvedTotal={resolvedTotal}
+        statusKind={statusKind}
+        statusLabel={statusLabel(data)}
+      />
       <span className="absolute inset-x-0 top-0 h-px neural-mini-shimmer" />
 
       <div className="relative flex items-center gap-1.5">
@@ -122,7 +139,13 @@ export function LeituraNeuralMiniCard({
             <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
               <div className="flex items-baseline justify-between gap-1">
                 <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                  {originKind === "OPOSTO" ? "Oposto" : postTie ? "Pos-empate" : "Pagando"}
+                  {originKind === "OPOSTO"
+                    ? "Oposto"
+                    : postTie
+                      ? "Pos-empate"
+                      : typeof data.numero === "number"
+                        ? `Numero ${data.numero}`
+                        : "Pagando"}
                 </span>
                 <span className="text-[11px] font-black text-neon-cyan">
                   {formatPercent(accuracy)}
@@ -132,7 +155,7 @@ export function LeituraNeuralMiniCard({
                 SG:{formatCount(sg)}  G1:{formatCount(g1)}  RED:{formatCount(red, true)}
               </div>
               <div className="truncate text-[8px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[9px]">
-                Total de Greens: {formatCount(totalGreens)}
+                Placar: {formatCount(totalGreens)}G / {formatCount(red, true)}R
               </div>
               {data.paganteWindow ? (
                 <div className="truncate text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -162,6 +185,99 @@ export function LeituraNeuralMiniCard({
         </div>
       )}
     </aside>
+  );
+}
+
+function NeuralGeneralScorePopover({
+  accuracy,
+  totalAlerts,
+  totalGreens,
+  sg,
+  g1,
+  red,
+  resolvedTotal,
+  statusKind,
+  statusLabel,
+}: {
+  accuracy: number | null;
+  totalAlerts: number | null;
+  totalGreens: number | null;
+  sg: number | null;
+  g1: number | null;
+  red: number | null;
+  resolvedTotal: number;
+  statusKind: "green" | "amber" | "red" | "muted";
+  statusLabel: string;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "absolute right-1.5 top-1.5 z-10 grid size-6 place-items-center rounded-full border bg-background/75 text-muted-foreground shadow-sm backdrop-blur transition hover:border-neon-cyan/45 hover:text-neon-cyan",
+            statusButtonClass(statusKind),
+          )}
+          aria-label="Abrir placar geral da Leitura Neural"
+          title="Placar geral da Leitura Neural"
+        >
+          <span
+            className={cn(
+              "absolute right-0.5 top-0.5 size-1.5 rounded-full",
+              statusDotClass(statusKind),
+            )}
+          />
+          <CircleHelp className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="left"
+        align="start"
+        className="w-[236px] rounded-xl border-neon-purple/25 bg-background/95 p-3 shadow-[0_0_30px_-18px_var(--neon-purple)]"
+      >
+        <div className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-gradient-brand">
+                Placar Geral
+              </div>
+              <div className="mt-0.5 text-[10px] font-semibold text-muted-foreground">
+                {statusLabel}
+              </div>
+            </div>
+            <div className={cn("rounded-full border px-2 py-0.5 text-[9px] font-black", statusPillClass(statusKind))}>
+              {formatPercent(accuracy)}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5">
+            <ScoreBox label="Green" value={totalGreens} tone="green" />
+            <ScoreBox label="RED" value={red} tone="red" />
+            <ScoreBox label="SG" value={sg} tone="green" />
+            <ScoreBox label="G1" value={g1} tone="cyan" />
+            <ScoreBox label="Alertas" value={totalAlerts ?? resolvedTotal} tone="neutral" />
+            <ScoreBox label="Total" value={resolvedTotal} tone="neutral" />
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ScoreBox({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | null;
+  tone: "green" | "red" | "cyan" | "neutral";
+}) {
+  return (
+    <div className={cn("rounded-lg border px-2 py-1.5", scoreBoxClass(tone))}>
+      <div className="text-[8px] font-bold uppercase tracking-[0.1em] opacity-75">{label}</div>
+      <div className="text-sm font-black leading-tight">{formatCount(value)}</div>
+    </div>
   );
 }
 
@@ -266,6 +382,90 @@ function formatPercent(value: number | null) {
 function formatCount(value: number | null, pad = false) {
   if (value === null) return "--";
   return pad && value >= 0 && value < 10 ? `0${value}` : String(value);
+}
+
+function neuralStatusKind(reading: NeuralReading): "green" | "amber" | "red" | "muted" {
+  if (reading.mode === "SCANNING" || typeof reading.numero !== "number") return "muted";
+
+  const status = normalizeStatus(reading.paganteStatus);
+  if (
+    reading.isRedAlert ||
+    reading.isSaturated ||
+    status.includes("RISCO") ||
+    status.includes("ESTICADO") ||
+    status.includes("RED") ||
+    status.includes("FALH")
+  ) {
+    return "red";
+  }
+
+  if (
+    reading.mode === "OBSERVING" ||
+    status.includes("INICIANTE") ||
+    status.includes("OBSERV") ||
+    status.includes("AGUARD") ||
+    status.includes("POS-EMPATE") ||
+    status.includes("POS EMPATE")
+  ) {
+    return "amber";
+  }
+
+  if (
+    reading.mode === "ACTIVE" &&
+    (status === "" ||
+      status.includes("VALID") ||
+      status.includes("GREEN") ||
+      status.includes("CONFIRM") ||
+      status.includes("FAVOR"))
+  ) {
+    return "green";
+  }
+
+  return "amber";
+}
+
+function statusLabel(reading: NeuralReading) {
+  if (reading.mode === "SCANNING" || typeof reading.numero !== "number") return "Procurando pagante";
+  const status = reading.paganteStatus?.trim();
+  if (status) return status.toLocaleLowerCase("pt-BR").replace(/_/g, " ");
+  if (neuralStatusKind(reading) === "green") return "leitura batendo";
+  return "em observacao";
+}
+
+function normalizeStatus(value?: string | null) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/_/g, " ");
+}
+
+function statusButtonClass(status: "green" | "amber" | "red" | "muted") {
+  if (status === "green") return "border-success/30 text-success";
+  if (status === "red") return "border-destructive/35 text-destructive";
+  if (status === "amber") return "border-warning/35 text-warning";
+  return "border-white/10 text-muted-foreground";
+}
+
+function statusDotClass(status: "green" | "amber" | "red" | "muted") {
+  if (status === "green") return "bg-success shadow-[0_0_10px_var(--success)]";
+  if (status === "red") return "bg-destructive shadow-[0_0_10px_var(--destructive)]";
+  if (status === "amber") return "bg-warning shadow-[0_0_10px_var(--warning)]";
+  return "bg-muted-foreground/55";
+}
+
+function statusPillClass(status: "green" | "amber" | "red" | "muted") {
+  if (status === "green") return "border-success/25 bg-success/10 text-success";
+  if (status === "red") return "border-destructive/30 bg-destructive/10 text-destructive";
+  if (status === "amber") return "border-warning/25 bg-warning/10 text-warning";
+  return "border-white/10 bg-white/5 text-muted-foreground";
+}
+
+function scoreBoxClass(tone: "green" | "red" | "cyan" | "neutral") {
+  if (tone === "green") return "border-success/25 bg-success/10 text-success";
+  if (tone === "red") return "border-destructive/30 bg-destructive/10 text-destructive";
+  if (tone === "cyan") return "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan";
+  return "border-white/10 bg-white/5 text-muted-foreground";
 }
 
 function sideLabel(side?: NeuralSide | null) {
