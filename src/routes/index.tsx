@@ -1,34 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
   AlertCircle,
-  AudioLines,
   Bell,
-  BrainCircuit,
-  CircleDollarSign,
-  Copy,
   Crown,
-  DatabaseZap,
-  GitBranch,
   KeyRound,
   Loader2,
   Mail,
   MapPin,
   Mic,
-  Network,
   Phone,
   Radio,
-  Radar,
-  RefreshCw,
-  Repeat,
-  ShieldAlert,
   ShieldCheck,
   Sparkles,
-  TrendingUp,
   UserPlus,
-  Waves,
-  type LucideIcon,
 } from "lucide-react";
 import { BrainAI } from "@/components/brand/BrainAI";
 import { NeuralLines } from "@/components/brand/NeuralLines";
@@ -62,79 +48,6 @@ const benefits = [
   { icon: Bell, label: "Alertas operacionais", desc: "Sinais instantaneos" },
   { icon: Mic, label: "Assistente de voz", desc: "Narrador IA dedicado" },
   { icon: Radio, label: "Dados em tempo real", desc: "Stream continuo" },
-];
-
-type LoginAgentTone = "cyan" | "green" | "amber" | "purple" | "red" | "blue";
-
-type LoginAgent = {
-  name: string;
-  status: string;
-  icon: LucideIcon;
-  tone: LoginAgentTone;
-  x: number;
-  y: number;
-  delay: number;
-};
-
-const loginAgentTones: Record<LoginAgentTone, { border: string; bg: string; text: string; dot: string; line: string }> = {
-  cyan: {
-    border: "border-neon-cyan/55",
-    bg: "bg-neon-cyan/12",
-    text: "text-neon-cyan",
-    dot: "bg-neon-cyan",
-    line: "rgba(0,229,255,0.72)",
-  },
-  green: {
-    border: "border-success/55",
-    bg: "bg-success/12",
-    text: "text-success",
-    dot: "bg-success",
-    line: "rgba(0,255,153,0.72)",
-  },
-  amber: {
-    border: "border-warning/60",
-    bg: "bg-warning/12",
-    text: "text-warning",
-    dot: "bg-warning",
-    line: "rgba(255,193,7,0.72)",
-  },
-  purple: {
-    border: "border-neon-purple/55",
-    bg: "bg-neon-purple/12",
-    text: "text-neon-purple",
-    dot: "bg-neon-purple",
-    line: "rgba(168,85,247,0.72)",
-  },
-  red: {
-    border: "border-red-400/60",
-    bg: "bg-red-500/12",
-    text: "text-red-300",
-    dot: "bg-red-400",
-    line: "rgba(248,113,113,0.72)",
-  },
-  blue: {
-    border: "border-neon-blue/55",
-    bg: "bg-neon-blue/12",
-    text: "text-neon-blue",
-    dot: "bg-neon-blue",
-    line: "rgba(59,130,246,0.72)",
-  },
-};
-
-const loginAgents: LoginAgent[] = [
-  { name: "Neural Pagante", status: "Escaneio protegido", icon: Radar, tone: "cyan", x: 13, y: 17, delay: 0 },
-  { name: "Surf Analyzer", status: "Tendência monitorada", icon: Waves, tone: "green", x: 32, y: 8, delay: 0.35 },
-  { name: "Assistente Voz", status: "Narração pronta", icon: AudioLines, tone: "blue", x: 50, y: 12, delay: 0.7 },
-  { name: "Tie Alert", status: "Empate observado", icon: CircleDollarSign, tone: "amber", x: 68, y: 8, delay: 1.05 },
-  { name: "Tendência", status: "Janela lendo", icon: TrendingUp, tone: "green", x: 87, y: 17, delay: 1.4 },
-  { name: "Alternância", status: "Trocas mapeadas", icon: Repeat, tone: "purple", x: 8, y: 42, delay: 1.75 },
-  { name: "Duplas", status: "Repetições lendo", icon: Copy, tone: "cyan", x: 92, y: 42, delay: 2.1 },
-  { name: "Market Turn", status: "Virada rastreada", icon: RefreshCw, tone: "amber", x: 10, y: 66, delay: 2.45 },
-  { name: "Multi Window", status: "Janelas cruzadas", icon: GitBranch, tone: "blue", x: 90, y: 66, delay: 2.8 },
-  { name: "Exhaustion", status: "Risco filtrado", icon: ShieldAlert, tone: "red", x: 16, y: 88, delay: 3.15 },
-  { name: "Banco Estratégias", status: "Padrões auditados", icon: DatabaseZap, tone: "purple", x: 36, y: 94, delay: 3.5 },
-  { name: "Aprendizado IA", status: "Histórico minerado", icon: BrainCircuit, tone: "purple", x: 60, y: 94, delay: 3.85 },
-  { name: "Mapa Neural IA", status: "Rede conectada", icon: Network, tone: "cyan", x: 82, y: 88, delay: 4.2 },
 ];
 
 const PARTICLES = Array.from({ length: 28 }, (_, i) => {
@@ -322,12 +235,37 @@ function LoginPage() {
 
       <div className="relative w-full max-w-6xl grid lg:grid-cols-[1.1fr_minmax(0,420px)] gap-10 lg:gap-16 items-center">
         <div className="relative hidden lg:flex flex-col items-center justify-center">
-          <LoginNeuralAgentsShowcase />
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="animate-orbit-slow size-[520px] rounded-full border border-neon-blue/20" />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="animate-orbit-reverse size-[620px] rounded-full border border-neon-purple/15 border-dashed" />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="size-[420px] rounded-full bg-gradient-to-br from-neon-blue/20 via-transparent to-neon-purple/20 blur-2xl" />
+            </div>
+            <BrainAI size={460} speaking />
+          </div>
+          <div className="mt-8 text-center max-w-md">
+            <h2 className="text-3xl font-bold text-gradient-brand">Inteligencia operacional ao vivo</h2>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Cadastro controlado pelo administrador, acesso demo limitado e ferramentas completas apenas para VIP/Premium liberado.
+            </p>
+          </div>
         </div>
 
         <div className="relative w-full max-w-md mx-auto">
           <div className="flex flex-col items-center mb-6 lg:hidden">
-            <LoginNeuralAgentsShowcase compact />
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="animate-orbit-slow size-[180px] rounded-full border border-neon-blue/20" />
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="animate-orbit-reverse size-[220px] rounded-full border border-neon-purple/15 border-dashed" />
+              </div>
+              <BrainAI size={200} speaking />
+            </div>
           </div>
 
           <div className="text-center mb-5">
@@ -464,156 +402,6 @@ function LoginPage() {
       </div>
     </div>
   );
-}
-
-function LoginNeuralAgentsShowcase({ compact = false }: { compact?: boolean }) {
-  const brainSize = compact ? 165 : 360;
-  const containerClass = compact
-    ? "relative mx-auto aspect-square w-[92vw] max-w-[360px]"
-    : "relative mx-auto aspect-square w-full max-w-[720px]";
-
-  return (
-    <div className={compact ? "w-full" : "w-full"}>
-      <div className={containerClass}>
-        <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle,rgba(0,229,255,0.13),transparent_56%)] blur-2xl" />
-        <div className="absolute inset-[7%] animate-orbit-slow rounded-full border border-neon-cyan/20" />
-        <div className="absolute inset-[13%] animate-orbit-reverse rounded-full border border-neon-purple/20 border-dashed" />
-        <div className="absolute inset-[23%] rounded-full border border-neon-blue/15" />
-
-        <svg className="pointer-events-none absolute inset-0 size-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <defs>
-            <filter id={compact ? "login-agent-glow-mobile" : "login-agent-glow-desktop"}>
-              <feGaussianBlur stdDeviation="0.9" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          {loginAgents.map((agent) => (
-            <path
-              key={`line-${agent.name}`}
-              d={loginAgentPath(agent)}
-              stroke={loginAgentTones[agent.tone].line}
-              strokeWidth={compact ? 0.22 : 0.34}
-              strokeOpacity={compact ? 0.38 : 0.62}
-              strokeDasharray="4 8"
-              fill="none"
-              filter={`url(#${compact ? "login-agent-glow-mobile" : "login-agent-glow-desktop"})`}
-            >
-              <animate attributeName="stroke-dashoffset" values="0;-24" dur={`${3.6 + agent.delay / 2}s`} repeatCount="indefinite" />
-            </path>
-          ))}
-          {loginAgents.map((agent) => (
-            <circle
-              key={`packet-${agent.name}`}
-              r={compact ? 0.75 : 1.05}
-              fill={loginAgentTones[agent.tone].line}
-              filter={`url(#${compact ? "login-agent-glow-mobile" : "login-agent-glow-desktop"})`}
-            >
-              <animateMotion dur={compact ? "8.5s" : "10.5s"} repeatCount="indefinite" path={loginAgentPath(agent)} begin={`${agent.delay}s`} />
-            </circle>
-          ))}
-        </svg>
-
-        <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
-          <BrainAI size={brainSize} speaking />
-        </div>
-
-        <div className="absolute left-1/2 top-[64%] z-20 -translate-x-1/2 rounded-full border border-neon-cyan/35 bg-background/65 px-3 py-1 text-[9px] font-black uppercase tracking-[0.18em] text-neon-cyan shadow-[0_0_22px_rgba(0,229,255,0.16)] backdrop-blur-md sm:text-[10px]">
-          Tempo real protegido
-        </div>
-
-        {loginAgents.map((agent) =>
-          compact ? (
-            <LoginMiniAgentNode key={agent.name} agent={agent} />
-          ) : (
-            <LoginAgentNode key={agent.name} agent={agent} />
-          ),
-        )}
-      </div>
-
-      {compact ? (
-        <div className="mt-2 flex gap-2 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {loginAgents.map((agent) => {
-            const tone = loginAgentTones[agent.tone];
-            return (
-              <div
-                key={`mobile-${agent.name}`}
-                className={`min-w-[138px] rounded-2xl border px-3 py-2 ${tone.border} ${tone.bg} backdrop-blur-md`}
-              >
-                <div className="flex items-center gap-2">
-                  <agent.icon className={`size-4 ${tone.text}`} />
-                  <span className="truncate text-[10px] font-black text-white">{agent.name}</span>
-                </div>
-                <div className="mt-1 truncate text-[9px] text-muted-foreground">{agent.status}</div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="-mt-3 text-center">
-          <h2 className="text-3xl font-bold text-gradient-brand">Central neural em tempo real</h2>
-          <p className="mx-auto mt-3 max-w-md text-sm text-muted-foreground">
-            Agentes visuais ativos no login com dados sensíveis protegidos.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LoginAgentNode({ agent }: { agent: LoginAgent }) {
-  const tone = loginAgentTones[agent.tone];
-  return (
-    <div
-      className="absolute z-20 w-[118px] -translate-x-1/2 -translate-y-1/2 text-center"
-      style={
-        {
-          left: `${agent.x}%`,
-          top: `${agent.y}%`,
-          animationDelay: `${agent.delay}s`,
-        } as CSSProperties
-      }
-    >
-      <div className={`mb-1 line-clamp-2 min-h-[24px] text-[9px] font-black uppercase leading-tight tracking-[0.08em] ${tone.text}`}>
-        {agent.name}
-      </div>
-      <div className={`mx-auto flex size-12 items-center justify-center rounded-2xl border ${tone.border} ${tone.bg} shadow-[0_0_18px_rgba(0,229,255,0.12)] backdrop-blur-md animate-brain-pulse`}>
-        <span className={`absolute -right-0.5 -top-0.5 size-2 rounded-full ${tone.dot} shadow-[0_0_12px_currentColor]`} />
-        <agent.icon className={`size-6 ${tone.text}`} />
-      </div>
-      <div className="mt-1 truncate rounded-full border border-white/10 bg-background/55 px-2 py-1 text-[8px] font-bold text-muted-foreground backdrop-blur-md">
-        {agent.status}
-      </div>
-    </div>
-  );
-}
-
-function LoginMiniAgentNode({ agent }: { agent: LoginAgent }) {
-  const tone = loginAgentTones[agent.tone];
-  return (
-    <div
-      className={`absolute z-20 flex size-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-xl border ${tone.border} ${tone.bg} backdrop-blur-md animate-brain-pulse`}
-      style={
-        {
-          left: `${agent.x}%`,
-          top: `${agent.y}%`,
-          animationDelay: `${agent.delay}s`,
-        } as CSSProperties
-      }
-      aria-label={agent.name}
-    >
-      <span className={`absolute -right-0.5 -top-0.5 size-1.5 rounded-full ${tone.dot}`} />
-      <agent.icon className={`size-4 ${tone.text}`} />
-    </div>
-  );
-}
-
-function loginAgentPath(agent: LoginAgent) {
-  const midX = (50 + agent.x) / 2;
-  const midY = (50 + agent.y) / 2;
-  return `M 50 50 Q ${midX} ${midY}, ${agent.x} ${agent.y}`;
 }
 
 function SalesAccessLoading() {
