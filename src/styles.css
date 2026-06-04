@@ -112,6 +112,9 @@
 
 @layer base {
   html, body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: "Inter", "SF Pro Display", system-ui, sans-serif;
