@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
@@ -110,6 +110,7 @@ type AdminView = "aprovacoes" | "resumo" | "clientes" | "seguranca";
 type AdminRole = NonNullable<AdminSession["role"]>;
 
 function AdminPage() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const userSession = readUserSession();
   const savedAdminSession = readAdminSession();
   const [ownerEmail, setOwnerEmail] = useState(
@@ -558,6 +559,10 @@ function AdminPage() {
     setSecuritySummary({ total: 0, low: 0, medium: 0, high: 0, critical: 0 });
     setAdminSummary(emptyAdminSummary());
     setSalesSettings({ salesClosed: false, mode: "open" });
+  }
+
+  if (pathname !== "/app/admin") {
+    return <Outlet />;
   }
 
   if (!session) {
