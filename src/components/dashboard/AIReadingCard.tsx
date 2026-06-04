@@ -24,7 +24,7 @@ const VOICE_RATE_STORAGE_KEY = "sniper_voice_assistant_rate";
 const VOICE_PITCH_STORAGE_KEY = "sniper_voice_assistant_pitch";
 const DEFAULT_LOCAL_VOICE = "pt-BR-AntonioNeural";
 type AIReadingVoiceProvider = "browser" | "edge-tts" | "elevenlabs" | "piper";
-const AI_READING_VOICE_MAX_CHARS = 180;
+const AI_READING_VOICE_MAX_CHARS = 120;
 const AI_READING_RESULT_WINDOW_MS = 90_000;
 const VOICE_COORDINATION_EVENT = "sniper-voice-stop";
 const AI_READING_VOICE_CHANGE_EVENT = "sniper-ai-reading-voice-change";
@@ -96,6 +96,7 @@ export function AIReadingCard({ data, mode }: Props) {
   const lastSpokenKeyRef = useRef("");
   const playbackIdRef = useRef(0);
   const previousStateKeyRef = useRef("");
+  const autoVoiceKeyRef = useRef("");
 
   // Nome do usuário logado (só primeiro nome). Vazio se não houver.
   const userFirstName = useMemo(() => {
@@ -120,7 +121,9 @@ export function AIReadingCard({ data, mode }: Props) {
   );
 
   // Chave de cache estavel: muda sempre que o estado relevante muda
-  const stateKey = `${snapshot.engineState}|${snapshot.signalSide}|${snapshot.signalStatus}|${snapshot.tieStatus}|${snapshot.surfPhase ?? "-"}|${snapshot.paganteNumero ?? "-"}|${snapshot.paganteDirecao ?? "-"}|${snapshot.paganteAssertiveness ?? "-"}|${snapshot.lastRounds}`;
+  const stateKey = `${data.currentSignal.id}|${snapshot.engineState}|${snapshot.signalSide}|${snapshot.signalStatus}|${resultKey(data)}|${snapshot.tieStatus}|${snapshot.surfPhase ?? "-"}|${snapshot.paganteNumero ?? "-"}|${snapshot.paganteDirecao ?? "-"}|${snapshot.paganteAssertiveness ?? "-"}|${snapshot.lastRounds}`;
+  const autoVoiceKey = `${stateKey}|${data.updatedAt ?? ""}`;
+  autoVoiceKeyRef.current = autoVoiceKey;
 
   const liveReady = mode === "live" && data.mockMode === false;
 
@@ -161,11 +164,13 @@ export function AIReadingCard({ data, mode }: Props) {
   }, [disposeAudio]);
 
   const speakReading = useCallback(
-    async (text: string) => {
+    async (text: string, expectedVoiceKey?: string) => {
       if (typeof window === "undefined") {
         setVoiceError(VOICE_UNAVAILABLE_MESSAGE);
         return;
       }
+      const isStaleVoice = () => Boolean(expectedVoiceKey && autoVoiceKeyRef.current !== expectedVoiceKey);
+      if (isStaleVoice()) return;
       const audioSupported = typeof window.Audio !== "undefined" && typeof window.URL !== "undefined";
       const browserVoiceSupported =
         typeof window.speechSynthesis !== "undefined" &&
@@ -184,6 +189,7 @@ export function AIReadingCard({ data, mode }: Props) {
 
       try {
         const voiceText = compactVoiceText(text);
+        if (isStaleVoice()) return;
         const provider = readStoredVoiceProvider();
         const voice = readStoredVoiceChoice();
         const volume = readStoredVoiceNumber(VOICE_VOLUME_STORAGE_KEY, 0.9, 0, 1);
@@ -221,6 +227,7 @@ export function AIReadingCard({ data, mode }: Props) {
           signal: controller.signal,
         });
 
+        if (isStaleVoice()) return;
         const contentType = response.headers.get("content-type") ?? "";
         if (!response.ok) {
           const fallback = await speakWithBrowserVoice(voiceText, volume, rate, pitch, voice);
@@ -234,6 +241,7 @@ export function AIReadingCard({ data, mode }: Props) {
           throw new Error(payload.error || payload.reason || VOICE_UNAVAILABLE_MESSAGE);
         }
         const blob = await response.blob();
+        if (isStaleVoice()) return;
         if (!blob.size) {
           const fallback = await speakWithBrowserVoice(voiceText, volume, rate, pitch, voice);
           if (fallback === true) return;
@@ -245,6 +253,7 @@ export function AIReadingCard({ data, mode }: Props) {
         const audio = new Audio(audioUrl);
         audio.volume = volume;
         audioRef.current = audio;
+        if (isStaleVoice()) return;
 
         await new Promise<void>((resolve, reject) => {
           audio.onended = () => resolve();
@@ -303,7 +312,7 @@ export function AIReadingCard({ data, mode }: Props) {
   useEffect(() => {
     const text = reading?.text?.trim();
     const resultVoice = buildSignalResultVoiceText(data);
-    const voiceText = resultVoice || text;
+    const voiceText = resultVoice || (shouldSuppressReadingText(data) ? "" : text);
     const spokenKey = resultVoice ? `result:${resultKey(data)}` : stateKey;
     if (
       !voiceEnabled ||
@@ -315,8 +324,8 @@ export function AIReadingCard({ data, mode }: Props) {
     }
     if (resultVoice) stopVoice();
     lastSpokenKeyRef.current = spokenKey;
-    void speakReading(voiceText);
-  }, [data, liveReady, reading?.text, speakReading, stateKey, stopVoice, voiceEnabled]);
+    void speakReading(voiceText, autoVoiceKey);
+  }, [autoVoiceKey, data, liveReady, reading?.text, speakReading, stateKey, stopVoice, voiceEnabled]);
 
   useEffect(() => stopVoice, [stopVoice]);
 
@@ -365,7 +374,7 @@ export function AIReadingCard({ data, mode }: Props) {
           <button
             type="button"
             onClick={() => {
-              const text = reading?.text?.trim();
+              const text = buildSignalResultVoiceText(data) || reading?.text?.trim();
               if (text) void speakReading(text);
             }}
             disabled={!liveReady || !reading?.text || isSpeaking}
@@ -463,6 +472,12 @@ function buildSignalResultVoiceText(data: DashboardData) {
     return `Green no G1 em ${side}. Entrada finalizada. Aguarda a proxima leitura.`;
   }
   return `Green confirmado em ${side}. Entrada finalizada. Aguarda a proxima leitura.`;
+}
+
+function shouldSuppressReadingText(data: DashboardData) {
+  const status = data.currentSignal.status;
+  if (status === "green" || status === "green_g1" || status === "red") return true;
+  return Boolean(data.currentSignal.lastResult && isRecentSignalResult(data.currentSignal.lastResult.finishedAt));
 }
 
 function isRecentSignalResult(finishedAt?: string) {

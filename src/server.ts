@@ -108,6 +108,7 @@ const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const MERCADOPAGO_PREFERENCE_URL = "https://api.mercadopago.com/checkout/preferences";
 const MERCADOPAGO_PAYMENT_URL = "https://api.mercadopago.com/v1/payments";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
+const ELEVENLABS_FAST_OUTPUT_FORMAT = "mp3_22050_32";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 const DEFAULT_ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
@@ -445,7 +446,7 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
   let lastFailureStatus: number | "network_error" | null = null;
   for (const apiKey of apiKeys) {
     response = await fetch(
-      `${ELEVENLABS_TTS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+      `${ELEVENLABS_TTS_URL}/${encodeURIComponent(voiceId)}?output_format=${ELEVENLABS_FAST_OUTPUT_FORMAT}`,
       {
         method: "POST",
         headers: {
@@ -459,7 +460,7 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
             stability: 0.48,
             similarity_boost: 0.78,
             style: 0.18,
-            use_speaker_boost: true,
+            use_speaker_boost: false,
           },
         }),
       },
@@ -627,7 +628,7 @@ async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
 
   for (const apiKey of apiKeys) {
     response = await fetch(
-      `${ELEVENLABS_TTS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+      `${ELEVENLABS_TTS_URL}/${encodeURIComponent(voiceId)}?output_format=${ELEVENLABS_FAST_OUTPUT_FORMAT}`,
       {
         method: "POST",
         headers: {
@@ -641,7 +642,7 @@ async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
             stability: 0.48,
             similarity_boost: 0.78,
             style: 0.18,
-            use_speaker_boost: true,
+            use_speaker_boost: false,
           },
         }),
       },
