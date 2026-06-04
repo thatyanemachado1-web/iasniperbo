@@ -1,12 +1,21 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import {
+  AudioLines,
+  BrainCircuit,
   CircleDollarSign,
+  Copy,
   DatabaseZap,
+  GitBranch,
+  Mic2,
+  Network,
   Pause,
   Play,
   Radar,
+  RefreshCw,
+  Repeat,
   ShieldAlert,
+  TrendingUp,
   Waves,
   type LucideIcon,
 } from "lucide-react";
@@ -14,10 +23,23 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import type { AdaptivePattern, AdaptiveStrategySnapshot } from "@/types/adaptiveStrategy";
-import type { DashboardData, SignalSide } from "@/types/dashboard";
+import type { DashboardData, RoundResult, SignalSide } from "@/types/dashboard";
 
 type SceneMode = "observing" | "forming" | "entry" | "green" | "red" | "risk";
-type AgentId = "neural" | "surf" | "tie" | "strategy" | "risk" | "voice";
+type AgentId =
+  | "neural"
+  | "surf"
+  | "tie"
+  | "trend"
+  | "alternation"
+  | "doubles"
+  | "marketTurn"
+  | "multiWindow"
+  | "exhaustion"
+  | "strategy"
+  | "learning"
+  | "neuralMap"
+  | "voice";
 type AgentTone = "cyan" | "green" | "amber" | "purple" | "red" | "blue";
 
 type AgentInfo = {
@@ -36,7 +58,6 @@ type AgentInfo = {
   active: boolean;
   pulse: boolean;
   nodeLabel: string;
-  position: { left: string; top: string; mobileLeft: string; mobileTop: string };
 };
 
 type Props = {
@@ -90,13 +111,22 @@ const toneClasses: Record<AgentTone, { text: string; border: string; bg: string;
   },
 };
 
-const agentNodes: Record<AgentId, { x: number; y: number }> = {
-  neural: { x: 19, y: 28 },
-  voice: { x: 50, y: 28 },
-  surf: { x: 81, y: 28 },
-  tie: { x: 19, y: 80 },
-  strategy: { x: 50, y: 80 },
-  risk: { x: 81, y: 80 },
+const centerNode = { x: 50, y: 52 };
+
+const agentNodes: Record<AgentId, { x: number; y: number; left: string; top: string }> = {
+  neural: { x: 10, y: 18, left: "3%", top: "7%" },
+  surf: { x: 30, y: 15, left: "22%", top: "5%" },
+  voice: { x: 50, y: 15, left: "41%", top: "5%" },
+  tie: { x: 70, y: 15, left: "60%", top: "5%" },
+  trend: { x: 90, y: 18, left: "79%", top: "7%" },
+  alternation: { x: 11, y: 42, left: "3%", top: "35%" },
+  doubles: { x: 89, y: 42, left: "79%", top: "35%" },
+  marketTurn: { x: 11, y: 64, left: "3%", top: "55%" },
+  multiWindow: { x: 89, y: 64, left: "79%", top: "55%" },
+  exhaustion: { x: 10, y: 87, left: "3%", top: "75%" },
+  strategy: { x: 35, y: 90, left: "27%", top: "78%" },
+  learning: { x: 62, y: 90, left: "52%", top: "78%" },
+  neuralMap: { x: 90, y: 87, left: "75%", top: "75%" },
 };
 
 export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Props) {
@@ -108,17 +138,17 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <GlassCard className="min-h-[640px] p-0 sm:min-h-[680px]">
-        <div className="relative min-h-[640px] overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.13),transparent_35%),linear-gradient(145deg,rgba(4,10,26,0.96),rgba(7,10,24,0.92))] sm:min-h-[680px]">
+      <GlassCard className="min-h-[640px] p-0 sm:min-h-[720px]">
+        <div className="relative min-h-[640px] overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.13),transparent_35%),linear-gradient(145deg,rgba(4,10,26,0.96),rgba(7,10,24,0.92))] sm:min-h-[720px]">
           <CommandGrid />
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 border-b border-neon-cyan/15 px-3 py-4 sm:px-5">
             <div className="min-w-0">
               <div className="text-[10px] uppercase tracking-[0.2em] text-neon-cyan sm:text-xs sm:tracking-[0.24em]">
-                Central de comando
+                Central neural
               </div>
-              <h1 className="text-lg font-black sm:text-2xl">Central de Agentes IA</h1>
+              <h1 className="text-lg font-black sm:text-2xl">Central Neural de Agentes</h1>
               <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-                Painel visual dos módulos reais trabalhando no mercado ao vivo.
+                Módulos reais conectados ao cérebro central, sem alterar a lógica de entrada.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -140,14 +170,14 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
             </div>
           </div>
 
-          <div className="relative z-10 grid gap-4 p-3 sm:p-5 lg:grid-cols-[1fr_220px]">
-            <div className="relative min-h-[650px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/20 p-3 sm:min-h-[540px] sm:p-0">
+          <div className="relative z-10 grid gap-4 p-3 sm:p-5 lg:grid-cols-[1fr_240px]">
+            <div className="relative min-h-[560px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/20 p-3 sm:min-h-[600px] sm:p-0">
               <NeonLines agents={agents} sceneMode={scene.mode} animationsEnabled={animationsEnabled} />
               <OutcomeRail side={scene.entrySide} mode={scene.mode} animationsEnabled={animationsEnabled} />
 
               <CoreStatus scene={scene} animationsEnabled={animationsEnabled} />
 
-              <div className="relative z-20 mt-4 grid grid-cols-2 gap-2 sm:contents">
+              <div className="relative z-20 mt-5 flex snap-x gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] sm:contents [&::-webkit-scrollbar]:hidden">
                 {agents.map((agent) => (
                   <AgentModuleCard
                     key={agent.id}
@@ -160,7 +190,7 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
+            <div className="grid max-h-[600px] grid-cols-2 gap-2 overflow-y-auto pr-1 lg:grid-cols-1">
               {agents.map((agent) => (
                 <button
                   key={agent.id}
@@ -207,6 +237,10 @@ function NeonLines({
   sceneMode: SceneMode;
   animationsEnabled: boolean;
 }) {
+  const packetPath = buildDataPacketPath(agents);
+  const packetColor = sceneColor(sceneMode);
+  const packetDuration = sceneMode === "entry" ? "8s" : sceneMode === "risk" || sceneMode === "red" ? "11s" : "15s";
+
   return (
     <svg className="pointer-events-none absolute inset-0 z-0 hidden size-full sm:block" viewBox="0 0 100 100" preserveAspectRatio="none">
       <defs>
@@ -220,13 +254,12 @@ function NeonLines({
       </defs>
       {agents.map((agent) => {
         const from = agentNodes[agent.id];
-        const to = { x: 50, y: 52 };
         const active = agent.active || sceneMode !== "observing";
         const color = lineColor(agent.tone);
         return (
           <motion.path
             key={agent.id}
-            d={`M ${from.x} ${from.y} C ${from.x} ${(from.y + to.y) / 2}, ${to.x} ${(from.y + to.y) / 2}, ${to.x} ${to.y}`}
+            d={`M ${from.x} ${from.y} C ${from.x} ${(from.y + centerNode.y) / 2}, ${centerNode.x} ${(from.y + centerNode.y) / 2}, ${centerNode.x} ${centerNode.y}`}
             stroke={color}
             strokeWidth={active ? 0.42 : 0.24}
             strokeOpacity={active ? 0.78 : 0.28}
@@ -238,6 +271,24 @@ function NeonLines({
           />
         );
       })}
+      <path
+        d={packetPath}
+        stroke={packetColor}
+        strokeWidth="0.18"
+        strokeOpacity="0.18"
+        fill="none"
+        filter="url(#agent-glow)"
+      />
+      {animationsEnabled && (
+        <>
+          <circle r="1.15" fill={packetColor} filter="url(#agent-glow)">
+            <animateMotion dur={packetDuration} repeatCount="indefinite" path={packetPath} />
+          </circle>
+          <circle r="0.72" fill="white" opacity="0.92">
+            <animateMotion dur={packetDuration} repeatCount="indefinite" path={packetPath} begin="2.6s" />
+          </circle>
+        </>
+      )}
     </svg>
   );
 }
@@ -249,6 +300,15 @@ function CoreStatus({
   scene: ReturnType<typeof buildScene>;
   animationsEnabled: boolean;
 }) {
+  const coreTone =
+    scene.mode === "risk" || scene.mode === "red"
+      ? "border-red-400/45 bg-red-500/12 text-red-200"
+      : scene.mode === "green" || scene.mode === "entry"
+        ? "border-success/45 bg-success/12 text-success"
+        : scene.mode === "forming"
+          ? "border-neon-purple/45 bg-neon-purple/12 text-neon-purple"
+          : "border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan";
+
   return (
     <motion.div
       className={`relative z-20 mx-auto mt-16 w-full max-w-[360px] rounded-2xl border px-4 py-4 text-center backdrop-blur-md sm:absolute sm:left-1/2 sm:top-1/2 sm:mt-0 sm:w-[330px] sm:-translate-x-1/2 sm:-translate-y-1/2 ${
@@ -265,11 +325,27 @@ function CoreStatus({
       }
       transition={{ repeat: animationsEnabled ? Infinity : 0, duration: 2.4 }}
     >
-      <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10 shadow-[0_0_28px_rgba(0,229,255,0.2)]">
-        <Radar className="size-7 text-neon-cyan" />
+      <div className="relative mx-auto mb-3 flex size-16 items-center justify-center">
+        {scene.voiceActive && (
+          <>
+            <motion.span
+              className="absolute inset-0 rounded-2xl border border-neon-blue/35"
+              animate={animationsEnabled ? { scale: [1, 1.35, 1.58], opacity: [0.45, 0.2, 0] } : { scale: 1, opacity: 0.3 }}
+              transition={{ repeat: animationsEnabled ? Infinity : 0, duration: 1.9 }}
+            />
+            <motion.span
+              className="absolute inset-0 rounded-2xl border border-neon-cyan/25"
+              animate={animationsEnabled ? { scale: [1, 1.2, 1.42], opacity: [0.35, 0.18, 0] } : { scale: 1, opacity: 0.25 }}
+              transition={{ repeat: animationsEnabled ? Infinity : 0, duration: 1.9, delay: 0.45 }}
+            />
+          </>
+        )}
+        <div className={`relative flex size-14 items-center justify-center rounded-2xl border shadow-[0_0_28px_rgba(0,229,255,0.2)] ${coreTone}`}>
+          <BrainCircuit className="size-7" />
+        </div>
       </div>
       <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-        Núcleo operacional
+        Cérebro central
       </div>
       <div className="mt-1 text-lg font-black">{scene.message}</div>
       <div className="mt-2 text-xs leading-relaxed text-muted-foreground">{scene.detail}</div>
@@ -330,18 +406,20 @@ function AgentModuleCard({
   onClick: () => void;
 }) {
   const tone = toneClasses[agent.tone];
+  const layout = agentNodes[agent.id];
+  const inactive = !agent.active && !selected;
 
   return (
     <motion.button
       type="button"
       onClick={onClick}
-      className={`relative z-20 min-h-[92px] rounded-2xl border px-3 py-3 text-left backdrop-blur-md transition sm:absolute sm:left-[var(--agent-left-sm)] sm:top-[var(--agent-top-sm)] sm:w-[172px] ${
+      className={`relative z-20 min-w-[152px] snap-start rounded-2xl border px-3 py-3 text-center backdrop-blur-md transition sm:absolute sm:left-[var(--agent-left-sm)] sm:top-[var(--agent-top-sm)] sm:min-w-0 sm:w-[116px] sm:px-2 sm:py-2 ${
         selected ? `${tone.border} ${tone.bg} ${tone.glow}` : "border-border/45 bg-background/48 hover:border-neon-cyan/45"
-      }`}
+      } ${inactive ? "opacity-60 saturate-50" : ""}`}
       style={
         {
-          "--agent-left-sm": agent.position.left,
-          "--agent-top-sm": agent.position.top,
+          "--agent-left-sm": layout.left,
+          "--agent-top-sm": layout.top,
         } as CSSProperties
       }
       animate={
@@ -359,19 +437,16 @@ function AgentModuleCard({
       }}
       aria-label={`Abrir detalhes do ${agent.name}`}
     >
-      <div className="flex items-start gap-2.5">
-        <div className={`relative flex size-10 shrink-0 items-center justify-center rounded-xl border ${tone.border} ${tone.bg}`}>
-          <span className={`absolute -right-1 -top-1 size-2 rounded-full ${agent.active ? tone.dot : "bg-muted-foreground/45"} ${agent.pulse ? "animate-status-blink" : ""}`} />
-          <agent.icon className={`size-5 ${tone.text}`} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-black">{agent.name.replace("Agente ", "")}</div>
-          <div className="mt-1 line-clamp-2 text-[10px] leading-snug text-muted-foreground">{agent.status}</div>
-        </div>
+      <div className={`mb-2 flex min-h-8 items-end justify-center text-[9px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[8px] ${tone.text}`}>
+        {agent.module}
       </div>
-      <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-2">
-        <span className="truncate text-[9px] uppercase tracking-wider text-muted-foreground">{agent.module}</span>
-        <span className={`shrink-0 text-[11px] font-black ${tone.text}`}>{moduleValue(agent)}</span>
+      <div className={`relative mx-auto flex size-12 items-center justify-center rounded-2xl border sm:size-10 ${tone.border} ${tone.bg}`}>
+        <span className={`absolute -right-1 -top-1 size-2 rounded-full ${agent.active ? tone.dot : "bg-muted-foreground/45"} ${agent.pulse ? "animate-status-blink" : ""}`} />
+        <agent.icon className={`size-6 sm:size-5 ${tone.text}`} />
+      </div>
+      <div className="mt-2 line-clamp-2 min-h-8 text-[10px] leading-snug text-muted-foreground sm:hidden">{agent.status}</div>
+      <div className={`mt-2 truncate rounded-full border border-white/10 bg-background/45 px-2 py-1 text-[10px] font-black ${tone.text}`}>
+        {moduleValue(agent)}
       </div>
     </motion.button>
   );
@@ -561,19 +636,50 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
   const surfRisk = surf?.surf_break_risk ?? surf?.surf_risk ?? null;
   const surfActive = Boolean(surf?.surf_alert || surf?.surf_phase === "SURF_FORTE" || surf?.surf_phase === "SURF_EXTREMO");
   const tieActive = data.currentTieAlert.status === "active";
+  const trend = buildTrendSnapshot(data.rounds);
+  const alternation = buildAlternationSnapshot(data.rounds);
+  const doubles = buildDoublesSnapshot(data.rounds);
+  const multiWindow = buildMultiWindowSnapshot(data.rounds);
+  const streak = calculateRoundStreak(data.rounds);
   const topPattern =
     snapshot.patterns.find((pattern) => pattern.status === "quente") ??
     snapshot.patterns.find((pattern) => pattern.status === "observacao") ??
     snapshot.patterns[0];
   const strategyActive = Boolean(topPattern && (topPattern.status === "quente" || topPattern.status === "observacao"));
   const riskLevel = computeRiskValue(data, snapshot);
-  const riskActive = scene.mode === "risk" || riskLevel >= 70;
+  const marketTurnActive =
+    data.engineDecision.state === "ATENCAO" ||
+    data.engineDecision.state === "BLOQUEADO" ||
+    ["QUEBRA_SURF", "CORRECAO", "VIRADA_OUTRO_LADO", "RISCO_QUEBRA"].includes(surf?.surf_phase ?? "");
+  const exhaustionActive =
+    scene.mode === "risk" ||
+    riskLevel >= 70 ||
+    Boolean(neural?.isSaturated) ||
+    surf?.surf_phase === "EXAUSTAO" ||
+    streak.count >= 6;
+  const learningActive = snapshot.patternsFound > 0 || snapshot.recordsStored > 0;
+  const neuralMapActive = neuralActive || surfActive || tieActive || strategyActive || marketTurnActive;
   const voiceActive = scene.voiceActive;
+  const activeCount = [
+    neuralActive,
+    surfActive,
+    tieActive,
+    trend.active,
+    alternation.active,
+    doubles.active,
+    marketTurnActive,
+    multiWindow.active,
+    exhaustionActive,
+    strategyActive,
+    learningActive,
+    neuralMapActive,
+    voiceActive,
+  ].filter(Boolean).length;
 
   return [
     {
       id: "neural",
-      name: "Agente Neural Pagante",
+      name: "Neural Pagante",
       module: "Neural Pagante",
       icon: Radar,
       tone: neuralActive ? "cyan" : "blue",
@@ -593,11 +699,10 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: neuralActive,
       pulse: neuralActive,
       nodeLabel: "Neural",
-      position: { left: "18%", top: "18%", mobileLeft: "7%", mobileTop: "18%" },
     },
     {
       id: "surf",
-      name: "Agente Surf",
+      name: "Surf Analyzer",
       module: "Surf Analyzer",
       icon: Waves,
       tone: surfActive ? "green" : "cyan",
@@ -615,11 +720,10 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: surfActive,
       pulse: surfActive,
       nodeLabel: "Surf",
-      position: { left: "70%", top: "18%", mobileLeft: "67%", mobileTop: "18%" },
     },
     {
       id: "tie",
-      name: "Agente Tie",
+      name: "Tie Alert",
       module: "Tie Alert",
       icon: CircleDollarSign,
       tone: "amber",
@@ -637,11 +741,127 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: tieActive,
       pulse: tieActive,
       nodeLabel: "Tie",
-      position: { left: "8%", top: "70%", mobileLeft: "7%", mobileTop: "66%" },
+    },
+    {
+      id: "trend",
+      name: "Tendência",
+      module: "Tendência",
+      icon: TrendingUp,
+      tone: trend.active ? "green" : "blue",
+      status: trend.status,
+      lastReading: trend.detail,
+      confidence: trend.confidence,
+      risk: null,
+      logs: compactLogs([trend.detail, trend.sample ? `Amostra: ${trend.sample} rodada(s)` : ""]),
+      greens: null,
+      reds: null,
+      active: trend.active,
+      pulse: trend.active && scene.mode !== "observing",
+      nodeLabel: "Tendência",
+    },
+    {
+      id: "alternation",
+      name: "Alternância",
+      module: "Alternância",
+      icon: Repeat,
+      tone: alternation.active ? "purple" : "blue",
+      status: alternation.status,
+      lastReading: alternation.detail,
+      confidence: alternation.confidence,
+      risk: null,
+      logs: compactLogs([alternation.detail, alternation.sample ? `Amostra: ${alternation.sample} transição(ões)` : ""]),
+      greens: null,
+      reds: null,
+      active: alternation.active,
+      pulse: alternation.active && scene.mode === "forming",
+      nodeLabel: "Alternância",
+    },
+    {
+      id: "doubles",
+      name: "Duplas",
+      module: "Duplas",
+      icon: Copy,
+      tone: doubles.active ? "cyan" : "blue",
+      status: doubles.status,
+      lastReading: doubles.detail,
+      confidence: null,
+      risk: null,
+      logs: compactLogs([doubles.detail, doubles.total ? `${doubles.total} dupla(s) nas últimas rodadas.` : ""]),
+      greens: null,
+      reds: null,
+      active: doubles.active,
+      pulse: doubles.active,
+      nodeLabel: "Duplas",
+    },
+    {
+      id: "marketTurn",
+      name: "Market Turn",
+      module: "Market Turn",
+      icon: RefreshCw,
+      tone: marketTurnActive ? "amber" : "blue",
+      status: marketTurnActive ? "Virada/atenção no mercado" : "Sem virada forte",
+      lastReading: data.engineDecision.reason || surf?.reason || "Mercado sem virada confirmada agora.",
+      confidence: numberOrNull(data.engineDecision.confidence),
+      risk: marketTurnActive ? riskLevel : null,
+      logs: compactLogs([
+        `Engine: ${data.engineDecision.state}`,
+        surf?.surf_phase ? `Surf phase: ${phaseLabel(surf.surf_phase)}` : "",
+        data.engineDecision.reason,
+      ]),
+      greens: null,
+      reds: null,
+      active: marketTurnActive,
+      pulse: marketTurnActive,
+      nodeLabel: "Turn",
+    },
+    {
+      id: "multiWindow",
+      name: "Multi Window",
+      module: "Multi Window",
+      icon: GitBranch,
+      tone: multiWindow.active ? "green" : "blue",
+      status: multiWindow.status,
+      lastReading: multiWindow.detail,
+      confidence: multiWindow.confidence,
+      risk: null,
+      logs: compactLogs([multiWindow.detail, multiWindow.shortWindow, multiWindow.longWindow]),
+      greens: null,
+      reds: null,
+      active: multiWindow.active,
+      pulse: multiWindow.active && scene.mode !== "observing",
+      nodeLabel: "Janelas",
+    },
+    {
+      id: "exhaustion",
+      name: "Exhaustion Module",
+      module: "Exhaustion",
+      icon: ShieldAlert,
+      tone: exhaustionActive ? "red" : "amber",
+      status: exhaustionActive ? "Exaustão/risco monitorado" : "Sem exaustão crítica",
+      lastReading:
+        neural?.isSaturated
+          ? "Neural Pagante indicou saturação."
+          : surf?.surf_phase === "EXAUSTAO"
+            ? "Surf Analyzer indicou exaustão."
+            : streak.count >= 6
+              ? `Sequência esticada: ${resultLabel(streak.side)} x${streak.count}.`
+              : "Sem bloqueio de exaustão ativo.",
+      confidence: null,
+      risk: riskLevel,
+      logs: compactLogs([
+        neural?.isSaturated ? "Neural saturado." : "",
+        surf?.surf_phase ? `Surf: ${phaseLabel(surf.surf_phase)}` : "",
+        streak.count ? `Sequência atual: ${resultLabel(streak.side)} x${streak.count}` : "",
+      ]),
+      greens: null,
+      reds: null,
+      active: exhaustionActive,
+      pulse: exhaustionActive,
+      nodeLabel: "Exaustão",
     },
     {
       id: "strategy",
-      name: "Agente Estratégias",
+      name: "Banco de Estratégias",
       module: "Banco de Estratégias",
       icon: DatabaseZap,
       tone: strategyActive ? "purple" : "blue",
@@ -657,35 +877,54 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: strategyActive,
       pulse: scene.mode === "forming" || strategyActive,
       nodeLabel: "Estratégias",
-      position: { left: "38%", top: "70%", mobileLeft: "39%", mobileTop: "66%" },
     },
     {
-      id: "risk",
-      name: "Agente Risk",
-      module: "Risk Shield",
-      icon: ShieldAlert,
-      tone: riskActive ? "red" : "amber",
-      status: riskActive ? "Risco alto detectado" : "Risco monitorado",
-      lastReading: data.engineDecision.reason || "Sem bloqueio ativo.",
-      confidence: numberOrNull(data.engineDecision.confidence),
-      risk: riskLevel,
+      id: "learning",
+      name: "Aprendizado IA",
+      module: "Aprendizado IA",
+      icon: BrainCircuit,
+      tone: learningActive ? "purple" : "blue",
+      status: learningActive ? "Minerando histórico real" : "Aguardando base real",
+      lastReading: `${snapshot.recordsStored} rodada(s) salvas, ${snapshot.patternsFound} padrão(ões) encontrados.`,
+      confidence: snapshot.entryScore.finalScore > 0 ? snapshot.entryScore.finalScore : null,
+      risk: snapshot.pausedPatterns > 0 ? 55 : null,
       logs: compactLogs([
-        `Engine: ${data.engineDecision.state}`,
-        data.engineDecision.reason,
-        snapshot.pausedPatterns ? `${snapshot.pausedPatterns} padrão(ões) pausado(s)` : "",
+        `${snapshot.recordsStored} registro(s) no aprendizado.`,
+        `${snapshot.hotPatterns} quente(s), ${snapshot.pausedPatterns} pausado(s).`,
+        snapshot.entryScore.explanation[0],
       ]),
       greens: null,
       reds: null,
-      active: riskActive,
-      pulse: riskActive,
-      nodeLabel: "Risk",
-      position: { left: "68%", top: "70%", mobileLeft: "68%", mobileTop: "66%" },
+      active: learningActive,
+      pulse: strategyActive || scene.mode === "forming",
+      nodeLabel: "Learning",
+    },
+    {
+      id: "neuralMap",
+      name: "Mapa Neural IA",
+      module: "Mapa Neural IA",
+      icon: Network,
+      tone: neuralMapActive ? "cyan" : "blue",
+      status: neuralMapActive ? `${activeCount} agente(s) conectado(s)` : "Rede em observação",
+      lastReading: "Mapa visual cruza módulos ativos sem criar sinal próprio.",
+      confidence: null,
+      risk: null,
+      logs: compactLogs([
+        `Agentes ativos: ${activeCount}`,
+        `Cena: ${scene.label}`,
+        "Representação visual; não decide entrada sozinha.",
+      ]),
+      greens: null,
+      reds: null,
+      active: neuralMapActive,
+      pulse: neuralMapActive && scene.mode !== "observing",
+      nodeLabel: "Mapa",
     },
     {
       id: "voice",
-      name: "Agente Voz",
-      module: "Voz IA Local",
-      icon: AudioLines,
+      name: "Assistente de Voz IA",
+      module: "Voz IA",
+      icon: voiceActive ? AudioLines : Mic2,
       tone: voiceActive ? "blue" : "cyan",
       status: voiceActive ? "Narrando evento" : "Aguardando evento",
       lastReading: scene.voiceText,
@@ -697,9 +936,147 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: voiceActive,
       pulse: voiceActive,
       nodeLabel: "Voz",
-      position: { left: "45%", top: "18%", mobileLeft: "39%", mobileTop: "26%" },
     },
   ];
+}
+
+function buildTrendSnapshot(rounds: DashboardData["rounds"]) {
+  const recent = rounds.slice(-30);
+  if (!recent.length) {
+    return {
+      active: false,
+      status: "Aguardando rodadas",
+      detail: "Sem base suficiente para ler tendência.",
+      confidence: null,
+      sample: 0,
+    };
+  }
+
+  const counts = countResults(recent);
+  const leader = maxResult(counts);
+  const confidence = roundPercent(counts[leader] / recent.length);
+  return {
+    active: confidence >= 55 && leader !== "T",
+    status: leader === "T" ? "Tie pressionando a janela" : `${resultLabel(leader)} dominante`,
+    detail: `${resultLabel(leader)} apareceu ${counts[leader]} vez(es) nas últimas ${recent.length} rodada(s).`,
+    confidence,
+    sample: recent.length,
+  };
+}
+
+function buildAlternationSnapshot(rounds: DashboardData["rounds"]) {
+  const recent = rounds.slice(-24).filter((round) => round.result !== "T");
+  if (recent.length < 2) {
+    return {
+      active: false,
+      status: "Aguardando alternância",
+      detail: "Sem transições suficientes para medir alternância.",
+      confidence: null,
+      sample: 0,
+    };
+  }
+
+  let switches = 0;
+  for (let index = 1; index < recent.length; index += 1) {
+    if (recent[index].result !== recent[index - 1].result) switches += 1;
+  }
+  const transitions = recent.length - 1;
+  const confidence = roundPercent(switches / transitions);
+  return {
+    active: confidence >= 58,
+    status: confidence >= 58 ? "Alternância ativa" : "Alternância fraca",
+    detail: `${switches} alternância(s) em ${transitions} transição(ões) recentes.`,
+    confidence,
+    sample: transitions,
+  };
+}
+
+function buildDoublesSnapshot(rounds: DashboardData["rounds"]) {
+  const recent = rounds.slice(-24).filter((round) => round.result !== "T");
+  if (recent.length < 2) {
+    return {
+      active: false,
+      status: "Aguardando duplas",
+      detail: "Sem base suficiente para ler duplas.",
+      total: 0,
+    };
+  }
+
+  let total = 0;
+  for (let index = 1; index < recent.length; index += 1) {
+    if (recent[index].result === recent[index - 1].result) total += 1;
+  }
+  const last = recent.at(-1);
+  const beforeLast = recent.at(-2);
+  const active = Boolean(last && beforeLast && last.result === beforeLast.result);
+  return {
+    active,
+    status: active ? `Dupla ${resultLabel(last?.result ?? null)} formada` : "Sem dupla na última rodada",
+    detail: active
+      ? `As duas últimas rodadas repetiram ${resultLabel(last?.result ?? null)}.`
+      : `${total} dupla(s) detectada(s) na janela recente.`,
+    total,
+  };
+}
+
+function buildMultiWindowSnapshot(rounds: DashboardData["rounds"]) {
+  const shortWindow = buildWindowLeader(rounds.slice(-12), "Janela 12");
+  const longWindow = buildWindowLeader(rounds.slice(-30), "Janela 30");
+  const active = Boolean(shortWindow.side && longWindow.side && shortWindow.side === longWindow.side && shortWindow.side !== "T");
+  const confidence =
+    shortWindow.confidence !== null && longWindow.confidence !== null
+      ? roundPercent((shortWindow.confidence + longWindow.confidence) / 200)
+      : null;
+
+  return {
+    active,
+    status: active ? `${resultLabel(shortWindow.side)} alinhado nas janelas` : "Janelas sem alinhamento limpo",
+    detail: active
+      ? `${resultLabel(shortWindow.side)} lidera a janela curta e longa.`
+      : "As janelas recentes ainda não apontam o mesmo lado.",
+    confidence,
+    shortWindow: shortWindow.label,
+    longWindow: longWindow.label,
+  };
+}
+
+function buildWindowLeader(rounds: DashboardData["rounds"], label: string) {
+  if (!rounds.length) {
+    return { side: null as RoundResult | null, confidence: null as number | null, label: `${label}: sem dados` };
+  }
+  const counts = countResults(rounds);
+  const side = maxResult(counts);
+  const confidence = roundPercent(counts[side] / rounds.length);
+  return { side, confidence, label: `${label}: ${resultLabel(side)} ${confidence.toFixed(1)}%` };
+}
+
+function calculateRoundStreak(rounds: DashboardData["rounds"]) {
+  const last = rounds.at(-1);
+  if (!last) return { side: null as RoundResult | null, count: 0 };
+  let count = 0;
+  for (let index = rounds.length - 1; index >= 0; index -= 1) {
+    if (rounds[index].result !== last.result) break;
+    count += 1;
+  }
+  return { side: last.result, count };
+}
+
+function countResults(rounds: DashboardData["rounds"]) {
+  return rounds.reduce(
+    (acc, round) => {
+      acc[round.result] += 1;
+      return acc;
+    },
+    { B: 0, P: 0, T: 0 } as Record<RoundResult, number>,
+  );
+}
+
+function maxResult(counts: Record<RoundResult, number>) {
+  return (Object.keys(counts) as RoundResult[]).reduce((best, side) => (counts[side] > counts[best] ? side : best), "B");
+}
+
+function roundPercent(value: number) {
+  return Math.round(value * 1000) / 10;
 }
 
 function isHighRisk(data: DashboardData, snapshot: AdaptiveStrategySnapshot) {
@@ -746,10 +1123,34 @@ function statusLabel(status: AdaptivePattern["status"]) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function buildDataPacketPath(agents: AgentInfo[]) {
+  const ordered = agents.map((agent) => agentNodes[agent.id]);
+  if (!ordered.length) return `M ${centerNode.x} ${centerNode.y}`;
+
+  const [first, ...rest] = ordered;
+  const segments = rest.map((node) => `Q ${centerNode.x} ${centerNode.y}, ${node.x} ${node.y}`).join(" ");
+  return `M ${first.x} ${first.y} ${segments} Q ${centerNode.x} ${centerNode.y}, ${first.x} ${first.y}`;
+}
+
+function sceneColor(mode: SceneMode) {
+  if (mode === "green" || mode === "entry") return "rgba(0,255,153,0.95)";
+  if (mode === "risk") return "rgba(255,193,7,0.95)";
+  if (mode === "red") return "rgba(248,113,113,0.95)";
+  if (mode === "forming") return "rgba(168,85,247,0.95)";
+  return "rgba(0,229,255,0.95)";
+}
+
 function sideLabel(side: SignalSide | "TIE" | "NONE" | null | undefined) {
   if (side === "BANKER") return "Banker";
   if (side === "PLAYER") return "Player";
   if (side === "TIE") return "Tie";
+  return "Sem lado";
+}
+
+function resultLabel(result: RoundResult | null | undefined) {
+  if (result === "B") return "Banker";
+  if (result === "P") return "Player";
+  if (result === "T") return "Tie";
   return "Sem lado";
 }
 
