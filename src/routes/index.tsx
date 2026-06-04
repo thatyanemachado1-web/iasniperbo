@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { BrainAI } from "@/components/brand/BrainAI";
 import { NeuralLines } from "@/components/brand/NeuralLines";
+import { SniperLogoMark } from "@/components/brand/SniperLogoMark";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { SalesClosedPanel } from "@/components/ui-app/SalesClosedPanel";
@@ -269,10 +270,7 @@ function LoginPage() {
           </div>
 
           <div className="text-center mb-5">
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tight">
-              <span className="text-white">SNIPER BO</span>{" "}
-              <span className="text-gradient-brand">IA</span>
-            </h1>
+            <SniperLogoMark className="mx-auto h-20 w-auto max-w-full sm:h-24 drop-shadow-[0_0_28px_rgba(0,229,255,0.3)]" />
             <p className="mt-2 text-xs sm:text-sm text-muted-foreground max-w-xs mx-auto">
               Entre somente com cadastro. Acesso completo depende de liberacao do ADM.
             </p>
@@ -419,7 +417,7 @@ function SalesAccessLoading() {
         <div className="mx-auto mb-4 flex justify-center">
           <BrainAI size={92} speaking />
         </div>
-        <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-neon-cyan">SNIPER BO IA</div>
+        <SniperLogoMark className="mx-auto h-12 w-auto max-w-[220px] drop-shadow-[0_0_22px_rgba(0,229,255,0.25)]" />
         <div className="mt-2 text-xl font-black text-white">Verificando acesso</div>
         <div className="mt-2 text-xs text-muted-foreground">Sincronizando status de vagas...</div>
         <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-secondary/70">
