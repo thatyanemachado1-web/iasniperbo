@@ -43,6 +43,10 @@ function buildEmptySnapshot(historyLimit: PatternMinerHistoryLimit): PatternMine
       g1: 0,
       red: 0,
       tie: 0,
+      sequencePositive: 0,
+      sequenceNegative: 0,
+      maxSequencePositive: 0,
+      maxSequenceNegative: 0,
       totalValidated: 0,
     },
     agent: {

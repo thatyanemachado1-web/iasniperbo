@@ -27,6 +27,10 @@ export interface PatternMinerStrategy {
   red: number;
   tie: number;
   totalValidated: number;
+  sequencePositive: number;
+  sequenceNegative: number;
+  maxSequencePositive: number;
+  maxSequenceNegative: number;
   assertiveness?: number;
   lastOccurrence?: string;
   lastHit?: string;
@@ -62,6 +66,10 @@ export interface PatternMinerScoreboard {
   red: number;
   tie: number;
   totalValidated: number;
+  sequencePositive: number;
+  sequenceNegative: number;
+  maxSequencePositive: number;
+  maxSequenceNegative: number;
   assertiveness?: number;
 }
 

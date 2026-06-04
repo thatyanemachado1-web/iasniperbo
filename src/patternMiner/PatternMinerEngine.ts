@@ -29,6 +29,11 @@ interface ExpectedStats {
   red: number;
   tie: number;
   totalValidated: number;
+  sequencePositive: number;
+  sequenceNegative: number;
+  maxSequencePositive: number;
+  maxSequenceNegative: number;
+  lastOutcome?: "green" | "red";
   lastHit?: string;
   lastRed?: string;
 }
@@ -47,6 +52,10 @@ const EMPTY_EXPECTED_STATS: ExpectedStats = {
   red: 0,
   tie: 0,
   totalValidated: 0,
+  sequencePositive: 0,
+  sequenceNegative: 0,
+  maxSequencePositive: 0,
+  maxSequenceNegative: 0,
 };
 
 export class PatternMinerEngine {
@@ -167,6 +176,10 @@ export class PatternMinerEngine {
       red: best.stats.red,
       tie: best.stats.tie,
       totalValidated: best.stats.totalValidated,
+      sequencePositive: best.stats.sequencePositive,
+      sequenceNegative: best.stats.sequenceNegative,
+      maxSequencePositive: best.stats.maxSequencePositive,
+      maxSequenceNegative: best.stats.maxSequenceNegative,
       assertiveness,
       lastOccurrence: bucket.lastOccurrence,
       lastHit: best.stats.lastHit,
@@ -258,9 +271,23 @@ export class PatternMinerEngine {
         acc.red += strategy.red;
         acc.tie += strategy.tie;
         acc.totalValidated += strategy.totalValidated;
+        acc.sequencePositive = Math.max(acc.sequencePositive, strategy.sequencePositive);
+        acc.sequenceNegative = Math.max(acc.sequenceNegative, strategy.sequenceNegative);
+        acc.maxSequencePositive = Math.max(acc.maxSequencePositive, strategy.maxSequencePositive);
+        acc.maxSequenceNegative = Math.max(acc.maxSequenceNegative, strategy.maxSequenceNegative);
         return acc;
       },
-      { sg: 0, g1: 0, red: 0, tie: 0, totalValidated: 0 },
+      {
+        sg: 0,
+        g1: 0,
+        red: 0,
+        tie: 0,
+        totalValidated: 0,
+        sequencePositive: 0,
+        sequenceNegative: 0,
+        maxSequencePositive: 0,
+        maxSequenceNegative: 0,
+      },
     );
 
     return {
@@ -287,16 +314,34 @@ function applyValidation(
   if (validation.kind === "sg") {
     stats.sg += 1;
     stats.lastHit = validation.roundLabel;
+    applyPatternResultSequence(stats, "green");
     return;
   }
   if (validation.kind === "g1") {
     stats.g1 += 1;
     stats.lastHit = validation.roundLabel;
+    applyPatternResultSequence(stats, "green");
     return;
   }
 
   stats.red += 1;
   stats.lastRed = validation.roundLabel;
+  applyPatternResultSequence(stats, "red");
+}
+
+function applyPatternResultSequence(stats: ExpectedStats, result: "green" | "red") {
+  if (result === "green") {
+    stats.sequencePositive = stats.lastOutcome === "green" ? stats.sequencePositive + 1 : 1;
+    stats.sequenceNegative = 0;
+    stats.maxSequencePositive = Math.max(stats.maxSequencePositive, stats.sequencePositive);
+    stats.lastOutcome = "green";
+    return;
+  }
+
+  stats.sequenceNegative = stats.lastOutcome === "red" ? stats.sequenceNegative + 1 : 1;
+  stats.sequencePositive = 0;
+  stats.maxSequenceNegative = Math.max(stats.maxSequenceNegative, stats.sequenceNegative);
+  stats.lastOutcome = "red";
 }
 
 function validateOccurrence(
