@@ -19,6 +19,7 @@ import { Route as AppPadroesRouteImport } from './routes/app.padroes'
 import { Route as AppIaRouteImport } from './routes/app.ia'
 import { Route as AppContaRouteImport } from './routes/app.conta'
 import { Route as AppAssinaturaRouteImport } from './routes/app.assinatura'
+import { Route as AppAgentesRouteImport } from './routes/app.agentes'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
 import { Route as AppAdminModulesRouteImport } from './routes/app.admin.modules'
@@ -75,6 +76,11 @@ const AppAssinaturaRoute = AppAssinaturaRouteImport.update({
   path: '/assinatura',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAgentesRoute = AppAgentesRouteImport.update({
+  id: '/agentes',
+  path: '/agentes',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAdminRoute = AppAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -105,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
+  '/app/agentes': typeof AppAgentesRoute
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
@@ -121,6 +128,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/app/admin': typeof AppAdminRouteWithChildren
+  '/app/agentes': typeof AppAgentesRoute
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
@@ -139,6 +147,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
+  '/app/agentes': typeof AppAgentesRoute
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/conta': typeof AppContaRoute
   '/app/ia': typeof AppIaRoute
@@ -158,6 +167,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/app/admin'
+    | '/app/agentes'
     | '/app/assinatura'
     | '/app/conta'
     | '/app/ia'
@@ -174,6 +184,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/app/admin'
+    | '/app/agentes'
     | '/app/assinatura'
     | '/app/conta'
     | '/app/ia'
@@ -191,6 +202,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app'
     | '/app/admin'
+    | '/app/agentes'
     | '/app/assinatura'
     | '/app/conta'
     | '/app/ia'
@@ -282,6 +294,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAssinaturaRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/agentes': {
+      id: '/app/agentes'
+      path: '/agentes'
+      fullPath: '/app/agentes'
+      preLoaderRoute: typeof AppAgentesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/admin': {
       id: '/app/admin'
       path: '/admin'
@@ -340,6 +359,7 @@ const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRouteWithChildren
+  AppAgentesRoute: typeof AppAgentesRoute
   AppAssinaturaRoute: typeof AppAssinaturaRoute
   AppContaRoute: typeof AppContaRoute
   AppIaRoute: typeof AppIaRoute
@@ -352,6 +372,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRouteWithChildren,
+  AppAgentesRoute: AppAgentesRoute,
   AppAssinaturaRoute: AppAssinaturaRoute,
   AppContaRoute: AppContaRoute,
   AppIaRoute: AppIaRoute,

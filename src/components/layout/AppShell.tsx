@@ -10,6 +10,7 @@ import {
   Settings,
   ShieldCheck,
   ReceiptText,
+  Network,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -20,6 +21,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/app/agentes", label: "Agentes IA", icon: Network },
   { to: "/app/voz", label: "Voz", icon: Mic },
   { to: "/app/ia", label: "Aprendizado IA", icon: Brain },
   { to: "/app/padroes", label: "Padrões IA", icon: BrainCircuit },
