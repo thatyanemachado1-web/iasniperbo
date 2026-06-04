@@ -24,6 +24,11 @@ const VOICE_RATE_STORAGE_KEY = "sniper_voice_assistant_rate";
 const VOICE_PITCH_STORAGE_KEY = "sniper_voice_assistant_pitch";
 const DEFAULT_LOCAL_VOICE = "pt-BR-AntonioNeural";
 type AIReadingVoiceProvider = "browser" | "edge-tts" | "elevenlabs" | "piper";
+const AI_READING_VOICE_MAX_CHARS = 180;
+const AI_READING_RESULT_WINDOW_MS = 90_000;
+const MAIN_VOICE_ASSISTANT_KEY = "sniper_voice_assistant_enabled";
+const VOICE_COORDINATION_EVENT = "sniper-voice-stop";
+const AI_READING_VOICE_SOURCE = "ai-reading";
 const VOICE_UNAVAILABLE_MESSAGE = "Voz da leitura IA indisponível no momento.";
 
 function firstNameOf(full?: string) {
@@ -77,8 +82,10 @@ export function AIReadingCard({ data, mode }: Props) {
   const [voiceError, setVoiceError] = useState("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef("");
+  const abortControllerRef = useRef<AbortController | null>(null);
   const lastSpokenKeyRef = useRef("");
   const playbackIdRef = useRef(0);
+  const previousStateKeyRef = useRef("");
 
   // Nome do usuário logado (só primeiro nome). Vazio se não houver.
   const userFirstName = useMemo(() => {
@@ -121,6 +128,8 @@ export function AIReadingCard({ data, mode }: Props) {
   });
 
   const disposeAudio = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.removeAttribute("src");
@@ -129,6 +138,9 @@ export function AIReadingCard({ data, mode }: Props) {
     if (audioUrlRef.current && typeof URL !== "undefined") {
       URL.revokeObjectURL(audioUrlRef.current);
       audioUrlRef.current = "";
+    }
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
     }
   }, []);
 
@@ -153,6 +165,7 @@ export function AIReadingCard({ data, mode }: Props) {
         return;
       }
 
+      broadcastVoiceStop(AI_READING_VOICE_SOURCE);
       const playbackId = playbackIdRef.current + 1;
       playbackIdRef.current = playbackId;
       disposeAudio();
@@ -160,13 +173,14 @@ export function AIReadingCard({ data, mode }: Props) {
       setVoiceError("");
 
       try {
+        const voiceText = compactVoiceText(text);
         const provider = readStoredVoiceProvider();
         const voice = readStoredVoiceChoice();
         const volume = readStoredVoiceNumber(VOICE_VOLUME_STORAGE_KEY, 0.9, 0, 1);
         const rate = readStoredVoiceNumber(VOICE_RATE_STORAGE_KEY, 1, 0.7, 1.35);
         const pitch = readStoredVoiceNumber(VOICE_PITCH_STORAGE_KEY, 0.95, 0.6, 1.45);
         if (provider === "browser") {
-          const fallback = await speakWithBrowserVoice(text, volume, rate, pitch, voice);
+          const fallback = await speakWithBrowserVoice(voiceText, volume, rate, pitch, voice);
           if (fallback === true) return;
           throw new Error(VOICE_UNAVAILABLE_MESSAGE);
         }
@@ -180,11 +194,13 @@ export function AIReadingCard({ data, mode }: Props) {
           headers["x-sniper-token"] = token;
         }
 
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
         const response = await fetch(readVoiceApiUrl(), {
           method: "POST",
           headers,
           body: JSON.stringify({
-            text,
+            text: voiceText,
             provider,
             voice,
             language: "pt-BR",
@@ -192,23 +208,24 @@ export function AIReadingCard({ data, mode }: Props) {
             rate,
             pitch,
           }),
+          signal: controller.signal,
         });
 
         const contentType = response.headers.get("content-type") ?? "";
         if (!response.ok) {
-          const fallback = await speakWithBrowserVoice(text, volume, rate, pitch, voice);
+          const fallback = await speakWithBrowserVoice(voiceText, volume, rate, pitch, voice);
           if (fallback === true) return;
           throw new Error(await readVoiceResponseError(response, VOICE_UNAVAILABLE_MESSAGE));
         }
         if (contentType.includes("application/json")) {
           const payload = (await response.json().catch(() => ({}))) as { reason?: string; error?: string };
-          const fallback = await speakWithBrowserVoice(text, volume, rate, pitch, voice);
+          const fallback = await speakWithBrowserVoice(voiceText, volume, rate, pitch, voice);
           if (fallback === true) return;
           throw new Error(payload.error || payload.reason || VOICE_UNAVAILABLE_MESSAGE);
         }
         const blob = await response.blob();
         if (!blob.size) {
-          const fallback = await speakWithBrowserVoice(text, volume, rate, pitch, voice);
+          const fallback = await speakWithBrowserVoice(voiceText, volume, rate, pitch, voice);
           if (fallback === true) return;
           throw new Error(VOICE_UNAVAILABLE_MESSAGE);
         }
@@ -225,8 +242,9 @@ export function AIReadingCard({ data, mode }: Props) {
           audio.play().catch(reject);
         });
       } catch (error) {
+        if ((error as { name?: string })?.name === "AbortError") return;
         if (playbackIdRef.current === playbackId) {
-          const fallback = await speakWithBrowserVoice(text);
+          const fallback = await speakWithBrowserVoice(compactVoiceText(text));
           setVoiceError(fallback === true ? "" : (error as Error)?.message || VOICE_UNAVAILABLE_MESSAGE);
         }
       } finally {
@@ -246,16 +264,49 @@ export function AIReadingCard({ data, mode }: Props) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const onVoiceStop = (event: Event) => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source !== AI_READING_VOICE_SOURCE) stopVoice();
+    };
+    window.addEventListener(VOICE_COORDINATION_EVENT, onVoiceStop);
+    return () => window.removeEventListener(VOICE_COORDINATION_EVENT, onVoiceStop);
+  }, [stopVoice]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     window.localStorage.setItem(AI_READING_VOICE_KEY, voiceEnabled ? "true" : "false");
     if (!voiceEnabled) stopVoice();
   }, [stopVoice, voiceEnabled]);
 
   useEffect(() => {
+    if (!previousStateKeyRef.current) {
+      previousStateKeyRef.current = stateKey;
+      return;
+    }
+    if (previousStateKeyRef.current !== stateKey) {
+      previousStateKeyRef.current = stateKey;
+      if (voiceEnabled) stopVoice();
+    }
+  }, [stateKey, stopVoice, voiceEnabled]);
+
+  useEffect(() => {
     const text = reading?.text?.trim();
-    if (!voiceEnabled || !liveReady || !text || lastSpokenKeyRef.current === stateKey) return;
-    lastSpokenKeyRef.current = stateKey;
-    void speakReading(text);
-  }, [liveReady, reading?.text, speakReading, stateKey, voiceEnabled]);
+    const resultVoice = buildSignalResultVoiceText(data);
+    const voiceText = resultVoice || text;
+    const spokenKey = resultVoice ? `result:${resultKey(data)}` : stateKey;
+    if (
+      !voiceEnabled ||
+      !liveReady ||
+      !voiceText ||
+      isMainVoiceAssistantEnabled() ||
+      lastSpokenKeyRef.current === spokenKey
+    ) {
+      return;
+    }
+    if (resultVoice) stopVoice();
+    lastSpokenKeyRef.current = spokenKey;
+    void speakReading(voiceText);
+  }, [data, liveReady, reading?.text, speakReading, stateKey, stopVoice, voiceEnabled]);
 
   useEffect(() => stopVoice, [stopVoice]);
 
@@ -383,6 +434,55 @@ function readStoredVoiceNumber(key: string, fallback: number, min: number, max: 
   if (typeof window === "undefined") return fallback;
   const value = Number(window.localStorage.getItem(key));
   return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
+function resultKey(data: DashboardData) {
+  const result = data.currentSignal.lastResult;
+  if (!result) return "";
+  return `${result.id}:${result.side}:${result.status}:${result.protection}:${result.finishedAt ?? ""}`;
+}
+
+function buildSignalResultVoiceText(data: DashboardData) {
+  const result = data.currentSignal.lastResult;
+  if (!result || !isRecentSignalResult(result.finishedAt)) return "";
+  const side = result.side === "BANKER" ? "Banker" : "Player";
+  if (result.status === "red") {
+    return `Red confirmado em ${side}. Aguarda a proxima leitura.`;
+  }
+  if (result.status === "green_g1") {
+    return `Green no G1 em ${side}. Entrada finalizada. Aguarda a proxima leitura.`;
+  }
+  return `Green confirmado em ${side}. Entrada finalizada. Aguarda a proxima leitura.`;
+}
+
+function isRecentSignalResult(finishedAt?: string) {
+  const time = Date.parse(finishedAt ?? "");
+  if (!Number.isFinite(time)) return false;
+  const age = Date.now() - time;
+  return age >= -5_000 && age <= AI_READING_RESULT_WINDOW_MS;
+}
+
+function isMainVoiceAssistantEnabled() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(MAIN_VOICE_ASSISTANT_KEY) === "true";
+}
+
+function broadcastVoiceStop(source: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(VOICE_COORDINATION_EVENT, { detail: { source } }));
+}
+
+function compactVoiceText(text: string) {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= AI_READING_VOICE_MAX_CHARS) return clean;
+  const sentences = clean.match(/[^.!?]+[.!?]?/g) ?? [clean];
+  let compact = "";
+  for (const sentence of sentences) {
+    const next = `${compact}${compact ? " " : ""}${sentence.trim()}`.trim();
+    if (next.length > AI_READING_VOICE_MAX_CHARS) break;
+    compact = next;
+  }
+  return compact || `${clean.slice(0, AI_READING_VOICE_MAX_CHARS - 3).trim()}...`;
 }
 
 async function speakWithBrowserVoice(

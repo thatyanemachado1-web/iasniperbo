@@ -26,8 +26,10 @@ const VOICE_CHOICE_STORAGE_KEY = "sniper_voice_assistant_browser_voice";
 const VOICE_VOLUME_STORAGE_KEY = "sniper_voice_assistant_volume";
 const VOICE_RATE_STORAGE_KEY = "sniper_voice_assistant_rate";
 const VOICE_PITCH_STORAGE_KEY = "sniper_voice_assistant_pitch";
-const COMMON_COOLDOWN_MS = 30_000;
-const MAX_QUEUE_SIZE = 6;
+const COMMON_COOLDOWN_MS = 8_000;
+const MAX_QUEUE_SIZE = 3;
+const VOICE_COORDINATION_EVENT = "sniper-voice-stop";
+const VOICE_ASSISTANT_SOURCE = "voice-assistant";
 const DEFAULT_PROVIDER = normalizeVoiceProvider(
   (import.meta.env.VITE_VOICE_PROVIDER as string | undefined) || "edge-tts",
 );
@@ -74,13 +76,11 @@ export function useVoiceAssistant(
     typeof window.SpeechSynthesisUtterance !== "undefined";
   const supported = provider === "browser" ? speechSupported : audioSupported || speechSupported;
   const hasLiveBackendData = mode === "live" && data.mockMode === false;
-  const events = useMemo(
-    () => [
-      ...buildVoiceResultEvents(previousDataRef.current, data, style),
-      ...buildVoiceEvents(data, style, adaptiveSnapshot),
-    ],
-    [adaptiveSnapshot, data, style],
-  );
+  const events = useMemo(() => {
+    const resultEvents = buildVoiceResultEvents(previousDataRef.current, data, style);
+    if (resultEvents.length) return resultEvents;
+    return buildVoiceEvents(data, style, adaptiveSnapshot);
+  }, [adaptiveSnapshot, data, style]);
   const canAutoNarrate = enabled && hasLiveBackendData && supported;
 
   const syncQueueLength = useCallback(() => setQueueLength(queueRef.current.length), []);
@@ -225,13 +225,14 @@ export function useVoiceAssistant(
       }
       const playbackId = playbackIdRef.current + 1;
       playbackIdRef.current = playbackId;
+      broadcastVoiceStop(VOICE_ASSISTANT_SOURCE);
       speakingRef.current = true;
       setIsSpeaking(true);
       setVoiceError("");
 
       void (async () => {
         let narration = text;
-        if (priority >= 3) {
+        if (priority === 3) {
           try {
             const ai = await requestLocalAiCommentary({
               event: "narracao",
@@ -245,6 +246,7 @@ export function useVoiceAssistant(
             narration = text;
           }
         }
+        if (playbackIdRef.current !== playbackId) return;
         const result = await speakWithBackendVoice(narration);
         if (result !== true && result) setVoiceError(result);
         finishPlayback(playbackId, updateCooldown);
@@ -325,6 +327,16 @@ export function useVoiceAssistant(
     setRate(readStoredNumber(VOICE_RATE_STORAGE_KEY, 1, 0.7, 1.35));
     setPitch(readStoredNumber(VOICE_PITCH_STORAGE_KEY, 0.95, 0.6, 1.45));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onVoiceStop = (event: Event) => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source !== VOICE_ASSISTANT_SOURCE) stopCurrentPlayback();
+    };
+    window.addEventListener(VOICE_COORDINATION_EVENT, onVoiceStop);
+    return () => window.removeEventListener(VOICE_COORDINATION_EVENT, onVoiceStop);
+  }, [stopCurrentPlayback]);
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -440,6 +452,11 @@ function readStoredNumber(key: string, fallback: number, min: number, max: numbe
   if (typeof window === "undefined") return fallback;
   const number = Number(window.localStorage.getItem(key));
   return Number.isFinite(number) ? clamp(number, min, max) : fallback;
+}
+
+function broadcastVoiceStop(source: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(VOICE_COORDINATION_EVENT, { detail: { source } }));
 }
 
 function clamp(value: number, min: number, max: number) {

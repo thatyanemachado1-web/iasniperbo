@@ -145,6 +145,7 @@ export function buildVoiceResultEvents(
         mainResultText(name, lastResult.side, lastResult.status, lastResult.protection, style),
       ),
     );
+    return events;
   }
 
   if (
@@ -300,18 +301,14 @@ function mainResultText(
   protection: string,
   style: VoiceNarrationStyle,
 ) {
-  const sideText = sideLabel(side);
-  const seed = `${side}:${status}:${protection}`;
+  const resultSideText = sideLabel(side);
+  const resultSeed = `${side}:${status}:${protection}`;
   if (status === "red") {
-    return style === "aggressive"
-      ? `${voiceLead("resultRed", style, seed, name)}Red na entrada principal em ${sideText}. Respeita a gestão e aguarda nova leitura.`
-      : `${voiceLead("resultRed", style, seed, name)}Red na entrada principal em ${sideText}. Aguardar nova análise.`;
+    return `${voiceLead("resultRed", style, resultSeed, name)}Red confirmado em ${resultSideText}. Aguarda a proxima leitura.`;
   }
 
-  const greenText = status === "green_g1" ? `Green no G1 em ${sideText}` : `Green em ${sideText}`;
-  return style === "aggressive"
-    ? `${voiceLead("resultGreen", style, seed, name)}${greenText} na entrada principal. Protege a gestão.`
-    : `${voiceLead("resultGreen", style, seed, name)}${greenText} na entrada principal, com proteção ${protection}.`;
+  const resultGreenText = status === "green_g1" ? `Green no G1 em ${resultSideText}` : `Green em ${resultSideText}`;
+  return `${voiceLead("resultGreen", style, resultSeed, name)}${resultGreenText}. Entrada finalizada. Aguarda a proxima leitura.`;
 }
 
 function tieResultText(name: string, status: TieAlert["status"], style: VoiceNarrationStyle) {
