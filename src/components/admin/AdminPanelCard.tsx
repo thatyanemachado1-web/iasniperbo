@@ -57,7 +57,7 @@ export function AdminPanelCard({ overview = fallbackOverview }: { overview?: Par
           <AdminLink to="/app/admin/users" icon={<Users className="size-4" />} label="Gerenciar usuários" />
           <AdminLink to="/app/admin/logs" icon={<Logs className="size-4" />} label="Ver logs" />
           <AdminLink to="/app/admin/modules" icon={<Settings2 className="size-4" />} label="Configurar módulos" />
-          <AdminLink to="/app/admin/broadcast" icon={<Megaphone className="size-4" />} label="Enviar aviso geral" />
+          <AdminLink to="/app/admin/broadcast" icon={<Megaphone className="size-4" />} label="Conteudo e avisos" />
         </div>
       </div>
     </GlassCard>

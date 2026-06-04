@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
@@ -691,6 +691,32 @@ function AdminPage() {
         saving={salesSaving}
         onChange={handleSalesSettingsChange}
       />
+
+      <GlassCard className="border-neon-cyan/25">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex size-11 items-center justify-center rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan">
+              <Globe2 className="size-5" />
+            </div>
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-neon-cyan">
+                Conteudo do site
+              </div>
+              <h2 className="mt-1 text-lg font-black">Preview, favicon, banner e pop-up</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Altere o texto do link compartilhado, o icone da aba e avisos para clientes.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/app/admin/broadcast"
+            className="btn-primary-grad inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black"
+          >
+            <Radio className="size-4" />
+            Abrir conteudo e avisos
+          </Link>
+        </div>
+      </GlassCard>
 
       <div
         className={`grid gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 ${isOwnerAdmin ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-1"}`}
