@@ -48,6 +48,8 @@ export interface NeuralReading {
   assertividade?: number | null;
   sequencePositive?: number | null;
   sequenceNegative?: number | null;
+  maxSequencePositive?: number | null;
+  maxSequenceNegative?: number | null;
   paganteStatus?: string | null;
   paganteAlert?: string | null;
   paganteWindow?: number | null;
@@ -65,6 +67,10 @@ export interface NeuralScoreboard {
   erros?: number | null;
   reds?: number | null;
   assertividade?: number | null;
+  sequencePositive?: number | null;
+  sequenceNegative?: number | null;
+  maxSequencePositive?: number | null;
+  maxSequenceNegative?: number | null;
 }
 
 export interface ModuleToggles {
@@ -213,6 +219,8 @@ export interface MainResult {
   assertiveness: number;
   sequencePositive: number;
   sequenceNegative: number;
+  maxSequencePositive: number;
+  maxSequenceNegative: number;
   breakdown: string;
 }
 

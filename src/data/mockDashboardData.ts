@@ -146,8 +146,10 @@ export const mockDashboardData: DashboardData = {
     erros: 100,
     reds: 100,
     assertividade: 43.5,
-    sequencePositive: 2,
+    sequencePositive: 0,
     sequenceNegative: 1,
+    maxSequencePositive: 4,
+    maxSequenceNegative: 3,
   },
   moduleToggles: {
     tieAlert: true,

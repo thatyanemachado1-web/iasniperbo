@@ -18,6 +18,8 @@ interface NeuralScoreSummary {
   reds: number | null;
   total: number;
   accuracy: number | null;
+  maxGreenSequence: number | null;
+  maxRedSequence: number | null;
 }
 
 type LeituraNeuralMiniCardProps = NeuralReading & {
@@ -219,7 +221,7 @@ export function LeituraNeuralMiniCard({
 function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) {
   if (sequenceNegative > 0) {
     return {
-      label: `Neural: ${sequenceNegative} RED ${sequenceNegative === 1 ? "atual" : "seguidos"}`,
+      label: `Neural: ${sequenceNegative} RED ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de reds da Leitura Neural.",
       className: "border-destructive/35 bg-destructive/10 text-destructive",
     };
@@ -227,7 +229,7 @@ function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) 
 
   if (sequencePositive > 0) {
     return {
-      label: `Neural: ${sequencePositive} GREEN ${sequencePositive === 1 ? "atual" : "seguidos"}`,
+      label: `Neural: ${sequencePositive} GREEN ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de greens da Leitura Neural.",
       className: "border-success/35 bg-success/10 text-success",
     };
@@ -306,6 +308,8 @@ function NeuralGeneralScorePopover({
             <ScoreBox label="G1 geral" value={score.g1} tone="cyan" />
             <ScoreBox label="Alertas" value={score.totalAlerts} tone="neutral" />
             <ScoreBox label="Total" value={score.total} tone="neutral" />
+            <ScoreBox label="SQ max green" value={score.maxGreenSequence ?? "coletando"} tone="green" />
+            <ScoreBox label="SQ max red" value={score.maxRedSequence ?? "coletando"} tone="red" />
           </div>
           <div className="space-y-2 rounded-lg border border-neon-cyan/15 bg-neon-cyan/5 px-2 py-2 text-[10px] leading-relaxed text-muted-foreground">
             <div>
@@ -383,13 +387,13 @@ function ScoreBox({
   tone,
 }: {
   label: string;
-  value: number | null;
+  value: number | string | null;
   tone: "green" | "red" | "cyan" | "neutral";
 }) {
   return (
     <div className={cn("rounded-lg border px-2 py-1.5", scoreBoxClass(tone))}>
       <div className="text-[8px] font-bold uppercase tracking-[0.1em] opacity-75">{label}</div>
-      <div className="text-sm font-black leading-tight">{formatCount(value)}</div>
+      <div className="text-sm font-black leading-tight">{typeof value === "string" ? value : formatCount(value)}</div>
     </div>
   );
 }
@@ -474,6 +478,12 @@ function buildGeneralScore(
   const total = numberFrom(greens) + numberFrom(reds);
   const totalAlerts = optionalNumberFrom(scoreboard?.totalAlerts ?? fallbackReading.alertas ?? total) ?? total;
   const accuracy = accuracyFrom(null, greens, reds) ?? optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
+  const maxGreenSequence = optionalPositiveNumberFrom(
+    scoreboard?.maxSequencePositive ?? fallbackReading.maxSequencePositive,
+  );
+  const maxRedSequence = optionalPositiveNumberFrom(
+    scoreboard?.maxSequenceNegative ?? fallbackReading.maxSequenceNegative,
+  );
 
   return {
     totalAlerts,
@@ -483,11 +493,17 @@ function buildGeneralScore(
     reds,
     total,
     accuracy,
+    maxGreenSequence,
+    maxRedSequence,
   };
 }
 
 function optionalNumberFrom(value?: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function optionalPositiveNumberFrom(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function numberFrom(value?: number | null) {

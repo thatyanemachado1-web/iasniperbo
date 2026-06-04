@@ -9,7 +9,8 @@ const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
 const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
-const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v1";
+const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v2";
+const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const DEFAULT_MODULE_TOGGLES: ModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -318,6 +319,36 @@ function normalizeNeuralScoreboard(
           record.win_rate,
         ),
       ) ?? fallback?.assertividade ?? null,
+    sequencePositive:
+      readOptionalNumber(
+        firstDefined(record.sequencePositive, record.sequence_positive, record.seqPositive),
+      ) ?? fallback?.sequencePositive ?? null,
+    sequenceNegative:
+      readOptionalNumber(
+        firstDefined(record.sequenceNegative, record.sequence_negative, record.seqNegative),
+      ) ?? fallback?.sequenceNegative ?? null,
+    maxSequencePositive:
+      readOptionalNumber(
+        firstDefined(
+          record.maxSequencePositive,
+          record.max_sequence_positive,
+          record.maxGreenSequence,
+          record.max_green_sequence,
+          record.maxGreensStreak,
+          record.max_greens_streak,
+        ),
+      ) ?? fallback?.maxSequencePositive ?? null,
+    maxSequenceNegative:
+      readOptionalNumber(
+        firstDefined(
+          record.maxSequenceNegative,
+          record.max_sequence_negative,
+          record.maxRedSequence,
+          record.max_red_sequence,
+          record.maxRedsStreak,
+          record.max_reds_streak,
+        ),
+      ) ?? fallback?.maxSequenceNegative ?? null,
   };
 }
 
@@ -478,6 +509,32 @@ function normalizeNeuralReading(value: unknown, fallback?: NeuralReading): Neura
       ) ??
       fallback?.sequenceNegative ??
       null,
+    maxSequencePositive:
+      readOptionalNumber(
+        firstDefined(
+          record.maxSequencePositive,
+          record.max_sequence_positive,
+          record.maxGreenSequence,
+          record.max_green_sequence,
+          record.maxGreensStreak,
+          record.max_greens_streak,
+        ),
+      ) ??
+      fallback?.maxSequencePositive ??
+      null,
+    maxSequenceNegative:
+      readOptionalNumber(
+        firstDefined(
+          record.maxSequenceNegative,
+          record.max_sequence_negative,
+          record.maxRedSequence,
+          record.max_red_sequence,
+          record.maxRedsStreak,
+          record.max_reds_streak,
+        ),
+      ) ??
+      fallback?.maxSequenceNegative ??
+      null,
     paganteStatus:
       readOptionalString(
         firstDefined(record.paganteStatus, record.pagante_status, record.statusPagante),
@@ -606,55 +663,30 @@ interface NeuralLiveSequence {
   reds: number;
   sequencePositive: number;
   sequenceNegative: number;
+  maxSequencePositive: number;
+  maxSequenceNegative: number;
+  lastOutcome: "GREEN" | "RED" | null;
 }
 
 function applyNeuralScoreBaseline(
   reading: NeuralReading,
   scoreboard: NeuralScoreboard | undefined,
-  day: string,
+  _day: string,
 ): Pick<DashboardData, "neuralReading" | "neuralScoreboard"> {
-  if (typeof window === "undefined") return { neuralReading: reading, neuralScoreboard: scoreboard };
   const current = neuralScoreFrom(reading, scoreboard);
-  const storageKey = neuralScoreBaselineStorageKey();
-  const baseline = readNeuralScoreBaseline(storageKey);
-
-  if (!baseline || baseline.day !== day || neuralScoreWentBackwards(current, baseline)) {
-    writeNeuralScoreBaseline(storageKey, { day, ...current });
-    writeNeuralLiveSequence(neuralSequenceStorageKey(), {
-      day,
-      greens: 0,
-      reds: 0,
-      sequencePositive: 0,
-      sequenceNegative: 0,
-    });
-    const neuralReading = {
-      ...reading,
-      alertas: 0,
-      acertos: 0,
-      greenSemGale: 0,
-      greenG1: 0,
-      erros: 0,
-      reds: 0,
-      assertividade: 0,
-      sequencePositive: 0,
-      sequenceNegative: 0,
-    };
-    return {
-      neuralReading,
-      neuralScoreboard: zeroNeuralScoreboard(scoreboard),
-    };
-  }
-
-  const greenSemGale = Math.max(0, current.greenSemGale - baseline.greenSemGale);
-  const greenG1 = Math.max(0, current.greenG1 - baseline.greenG1);
-  const acertos = Math.max(0, current.acertos - baseline.acertos);
-  const reds = Math.max(0, current.reds - baseline.reds);
-  const erros = Math.max(0, current.erros - baseline.erros);
-  const alertas = Math.max(0, current.alertas - baseline.alertas);
+  const greenSemGale = current.greenSemGale;
+  const greenG1 = current.greenG1;
+  const acertos = current.acertos;
+  const reds = current.reds;
+  const erros = current.erros;
+  const alertas = current.alertas;
   const totalGreens = greenSemGale + greenG1 || acertos;
   const totalLosses = reds || erros;
   const total = totalGreens + totalLosses;
-  const liveSequence = updateNeuralLiveSequence(day, totalGreens, totalLosses);
+  const sequencePositive = safeCounter(reading.sequencePositive ?? scoreboard?.sequencePositive);
+  const sequenceNegative = safeCounter(reading.sequenceNegative ?? scoreboard?.sequenceNegative);
+  const maxSequencePositive = safeCounter(reading.maxSequencePositive ?? scoreboard?.maxSequencePositive);
+  const maxSequenceNegative = safeCounter(reading.maxSequenceNegative ?? scoreboard?.maxSequenceNegative);
 
   const neuralReading = {
     ...reading,
@@ -665,8 +697,10 @@ function applyNeuralScoreBaseline(
     erros: totalLosses,
     reds: totalLosses,
     assertividade: total > 0 ? Math.round((totalGreens / total) * 1000) / 10 : 0,
-    sequencePositive: liveSequence.sequencePositive,
-    sequenceNegative: liveSequence.sequenceNegative,
+    sequencePositive,
+    sequenceNegative,
+    maxSequencePositive: Math.max(maxSequencePositive, sequencePositive),
+    maxSequenceNegative: Math.max(maxSequenceNegative, sequenceNegative),
   };
   return {
     neuralReading,
@@ -680,6 +714,10 @@ function applyNeuralScoreBaseline(
       erros: totalLosses,
       reds: totalLosses,
       assertividade: total > 0 ? Math.round((totalGreens / total) * 1000) / 10 : 0,
+      sequencePositive,
+      sequenceNegative,
+      maxSequencePositive: Math.max(maxSequencePositive, sequencePositive),
+      maxSequenceNegative: Math.max(maxSequenceNegative, sequenceNegative),
     },
   };
 }
@@ -706,6 +744,10 @@ function zeroNeuralScoreboard(scoreboard?: NeuralScoreboard): NeuralScoreboard |
     erros: 0,
     reds: 0,
     assertividade: 0,
+    sequencePositive: 0,
+    sequenceNegative: 0,
+    maxSequencePositive: 0,
+    maxSequenceNegative: 0,
   };
 }
 
@@ -744,7 +786,15 @@ function writeNeuralScoreBaseline(key: string, baseline: NeuralScoreBaseline) {
   window.localStorage.setItem(key, JSON.stringify(baseline));
 }
 
-function updateNeuralLiveSequence(day: string, greens: number, reds: number) {
+function updateNeuralLiveSequence(
+  day: string,
+  greens: number,
+  reds: number,
+  provided: Partial<Pick<
+    NeuralLiveSequence,
+    "sequencePositive" | "sequenceNegative" | "maxSequencePositive" | "maxSequenceNegative"
+  >> = {},
+) {
   const key = neuralSequenceStorageKey();
   const previous = readNeuralLiveSequence(key);
   const base =
@@ -756,26 +806,47 @@ function updateNeuralLiveSequence(day: string, greens: number, reds: number) {
           reds: 0,
           sequencePositive: 0,
           sequenceNegative: 0,
+          maxSequencePositive: 0,
+          maxSequenceNegative: 0,
+          lastOutcome: null,
         };
   const greenDelta = Math.max(0, greens - base.greens);
   const redDelta = Math.max(0, reds - base.reds);
+  const providedPositive = safeCounter(provided.sequencePositive);
+  const providedNegative = safeCounter(provided.sequenceNegative);
+  const hasProvidedCurrent =
+    (providedPositive > 0 && providedNegative === 0) || (providedNegative > 0 && providedPositive === 0);
   const next: NeuralLiveSequence = {
     day,
     greens,
     reds,
     sequencePositive: base.sequencePositive,
     sequenceNegative: base.sequenceNegative,
+    maxSequencePositive: Math.max(base.maxSequencePositive, safeCounter(provided.maxSequencePositive)),
+    maxSequenceNegative: Math.max(base.maxSequenceNegative, safeCounter(provided.maxSequenceNegative)),
+    lastOutcome: base.lastOutcome,
   };
 
-  if (greenDelta > 0) {
-    next.sequencePositive += greenDelta;
-    next.sequenceNegative = 0;
-  }
-  if (redDelta > 0) {
-    next.sequenceNegative += redDelta;
+  if (hasProvidedCurrent) {
+    next.sequencePositive = providedPositive;
+    next.sequenceNegative = providedNegative;
+    next.lastOutcome = providedPositive > 0 ? "GREEN" : "RED";
+  } else if (greenDelta > 0 && redDelta > 0) {
     next.sequencePositive = 0;
+    next.sequenceNegative = 0;
+    next.lastOutcome = null;
+  } else if (greenDelta > 0) {
+    next.sequencePositive = (base.lastOutcome === "GREEN" ? base.sequencePositive : 0) + greenDelta;
+    next.sequenceNegative = 0;
+    next.lastOutcome = "GREEN";
+  } else if (redDelta > 0) {
+    next.sequenceNegative = (base.lastOutcome === "RED" ? base.sequenceNegative : 0) + redDelta;
+    next.sequencePositive = 0;
+    next.lastOutcome = "RED";
   }
 
+  next.maxSequencePositive = Math.max(next.maxSequencePositive, next.sequencePositive);
+  next.maxSequenceNegative = Math.max(next.maxSequenceNegative, next.sequenceNegative);
   writeNeuralLiveSequence(key, next);
   return next;
 }
@@ -790,6 +861,9 @@ function readNeuralLiveSequence(key: string): NeuralLiveSequence | null {
       reds: safeCounter(parsed.reds),
       sequencePositive: safeCounter(parsed.sequencePositive),
       sequenceNegative: safeCounter(parsed.sequenceNegative),
+      maxSequencePositive: safeCounter(parsed.maxSequencePositive ?? parsed.sequencePositive),
+      maxSequenceNegative: safeCounter(parsed.maxSequenceNegative ?? parsed.sequenceNegative),
+      lastOutcome: parsed.lastOutcome === "GREEN" || parsed.lastOutcome === "RED" ? parsed.lastOutcome : null,
     };
   } catch {
     return null;
@@ -833,10 +907,30 @@ function dashboardDayKey(data: DashboardData) {
 function localDayKey(value: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  const parts = cycleDateParts(date);
+  if (parts.hour === "00" && parts.minute === "00") {
+    return cycleDateParts(new Date(date.getTime() - 60_000)).date;
+  }
+  return parts.date;
+}
+
+function cycleDateParts(value: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: DASHBOARD_CYCLE_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return {
+    date: `${part("year")}-${part("month")}-${part("day")}`,
+    hour: part("hour"),
+    minute: part("minute"),
+  };
 }
 
 function safeCounter(value: unknown) {

@@ -3,6 +3,8 @@ import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
 import type { AdaptiveRoundRecord, AdaptiveSyncStatus } from "@/types/adaptiveStrategy";
 import type { DashboardData, Round } from "@/types/dashboard";
+
+const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 import {
   adaptiveSideFromRoundResult,
   analyzeAdaptiveStrategy,
@@ -280,10 +282,30 @@ function playedAt(day: string, time: string, fallback: string) {
 function localDayKey(value: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  const parts = cycleDateParts(date);
+  if (parts.hour === "00" && parts.minute === "00") {
+    return cycleDateParts(new Date(date.getTime() - 60_000)).date;
+  }
+  return parts.date;
+}
+
+function cycleDateParts(value: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: DASHBOARD_CYCLE_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return {
+    date: `${part("year")}-${part("month")}-${part("day")}`,
+    hour: part("hour"),
+    minute: part("minute"),
+  };
 }
 
 function validIsoDate(value: unknown): value is string {

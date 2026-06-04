@@ -26,6 +26,7 @@ type LiveDashboardData = DashboardData & {
   entryModeCountedResults?: Record<string, true>;
   latestEntryModeSignalId?: string;
   latestEntryModeSignalModes?: ActiveEntryMode[];
+  neuralSequenceLastOutcome?: "GREEN" | "RED" | null;
 };
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
 type AdminRole = "owner" | "admin";
@@ -2651,7 +2652,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
   };
 
-  return trackServerEntryModeStats(nextDashboard);
+  return trackServerEntryModeStats(trackServerNeuralSequences(nextDashboard, currentDashboard));
 }
 
 function ensureDashboardDailyCycle(
@@ -2733,6 +2734,8 @@ function resetDashboardDailyCycle(
       assertividade: 0,
       sequencePositive: 0,
       sequenceNegative: 0,
+      maxSequencePositive: 0,
+      maxSequenceNegative: 0,
     },
     engineDecision: {
       state: "AGUARDAR",
@@ -2755,6 +2758,7 @@ function resetDashboardDailyCycle(
     entryModeCountedResults: {},
     latestEntryModeSignalId: undefined,
     latestEntryModeSignalModes: [],
+    neuralSequenceLastOutcome: null,
     tieAlertScoreboard: {
       greenTieAlerts: 0,
       expired: 0,
@@ -2807,7 +2811,138 @@ function resetNeuralReadingDailyCounters(
     assertividade: 0,
     sequencePositive: 0,
     sequenceNegative: 0,
+    maxSequencePositive: 0,
+    maxSequenceNegative: 0,
   };
+}
+
+function trackServerNeuralSequences(
+  dashboard: LiveDashboardData,
+  previousDashboard: LiveDashboardData,
+): LiveDashboardData {
+  if (!dashboard.neuralReading && !dashboard.neuralScoreboard) return dashboard;
+
+  const totals = serverReadNeuralTotalsFromDashboard(dashboard);
+  const previousTotals = serverReadNeuralTotalsFromDashboard(previousDashboard);
+  const countersWentBack = totals.greens < previousTotals.greens || totals.reds < previousTotals.reds;
+  const previousPositive = countersWentBack
+    ? 0
+    : serverSafeCounter(
+        previousDashboard.neuralReading?.sequencePositive ??
+          previousDashboard.neuralScoreboard?.sequencePositive,
+      );
+  const previousNegative = countersWentBack
+    ? 0
+    : serverSafeCounter(
+        previousDashboard.neuralReading?.sequenceNegative ??
+          previousDashboard.neuralScoreboard?.sequenceNegative,
+      );
+  const explicitPositive = serverSafeCounter(
+    dashboard.neuralReading?.sequencePositive ?? dashboard.neuralScoreboard?.sequencePositive,
+  );
+  const explicitNegative = serverSafeCounter(
+    dashboard.neuralReading?.sequenceNegative ?? dashboard.neuralScoreboard?.sequenceNegative,
+  );
+  const hasExplicitSequence =
+    (explicitPositive > 0 && explicitNegative === 0) ||
+    (explicitNegative > 0 && explicitPositive === 0);
+  let sequencePositive = hasExplicitSequence ? explicitPositive : previousPositive;
+  let sequenceNegative = hasExplicitSequence ? explicitNegative : previousNegative;
+  let lastOutcome: LiveDashboardData["neuralSequenceLastOutcome"] =
+    previousDashboard.neuralSequenceLastOutcome ??
+    inferServerNeuralOutcome(previousPositive, previousNegative);
+
+  const greenDelta = countersWentBack
+    ? totals.greens
+    : Math.max(0, totals.greens - previousTotals.greens);
+  const redDelta = countersWentBack
+    ? totals.reds
+    : Math.max(0, totals.reds - previousTotals.reds);
+
+  if (hasExplicitSequence) {
+    lastOutcome = explicitPositive > 0 ? "GREEN" : "RED";
+  } else if (greenDelta > 0 && redDelta > 0) {
+    sequencePositive = 0;
+    sequenceNegative = 0;
+    lastOutcome = null;
+  } else if (greenDelta > 0) {
+    sequencePositive = lastOutcome === "GREEN" ? previousPositive + greenDelta : greenDelta;
+    sequenceNegative = 0;
+    lastOutcome = "GREEN";
+  } else if (redDelta > 0) {
+    sequenceNegative = lastOutcome === "RED" ? previousNegative + redDelta : redDelta;
+    sequencePositive = 0;
+    lastOutcome = "RED";
+  }
+
+  const previousMaxPositive = countersWentBack
+    ? 0
+    : serverSafeCounter(
+        previousDashboard.neuralReading?.maxSequencePositive ??
+          previousDashboard.neuralScoreboard?.maxSequencePositive,
+      );
+  const previousMaxNegative = countersWentBack
+    ? 0
+    : serverSafeCounter(
+        previousDashboard.neuralReading?.maxSequenceNegative ??
+          previousDashboard.neuralScoreboard?.maxSequenceNegative,
+      );
+  const explicitMaxPositive = serverSafeCounter(
+    dashboard.neuralReading?.maxSequencePositive ?? dashboard.neuralScoreboard?.maxSequencePositive,
+  );
+  const explicitMaxNegative = serverSafeCounter(
+    dashboard.neuralReading?.maxSequenceNegative ?? dashboard.neuralScoreboard?.maxSequenceNegative,
+  );
+  const maxSequencePositive = Math.max(previousMaxPositive, explicitMaxPositive, sequencePositive);
+  const maxSequenceNegative = Math.max(previousMaxNegative, explicitMaxNegative, sequenceNegative);
+  const neuralReading = dashboard.neuralReading
+    ? {
+        ...dashboard.neuralReading,
+        sequencePositive,
+        sequenceNegative,
+        maxSequencePositive,
+        maxSequenceNegative,
+      }
+    : dashboard.neuralReading;
+  const neuralScoreboard = dashboard.neuralScoreboard
+    ? {
+        ...dashboard.neuralScoreboard,
+        sequencePositive,
+        sequenceNegative,
+        maxSequencePositive,
+        maxSequenceNegative,
+      }
+    : dashboard.neuralScoreboard;
+
+  return {
+    ...dashboard,
+    neuralReading,
+    neuralScoreboard,
+    neuralSequenceLastOutcome: lastOutcome,
+  };
+}
+
+function serverReadNeuralTotalsFromDashboard(dashboard: Pick<DashboardData, "neuralReading" | "neuralScoreboard">) {
+  const reading = dashboard.neuralReading;
+  const scoreboard = dashboard.neuralScoreboard;
+  const greenSemGale = serverSafeCounter(scoreboard?.greenSemGale ?? reading?.greenSemGale);
+  const greenG1 = serverSafeCounter(scoreboard?.greenG1 ?? reading?.greenG1);
+  const splitGreens = greenSemGale + greenG1;
+  const greens =
+    splitGreens > 0
+      ? splitGreens
+      : serverSafeCounter(scoreboard?.greens ?? scoreboard?.acertos ?? reading?.acertos);
+  const reds = serverSafeCounter(scoreboard?.reds ?? scoreboard?.erros ?? reading?.reds ?? reading?.erros);
+  return { greens, reds };
+}
+
+function inferServerNeuralOutcome(
+  sequencePositive: number,
+  sequenceNegative: number,
+): LiveDashboardData["neuralSequenceLastOutcome"] {
+  if (sequencePositive > 0 && sequenceNegative === 0) return "GREEN";
+  if (sequenceNegative > 0 && sequencePositive === 0) return "RED";
+  return null;
 }
 
 function readDashboardCycleDate(value: unknown) {
@@ -2822,12 +2957,30 @@ function readDashboardCycleDate(value: unknown) {
 }
 
 function currentDashboardCycleDate(now = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", {
+  const parts = dashboardCycleDateParts(now);
+  if (parts.hour === "00" && parts.minute === "00") {
+    return dashboardCycleDateParts(new Date(now.getTime() - 60_000)).date;
+  }
+  return parts.date;
+}
+
+function dashboardCycleDateParts(value: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: DASHBOARD_CYCLE_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(now);
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return {
+    date: `${part("year")}-${part("month")}-${part("day")}`,
+    hour: part("hour"),
+    minute: part("minute"),
+  };
 }
 
 function pickDashboardSections(incoming: Record<string, unknown>): Partial<LiveDashboardData> {
@@ -2838,6 +2991,10 @@ function pickDashboardSections(incoming: Record<string, unknown>): Partial<LiveD
     out.currentSurfAlert = incoming.surfAlert as DashboardData["currentSurfAlert"];
   if (incoming.neuralReading)
     out.neuralReading = incoming.neuralReading as DashboardData["neuralReading"];
+  if (incoming.neuralScoreboard)
+    out.neuralScoreboard = incoming.neuralScoreboard as DashboardData["neuralScoreboard"];
+  if (incoming.neural_scoreboard)
+    out.neuralScoreboard = incoming.neural_scoreboard as DashboardData["neuralScoreboard"];
   if (incoming.moduleToggles)
     out.moduleToggles = incoming.moduleToggles as DashboardData["moduleToggles"];
   if (incoming.engineDecision)

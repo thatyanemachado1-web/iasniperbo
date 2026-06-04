@@ -223,6 +223,8 @@ function DashboardPage() {
                 { label: "SG", value: neuralResult.greenSemGale, variant: "green" },
                 { label: "G1", value: neuralResult.greenG1, variant: "cyan" },
                 { label: "RED", value: neuralResult.reds, variant: "red" },
+                { label: "SQ max green", value: neuralMaxSequenceLabel(neuralResult.maxSequencePositive), variant: "green" },
+                { label: "SQ max red", value: neuralMaxSequenceLabel(neuralResult.maxSequenceNegative), variant: "red" },
                 { label: "EMP", value: tableTieLabel, variant: "purple" },
                 { label: "Total", value: neuralResult.total, variant: "neutral" },
               ]}
@@ -362,6 +364,10 @@ function DashboardPage() {
 
 function formatCompactCount(value: number) {
   return value >= 0 && value < 10 ? `0${value}` : String(value);
+}
+
+function neuralMaxSequenceLabel(value: number) {
+  return value > 0 ? value : "coletando";
 }
 
 function TrialCountdown({ expiresAt }: { expiresAt: string }) {

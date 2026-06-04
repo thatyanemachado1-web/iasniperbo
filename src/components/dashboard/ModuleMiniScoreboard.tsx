@@ -131,7 +131,7 @@ export function ModuleMiniScoreboard({
             </div>
           )}
           <div className="mt-1 text-[9px] font-medium text-muted-foreground">
-            Desde o último reset do painel. Sem amostra suficiente, fica em coleta.
+            Ciclo oficial 00:01-00:00. Sem amostra suficiente, fica em coleta.
           </div>
           <div className={cn("mt-1 inline-flex max-w-full rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.08em]", sequenceState.className)}>
             <span className="truncate">Sequência atual: {sequenceState.label}</span>
@@ -305,7 +305,7 @@ function ScoreboardDetailsModal({
       <DialogContent className="border-neon-cyan/20 bg-background/95 sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-sm uppercase tracking-[0.16em]">{title}</DialogTitle>
-          <DialogDescription>{description} Fonte: dados reais desde o último reset do painel.</DialogDescription>
+          <DialogDescription>{description} Fonte: dados reais do ciclo oficial 00:01-00:00.</DialogDescription>
         </DialogHeader>
         <div className="space-y-2 rounded-xl border border-neon-cyan/15 bg-neon-cyan/5 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           <ToolInfoLine label="Para que serve" value={toolInfo.purpose} />
