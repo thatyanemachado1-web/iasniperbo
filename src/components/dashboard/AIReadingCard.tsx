@@ -17,7 +17,13 @@ type Props = {
 };
 
 const AI_READING_VOICE_KEY = "sniper_ai_reading_voice_enabled";
+const VOICE_PROVIDER_STORAGE_KEY = "sniper_voice_assistant_provider";
+const VOICE_CHOICE_STORAGE_KEY = "sniper_voice_assistant_browser_voice";
+const VOICE_VOLUME_STORAGE_KEY = "sniper_voice_assistant_volume";
+const VOICE_RATE_STORAGE_KEY = "sniper_voice_assistant_rate";
+const VOICE_PITCH_STORAGE_KEY = "sniper_voice_assistant_pitch";
 const DEFAULT_LOCAL_VOICE = "pt-BR-AntonioNeural";
+type AIReadingVoiceProvider = "browser" | "edge-tts" | "elevenlabs" | "piper";
 const VOICE_UNAVAILABLE_MESSAGE = "Voz da leitura IA indisponível no momento.";
 
 function firstNameOf(full?: string) {
@@ -154,6 +160,17 @@ export function AIReadingCard({ data, mode }: Props) {
       setVoiceError("");
 
       try {
+        const provider = readStoredVoiceProvider();
+        const voice = readStoredVoiceChoice();
+        const volume = readStoredVoiceNumber(VOICE_VOLUME_STORAGE_KEY, 0.9, 0, 1);
+        const rate = readStoredVoiceNumber(VOICE_RATE_STORAGE_KEY, 1, 0.7, 1.35);
+        const pitch = readStoredVoiceNumber(VOICE_PITCH_STORAGE_KEY, 0.95, 0.6, 1.45);
+        if (provider === "browser") {
+          const fallback = await speakWithBrowserVoice(text, volume, rate, pitch, voice);
+          if (fallback === true) return;
+          throw new Error(VOICE_UNAVAILABLE_MESSAGE);
+        }
+
         const token = readVoiceAuthToken();
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
@@ -168,30 +185,30 @@ export function AIReadingCard({ data, mode }: Props) {
           headers,
           body: JSON.stringify({
             text,
-            provider: "edge-tts",
-            voice: DEFAULT_LOCAL_VOICE,
+            provider,
+            voice,
             language: "pt-BR",
-            volume: 0.9,
-            rate: 1,
-            pitch: 0.95,
+            volume,
+            rate,
+            pitch,
           }),
         });
 
         const contentType = response.headers.get("content-type") ?? "";
         if (!response.ok) {
-          const fallback = await speakWithBrowserVoice(text);
+          const fallback = await speakWithBrowserVoice(text, volume, rate, pitch, voice);
           if (fallback === true) return;
           throw new Error(await readVoiceResponseError(response, VOICE_UNAVAILABLE_MESSAGE));
         }
         if (contentType.includes("application/json")) {
           const payload = (await response.json().catch(() => ({}))) as { reason?: string; error?: string };
-          const fallback = await speakWithBrowserVoice(text);
+          const fallback = await speakWithBrowserVoice(text, volume, rate, pitch, voice);
           if (fallback === true) return;
           throw new Error(payload.error || payload.reason || VOICE_UNAVAILABLE_MESSAGE);
         }
         const blob = await response.blob();
         if (!blob.size) {
-          const fallback = await speakWithBrowserVoice(text);
+          const fallback = await speakWithBrowserVoice(text, volume, rate, pitch, voice);
           if (fallback === true) return;
           throw new Error(VOICE_UNAVAILABLE_MESSAGE);
         }
@@ -199,6 +216,7 @@ export function AIReadingCard({ data, mode }: Props) {
         const audioUrl = window.URL.createObjectURL(blob);
         audioUrlRef.current = audioUrl;
         const audio = new Audio(audioUrl);
+        audio.volume = volume;
         audioRef.current = audio;
 
         await new Promise<void>((resolve, reject) => {
@@ -344,7 +362,36 @@ function readVoiceAuthToken() {
   return "";
 }
 
-async function speakWithBrowserVoice(text: string) {
+function readStoredVoiceProvider(): AIReadingVoiceProvider {
+  if (typeof window === "undefined") return "edge-tts";
+  const provider = String(window.localStorage.getItem(VOICE_PROVIDER_STORAGE_KEY) || "")
+    .trim()
+    .toLowerCase();
+  if (provider === "browser" || provider === "edge-tts" || provider === "elevenlabs" || provider === "piper") {
+    return provider;
+  }
+  return "edge-tts";
+}
+
+function readStoredVoiceChoice() {
+  if (typeof window === "undefined") return DEFAULT_LOCAL_VOICE;
+  const voice = String(window.localStorage.getItem(VOICE_CHOICE_STORAGE_KEY) || "").trim();
+  return voice || DEFAULT_LOCAL_VOICE;
+}
+
+function readStoredVoiceNumber(key: string, fallback: number, min: number, max: number) {
+  if (typeof window === "undefined") return fallback;
+  const value = Number(window.localStorage.getItem(key));
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
+async function speakWithBrowserVoice(
+  text: string,
+  volume = 0.9,
+  rate = 1,
+  pitch = 0.95,
+  voiceChoice = DEFAULT_LOCAL_VOICE,
+) {
   if (
     typeof window === "undefined" ||
     typeof window.speechSynthesis === "undefined" ||
@@ -357,11 +404,12 @@ async function speakWithBrowserVoice(text: string) {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "pt-BR";
-    utterance.volume = 0.9;
-    utterance.rate = 1;
-    utterance.pitch = 0.95;
+    utterance.volume = volume;
+    utterance.rate = rate;
+    utterance.pitch = pitch;
     const voices = window.speechSynthesis.getVoices();
     utterance.voice =
+      voices.find((voice) => voice.name === voiceChoice) ??
       voices.find((voice) => voice.name === DEFAULT_LOCAL_VOICE) ??
       voices.find((voice) => voice.lang.toLowerCase().startsWith("pt-br")) ??
       voices.find((voice) => voice.lang.toLowerCase().startsWith("pt")) ??
