@@ -183,13 +183,13 @@ function AiAgentsCommandCenterContent({ data, adaptiveSnapshot, liveReady }: Pro
           </div>
 
           <div className="relative z-10 space-y-4 p-3 sm:p-5">
-            <div className="relative min-h-[640px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/15 p-3 shadow-[inset_0_0_36px_rgba(0,229,255,0.05)] sm:min-h-[720px] sm:p-0 lg:min-h-[760px]">
+            <div className="relative min-h-[560px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/15 p-0 shadow-[inset_0_0_36px_rgba(0,229,255,0.05)] sm:min-h-[720px] lg:min-h-[760px]">
               <NeonLines agents={agents} sceneMode={scene.mode} animationsEnabled={animationsEnabled} />
               <OutcomeRail side={scene.entrySide} mode={scene.mode} animationsEnabled={animationsEnabled} />
 
               <CoreStatus scene={scene} animationsEnabled={animationsEnabled} />
 
-              <div className="relative z-20 mt-5 flex snap-x gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] sm:contents [&::-webkit-scrollbar]:hidden">
+              <div className="absolute inset-0 z-20">
                 {agents.map((agent) => (
                   <AgentModuleCard
                     key={agent.id}
@@ -301,7 +301,7 @@ function NeonLines({
   const packetDuration = sceneMode === "entry" ? "8s" : sceneMode === "risk" || sceneMode === "red" ? "11s" : "15s";
 
   return (
-    <svg className="pointer-events-none absolute inset-0 z-0 hidden size-full sm:block" viewBox="0 0 100 100" preserveAspectRatio="none">
+    <svg className="pointer-events-none absolute inset-0 z-0 block size-full" viewBox="0 0 100 100" preserveAspectRatio="none">
       <defs>
         <filter id="agent-glow">
           <feGaussianBlur stdDeviation="1.1" result="blur" />
@@ -370,7 +370,7 @@ function CoreStatus({
 
   return (
     <motion.div
-      className={`relative z-20 mx-auto mt-16 w-full max-w-[360px] rounded-2xl border px-4 py-4 text-center backdrop-blur-md sm:absolute sm:left-1/2 sm:top-1/2 sm:mt-0 sm:w-[330px] sm:-translate-x-1/2 sm:-translate-y-1/2 ${
+      className={`absolute left-1/2 top-1/2 z-20 mt-0 w-[172px] max-w-[172px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border px-2.5 py-3 text-center backdrop-blur-md sm:w-[330px] sm:max-w-[360px] sm:px-4 sm:py-4 ${
         scene.mode === "risk"
           ? "border-red-400/50 bg-red-950/35 text-red-100"
           : scene.mode === "green"
@@ -384,7 +384,7 @@ function CoreStatus({
       }
       transition={{ repeat: animationsEnabled ? Infinity : 0, duration: 2.4 }}
     >
-      <div className="relative mx-auto mb-3 flex size-16 items-center justify-center">
+      <div className="relative mx-auto mb-2 flex size-12 items-center justify-center sm:mb-3 sm:size-16">
         {scene.voiceActive && (
           <>
             <motion.span
@@ -399,17 +399,17 @@ function CoreStatus({
             />
           </>
         )}
-        <div className={`relative flex size-14 items-center justify-center rounded-2xl border shadow-[0_0_28px_rgba(0,229,255,0.2)] ${coreTone}`}>
-          <BrainCircuit className="size-7" />
+        <div className={`relative flex size-10 items-center justify-center rounded-2xl border shadow-[0_0_28px_rgba(0,229,255,0.2)] sm:size-14 ${coreTone}`}>
+          <BrainCircuit className="size-5 sm:size-7" />
         </div>
       </div>
-      <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+      <div className="text-[8px] uppercase tracking-[0.16em] text-muted-foreground sm:text-[10px] sm:tracking-[0.22em]">
         Cérebro central
       </div>
-      <div className="mt-1 text-lg font-black">{scene.message}</div>
-      <div className="mt-2 text-xs leading-relaxed text-muted-foreground">{scene.detail}</div>
+      <div className="mt-1 text-sm font-black leading-tight sm:text-lg">{scene.message}</div>
+      <div className="mt-1.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground sm:mt-2 sm:text-xs sm:leading-relaxed">{scene.detail}</div>
       {scene.entrySide && (
-        <div className="mt-3 inline-flex rounded-full border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-neon-cyan">
+        <div className="mt-2 inline-flex rounded-full border border-neon-cyan/35 bg-neon-cyan/10 px-2 py-1 text-[8px] font-black uppercase tracking-wider text-neon-cyan sm:mt-3 sm:px-3 sm:text-[10px]">
           Alvo {sideLabel(scene.entrySide)}
         </div>
       )}
@@ -472,9 +472,9 @@ function AgentModuleCard({
     <motion.button
       type="button"
       onClick={onClick}
-      className={`relative z-20 min-w-[156px] snap-start rounded-2xl border px-3 py-3 text-center backdrop-blur-md transition sm:absolute sm:left-[var(--agent-left-sm)] sm:top-[var(--agent-top-sm)] sm:min-w-0 sm:w-[126px] sm:px-2.5 sm:py-2.5 ${
+      className={`absolute left-[var(--agent-left-sm)] top-[var(--agent-top-sm)] min-w-0 w-[78px] rounded-xl border px-1.5 py-2 text-center backdrop-blur-md transition sm:w-[126px] sm:rounded-2xl sm:px-2.5 sm:py-2.5 ${
         selected ? `${tone.border} ${tone.bg} ${tone.glow}` : "border-border/45 bg-background/48 hover:border-neon-cyan/45"
-      } ${inactive ? "opacity-80 saturate-75" : ""}`}
+      } ${inactive ? "opacity-80 saturate-75" : ""} ${selected ? "z-30" : "z-20"}`}
       style={
         {
           "--agent-left-sm": layout.left,
@@ -496,15 +496,14 @@ function AgentModuleCard({
       }}
       aria-label={`Abrir detalhes do ${agent.name}`}
     >
-      <div className={`mb-2 flex min-h-8 items-end justify-center text-[9px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[9px] ${tone.text}`}>
+      <div className={`mb-1 flex min-h-6 items-end justify-center text-[7px] font-black uppercase leading-tight tracking-normal sm:mb-2 sm:min-h-8 sm:text-[9px] sm:tracking-[0.08em] ${tone.text}`}>
         {agent.module}
       </div>
-      <div className={`relative mx-auto flex size-12 items-center justify-center rounded-2xl border sm:size-12 ${tone.border} ${tone.bg}`}>
+      <div className={`relative mx-auto flex size-9 items-center justify-center rounded-xl border sm:size-12 sm:rounded-2xl ${tone.border} ${tone.bg}`}>
         <span className={`absolute -right-1 -top-1 size-2 rounded-full ${agent.active ? tone.dot : "bg-muted-foreground/45"} ${agent.pulse ? "animate-status-blink" : ""}`} />
-        <agent.icon className={`size-6 ${tone.text}`} />
+        <agent.icon className={`size-4 sm:size-6 ${tone.text}`} />
       </div>
-      <div className="mt-2 line-clamp-2 min-h-8 text-[10px] leading-snug text-muted-foreground sm:hidden">{agent.status}</div>
-      <div className={`mt-2 truncate rounded-full border border-white/10 bg-background/45 px-2 py-1 text-[10px] font-black ${tone.text}`}>
+      <div className={`mt-1 truncate rounded-full border border-white/10 bg-background/45 px-1 py-0.5 text-[8px] font-black sm:mt-2 sm:px-2 sm:py-1 sm:text-[10px] ${tone.text}`}>
         {moduleValue(agent)}
       </div>
     </motion.button>
