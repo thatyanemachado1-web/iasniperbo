@@ -145,9 +145,9 @@ function AiAgentsCommandCenterContent({ data, adaptiveSnapshot, liveReady }: Pro
   const selectedAgent = agents.find((agent) => agent.id === selectedId) ?? agents[0];
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <GlassCard className="min-h-[640px] border-neon-cyan/15 p-0 sm:min-h-[720px]">
-        <div className="relative min-h-[640px] overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.08),transparent_36%),linear-gradient(145deg,rgba(4,10,26,0.97),rgba(7,10,24,0.94))] sm:min-h-[720px]">
+    <div className="space-y-4">
+      <GlassCard className="border-neon-cyan/15 p-0">
+        <div className="relative overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.08),transparent_36%),linear-gradient(145deg,rgba(4,10,26,0.97),rgba(7,10,24,0.94))]">
           <CommandGrid />
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 border-b border-neon-cyan/15 px-3 py-4 sm:px-5">
             <div className="min-w-0">
@@ -182,8 +182,8 @@ function AiAgentsCommandCenterContent({ data, adaptiveSnapshot, liveReady }: Pro
             </div>
           </div>
 
-          <div className="relative z-10 grid gap-4 p-3 sm:p-5 lg:grid-cols-[1fr_240px]">
-            <div className="relative min-h-[560px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/15 p-3 sm:min-h-[600px] sm:p-0">
+          <div className="relative z-10 space-y-4 p-3 sm:p-5">
+            <div className="relative min-h-[640px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/15 p-3 shadow-[inset_0_0_36px_rgba(0,229,255,0.05)] sm:min-h-[720px] sm:p-0 lg:min-h-[760px]">
               <NeonLines agents={agents} sceneMode={scene.mode} animationsEnabled={animationsEnabled} />
               <OutcomeRail side={scene.entrySide} mode={scene.mode} animationsEnabled={animationsEnabled} />
 
@@ -202,7 +202,21 @@ function AiAgentsCommandCenterContent({ data, adaptiveSnapshot, liveReady }: Pro
               </div>
             </div>
 
-            <div className="grid max-h-[600px] grid-cols-2 gap-2 overflow-y-auto pr-1 lg:grid-cols-1">
+            <div className="rounded-2xl border border-neon-cyan/15 bg-background/28 p-3 backdrop-blur-md">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neon-cyan">
+                    Agentes trabalhando
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    Clique em um módulo para ver a leitura completa abaixo.
+                  </div>
+                </div>
+                <AppBadge tone={scene.badgeTone} pulse={scene.mode !== "observing"}>
+                  {scene.label}
+                </AppBadge>
+              </div>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4">
               {agents.map((agent) => (
                 <button
                   key={agent.id}
@@ -221,6 +235,7 @@ function AiAgentsCommandCenterContent({ data, adaptiveSnapshot, liveReady }: Pro
                   <div className="mt-1 truncate text-[10px] text-muted-foreground">{agent.status}</div>
                 </button>
               ))}
+              </div>
             </div>
           </div>
         </div>
@@ -457,9 +472,9 @@ function AgentModuleCard({
     <motion.button
       type="button"
       onClick={onClick}
-      className={`relative z-20 min-w-[152px] snap-start rounded-2xl border px-3 py-3 text-center backdrop-blur-md transition sm:absolute sm:left-[var(--agent-left-sm)] sm:top-[var(--agent-top-sm)] sm:min-w-0 sm:w-[116px] sm:px-2 sm:py-2 ${
+      className={`relative z-20 min-w-[156px] snap-start rounded-2xl border px-3 py-3 text-center backdrop-blur-md transition sm:absolute sm:left-[var(--agent-left-sm)] sm:top-[var(--agent-top-sm)] sm:min-w-0 sm:w-[126px] sm:px-2.5 sm:py-2.5 ${
         selected ? `${tone.border} ${tone.bg} ${tone.glow}` : "border-border/45 bg-background/48 hover:border-neon-cyan/45"
-      } ${inactive ? "opacity-60 saturate-50" : ""}`}
+      } ${inactive ? "opacity-80 saturate-75" : ""}`}
       style={
         {
           "--agent-left-sm": layout.left,
@@ -469,24 +484,24 @@ function AgentModuleCard({
       animate={
         animationsEnabled
           ? {
-              y: agent.active ? [0, -4, 0] : [0, -2, 0],
-              scale: agent.pulse ? [1, 1.025, 1] : 1,
+              y: agent.active ? [0, -6, 0] : [0, -2, 0],
+              scale: agent.pulse ? [1, 1.04, 1] : 1,
             }
           : { y: 0, scale: 1 }
       }
       transition={{
         repeat: animationsEnabled ? Infinity : 0,
-        duration: agent.active ? 1.45 : 3.2,
+        duration: agent.active ? 1.25 : 3.2,
         ease: "easeInOut",
       }}
       aria-label={`Abrir detalhes do ${agent.name}`}
     >
-      <div className={`mb-2 flex min-h-8 items-end justify-center text-[9px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[8px] ${tone.text}`}>
+      <div className={`mb-2 flex min-h-8 items-end justify-center text-[9px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[9px] ${tone.text}`}>
         {agent.module}
       </div>
-      <div className={`relative mx-auto flex size-12 items-center justify-center rounded-2xl border sm:size-10 ${tone.border} ${tone.bg}`}>
+      <div className={`relative mx-auto flex size-12 items-center justify-center rounded-2xl border sm:size-12 ${tone.border} ${tone.bg}`}>
         <span className={`absolute -right-1 -top-1 size-2 rounded-full ${agent.active ? tone.dot : "bg-muted-foreground/45"} ${agent.pulse ? "animate-status-blink" : ""}`} />
-        <agent.icon className={`size-6 sm:size-5 ${tone.text}`} />
+        <agent.icon className={`size-6 ${tone.text}`} />
       </div>
       <div className="mt-2 line-clamp-2 min-h-8 text-[10px] leading-snug text-muted-foreground sm:hidden">{agent.status}</div>
       <div className={`mt-2 truncate rounded-full border border-white/10 bg-background/45 px-2 py-1 text-[10px] font-black ${tone.text}`}>
@@ -505,7 +520,7 @@ function AgentInspector({
 }) {
   const tone = toneClasses[agent.tone];
   return (
-    <GlassCard className="xl:sticky xl:top-20">
+    <GlassCard className="border-neon-cyan/15">
       <SectionTitle
         title={agent.name}
         subtitle={agent.module}
