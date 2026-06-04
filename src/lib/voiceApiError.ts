@@ -5,7 +5,7 @@ export async function readVoiceResponseError(response: Response, fallback: strin
   const detail = await readResponseErrorDetail(response);
 
   if (/ELEVENLABS_(API_KEY|TTS_API_KEY|VOICE_ID)/i.test(detail)) {
-    return VOICE_CONFIG_ERROR;
+    return "Voz ElevenLabs sem configuracao no backend. Configure ELEVENLABS_TTS_API_KEY e ELEVENLABS_VOICE_ID.";
   }
 
   if (/nao autorizado|sessao|não autorizado|sessão/i.test(detail)) {

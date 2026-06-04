@@ -16,7 +16,7 @@ import {
 } from "@/lib/voiceNarrative";
 
 type DashboardMode = "mock" | "fallback" | "connecting" | "live";
-export type VoiceProvider = "browser" | "edge-tts" | "piper";
+export type VoiceProvider = "browser" | "edge-tts" | "elevenlabs" | "piper";
 export type BrowserVoiceChoice = "browser_auto" | "pt-BR-AntonioNeural";
 
 const STORAGE_KEY = "sniper_voice_assistant_enabled";
@@ -424,7 +424,7 @@ function readVoiceAuthToken() {
 
 function normalizeVoiceProvider(value: unknown): VoiceProvider {
   const text = String(value || "").trim().toLowerCase();
-  if (text === "browser" || text === "edge-tts" || text === "piper") {
+  if (text === "browser" || text === "edge-tts" || text === "elevenlabs" || text === "piper") {
     return text;
   }
   return "edge-tts";

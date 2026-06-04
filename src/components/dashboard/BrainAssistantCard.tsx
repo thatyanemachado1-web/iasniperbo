@@ -131,9 +131,11 @@ export function BrainAssistantCard({ data, mode, adaptiveSnapshot, locked = fals
           <span className="text-[11px] text-muted-foreground">
             {voice.provider === "edge-tts"
               ? "Edge TTS"
-              : voice.provider === "browser"
-                ? "Navegador"
-                : "Futuro"}
+              : voice.provider === "elevenlabs"
+                ? "ElevenLabs"
+                : voice.provider === "browser"
+                  ? "Navegador"
+                  : "Futuro"}
           </span>
         </div>
         <Select
@@ -145,6 +147,7 @@ export function BrainAssistantCard({ data, mode, adaptiveSnapshot, locked = fals
             <SelectValue placeholder="Edge TTS" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="elevenlabs">ElevenLabs premium</SelectItem>
             <SelectItem value="edge-tts">Edge TTS local</SelectItem>
             <SelectItem value="browser">Web Speech navegador</SelectItem>
             <SelectItem value="piper">Piper futuro</SelectItem>
@@ -169,7 +172,7 @@ export function BrainAssistantCard({ data, mode, adaptiveSnapshot, locked = fals
           </SelectContent>
         </Select>
         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-          Se o Edge TTS falhar, o navegador assume com speechSynthesis.
+          Se a voz premium falhar, o navegador assume com speechSynthesis.
         </p>
       </div>
 

@@ -564,6 +564,9 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
 
   const settings = getLocalAiSettings(env);
   const provider = readString(body, "provider") || settings.voiceProvider;
+  if (provider === "elevenlabs") {
+    return generateElevenLabsVoiceResponse(text, env);
+  }
   if (provider !== "edge-tts") {
     return json({ fallback: "browser", reason: "Provedor local ainda não ativo no backend." });
   }
@@ -605,6 +608,70 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
     console.warn("Edge TTS indisponível.", error);
     return json({ fallback: "browser", reason: "Falha de conexão com Edge TTS." });
   }
+}
+
+async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
+  const apiKeys = getElevenLabsApiKeys(env);
+  if (!apiKeys.length) {
+    return json({ error: "ELEVENLABS_API_KEY nao configurada no backend." }, 503);
+  }
+
+  const voiceId = getElevenLabsVoiceId(env);
+  if (!voiceId) {
+    return json({ error: "ELEVENLABS_VOICE_ID nao configurado no backend." }, 503);
+  }
+
+  const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
+  let response: Response | null = null;
+  let lastFailureStatus: number | "network_error" | null = null;
+
+  for (const apiKey of apiKeys) {
+    response = await fetch(
+      `${ELEVENLABS_TTS_URL}/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          model_id: modelId,
+          voice_settings: {
+            stability: 0.48,
+            similarity_boost: 0.78,
+            style: 0.18,
+            use_speaker_boost: true,
+          },
+        }),
+      },
+    ).catch(() => null);
+
+    if (response?.ok) break;
+    lastFailureStatus = response?.status ?? "network_error";
+    response = null;
+  }
+
+  if (!response) {
+    recordElevenLabsStatus(lastFailureStatus ?? "network_error");
+    if (typeof lastFailureStatus === "number") {
+      return json(elevenLabsErrorPayload(lastFailureStatus), elevenLabsErrorStatus(lastFailureStatus));
+    }
+    return json({ error: "Falha de conexao ao gerar voz ElevenLabs." }, 502);
+  }
+
+  recordElevenLabsStatus("ok");
+  return new Response(await response.arrayBuffer(), {
+    status: 200,
+    headers: {
+      "content-type": "audio/mpeg",
+      "cache-control": "no-store",
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "POST,OPTIONS",
+      "access-control-allow-headers":
+        "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
+    },
+  });
 }
 
 async function handleLocalAiRequest(request: Request, env: unknown) {
