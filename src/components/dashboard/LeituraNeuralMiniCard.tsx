@@ -177,10 +177,10 @@ export function LeituraNeuralMiniCard({
                 )}
               >
                 {sequenceNegative > 0
-                  ? `Seq Red: ${sequenceNegative}`
+                  ? `${sequenceNegative} RED`
                   : sequencePositive > 0
-                    ? `Seq Green: ${sequencePositive}`
-                    : "Seq Green: 0"}
+                    ? `${sequencePositive} GREEN`
+                    : "0 GREEN"}
               </div>
               {data.paganteWindow ? (
                 <div className="truncate text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
