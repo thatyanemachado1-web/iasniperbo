@@ -167,33 +167,30 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
         </aside>
 
-        <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-24 lg:pb-8">{children}</main>
+        <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-28 lg:pb-8">{children}</main>
       </div>
 
       {/* Bottom nav mobile */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 glass-strong border-t border-border/60">
-        <div
-          className="grid"
-          style={{ gridTemplateColumns: `repeat(${mobileNavItems.length}, minmax(0, 1fr))` }}
-        >
+      <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 glass-strong lg:hidden">
+        <div className="flex overflow-x-auto px-1 pb-[calc(env(safe-area-inset-bottom)+0.35rem)] pt-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {mobileNavItems.map((it) => {
             const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
             return (
               <Link
                 key={it.to}
                 to={it.to}
-                className={`flex flex-col items-center justify-center py-2.5 text-[10px] gap-1 ${
+                className={`flex min-w-[68px] flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] sm:min-w-[78px] sm:text-[10px] ${
                   active ? "text-neon-cyan" : "text-muted-foreground"
                 }`}
               >
                 <div
-                  className={`size-9 rounded-xl flex items-center justify-center ${
+                  className={`flex size-8 items-center justify-center rounded-xl sm:size-9 ${
                     active ? "btn-primary-grad glow-blue" : ""
                   }`}
                 >
                   <it.icon className="size-4" />
                 </div>
-                {it.label}
+                <span className="max-w-full truncate">{it.label}</span>
               </Link>
             );
           })}

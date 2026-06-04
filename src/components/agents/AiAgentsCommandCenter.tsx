@@ -1,23 +1,14 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import {
-  Activity,
   AudioLines,
-  Bot,
-  BrainCircuit,
   CircleDollarSign,
   DatabaseZap,
-  Eye,
-  Gauge,
-  Network,
   Pause,
   Play,
   Radar,
   ShieldAlert,
-  ShieldCheck,
-  Sparkles,
   Waves,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -46,7 +37,7 @@ type AgentInfo = {
   active: boolean;
   pulse: boolean;
   nodeLabel: string;
-  position: { left: string; top: string };
+  position: { left: string; top: string; mobileLeft: string; mobileTop: string };
 };
 
 type Props = {
@@ -127,13 +118,15 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <GlassCard className="min-h-[680px] p-0">
-        <div className="relative min-h-[680px] overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.13),transparent_35%),linear-gradient(145deg,rgba(4,10,26,0.96),rgba(7,10,24,0.92))]">
+      <GlassCard className="min-h-[640px] p-0 sm:min-h-[680px]">
+        <div className="relative min-h-[640px] overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.13),transparent_35%),linear-gradient(145deg,rgba(4,10,26,0.96),rgba(7,10,24,0.92))] sm:min-h-[680px]">
           <CommandGrid />
-          <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 border-b border-neon-cyan/15 px-4 py-4 sm:px-5">
-            <div>
-              <div className="text-xs uppercase tracking-[0.24em] text-neon-cyan">Central de comando</div>
-              <h1 className="text-xl font-black sm:text-2xl">Central de Agentes IA</h1>
+          <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 border-b border-neon-cyan/15 px-3 py-4 sm:px-5">
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-[0.2em] text-neon-cyan sm:text-xs sm:tracking-[0.24em]">
+                Central de comando
+              </div>
+              <h1 className="text-lg font-black sm:text-2xl">Central de Agentes IA</h1>
               <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
                 Agentes digitais representam os módulos reais trabalhando no mercado ao vivo.
               </p>
@@ -151,13 +144,14 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
                 className="inline-flex h-9 items-center gap-2 rounded-xl border border-neon-cyan/25 bg-background/35 px-3 text-xs font-bold text-neon-cyan transition hover:bg-neon-cyan/10"
               >
                 {animationsEnabled ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-                {animationsEnabled ? "Pausar animações" : "Ativar animações"}
+                <span className="sm:hidden">{animationsEnabled ? "Pausar" : "Animar"}</span>
+                <span className="hidden sm:inline">{animationsEnabled ? "Pausar animações" : "Ativar animações"}</span>
               </button>
             </div>
           </div>
 
-          <div className="relative z-10 grid gap-4 p-4 lg:grid-cols-[1fr_220px] sm:p-5">
-            <div className="relative min-h-[510px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/20">
+          <div className="relative z-10 grid gap-4 p-3 sm:p-5 lg:grid-cols-[1fr_220px]">
+            <div className="relative min-h-[560px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/20 sm:min-h-[510px]">
               <NeonLines agents={agents} sceneMode={scene.mode} animationsEnabled={animationsEnabled} />
               <OutcomeRail side={scene.entrySide} mode={scene.mode} animationsEnabled={animationsEnabled} />
               <ModuleNode
@@ -166,6 +160,8 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
                 value={moduleValue(agents[0])}
                 x="12%"
                 y="42%"
+                mobileX="7%"
+                mobileY="52%"
                 active={agents[0].active}
               />
               <ModuleNode
@@ -174,6 +170,8 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
                 value={moduleValue(agents[1])}
                 x="72%"
                 y="42%"
+                mobileX="58%"
+                mobileY="52%"
                 active={agents[1].active}
               />
               <ModuleNode
@@ -182,6 +180,8 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
                 value={moduleValue(agents[2])}
                 x="12%"
                 y="78%"
+                mobileX="4%"
+                mobileY="82%"
                 active={agents[2].active}
               />
               <ModuleNode
@@ -190,6 +190,8 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
                 value={moduleValue(agents[3])}
                 x="38%"
                 y="79%"
+                mobileX="36%"
+                mobileY="82%"
                 active={agents[3].active}
               />
               <ModuleNode
@@ -198,6 +200,8 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
                 value={moduleValue(agents[4])}
                 x="68%"
                 y="78%"
+                mobileX="68%"
+                mobileY="82%"
                 active={agents[4].active}
               />
 
@@ -214,7 +218,7 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
               ))}
 
               <motion.div
-                className={`absolute left-1/2 top-[36%] z-20 w-[min(92%,360px)] -translate-x-1/2 rounded-2xl border px-4 py-3 text-center backdrop-blur-md ${
+                className={`absolute left-1/2 top-[34%] z-20 w-[min(86%,320px)] -translate-x-1/2 rounded-2xl border px-3 py-3 text-center backdrop-blur-md sm:top-[36%] sm:w-[min(92%,360px)] sm:px-4 ${
                   scene.mode === "risk"
                     ? "border-red-400/50 bg-red-950/35 text-red-100"
                     : scene.mode === "green"
@@ -231,7 +235,7 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
                 <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
                   Status operacional
                 </div>
-                <div className="mt-1 text-lg font-black">{scene.message}</div>
+                <div className="mt-1 text-base font-black sm:text-lg">{scene.message}</div>
                 <div className="mt-1 text-xs text-muted-foreground">{scene.detail}</div>
               </motion.div>
 
@@ -248,7 +252,7 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
                   key={agent.id}
                   type="button"
                   onClick={() => setSelectedId(agent.id)}
-                  className={`rounded-xl border px-3 py-2 text-left transition ${
+                  className={`min-w-0 rounded-xl border px-3 py-2 text-left transition ${
                     agent.id === selectedAgent.id
                       ? `${toneClasses[agent.tone].border} ${toneClasses[agent.tone].bg}`
                       : "border-border/50 bg-background/25 hover:border-neon-cyan/30"
@@ -329,6 +333,8 @@ function ModuleNode({
   value,
   x,
   y,
+  mobileX,
+  mobileY,
   active,
 }: {
   id: AgentId;
@@ -336,19 +342,28 @@ function ModuleNode({
   value: string;
   x: string;
   y: string;
+  mobileX: string;
+  mobileY: string;
   active: boolean;
 }) {
   return (
     <motion.div
-      className={`absolute z-10 w-40 rounded-xl border bg-background/70 px-3 py-2 backdrop-blur-md ${
+      className={`absolute left-[var(--node-left)] top-[var(--node-top)] z-10 w-[6.25rem] rounded-xl border bg-background/70 px-2 py-2 backdrop-blur-md sm:left-[var(--node-left-sm)] sm:top-[var(--node-top-sm)] sm:w-40 sm:px-3 ${
         active ? "border-neon-cyan/45 shadow-[0_0_22px_rgba(0,229,255,0.22)]" : "border-border/45"
       }`}
-      style={{ left: x, top: y }}
+      style={
+        {
+          "--node-left": mobileX,
+          "--node-top": mobileY,
+          "--node-left-sm": x,
+          "--node-top-sm": y,
+        } as CSSProperties
+      }
       animate={active ? { scale: [1, 1.035, 1] } : { scale: 1 }}
       transition={{ repeat: active ? Infinity : 0, duration: 1.9 }}
     >
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-xs font-bold">{value}</div>
+      <div className="truncate text-[9px] uppercase tracking-wider text-muted-foreground sm:text-[10px]">{label}</div>
+      <div className="mt-1 truncate text-[11px] font-bold sm:text-xs">{value}</div>
     </motion.div>
   );
 }
@@ -368,13 +383,13 @@ function OutcomeRail({
     { label: "Tie", key: "TIE", x: "74%" },
   ];
   return (
-    <div className="absolute inset-x-4 top-4 z-10 grid grid-cols-3 gap-2">
+    <div className="absolute inset-x-3 top-3 z-10 grid grid-cols-3 gap-1.5 sm:inset-x-4 sm:top-4 sm:gap-2">
       {options.map((item) => {
         const active = mode === "entry" && side === item.key;
         return (
           <motion.div
             key={item.key}
-            className={`rounded-xl border px-3 py-2 text-center text-xs font-black uppercase tracking-wider ${
+            className={`rounded-xl border px-1.5 py-2 text-center text-[10px] font-black uppercase tracking-wider sm:px-3 sm:text-xs ${
               active ? "border-neon-cyan/60 bg-neon-cyan/15 text-neon-cyan" : "border-border/45 bg-background/45 text-muted-foreground"
             }`}
             animate={active && animationsEnabled ? { y: [0, -3, 0], scale: [1, 1.04, 1] } : { y: 0, scale: 1 }}
@@ -405,13 +420,13 @@ function AgentBot({
   onClick: () => void;
 }) {
   const tone = toneClasses[agent.tone];
-  const drift = agent.active ? 16 : 8;
+  const drift = agent.active ? 10 : 5;
   const entryShift =
     scene.mode === "entry" && scene.entrySide
       ? scene.entrySide === "BANKER"
-        ? -34
+        ? -22
         : scene.entrySide === "PLAYER"
-          ? 34
+          ? 22
           : 0
       : 0;
   const riskFront = scene.mode === "risk" && agent.id === "risk";
@@ -422,15 +437,22 @@ function AgentBot({
     <motion.button
       type="button"
       onClick={onClick}
-      className={`absolute z-20 flex w-24 flex-col items-center gap-1 rounded-2xl border px-2 py-2 text-center backdrop-blur-md transition ${
+      className={`absolute left-[var(--agent-left)] top-[var(--agent-top)] z-20 flex w-20 flex-col items-center gap-1 rounded-2xl border px-1.5 py-2 text-center backdrop-blur-md transition sm:left-[var(--agent-left-sm)] sm:top-[var(--agent-top-sm)] sm:w-24 sm:px-2 ${
         selected ? `${tone.border} ${tone.bg} ${tone.glow}` : "border-border/45 bg-background/45 hover:border-neon-cyan/45"
       } ${riskFront ? "z-30" : ""}`}
-      style={{ left: agent.position.left, top: agent.position.top }}
+      style={
+        {
+          "--agent-left": agent.position.mobileLeft,
+          "--agent-top": agent.position.mobileTop,
+          "--agent-left-sm": agent.position.left,
+          "--agent-top-sm": agent.position.top,
+        } as CSSProperties
+      }
       animate={
         animationsEnabled
           ? {
               x: recalibrate ? [entryShift, entryShift - 6, entryShift + 6, entryShift] : [entryShift, entryShift + drift, entryShift - drift * 0.65, entryShift],
-              y: celebrate ? [0, -16, 0, -10, 0] : riskFront ? [-8, -14, -8] : [0, -6 - index, 5, 0],
+              y: celebrate ? [0, -12, 0, -8, 0] : riskFront ? [-6, -11, -6] : [0, -5 - index * 0.6, 4, 0],
               rotate: recalibrate ? [0, -3, 3, 0] : celebrate ? [0, 4, -4, 0] : 0,
               scale: agent.pulse || riskFront ? [1, 1.08, 1] : 1,
             }
@@ -443,15 +465,15 @@ function AgentBot({
       }}
       aria-label={`Abrir detalhes do ${agent.name}`}
     >
-      <div className={`relative flex size-11 items-center justify-center rounded-full border ${tone.border} ${tone.bg}`}>
+      <div className={`relative flex size-9 items-center justify-center rounded-full border sm:size-11 ${tone.border} ${tone.bg}`}>
         <span className={`absolute -top-1.5 size-2 rounded-full ${tone.dot} ${agent.pulse ? "animate-status-blink" : ""}`} />
-        <agent.icon className={`size-5 ${tone.text}`} />
+        <agent.icon className={`size-4 sm:size-5 ${tone.text}`} />
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex max-w-full items-center gap-1">
         <span className={`size-1.5 rounded-full ${agent.active ? tone.dot : "bg-muted-foreground/40"}`} />
-        <span className="truncate text-[10px] font-black">{agent.nodeLabel}</span>
+        <span className="min-w-0 truncate text-[9px] font-black sm:text-[10px]">{agent.nodeLabel}</span>
       </div>
-      <div className="h-3 w-10 rounded-b-full border-x border-b border-current/30 opacity-70" />
+      <div className="h-2.5 w-9 rounded-b-full border-x border-b border-current/30 opacity-70 sm:h-3 sm:w-10" />
     </motion.button>
   );
 }
@@ -468,7 +490,7 @@ function VoiceBubble({
   if (!visible) return null;
   return (
     <motion.div
-      className="absolute right-5 top-24 z-30 max-w-[280px] rounded-2xl border border-neon-blue/45 bg-background/80 px-4 py-3 text-xs shadow-[0_0_30px_rgba(59,130,246,0.24)] backdrop-blur-md"
+      className="absolute left-3 right-3 top-16 z-30 rounded-2xl border border-neon-blue/45 bg-background/80 px-3 py-3 text-xs shadow-[0_0_30px_rgba(59,130,246,0.24)] backdrop-blur-md sm:left-auto sm:right-5 sm:top-24 sm:max-w-[280px] sm:px-4"
       initial={{ opacity: 0, y: 12 }}
       animate={animationsEnabled ? { opacity: 1, y: [0, -4, 0] } : { opacity: 1, y: 0 }}
       transition={{ repeat: animationsEnabled ? Infinity : 0, duration: 2 }}
@@ -698,7 +720,7 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: neuralActive,
       pulse: neuralActive,
       nodeLabel: "Neural",
-      position: { left: "18%", top: "18%" },
+      position: { left: "18%", top: "18%", mobileLeft: "7%", mobileTop: "18%" },
     },
     {
       id: "surf",
@@ -720,7 +742,7 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: surfActive,
       pulse: surfActive,
       nodeLabel: "Surf",
-      position: { left: "70%", top: "18%" },
+      position: { left: "70%", top: "18%", mobileLeft: "67%", mobileTop: "18%" },
     },
     {
       id: "tie",
@@ -742,7 +764,7 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: tieActive,
       pulse: tieActive,
       nodeLabel: "Tie",
-      position: { left: "12%", top: "58%" },
+      position: { left: "12%", top: "58%", mobileLeft: "7%", mobileTop: "66%" },
     },
     {
       id: "strategy",
@@ -762,7 +784,7 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: strategyActive,
       pulse: scene.mode === "forming" || strategyActive,
       nodeLabel: "Estratégias",
-      position: { left: "44%", top: "57%" },
+      position: { left: "44%", top: "57%", mobileLeft: "39%", mobileTop: "66%" },
     },
     {
       id: "risk",
@@ -784,7 +806,7 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: riskActive,
       pulse: riskActive,
       nodeLabel: "Risk",
-      position: { left: "72%", top: "59%" },
+      position: { left: "72%", top: "59%", mobileLeft: "68%", mobileTop: "66%" },
     },
     {
       id: "voice",
@@ -802,7 +824,7 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       active: voiceActive,
       pulse: voiceActive,
       nodeLabel: "Voz",
-      position: { left: "45%", top: "18%" },
+      position: { left: "45%", top: "18%", mobileLeft: "39%", mobileTop: "26%" },
     },
   ];
 }
