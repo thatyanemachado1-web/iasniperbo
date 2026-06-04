@@ -15,6 +15,43 @@ import type {
 import type { ModuleToggles } from "@/types/dashboard";
 import type { SalesSettings } from "@/lib/accessApi";
 
+export interface LocalAiAdminSettings {
+  enabled: boolean;
+  narrationEnabled: boolean;
+  ollamaBaseUrl: string;
+  ollamaModel: string;
+  voiceProvider: string;
+  voiceName: string;
+  voiceVolume: number;
+  voiceRate: number;
+  voicePitch: number;
+  callsPerMinute: number;
+  cooldownMs: number;
+}
+
+export interface LocalAiAdminStatus {
+  online: boolean;
+  status: string;
+  model: string;
+  baseUrl: string;
+}
+
+export interface LocalAiAdminLog {
+  id: string;
+  user: string;
+  mesa: string;
+  event: string;
+  question: string;
+  response: string;
+  model: string;
+  provider: string;
+  durationMs: number;
+  estimatedCost: number;
+  status: string;
+  error: string;
+  timestamp: string;
+}
+
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
 export const LOCAL_ADMIN_API_URL = "http://127.0.0.1:8787";
@@ -146,6 +183,28 @@ export async function deleteSignalRecipient(session: AdminSession, recipientId: 
 export async function getModuleToggles(session: AdminSession) {
   const data = await request<{ moduleToggles: ModuleToggles }>(session, "/module-toggles");
   return data.moduleToggles;
+}
+
+export async function getLocalAiAdmin(session: AdminSession) {
+  return request<{
+    settings: LocalAiAdminSettings;
+    logs: LocalAiAdminLog[];
+    status: LocalAiAdminStatus;
+  }>(session, "/admin/local-ai");
+}
+
+export async function updateLocalAiAdmin(
+  session: AdminSession,
+  payload: Partial<LocalAiAdminSettings>,
+) {
+  return request<{
+    settings: LocalAiAdminSettings;
+    logs: LocalAiAdminLog[];
+    status: LocalAiAdminStatus;
+  }>(session, "/admin/local-ai", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getAdminSalesSettings(session: AdminSession) {

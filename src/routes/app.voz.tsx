@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { BrainAssistantCard } from "@/components/dashboard/BrainAssistantCard";
+import { useAdaptiveStrategyLearning } from "@/adaptiveStrategy/useAdaptiveStrategyLearning";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -14,13 +15,22 @@ export const Route = createFileRoute("/app/voz")({
 
 function VozPage() {
   const { data, mode } = useDashboardData();
+  const { snapshot: adaptiveSnapshot } = useAdaptiveStrategyLearning(
+    data,
+    mode === "live" && !data.mockMode,
+  );
   const fullAccess = hasFullAccess(readUserSession());
   const liveReady = mode === "live" && data.mockMode === false;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
       <div className="relative overflow-hidden rounded-2xl">
-        <BrainAssistantCard data={data} mode={mode} locked={!fullAccess} />
+        <BrainAssistantCard
+          data={data}
+          mode={mode}
+          adaptiveSnapshot={adaptiveSnapshot}
+          locked={!fullAccess}
+        />
         {!fullAccess && (
           <PremiumLock
             title="Narrador IA Premium"
@@ -54,7 +64,7 @@ function VozPage() {
           <StatusRow
             icon={<ShieldCheck className="size-4" />}
             label="Fonte"
-            value="Somente backend ao vivo"
+            value="Modulos internos + Ollama local"
           />
           <StatusRow
             icon={<Radio className="size-4" />}

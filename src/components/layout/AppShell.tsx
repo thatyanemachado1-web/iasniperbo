@@ -21,7 +21,7 @@ import { useEffect, useState, type ReactNode } from "react";
 const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/voz", label: "Voz", icon: Mic },
-  { to: "/app/ia", label: "Assistente IA", icon: Brain },
+  { to: "/app/ia", label: "Aprendizado IA", icon: Brain },
   { to: "/app/padroes", label: "Padrões IA", icon: BrainCircuit },
   { to: "/app/planos", label: "Assinar", icon: Crown },
   { to: "/app/assinatura", label: "Assinatura", icon: ReceiptText },
@@ -29,6 +29,7 @@ const navItems = [
 ] as const;
 
 const adminNavItem = { to: "/app/admin/users", label: "ADM", icon: ShieldCheck } as const;
+const hiddenOnMobileNav = new Set(["/app/ia"]);
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -40,7 +41,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const visibleNavItems = fullAccess
     ? navItems.filter((item) => item.to !== "/app/planos")
     : navItems;
-  const mobileNavItems = canSeeAdmin ? [...visibleNavItems, adminNavItem] : visibleNavItems;
+  const visibleMobileNavItems = visibleNavItems.filter((item) => !hiddenOnMobileNav.has(item.to));
+  const mobileNavItems = canSeeAdmin ? [...visibleMobileNavItems, adminNavItem] : visibleMobileNavItems;
 
   useEffect(() => {
     const savedPreference = window.localStorage.getItem("sniper_sidebar_collapsed");

@@ -1,5 +1,5 @@
 const VOICE_CONFIG_ERROR =
-  "Voz ElevenLabs sem configuracao no backend. Configure ELEVENLABS_TTS_API_KEY e ELEVENLABS_VOICE_ID.";
+  "Voz local sem configuracao no backend. Configure EDGE_TTS_URL ou use Web Speech API no navegador.";
 
 export async function readVoiceResponseError(response: Response, fallback: string) {
   const detail = await readResponseErrorDetail(response);

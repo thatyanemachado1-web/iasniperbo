@@ -69,8 +69,8 @@ EXEMPLOS de tom (apenas referencia, NAO copiar literal):
 
 Saida: apenas o texto da narracao, sem prefixos, sem aspas.`;
 
-const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
-const LOVABLE_MODEL = "google/gemini-3-flash-preview";
+const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+const DEFAULT_OLLAMA_MODEL = "qwen2.5:7b";
 
 export const generateAIReading = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => input as AIReadingSnapshot)
@@ -80,120 +80,64 @@ ${JSON.stringify(data, null, 2)}
 
 Gere AGORA a narracao curta, humana e natural seguindo todas as regras do system.`;
 
-    const geminiText = await runGeminiReading(userPrompt);
-    if (geminiText) {
-      return { text: geminiText, ok: true as const };
-    }
-
-    const lovableText = await runLovableReading(userPrompt);
-    if (lovableText) {
-      return { text: lovableText, ok: true as const };
+    const ollamaText = await runOllamaReading(userPrompt);
+    if (ollamaText) {
+      return { text: cleanAiText(ollamaText), ok: true as const };
     }
 
     return { text: buildLocalReading(data), ok: false as const };
   });
 
-async function runGeminiReading(userPrompt: string) {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) return "";
+async function runOllamaReading(userPrompt: string) {
+  if (readEnvBoolean("AI_LOCAL_ENABLED", true) === false) return "";
 
-  const model = resolveGeminiModel();
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-
+  const baseUrl = (process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL).trim().replace(/\/+$/, "");
+  const model = (process.env.OLLAMA_MODEL || DEFAULT_OLLAMA_MODEL).trim() || DEFAULT_OLLAMA_MODEL;
   try {
-    const res = await fetch(endpoint, {
+    const res = await fetch(`${baseUrl}/api/generate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: SYSTEM_PROMPT }],
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: userPrompt }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.9,
-          maxOutputTokens: 160,
+        model,
+        stream: false,
+        prompt: `${SYSTEM_PROMPT}\n\n${userPrompt}`,
+        options: {
+          temperature: 0.72,
+          num_predict: 150,
         },
       }),
     });
 
     if (!res.ok) {
-      console.warn(`Falha no Gemini (${res.status}).`);
+      console.warn(`Falha no Ollama (${res.status}).`);
       return "";
     }
 
-    const json = (await res.json()) as GeminiResponse;
-    return readGeminiText(json);
+    const json = (await res.json()) as { response?: string };
+    return String(json.response || "").trim();
   } catch (err) {
-    console.warn(`Erro ao consultar Gemini: ${(err as Error).message}`);
+    console.warn(`Erro ao consultar Ollama: ${(err as Error).message}`);
     return "";
   }
 }
 
-async function runLovableReading(userPrompt: string) {
-  const apiKey = process.env.LOVABLE_API_KEY?.trim();
-  if (!apiKey) return "";
-
-    try {
-      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: LOVABLE_MODEL,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: userPrompt },
-          ],
-        }),
-      });
-
-      if (!res.ok) {
-        console.warn(`Falha na leitura IA Lovable (${res.status}).`);
-        return "";
-      }
-
-      const json = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-      };
-      const text = json.choices?.[0]?.message?.content?.trim() ?? "";
-      return text;
-    } catch (err) {
-      console.warn(`Erro ao consultar IA Lovable: ${(err as Error).message}`);
-      return "";
-    }
-}
-
-type GeminiResponse = {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{ text?: string }>;
-    };
-  }>;
-};
-
-function readGeminiText(json: GeminiResponse) {
-  return (json.candidates?.[0]?.content?.parts ?? [])
-    .map((part) => part.text ?? "")
-    .join("")
+function cleanAiText(value: string) {
+  return value
+    .replace(/entrada garantida/gi, "entrada confirmada")
+    .replace(/\bgarantid[ao]s?\b/gi, "confirmado")
+    .replace(/\bcerteza\b/gi, "leitura")
+    .replace(/lucro certo/gi, "gestao")
     .trim();
 }
 
-function resolveGeminiModel() {
-  const model = (process.env.GEMINI_MODEL_ID || process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL).trim();
-  if (!model || model === "gemini-3.5-flash") {
-    return DEFAULT_GEMINI_MODEL;
-  }
-  return model;
+function readEnvBoolean(name: string, fallback: boolean) {
+  const value = String(process.env[name] ?? "").trim().toLowerCase();
+  if (!value) return fallback;
+  if (["1", "true", "yes", "on", "sim"].includes(value)) return true;
+  if (["0", "false", "no", "off", "nao", "não"].includes(value)) return false;
+  return fallback;
 }
 
 function buildLocalReading(data: AIReadingSnapshot) {

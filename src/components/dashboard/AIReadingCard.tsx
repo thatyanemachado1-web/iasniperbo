@@ -5,7 +5,7 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { BrainAI } from "@/components/brand/BrainAI";
 import { generateAIReading, type AIReadingSnapshot } from "@/lib/aiReader.functions";
-import { getInitialApiUrl, readAdminSession } from "@/lib/adminApi";
+import { readAdminSession } from "@/lib/adminApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import { readVoiceResponseError } from "@/lib/voiceApiError";
 import type { DashboardData } from "@/types/dashboard";
@@ -17,6 +17,7 @@ type Props = {
 };
 
 const AI_READING_VOICE_KEY = "sniper_ai_reading_voice_enabled";
+const DEFAULT_LOCAL_VOICE = "pt-BR-AntonioNeural";
 const VOICE_UNAVAILABLE_MESSAGE = "Voz da leitura IA indisponível no momento.";
 
 function firstNameOf(full?: string) {
@@ -133,11 +134,15 @@ export function AIReadingCard({ data, mode }: Props) {
 
   const speakReading = useCallback(
     async (text: string) => {
-      if (
-        typeof window === "undefined" ||
-        typeof window.Audio === "undefined" ||
-        typeof window.URL === "undefined"
-      ) {
+      if (typeof window === "undefined") {
+        setVoiceError(VOICE_UNAVAILABLE_MESSAGE);
+        return;
+      }
+      const audioSupported = typeof window.Audio !== "undefined" && typeof window.URL !== "undefined";
+      const browserVoiceSupported =
+        typeof window.speechSynthesis !== "undefined" &&
+        typeof window.SpeechSynthesisUtterance !== "undefined";
+      if (!audioSupported && !browserVoiceSupported) {
         setVoiceError(VOICE_UNAVAILABLE_MESSAGE);
         return;
       }
@@ -161,14 +166,35 @@ export function AIReadingCard({ data, mode }: Props) {
         const response = await fetch(readVoiceApiUrl(), {
           method: "POST",
           headers,
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({
+            text,
+            provider: "edge-tts",
+            voice: DEFAULT_LOCAL_VOICE,
+            language: "pt-BR",
+            volume: 0.9,
+            rate: 1,
+            pitch: 0.95,
+          }),
         });
 
+        const contentType = response.headers.get("content-type") ?? "";
         if (!response.ok) {
+          const fallback = await speakWithBrowserVoice(text);
+          if (fallback === true) return;
           throw new Error(await readVoiceResponseError(response, VOICE_UNAVAILABLE_MESSAGE));
         }
+        if (contentType.includes("application/json")) {
+          const payload = (await response.json().catch(() => ({}))) as { reason?: string; error?: string };
+          const fallback = await speakWithBrowserVoice(text);
+          if (fallback === true) return;
+          throw new Error(payload.error || payload.reason || VOICE_UNAVAILABLE_MESSAGE);
+        }
         const blob = await response.blob();
-        if (!blob.size) throw new Error(VOICE_UNAVAILABLE_MESSAGE);
+        if (!blob.size) {
+          const fallback = await speakWithBrowserVoice(text);
+          if (fallback === true) return;
+          throw new Error(VOICE_UNAVAILABLE_MESSAGE);
+        }
 
         const audioUrl = window.URL.createObjectURL(blob);
         audioUrlRef.current = audioUrl;
@@ -182,7 +208,8 @@ export function AIReadingCard({ data, mode }: Props) {
         });
       } catch (error) {
         if (playbackIdRef.current === playbackId) {
-          setVoiceError((error as Error)?.message || VOICE_UNAVAILABLE_MESSAGE);
+          const fallback = await speakWithBrowserVoice(text);
+          setVoiceError(fallback === true ? "" : (error as Error)?.message || VOICE_UNAVAILABLE_MESSAGE);
         }
       } finally {
         if (playbackIdRef.current === playbackId) {
@@ -290,8 +317,13 @@ export function AIReadingCard({ data, mode }: Props) {
 
 function readVoiceApiUrl() {
   const adminSession = readAdminSession();
-  const apiUrl = adminSession?.apiUrl || getInitialApiUrl();
-  return `${apiUrl.replace(/\/+$/, "")}/voice/narration`;
+  if (adminSession?.apiUrl) {
+    return `${adminSession.apiUrl.replace(/\/+$/, "")}/api/voice/speak`;
+  }
+  if (typeof window !== "undefined") {
+    return `${window.location.origin.replace(/\/+$/, "")}/api/voice/speak`;
+  }
+  return "/api/voice/speak";
 }
 
 function readVoiceAuthToken() {
@@ -310,4 +342,38 @@ function readVoiceAuthToken() {
   }
 
   return "";
+}
+
+async function speakWithBrowserVoice(text: string) {
+  if (
+    typeof window === "undefined" ||
+    typeof window.speechSynthesis === "undefined" ||
+    typeof window.SpeechSynthesisUtterance === "undefined"
+  ) {
+    return false;
+  }
+
+  try {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "pt-BR";
+    utterance.volume = 0.9;
+    utterance.rate = 1;
+    utterance.pitch = 0.95;
+    const voices = window.speechSynthesis.getVoices();
+    utterance.voice =
+      voices.find((voice) => voice.name === DEFAULT_LOCAL_VOICE) ??
+      voices.find((voice) => voice.lang.toLowerCase().startsWith("pt-br")) ??
+      voices.find((voice) => voice.lang.toLowerCase().startsWith("pt")) ??
+      null;
+
+    await new Promise<void>((resolve, reject) => {
+      utterance.onend = () => resolve();
+      utterance.onerror = () => reject(new Error(VOICE_UNAVAILABLE_MESSAGE));
+      window.speechSynthesis.speak(utterance);
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }

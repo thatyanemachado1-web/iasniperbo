@@ -42,6 +42,41 @@ type LiveStateSaveStatus = {
   durableConfigured: boolean;
   saved_at: string;
 };
+type AdaptiveStrategySyncPayload = {
+  records?: unknown[];
+  patterns?: unknown[];
+  decision?: Record<string, unknown>;
+  logs?: unknown[];
+};
+type LocalAiSettings = {
+  enabled: boolean;
+  narrationEnabled: boolean;
+  ollamaBaseUrl: string;
+  ollamaModel: string;
+  voiceProvider: string;
+  voiceName: string;
+  voiceVolume: number;
+  voiceRate: number;
+  voicePitch: number;
+  callsPerMinute: number;
+  cooldownMs: number;
+};
+type LocalAiLog = {
+  id: string;
+  user: string;
+  mesa: string;
+  event: string;
+  question: string;
+  response: string;
+  model: string;
+  provider: string;
+  durationMs: number;
+  estimatedCost: number;
+  status: string;
+  error: string;
+  timestamp: string;
+  data: Record<string, unknown>;
+};
 type AdminManagedUserRole = "user" | "admin" | "owner";
 type AdminManagedUserPlan = "free" | "trial" | "monthly" | "premium" | "vip_manual";
 type AdminSubscriptionStatus =
@@ -74,6 +109,9 @@ const MERCADOPAGO_PAYMENT_URL = "https://api.mercadopago.com/v1/payments";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 const DEFAULT_ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
+const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+const DEFAULT_OLLAMA_MODEL = "qwen2.5:7b";
+const DEFAULT_EDGE_TTS_VOICE = "pt-BR-AntonioNeural";
 const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
 const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
@@ -123,6 +161,8 @@ let liveSalesSettings: SalesSettings = {
   updated_at: "",
   updated_by: "",
 };
+let liveLocalAiSettings: Partial<LocalAiSettings> = {};
+let liveLocalAiLogs: LocalAiLog[] = [];
 let liveStateSaveStatus: LiveStateSaveStatus = {
   durable: false,
   cache: false,
@@ -130,6 +170,9 @@ let liveStateSaveStatus: LiveStateSaveStatus = {
   saved_at: "",
 };
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+const localAiRateBuckets = new Map<string, { count: number; resetAt: number }>();
+const localAiCache = new Map<string, { response: string; createdAt: number }>();
+const localAiCooldowns = new Map<string, number>();
 
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
@@ -220,8 +263,14 @@ export default {
       const voiceResponse = await handleVoiceNarrationRequest(request, env);
       if (voiceResponse) return withSecurityHeaders(voiceResponse);
 
+      const localVoiceResponse = await handleLocalVoiceRequest(request, env);
+      if (localVoiceResponse) return withSecurityHeaders(localVoiceResponse);
+
       const voiceDiagnosticsResponse = await handleVoiceDiagnosticsRequest(request, env);
       if (voiceDiagnosticsResponse) return withSecurityHeaders(voiceDiagnosticsResponse);
+
+      const localAiResponse = await handleLocalAiRequest(request, env);
+      if (localAiResponse) return withSecurityHeaders(localAiResponse);
 
       const salesSettingsResponse = await handleSalesSettingsRequest(request);
       if (salesSettingsResponse) return withSecurityHeaders(salesSettingsResponse);
@@ -234,6 +283,9 @@ export default {
 
       const dashboardResponse = await handleDashboardRequest(request, env);
       if (dashboardResponse) return withSecurityHeaders(dashboardResponse);
+
+      const adaptiveStrategyResponse = await handleAdaptiveStrategyRequest(request, env);
+      if (adaptiveStrategyResponse) return withSecurityHeaders(adaptiveStrategyResponse);
 
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
@@ -307,8 +359,11 @@ function rateLimitForRequest(method: string, pathname: string) {
   if (pathname === "/api/webhook/hubla" || pathname === "/api/webhooks/hubla") return 240;
   if (pathname === "/auth/verify") return 60;
   if (pathname === "/voice/narration") return 25;
+  if (pathname === "/api/voice/speak") return 40;
+  if (pathname === "/api/ai/local-commentary") return 60;
   if (pathname === "/dashboard") return method === "GET" ? 120 : 240;
   if (pathname === "/dashboard/signal") return 240;
+  if (pathname === "/adaptive-strategy/sync") return 240;
   if (
     pathname === "/billing/plans" ||
     pathname === "/billing/subscription" ||
@@ -319,6 +374,7 @@ function rateLimitForRequest(method: string, pathname: string) {
     pathname === "/module-toggles" ||
     pathname === "/security-events" ||
     pathname === "/voice/diagnostics" ||
+    pathname === "/admin/local-ai" ||
     pathname === "/auth/diagnostics"
   ) {
     return 120;
@@ -363,6 +419,13 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
       { error: `Texto de voz muito longo. Limite: ${MAX_NARRATION_CHARS} caracteres.` },
       413,
     );
+  }
+
+  if (!readServerBoolean(env, "ELEVENLABS_ENABLED", false)) {
+    return json({
+      fallback: "browser",
+      reason: "Voz antiga desativada. Use /api/voice/speak com Edge TTS local.",
+    });
   }
 
   const apiKeys = getElevenLabsApiKeys(env);
@@ -479,6 +542,477 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
     provider: "elevenlabs",
     lastElevenLabsStatus,
   });
+}
+
+async function handleLocalVoiceRequest(request: Request, env: unknown) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/api/voice/speak") return null;
+
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
+  if (!(await isDashboardReadAuthorized(request, url, env))) {
+    return json({ error: "Nao autorizado." }, 401);
+  }
+
+  const body = readRecord(await request.json().catch(() => ({})));
+  const text = normalizeNarrationText(readString(body, "text"));
+  if (!text) return json({ error: "Texto de voz obrigatorio." }, 400);
+  if (text.length > MAX_NARRATION_CHARS) {
+    return json({ error: `Texto de voz muito longo. Limite: ${MAX_NARRATION_CHARS} caracteres.` }, 413);
+  }
+
+  const settings = getLocalAiSettings(env);
+  const provider = readString(body, "provider") || settings.voiceProvider;
+  if (provider !== "edge-tts") {
+    return json({ fallback: "browser", reason: "Provedor local ainda nao ativo no backend." });
+  }
+
+  const edgeTtsUrl = readServerEnvString(env, "EDGE_TTS_URL", "").replace(/\/+$/, "");
+  if (!edgeTtsUrl) {
+    return json({ fallback: "browser", reason: "EDGE_TTS_URL nao configurado no backend." });
+  }
+
+  try {
+    const response = await fetch(edgeTtsUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        voice: readString(body, "voice") || settings.voiceName,
+        language: readString(body, "language") || "pt-BR",
+        volume: safeServerNumber(body.volume, settings.voiceVolume),
+        rate: safeServerNumber(body.rate, settings.voiceRate),
+        pitch: safeServerNumber(body.pitch, settings.voicePitch),
+      }),
+    });
+    if (!response.ok) {
+      return json({ fallback: "browser", reason: `Edge TTS indisponivel (${response.status}).` });
+    }
+
+    return new Response(await response.arrayBuffer(), {
+      status: 200,
+      headers: {
+        "content-type": response.headers.get("content-type") || "audio/mpeg",
+        "cache-control": "no-store",
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "POST,OPTIONS",
+        "access-control-allow-headers":
+          "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
+      },
+    });
+  } catch (error) {
+    console.warn("Edge TTS indisponivel.", error);
+    return json({ fallback: "browser", reason: "Falha de conexao com Edge TTS." });
+  }
+}
+
+async function handleLocalAiRequest(request: Request, env: unknown) {
+  const url = new URL(request.url);
+
+  if (url.pathname === "/admin/local-ai") {
+    if (request.method === "OPTIONS") return json(null, 204);
+    const role = await getAdminRequestRole(request, env);
+    if (!role) return json({ error: "Nao autorizado." }, 401);
+    if (request.method === "GET") {
+      return json({
+        settings: getLocalAiSettings(env),
+        logs: liveLocalAiLogs.slice(0, 100),
+        status: await probeOllamaStatus(env),
+      });
+    }
+    if (request.method === "POST") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      liveLocalAiSettings = normalizeLocalAiSettingsPatch(body, getLocalAiSettings(env));
+      await saveLiveState(env);
+      return json({
+        settings: getLocalAiSettings(env),
+        logs: liveLocalAiLogs.slice(0, 100),
+        status: await probeOllamaStatus(env),
+      });
+    }
+    return json({ error: "Metodo nao permitido." }, 405);
+  }
+
+  if (url.pathname !== "/api/ai/local-commentary") return null;
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
+  if (!(await isDashboardReadAuthorized(request, url, env))) {
+    return json({ error: "Nao autorizado." }, 401);
+  }
+
+  const startedAt = Date.now();
+  const settings = getLocalAiSettings(env);
+  const body = readRecord(await request.json().catch(() => ({})));
+  const event = sanitizeQuestion(readString(body, "event") || "chat", 80);
+  const question = sanitizeQuestion(readString(body, "question"), 260);
+  const fallbackText = sanitizeQuestion(readString(body, "fallbackText"), 360);
+  const userKey = localAiUserKey(request, body);
+  const summary = buildLocalAiMarketSummary(liveDashboardData, body);
+
+  if (!settings.enabled) {
+    const commentary = fallbackText || fallbackLocalAiCommentary(event, summary);
+    recordLocalAiLog(userKey, event, question, commentary, settings.ollamaModel, "fallback", Date.now() - startedAt, "disabled", "", summary);
+    return json({ commentary, provider: "fallback", model: settings.ollamaModel, status: "disabled" });
+  }
+
+  const rateBlocked = consumeLocalAiRate(userKey, settings.callsPerMinute);
+  if (rateBlocked) {
+    return json({ error: "IA local em cooldown: muitas perguntas em pouco tempo." }, 429);
+  }
+
+  const cacheKey = hashServerText(JSON.stringify({ event, question, summary: compactLocalAiCacheSummary(summary) }));
+  const cached = localAiCache.get(cacheKey);
+  if (cached && Date.now() - cached.createdAt < 90_000) {
+    return json({
+      commentary: cached.response,
+      cached: true,
+      provider: "ollama",
+      model: settings.ollamaModel,
+      status: "ok",
+    });
+  }
+
+  const lastCall = localAiCooldowns.get(userKey) || 0;
+  if (Date.now() - lastCall < settings.cooldownMs) {
+    const commentary = fallbackText || fallbackLocalAiCommentary(event, summary);
+    return json({ commentary, provider: "fallback", model: settings.ollamaModel, status: "fallback", cached: true });
+  }
+  localAiCooldowns.set(userKey, Date.now());
+
+  const prompt = buildLocalAiPrompt(event, question, fallbackText, summary);
+  const ollama = await callOllama(settings, prompt);
+  const commentary = cleanLocalAiResponse(ollama.response || fallbackText || fallbackLocalAiCommentary(event, summary));
+  const provider = ollama.ok ? "ollama" : "fallback";
+  localAiCache.set(cacheKey, { response: commentary, createdAt: Date.now() });
+  recordLocalAiLog(
+    userKey,
+    event,
+    question,
+    commentary,
+    settings.ollamaModel,
+    provider,
+    Date.now() - startedAt,
+    ollama.ok ? "ok" : "fallback",
+    ollama.error,
+    summary,
+  );
+
+  return json({
+    commentary,
+    provider,
+    model: settings.ollamaModel,
+    status: ollama.ok ? "ok" : "fallback",
+    error: ollama.error || undefined,
+  });
+}
+
+function getLocalAiSettings(env: unknown): LocalAiSettings {
+  return {
+    enabled: readServerBoolean(env, "AI_LOCAL_ENABLED", true, liveLocalAiSettings.enabled),
+    narrationEnabled: readServerBoolean(
+      env,
+      "AI_LOCAL_NARRATION_ENABLED",
+      true,
+      liveLocalAiSettings.narrationEnabled,
+    ),
+    ollamaBaseUrl:
+      liveLocalAiSettings.ollamaBaseUrl ||
+      readServerEnvString(env, "OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL).replace(/\/+$/, ""),
+    ollamaModel:
+      liveLocalAiSettings.ollamaModel ||
+      readServerEnvString(env, "OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
+    voiceProvider:
+      liveLocalAiSettings.voiceProvider ||
+      readServerEnvString(env, "VOICE_PROVIDER", "edge-tts"),
+    voiceName:
+      liveLocalAiSettings.voiceName ||
+      readServerEnvString(env, "VOICE_NAME", DEFAULT_EDGE_TTS_VOICE),
+    voiceVolume: safeServerNumber(liveLocalAiSettings.voiceVolume, readServerNumber(env, "VOICE_VOLUME", 0.9)),
+    voiceRate: safeServerNumber(liveLocalAiSettings.voiceRate, readServerNumber(env, "VOICE_RATE", 1)),
+    voicePitch: safeServerNumber(liveLocalAiSettings.voicePitch, readServerNumber(env, "VOICE_PITCH", 0.95)),
+    callsPerMinute: Math.max(
+      1,
+      Math.floor(safeServerNumber(liveLocalAiSettings.callsPerMinute, readServerNumber(env, "AI_LOCAL_CALLS_PER_MINUTE", 12))),
+    ),
+    cooldownMs: Math.max(
+      0,
+      Math.floor(safeServerNumber(liveLocalAiSettings.cooldownMs, readServerNumber(env, "AI_LOCAL_COOLDOWN_MS", 8000))),
+    ),
+  };
+}
+
+function normalizeLocalAiSettingsPatch(body: Record<string, unknown>, fallback: LocalAiSettings) {
+  return {
+    enabled: typeof body.enabled === "boolean" ? body.enabled : fallback.enabled,
+    narrationEnabled:
+      typeof body.narrationEnabled === "boolean" ? body.narrationEnabled : fallback.narrationEnabled,
+    ollamaBaseUrl: readString(body, "ollamaBaseUrl") || fallback.ollamaBaseUrl,
+    ollamaModel: readString(body, "ollamaModel") || fallback.ollamaModel,
+    voiceProvider: readString(body, "voiceProvider") || fallback.voiceProvider,
+    voiceName: readString(body, "voiceName") || fallback.voiceName,
+    voiceVolume: safeServerNumber(body.voiceVolume, fallback.voiceVolume),
+    voiceRate: safeServerNumber(body.voiceRate, fallback.voiceRate),
+    voicePitch: safeServerNumber(body.voicePitch, fallback.voicePitch),
+    callsPerMinute: safeServerNumber(body.callsPerMinute, fallback.callsPerMinute),
+    cooldownMs: safeServerNumber(body.cooldownMs, fallback.cooldownMs),
+  } satisfies LocalAiSettings;
+}
+
+async function probeOllamaStatus(env: unknown) {
+  const settings = getLocalAiSettings(env);
+  try {
+    const response = await fetch(`${settings.ollamaBaseUrl}/api/tags`, { method: "GET" });
+    return {
+      online: response.ok,
+      status: response.ok ? "Online" : `Offline (${response.status})`,
+      model: settings.ollamaModel,
+      baseUrl: settings.ollamaBaseUrl,
+    };
+  } catch {
+    return {
+      online: false,
+      status: "Offline",
+      model: settings.ollamaModel,
+      baseUrl: settings.ollamaBaseUrl,
+    };
+  }
+}
+
+async function callOllama(settings: LocalAiSettings, prompt: string) {
+  try {
+    const response = await fetch(`${settings.ollamaBaseUrl}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: settings.ollamaModel,
+        prompt,
+        stream: false,
+        options: {
+          temperature: 0.45,
+          top_p: 0.82,
+          num_predict: 140,
+        },
+      }),
+    });
+    if (!response.ok) return { ok: false, response: "", error: `Ollama ${response.status}` };
+    const payload = readRecord(await response.json().catch(() => ({})));
+    return { ok: true, response: readString(payload, "response"), error: "" };
+  } catch (error) {
+    return { ok: false, response: "", error: "Ollama offline ou inacessivel." };
+  }
+}
+
+function buildLocalAiPrompt(
+  event: string,
+  question: string,
+  fallbackText: string,
+  summary: Record<string, unknown>,
+) {
+  return [
+    "Voce e o Sniper Voice IA, analista virtual de Bac Bo dentro do Sniper Bo IA.",
+    "Voce NAO decide entradas. As entradas ja foram decididas pelos modulos internos.",
+    "Use somente os dados reais enviados em JSON. Nao invente porcentagens, estatisticas ou fatos.",
+    "Nunca prometa lucro. Nunca diga certeza, garantida ou entrada garantida.",
+    "Se nao houver dados suficientes, diga que a mesa esta em observacao.",
+    "Tom: natural, agressivo, confiante, profissional, frases curtas, sala ao vivo.",
+    "Sempre mencione risco quando o risco estiver alto.",
+    "Responda em portugues do Brasil com no maximo 3 frases curtas.",
+    `Evento: ${event || "chat"}`,
+    question ? `Pergunta do usuario: ${question}` : "",
+    fallbackText ? `Comentario base do sistema: ${fallbackText}` : "",
+    `Dados reais do Sniper Bo IA: ${JSON.stringify(summary).slice(0, 6000)}`,
+    "Resposta:",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildLocalAiMarketSummary(data: LiveDashboardData, body: Record<string, unknown>) {
+  const rounds = data.rounds.slice(-30);
+  const adaptive = readRecord(body.adaptiveSnapshot);
+  const entryScore = readRecord(adaptive.entryScore);
+  const topPattern = Array.isArray(adaptive.patterns) ? readRecord(adaptive.patterns[0]) : {};
+  return {
+    mesa: "Mesa principal",
+    updatedAt: data.updatedAt || "",
+    ultimasRodadas: rounds,
+    tendenciaAtual: summarizeRoundTrend(rounds),
+    entradaAtual: data.currentSignal,
+    decisaoEngine: data.engineDecision,
+    surfAtual: data.currentSurfAlert || null,
+    numeroPagante: data.neuralReading || null,
+    tieAlert: data.currentTieAlert,
+    scoreEntrada: entryScore.finalScore ?? null,
+    estrategiaAtiva: {
+      label: readString(topPattern, "label"),
+      status: readString(topPattern, "status"),
+      direcao: readString(topPattern, "direction"),
+      ocorrencias: topPattern.occurrences ?? null,
+      assertividade: topPattern.assertiveness ?? null,
+    },
+    placaresRecentes: {
+      principal: data.mainScoreboard,
+      tie: data.tieAlertScoreboard,
+      surf: data.surfAnalyzerScoreboard,
+      neural: data.neuralScoreboard || data.neuralReading || null,
+    },
+    risco: summarizeMarketRisk(data),
+    logsRecentes: Array.isArray(adaptive.decisionLogs) ? adaptive.decisionLogs.slice(0, 8) : [],
+  };
+}
+
+function summarizeRoundTrend(rounds: DashboardData["rounds"]) {
+  const banker = rounds.filter((round) => round.result === "B").length;
+  const player = rounds.filter((round) => round.result === "P").length;
+  const tie = rounds.filter((round) => round.result === "T").length;
+  return {
+    banker,
+    player,
+    tie,
+    dominante: banker >= player && banker >= tie ? "BANKER" : player >= tie ? "PLAYER" : "TIE",
+    sequencia: rounds.slice(-12).map((round) => round.result).join(""),
+  };
+}
+
+function summarizeMarketRisk(data: DashboardData) {
+  const tieHigh =
+    data.currentTieAlert.status === "active" &&
+    normalizeText(data.currentTieAlert.level).includes("ALTO");
+  const surfRisk = data.currentSurfAlert?.surf_break_risk ?? data.currentSurfAlert?.surf_risk ?? 0;
+  const neuralRisk = data.neuralReading?.isSaturated || data.neuralReading?.isRedAlert;
+  const blocked = data.engineDecision.state === "BLOQUEADO";
+  const high = tieHigh || surfRisk >= 70 || neuralRisk || blocked;
+  return {
+    nivel: high ? "alto" : surfRisk >= 40 ? "medio" : "controlado",
+    tieHigh,
+    surfRisk,
+    neuralRisk,
+    blocked,
+    motivo: data.engineDecision.reason,
+  };
+}
+
+function fallbackLocalAiCommentary(event: string, summary: Record<string, unknown>) {
+  const risk = readRecord(summary.risco);
+  const entry = readRecord(summary.entradaAtual);
+  const side = readString(entry, "side");
+  if (readString(risk, "nivel") === "alto") {
+    return "Cuidado. O mercado esta pesado e o risco subiu. Melhor nao forcar entrada agora.";
+  }
+  if (event.includes("green")) return "Bateu. Green confirmado. A leitura respeitou o padrao.";
+  if (event.includes("red")) return "Red confirmado. O mercado quebrou a leitura. Gestao primeiro.";
+  if (side === "BANKER" || side === "PLAYER" || side === "TIE") {
+    return `Entrada confirmada em ${side}. A leitura veio dos modulos internos e o risco esta monitorado.`;
+  }
+  return "Mesa ainda em observacao. Tem movimento, mas nao existe confirmacao limpa para entrada.";
+}
+
+function cleanLocalAiResponse(value: string) {
+  const text = sanitizeQuestion(value, 520)
+    .replace(/entrada\s+garantida/gi, "entrada confirmada pelos modulos")
+    .replace(/\bgarantid[ao]\b/gi, "confirmado pelos dados")
+    .replace(/\bcerteza\b/gi, "leitura")
+    .replace(/lucro\s+certo/gi, "resultado ainda depende do mercado");
+  return text || "Mesa em observacao. Ainda sem dados suficientes para comentario seguro.";
+}
+
+function sanitizeQuestion(value: unknown, maxLength = 260) {
+  return String(value || "")
+    .replace(/[<>]/g, "")
+    .replace(/\b(ignore|system prompt|developer|jailbreak|prompt injection)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function consumeLocalAiRate(userKey: string, limit: number) {
+  const now = Date.now();
+  const current = localAiRateBuckets.get(userKey);
+  const bucket =
+    current && current.resetAt > now ? current : { count: 0, resetAt: now + 60_000 };
+  bucket.count += 1;
+  localAiRateBuckets.set(userKey, bucket);
+  return bucket.count > limit;
+}
+
+function localAiUserKey(request: Request, body: Record<string, unknown>) {
+  const explicit = readString(body, "user") || readString(body, "email");
+  return explicit || getClientIp(request);
+}
+
+function compactLocalAiCacheSummary(summary: Record<string, unknown>) {
+  return {
+    entradaAtual: summary.entradaAtual,
+    risco: summary.risco,
+    tendenciaAtual: summary.tendenciaAtual,
+    scoreEntrada: summary.scoreEntrada,
+    estrategiaAtiva: summary.estrategiaAtiva,
+  };
+}
+
+function recordLocalAiLog(
+  user: string,
+  event: string,
+  question: string,
+  response: string,
+  model: string,
+  provider: string,
+  durationMs: number,
+  status: string,
+  error: string,
+  data: Record<string, unknown>,
+) {
+  liveLocalAiLogs = [
+    {
+      id: crypto.randomUUID(),
+      user,
+      mesa: readString(data, "mesa") || "Mesa principal",
+      event,
+      question,
+      response,
+      model,
+      provider,
+      durationMs,
+      estimatedCost: 0,
+      status,
+      error,
+      timestamp: new Date().toISOString(),
+      data,
+    },
+    ...liveLocalAiLogs,
+  ].slice(0, 250);
+}
+
+function readServerBoolean(
+  env: unknown,
+  key: string,
+  fallback: boolean,
+  override?: boolean,
+) {
+  if (typeof override === "boolean") return override;
+  const value = readServerEnvString(env, key, "");
+  if (!value) return fallback;
+  return ["1", "true", "sim", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function safeServerNumber(value: unknown, fallback: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function hashServerText(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function normalizeText(value: unknown) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
 }
 
 async function handleSalesSettingsRequest(request: Request) {
@@ -1792,6 +2326,227 @@ async function handleDashboardRequest(request: Request, env: unknown) {
   }
 
   return null;
+}
+
+async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/adaptive-strategy/sync") return null;
+
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
+
+  if (!(await isDashboardReadAuthorized(request, url, env))) {
+    return json({ error: "Nao autorizado." }, 401);
+  }
+
+  const config = getSupabasePersistenceConfig(env);
+  if (!config) {
+    return json({
+      mode: "local",
+      storage: "local",
+      lastSyncedAt: new Date().toISOString(),
+      message:
+        "Supabase service role nao configurado no backend. Adaptive Engine mantido no historico local.",
+    });
+  }
+
+  const payload = readRecord(await request.json().catch(() => ({}))) as AdaptiveStrategySyncPayload;
+  const records = normalizeAdaptiveRoundRows(payload.records);
+  const patterns = normalizeAdaptivePatternRows(payload.patterns);
+  const decision = normalizeAdaptiveDecisionRow(payload.decision, payload.logs);
+
+  const [roundsSaved, patternsSaved, decisionSaved] = await Promise.all([
+    saveSupabaseRows(config, "adaptive_strategy_rounds", records, "round_key"),
+    saveSupabaseRows(config, "adaptive_strategy_patterns", patterns, "pattern_id"),
+    saveSupabaseRows(config, "adaptive_strategy_decision_logs", decision ? [decision] : [], "decision_key"),
+  ]);
+
+  if (!roundsSaved || !patternsSaved || !decisionSaved) {
+    return json(
+      {
+        mode: "error",
+        storage: "error",
+        lastSyncedAt: new Date().toISOString(),
+        error: "Nao foi possivel salvar todos os dados do Adaptive Engine no Supabase.",
+      },
+      502,
+    );
+  }
+
+  return json({
+    mode: "database",
+    storage: "database",
+    lastSyncedAt: new Date().toISOString(),
+    message: "Rodadas, padroes e logs do Adaptive Engine salvos no Supabase.",
+  });
+}
+
+function normalizeAdaptiveRoundRows(value: unknown[] | undefined) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const record = readRecord(item);
+      const result = readAdaptiveSide(record.result);
+      if (!result) return null;
+      const roundKey = readString(record, "key");
+      const timestamp = safeIso(readString(record, "timestamp"));
+      const capturedAt = safeIso(readString(record, "capturedAt")) || new Date().toISOString();
+      if (!roundKey || !timestamp) return null;
+
+      return {
+        round_key: roundKey,
+        table_name: readString(record, "tableName") || "Mesa principal",
+        round_id: Math.floor(Number(record.roundId) || 0),
+        day: readString(record, "day") || timestamp.slice(0, 10),
+        time_label: readString(record, "time") || "--:--",
+        result,
+        banker_score: Math.floor(Number(record.bankerScore) || 0),
+        player_score: Math.floor(Number(record.playerScore) || 0),
+        tie_multiplier: readNullableNumber(record.tieMultiplier),
+        previous_sequence: readString(record, "previousSequence"),
+        next_result: readAdaptiveSide(record.nextResult),
+        played_at: timestamp,
+        source_updated_at: safeIso(readString(record, "sourceUpdatedAt")) || null,
+        captured_at: capturedAt,
+      };
+    })
+    .filter((row): row is Record<string, unknown> => Boolean(row));
+}
+
+function normalizeAdaptivePatternRows(value: unknown[] | undefined) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const pattern = readRecord(item);
+      const direction = readAdaptiveSide(pattern.direction);
+      const patternId = readString(pattern, "id");
+      if (!patternId || !direction) return null;
+
+      const sequence = readRecord(pattern.greenRedSequence);
+      return {
+        pattern_id: patternId,
+        label: readString(pattern, "label") || patternId,
+        kind: readString(pattern, "kind") || "sequence",
+        table_name: readString(pattern, "tableName") || "Mesa principal",
+        hour_label: readString(pattern, "hour") || null,
+        direction,
+        occurrences: safeInteger(pattern.occurrences),
+        pulled_player: safeInteger(pattern.pulledPlayer),
+        pulled_banker: safeInteger(pattern.pulledBanker),
+        pulled_tie: safeInteger(pattern.pulledTie),
+        sg: safeInteger(pattern.sg),
+        g1: safeInteger(pattern.g1),
+        red: safeInteger(pattern.red),
+        expired: safeInteger(pattern.expired),
+        assertiveness: safeNumber(pattern.assertiveness),
+        assertiveness_sg: safeNumber(pattern.assertivenessSg),
+        assertiveness_g1: safeNumber(pattern.assertivenessG1),
+        last_seen_at: safeIso(readString(pattern, "lastSeenAt")) || null,
+        green_red_sequence_type: readString(sequence, "type") || "none",
+        green_red_sequence_count: safeInteger(sequence.count),
+        status: readAdaptiveStatus(pattern.status),
+        score: safeNumber(pattern.score),
+        sample_weak: Boolean(pattern.sampleWeak),
+        blocked: Boolean(pattern.blocked),
+        paused_reason: readString(pattern, "pausedReason") || null,
+        updated_at: new Date().toISOString(),
+      };
+    })
+    .filter((row): row is Record<string, unknown> => Boolean(row));
+}
+
+function normalizeAdaptiveDecisionRow(
+  decision: Record<string, unknown> | undefined,
+  logs: unknown[] | undefined,
+) {
+  const record = readRecord(decision);
+  if (!Object.keys(record).length) return null;
+  const side = readAdaptiveSide(record.side);
+  const finalScore = safeNumber(record.finalScore);
+  const allowed = Boolean(record.allowed);
+  const explanation = Array.isArray(record.explanation) ? record.explanation : [];
+  const parts = Array.isArray(record.parts) ? record.parts : [];
+  const rawLogs = Array.isArray(logs) ? logs : [];
+
+  return {
+    decision_key: `${new Date().toISOString().slice(0, 16)}:${side ?? "NONE"}:${finalScore}:${allowed}`,
+    final_score: finalScore,
+    allowed,
+    side,
+    explanation,
+    score_parts: parts,
+    raw_logs: rawLogs,
+  };
+}
+
+async function saveSupabaseRows(
+  config: { url: string; key: string },
+  table: string,
+  rows: Record<string, unknown>[],
+  conflictColumn: string,
+) {
+  if (!rows.length) return true;
+
+  try {
+    const response = await fetch(
+      `${config.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(conflictColumn)}`,
+      {
+        method: "POST",
+        headers: {
+          ...supabasePersistenceHeaders(config.key),
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(rows),
+      },
+    );
+    if (!response.ok) {
+      console.warn(`Adaptive Engine: falha ao salvar ${table} (${response.status}).`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn(`Adaptive Engine: falha de conexao ao salvar ${table}.`, error);
+    return false;
+  }
+}
+
+function readAdaptiveSide(value: unknown) {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "B" || text === "BANKER" || text === "BANCA") return "BANKER";
+  if (text === "P" || text === "PLAYER" || text === "JOGADOR") return "PLAYER";
+  if (text === "T" || text === "TIE" || text === "EMPATE") return "TIE";
+  return null;
+}
+
+function readAdaptiveStatus(value: unknown) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "quente" || text === "pausado" || text === "observacao" || text === "frio") {
+    return text;
+  }
+  return "frio";
+}
+
+function safeIso(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : "";
+}
+
+function safeInteger(value: unknown) {
+  const number = Math.floor(Number(value) || 0);
+  return Number.isFinite(number) ? Math.max(0, number) : 0;
+}
+
+function safeNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function readNullableNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function updateDashboardData(current: LiveDashboardData, body: unknown) {
@@ -5329,6 +6084,18 @@ function applyLiveState(state: Record<string, unknown>) {
   if (Object.keys(salesSettings).length > 0) {
     liveSalesSettings = restoreSalesSettings(salesSettings);
   }
+
+  const localAiSettings = readRecord(state.localAiSettings);
+  if (Object.keys(localAiSettings).length > 0) {
+    liveLocalAiSettings = normalizeLocalAiSettingsPatch(localAiSettings, getLocalAiSettings({}));
+  }
+
+  if (Array.isArray(state.localAiLogs)) {
+    liveLocalAiLogs = state.localAiLogs
+      .map(readRecord)
+      .filter((log) => Object.keys(log).length > 0)
+      .slice(0, 250) as LocalAiLog[];
+  }
 }
 
 function mergeLiveStates(
@@ -5718,6 +6485,8 @@ function buildLiveStateSnapshot() {
     deletedEntities: liveDeletedEntities,
     moduleToggles: liveModuleToggles,
     salesSettings: liveSalesSettings,
+    localAiSettings: liveLocalAiSettings,
+    localAiLogs: liveLocalAiLogs.slice(0, 250),
     savedAt: new Date().toISOString(),
   };
 }

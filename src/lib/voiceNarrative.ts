@@ -5,11 +5,13 @@ import type {
   SurfAlert,
   TieAlert,
 } from "@/types/dashboard";
+import type { AdaptiveStrategySnapshot } from "@/types/adaptiveStrategy";
 import { buildSurfCopy, buildTieCopy } from "@/lib/operationalCopy";
 import { buildSurfEntrySummary } from "@/utils/surf";
 
-export type VoiceNarrationStyle = "balanced" | "aggressive";
-export type VoicePriority = 1 | 2 | 3;
+export type VoiceNarrationStyle = "discreet" | "aggressive" | "professional";
+export type VoicePriority = 1 | 2 | 3 | 4 | 5;
+type VoiceLeadStyle = Exclude<VoiceNarrationStyle, "discreet">;
 type PaganteStatusKind = "favorable" | "watch" | "risk";
 type VoiceLeadKind =
   | "blocked"
@@ -32,81 +34,81 @@ type VoiceLeadKind =
   | "surf"
   | "tie";
 
-const VOICE_LEADS: Record<VoiceLeadKind, Record<VoiceNarrationStyle, readonly string[]>> = {
+const VOICE_LEADS: Record<VoiceLeadKind, Record<VoiceLeadStyle, readonly string[]>> = {
   blocked: {
-    balanced: ["Sem entrada agora.", "Entrada segurada.", "A leitura pediu bloqueio.", "Melhor aguardar agora."],
+    professional: ["Sem entrada agora.", "Entrada segurada.", "A leitura pediu bloqueio.", "Melhor aguardar agora."],
     aggressive: ["Segura essa entrada.", "Entrada travada agora.", "Risco no radar.", "Melhor não forçar agora."],
   },
   resultGreen: {
-    balanced: ["Resultado confirmado:", "Fechamento da entrada:", "Entrada encerrada:", "Atualização do sinal:"],
+    professional: ["Resultado confirmado:", "Fechamento da entrada:", "Entrada encerrada:", "Atualização do sinal:"],
     aggressive: ["Boa leitura:", "Fechou positivo:", "Mandou bem nessa:", "Sinal respeitou:"],
   },
   resultRed: {
-    balanced: ["Resultado confirmado:", "Fechamento da entrada:", "Entrada encerrada:", "Atualização do sinal:"],
+    professional: ["Resultado confirmado:", "Fechamento da entrada:", "Entrada encerrada:", "Atualização do sinal:"],
     aggressive: ["Resultado registrado:", "Não confirmou agora:", "Fechou contra:", "Gestão primeiro:"],
   },
   tieResult: {
-    balanced: ["Resultado do Tie:", "Fechamento do empate:", "Atualização do Tie:", "Leitura de empate encerrada:"],
+    professional: ["Resultado do Tie:", "Fechamento do empate:", "Atualização do Tie:", "Leitura de empate encerrada:"],
     aggressive: ["Tie resolvido:", "Empate no radar fechou:", "Atualização forte do Tie:", "Linha do Tie encerrou:"],
   },
   surfResult: {
-    balanced: ["Resultado do Surf Analyzer:", "Fechamento da leitura de surf:", "Atualização do surf:", "Surf Analyzer finalizou:"],
+    professional: ["Resultado do Surf Analyzer:", "Fechamento da leitura de surf:", "Atualização do surf:", "Surf Analyzer finalizou:"],
     aggressive: ["Surf resolvido:", "Leitura de surf fechou:", "Atualização do Surf Analyzer:", "Movimento de surf encerrou:"],
   },
   neuralResultGreen: {
-    balanced: ["Número pagante respeitou.", "Previsão do pagante confirmou.", "Número pagante fechou green.", "Leitura do pagante bateu."],
+    professional: ["Número pagante respeitou.", "Previsão do pagante confirmou.", "Número pagante fechou green.", "Leitura do pagante bateu."],
     aggressive: ["Número pagante respeitou mesmo.", "Pagante bateu na leitura.", "Boa no pagante.", "Leitura do número cravou."],
   },
   neuralResultRed: {
-    balanced: ["Número pagante não confirmou agora.", "Previsão do pagante falhou agora.", "Pagante fechou contra.", "Leitura do número não bateu."],
+    professional: ["Número pagante não confirmou agora.", "Previsão do pagante falhou agora.", "Pagante fechou contra.", "Leitura do número não bateu."],
     aggressive: ["Número pagante não confirmou agora.", "Pagante veio contra.", "Essa do número não bateu.", "Leitura do pagante falhou agora."],
   },
   neuralOppositeResultGreen: {
-    balanced: ["Gatilho oposto confirmou.", "Leitura oposta bateu.", "Gatilho oposto fechou green.", "Leitura complementar confirmou."],
+    professional: ["Gatilho oposto confirmou.", "Leitura oposta bateu.", "Gatilho oposto fechou green.", "Leitura complementar confirmou."],
     aggressive: ["Gatilho oposto bateu.", "Leitura oposta respeitou.", "Boa leitura no oposto.", "Complementar cravou agora."],
   },
   neuralOppositeResultRed: {
-    balanced: ["Gatilho oposto não confirmou agora.", "Leitura oposta falhou agora.", "Complementar fechou contra.", "Leitura oposta não bateu."],
+    professional: ["Gatilho oposto não confirmou agora.", "Leitura oposta falhou agora.", "Complementar fechou contra.", "Leitura oposta não bateu."],
     aggressive: ["Gatilho oposto veio contra.", "Oposto não confirmou agora.", "Essa complementar não bateu.", "Leitura oposta falhou agora."],
   },
   entry: {
-    balanced: ["Leitura atual favorece", "Entrada formada em", "Sinal confirmado em", "A mesa abriu entrada em"],
+    professional: ["Leitura atual favorece", "Entrada formada em", "Sinal confirmado em", "A mesa abriu entrada em"],
     aggressive: ["Leitura forte agora:", "Linha interessante agora:", "Sinal formou com presença:", "A mesa apontou firme:"],
   },
   tieEntry: {
-    balanced: ["Leitura atual favorece Tie.", "Tie ganhou leitura agora.", "Entrada de Tie formada.", "A mesa abriu janela de Tie."],
+    professional: ["Leitura atual favorece Tie.", "Tie ganhou leitura agora.", "Entrada de Tie formada.", "A mesa abriu janela de Tie."],
     aggressive: ["Tie ganhou força agora.", "Empate entrou com presença.", "Atenção no Tie agora.", "Linha de Tie formada."],
   },
   currentReading: {
-    balanced: ["Leitura do momento favorece", "A tendência atual aponta", "No momento, a mesa favorece", "Leitura parcial inclinada para"],
+    professional: ["Leitura do momento favorece", "A tendência atual aponta", "No momento, a mesa favorece", "Leitura parcial inclinada para"],
     aggressive: ["Leitura em formação:", "Momento pede atenção:", "Linha ganhando forma:", "Mesa começando a apontar:"],
   },
   observing: {
-    balanced: ["Mesa em observação.", "Aguardando confirmação.", "Sem gatilho limpo agora.", "Leitura ainda em formação."],
+    professional: ["Mesa em observação.", "Aguardando confirmação.", "Sem gatilho limpo agora.", "Leitura ainda em formação."],
     aggressive: ["Mesa em observação.", "Calma nessa linha.", "Ainda não fechou entrada.", "Esperando confirmação limpa."],
   },
   neuralRisk: {
-    balanced: ["Atenção no número.", "Número em zona de risco.", "Pagante pede cautela.", "Leitura numérica travada."],
+    professional: ["Atenção no número.", "Número em zona de risco.", "Pagante pede cautela.", "Leitura numérica travada."],
     aggressive: ["Atenção nesse número.", "Cuidado com esse pagante.", "Número veio pesado, mas com risco.", "Segura a mão nesse número."],
   },
   neuralWatch: {
-    balanced: ["Número em observação.", "Pagante ainda formando.", "Leitura numérica inicial.", "Número apareceu no radar."],
+    professional: ["Número em observação.", "Pagante ainda formando.", "Leitura numérica inicial.", "Número apareceu no radar."],
     aggressive: ["Número apareceu, mas calma.", "Pagante no radar, sem cravar.", "Olho nesse número.", "Leitura numérica querendo formar."],
   },
   neuralFavorable: {
-    balanced: ["Número pagante identificado.", "Pagante entrou na leitura.", "Número favorável no radar.", "Leitura numérica ativa."],
+    professional: ["Número pagante identificado.", "Pagante entrou na leitura.", "Número favorável no radar.", "Leitura numérica ativa."],
     aggressive: ["Pagante entrou forte.", "Número pagante com presença.", "Leitura forte no número.", "Pagante querendo pagar agora."],
   },
   neuralOpposite: {
-    balanced: ["Gatilho oposto identificado.", "Leitura oposta no radar.", "Gatilho complementar ativo.", "Oposto entrou na leitura."],
+    professional: ["Gatilho oposto identificado.", "Leitura oposta no radar.", "Gatilho complementar ativo.", "Oposto entrou na leitura."],
     aggressive: ["Gatilho oposto apareceu.", "Oposto entrou forte no radar.", "Leitura complementar pedindo atenção.", "Gatilho oposto com presença."],
   },
   surf: {
-    balanced: ["Leitura de surf detectada.", "Surf Analyzer em leitura.", "Movimento de surf no radar.", "Leitura paralela de surf ativa."],
+    professional: ["Leitura de surf detectada.", "Surf Analyzer em leitura.", "Movimento de surf no radar.", "Leitura paralela de surf ativa."],
     aggressive: ["Surf entrou no radar:", "Movimento de surf detectado:", "Surf pedindo atenção:", "Leitura de surf ativa:"],
   },
   tie: {
-    balanced: ["Atenção para empate.", "Tie entrou em observação.", "Pressão de empate detectada.", "Leitura de Tie ativa."],
+    professional: ["Atenção para empate.", "Tie entrou em observação.", "Pressão de empate detectada.", "Leitura de Tie ativa."],
     aggressive: ["Pressão de Tie no radar.", "Tie começou a pressionar.", "Empate entrou na leitura.", "Atenção nessa pressão de Tie."],
   },
 };
@@ -118,10 +120,10 @@ export interface VoiceEvent {
   bypassCooldown: boolean;
 }
 
-export const DEFAULT_VOICE_NARRATION_STYLE: VoiceNarrationStyle = "balanced";
+export const DEFAULT_VOICE_NARRATION_STYLE: VoiceNarrationStyle = "professional";
 
 export function isVoiceNarrationStyle(value: unknown): value is VoiceNarrationStyle {
-  return value === "balanced" || value === "aggressive";
+  return value === "discreet" || value === "aggressive" || value === "professional";
 }
 
 export function buildVoiceResultEvents(
@@ -180,6 +182,7 @@ export function buildVoiceResultEvents(
 export function buildVoiceEvents(
   data: DashboardData,
   style: VoiceNarrationStyle = DEFAULT_VOICE_NARRATION_STYLE,
+  adaptiveSnapshot?: AdaptiveStrategySnapshot,
 ): VoiceEvent[] {
   const signal = data.currentSignal;
   const decision = data.engineDecision;
@@ -237,6 +240,7 @@ export function buildVoiceEvents(
   const surfEvent = buildSurfEvent(data.currentSurfAlert, name, style);
   const tieEvent = buildTieEvent(data.currentTieAlert, name, style);
   const neuralEvent = buildNeuralEvent(data.neuralReading, name, style, roundId);
+  const adaptiveEvent = buildAdaptiveEvent(adaptiveSnapshot, name, style, roundId);
 
   if (neuralEvent) {
     candidateEvents.push(neuralEvent);
@@ -248,6 +252,10 @@ export function buildVoiceEvents(
 
   if (surfEvent) {
     candidateEvents.push(surfEvent);
+  }
+
+  if (adaptiveEvent) {
+    candidateEvents.push(adaptiveEvent);
   }
 
   if (!hasTieEntry && signal.status !== "tie_watch" && tieEvent) {
@@ -643,6 +651,50 @@ function buildNeuralEvent(
   );
 }
 
+function buildAdaptiveEvent(
+  snapshot: AdaptiveStrategySnapshot | undefined,
+  name: string,
+  style: VoiceNarrationStyle,
+  roundId: string,
+): VoiceEvent | null {
+  if (!snapshot || snapshot.recordsStored < snapshot.minOccurrences) return null;
+
+  const score = snapshot.entryScore.finalScore;
+  const side = snapshot.entryScore.side;
+  const topPattern =
+    snapshot.patterns.find((pattern) => pattern.status === "quente" && !pattern.blocked) ??
+    snapshot.patterns.find((pattern) => pattern.status === "observacao" && !pattern.blocked);
+
+  if (snapshot.entryScore.allowed && side && topPattern) {
+    return high(
+      `adaptive-entry:${roundId}:${topPattern.id}:${score}:${side}:${style}`,
+      style === "aggressive"
+        ? `${voiceLead("entry", style, `${topPattern.id}:${score}:${side}`, name)}Banco de estrategias confirmou. Entrada em ${sideLabel(side)} ate G1. Score ${score}. Risco controlado.`
+        : `Banco de estrategias confirmou ${sideLabel(side)}. Score ${score}. Padrao ${topPattern.label} validado pela amostra real.`,
+    );
+  }
+
+  if (snapshot.pausedPatterns > 0 || score < 50) {
+    return medium(
+      `adaptive-risk:${roundId}:${snapshot.pausedPatterns}:${score}:${style}`,
+      style === "aggressive"
+        ? `${voiceLead("blocked", style, `${snapshot.pausedPatterns}:${score}`, name)}Cuidado. Banco de estrategias reduziu confianca. Score ${score}. Melhor nao forcar.`
+        : `Banco de estrategias em cautela. Score ${score}. A IA esta bloqueando padroes com risco ou amostra fraca.`,
+    );
+  }
+
+  if (topPattern && score >= 50) {
+    return analysis(
+      `adaptive-forming:${roundId}:${topPattern.id}:${score}:${style}`,
+      style === "aggressive"
+        ? `${voiceLead("currentReading", style, `${topPattern.id}:${score}`, name)}Padrao comecando a formar. ${sideLabel(topPattern.direction)} ganhou leitura, mas ainda precisa confirmar.`
+        : `Padrao em observacao. ${topPattern.label} puxa ${sideLabel(topPattern.direction)}, mas a entrada ainda depende do score final.`,
+    );
+  }
+
+  return null;
+}
+
 function neuralEventText(
   reading: NeuralReading,
   statusKind: PaganteStatusKind,
@@ -819,11 +871,11 @@ function safeNumber(value: unknown) {
 }
 
 function urgent(key: string, text: string): VoiceEvent {
-  return { key, text, priority: 3, bypassCooldown: true };
+  return { key, text, priority: 5, bypassCooldown: true };
 }
 
 function high(key: string, text: string): VoiceEvent {
-  return { key, text, priority: 3, bypassCooldown: true };
+  return { key, text, priority: 4, bypassCooldown: true };
 }
 
 function medium(key: string, text: string): VoiceEvent {
@@ -831,7 +883,7 @@ function medium(key: string, text: string): VoiceEvent {
 }
 
 function analysis(key: string, text: string): VoiceEvent {
-  return { key, text, priority: 2, bypassCooldown: true };
+  return { key, text, priority: 3, bypassCooldown: true };
 }
 
 function common(key: string, text: string): VoiceEvent {
@@ -847,7 +899,8 @@ function namePrefix(_name: string) {
 }
 
 function voiceLead(kind: VoiceLeadKind, style: VoiceNarrationStyle, seed: string, name = "") {
-  return `${namePrefix(name)}${pickVoiceVariant(`${kind}:${style}:${seed}`, VOICE_LEADS[kind][style])} `;
+  const leadStyle: VoiceLeadStyle = style === "discreet" ? "professional" : style;
+  return `${namePrefix(name)}${pickVoiceVariant(`${kind}:${style}:${seed}`, VOICE_LEADS[kind][leadStyle])} `;
 }
 
 function pickVoiceVariant(seed: string, variants: readonly string[]) {
