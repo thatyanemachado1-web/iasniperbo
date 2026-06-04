@@ -54,6 +54,8 @@ export function LeituraNeuralMiniCard({
   const sg = optionalNumberFrom(data.greenSemGale);
   const g1 = optionalNumberFrom(data.greenG1);
   const red = optionalNumberFrom(data.reds ?? data.erros);
+  const sequencePositive = numberFrom(data.sequencePositive);
+  const sequenceNegative = numberFrom(data.sequenceNegative);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
   const resolvedTotal = numberFrom(totalGreens) + numberFrom(red);
   const showPayingStats = hasNumber || totalGreens !== null || accuracy !== null || totalAlerts !== null;
@@ -163,6 +165,22 @@ export function LeituraNeuralMiniCard({
               </div>
               <div className="truncate text-[8px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[9px]">
                 Placar: {formatCount(totalGreens)}G / {formatCount(red, true)}R
+              </div>
+              <div
+                className={cn(
+                  "mt-1 truncate rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em]",
+                  sequenceNegative > 0
+                    ? "border-destructive/35 bg-destructive/10 text-destructive"
+                    : sequencePositive > 0
+                      ? "border-success/35 bg-success/10 text-success"
+                      : "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
+                )}
+              >
+                {sequenceNegative > 0
+                  ? `Seq Red: ${sequenceNegative}`
+                  : sequencePositive > 0
+                    ? `Seq Green: ${sequencePositive}`
+                    : "Seq Green: 0"}
               </div>
               {data.paganteWindow ? (
                 <div className="truncate text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">

@@ -9,6 +9,7 @@ const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
 const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
+const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v1";
 const DEFAULT_MODULE_TOGGLES: ModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -599,6 +600,14 @@ interface NeuralScoreBaseline {
   reds: number;
 }
 
+interface NeuralLiveSequence {
+  day: string;
+  greens: number;
+  reds: number;
+  sequencePositive: number;
+  sequenceNegative: number;
+}
+
 function applyNeuralScoreBaseline(
   reading: NeuralReading,
   scoreboard: NeuralScoreboard | undefined,
@@ -611,6 +620,13 @@ function applyNeuralScoreBaseline(
 
   if (!baseline || baseline.day !== day || neuralScoreWentBackwards(current, baseline)) {
     writeNeuralScoreBaseline(storageKey, { day, ...current });
+    writeNeuralLiveSequence(neuralSequenceStorageKey(), {
+      day,
+      greens: 0,
+      reds: 0,
+      sequencePositive: 0,
+      sequenceNegative: 0,
+    });
     const neuralReading = {
       ...reading,
       alertas: 0,
@@ -638,6 +654,7 @@ function applyNeuralScoreBaseline(
   const totalGreens = greenSemGale + greenG1 || acertos;
   const totalLosses = reds || erros;
   const total = totalGreens + totalLosses;
+  const liveSequence = updateNeuralLiveSequence(day, totalGreens, totalLosses);
 
   const neuralReading = {
     ...reading,
@@ -648,8 +665,8 @@ function applyNeuralScoreBaseline(
     erros: totalLosses,
     reds: totalLosses,
     assertividade: total > 0 ? Math.round((totalGreens / total) * 1000) / 10 : 0,
-    sequencePositive: totalGreens > 0 && totalLosses === 0 ? totalGreens : reading.sequencePositive ?? 0,
-    sequenceNegative: totalLosses > 0 && totalGreens === 0 ? totalLosses : reading.sequenceNegative ?? 0,
+    sequencePositive: liveSequence.sequencePositive,
+    sequenceNegative: liveSequence.sequenceNegative,
   };
   return {
     neuralReading,
@@ -727,6 +744,62 @@ function writeNeuralScoreBaseline(key: string, baseline: NeuralScoreBaseline) {
   window.localStorage.setItem(key, JSON.stringify(baseline));
 }
 
+function updateNeuralLiveSequence(day: string, greens: number, reds: number) {
+  const key = neuralSequenceStorageKey();
+  const previous = readNeuralLiveSequence(key);
+  const base =
+    previous && previous.day === day && previous.greens <= greens && previous.reds <= reds
+      ? previous
+      : {
+          day,
+          greens: 0,
+          reds: 0,
+          sequencePositive: 0,
+          sequenceNegative: 0,
+        };
+  const greenDelta = Math.max(0, greens - base.greens);
+  const redDelta = Math.max(0, reds - base.reds);
+  const next: NeuralLiveSequence = {
+    day,
+    greens,
+    reds,
+    sequencePositive: base.sequencePositive,
+    sequenceNegative: base.sequenceNegative,
+  };
+
+  if (greenDelta > 0) {
+    next.sequencePositive += greenDelta;
+    next.sequenceNegative = 0;
+  }
+  if (redDelta > 0) {
+    next.sequenceNegative += redDelta;
+    next.sequencePositive = 0;
+  }
+
+  writeNeuralLiveSequence(key, next);
+  return next;
+}
+
+function readNeuralLiveSequence(key: string): NeuralLiveSequence | null {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || "null") as Partial<NeuralLiveSequence> | null;
+    if (!parsed || typeof parsed.day !== "string") return null;
+    return {
+      day: parsed.day,
+      greens: safeCounter(parsed.greens),
+      reds: safeCounter(parsed.reds),
+      sequencePositive: safeCounter(parsed.sequencePositive),
+      sequenceNegative: safeCounter(parsed.sequenceNegative),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeNeuralLiveSequence(key: string, sequence: NeuralLiveSequence) {
+  window.localStorage.setItem(key, JSON.stringify(sequence));
+}
+
 function neuralScoreWentBackwards(current: Omit<NeuralScoreBaseline, "day">, baseline: NeuralScoreBaseline) {
   return (
     current.alertas < baseline.alertas ||
@@ -741,6 +814,11 @@ function neuralScoreWentBackwards(current: Omit<NeuralScoreBaseline, "day">, bas
 function neuralScoreBaselineStorageKey() {
   const email = readUserSession().email.trim().toLowerCase();
   return email ? `${NEURAL_SCORE_BASELINE_KEY}:${email}` : NEURAL_SCORE_BASELINE_KEY;
+}
+
+function neuralSequenceStorageKey() {
+  const email = readUserSession().email.trim().toLowerCase();
+  return email ? `${NEURAL_SEQUENCE_KEY}:${email}` : NEURAL_SEQUENCE_KEY;
 }
 
 function dashboardDayKey(data: DashboardData) {
