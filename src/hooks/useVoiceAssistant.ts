@@ -26,9 +26,11 @@ const VOICE_CHOICE_STORAGE_KEY = "sniper_voice_assistant_browser_voice";
 const VOICE_VOLUME_STORAGE_KEY = "sniper_voice_assistant_volume";
 const VOICE_RATE_STORAGE_KEY = "sniper_voice_assistant_rate";
 const VOICE_PITCH_STORAGE_KEY = "sniper_voice_assistant_pitch";
+const AI_READING_VOICE_KEY = "sniper_ai_reading_voice_enabled";
 const COMMON_COOLDOWN_MS = 8_000;
 const MAX_QUEUE_SIZE = 3;
 const VOICE_COORDINATION_EVENT = "sniper-voice-stop";
+const AI_READING_VOICE_CHANGE_EVENT = "sniper-ai-reading-voice-change";
 const VOICE_ASSISTANT_SOURCE = "voice-assistant";
 const DEFAULT_PROVIDER = normalizeVoiceProvider(
   (import.meta.env.VITE_VOICE_PROVIDER as string | undefined) || "edge-tts",
@@ -51,6 +53,7 @@ export function useVoiceAssistant(
   const [rate, setRate] = useState(1);
   const [pitch, setPitch] = useState(0.95);
   const [voiceError, setVoiceError] = useState("");
+  const [aiReadingVoiceEnabled, setAiReadingVoiceEnabled] = useState(false);
 
   const enabledRef = useRef(false);
   const lastNarrationAtRef = useRef(0);
@@ -81,7 +84,7 @@ export function useVoiceAssistant(
     if (resultEvents.length) return resultEvents;
     return buildVoiceEvents(data, style, adaptiveSnapshot);
   }, [adaptiveSnapshot, data, style]);
-  const canAutoNarrate = enabled && hasLiveBackendData && supported;
+  const canAutoNarrate = enabled && hasLiveBackendData && supported && !aiReadingVoiceEnabled;
 
   const syncQueueLength = useCallback(() => setQueueLength(queueRef.current.length), []);
 
@@ -326,7 +329,26 @@ export function useVoiceAssistant(
     setVolume(readStoredNumber(VOICE_VOLUME_STORAGE_KEY, 0.9, 0, 1));
     setRate(readStoredNumber(VOICE_RATE_STORAGE_KEY, 1, 0.7, 1.35));
     setPitch(readStoredNumber(VOICE_PITCH_STORAGE_KEY, 0.95, 0.6, 1.45));
+    setAiReadingVoiceEnabled(window.localStorage.getItem(AI_READING_VOICE_KEY) === "true");
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onAIReadingVoiceChange = (event: Event) => {
+      const enabledFromEvent = (event as CustomEvent<{ enabled?: boolean }>).detail?.enabled;
+      const nextEnabled = typeof enabledFromEvent === "boolean"
+        ? enabledFromEvent
+        : window.localStorage.getItem(AI_READING_VOICE_KEY) === "true";
+      setAiReadingVoiceEnabled(nextEnabled);
+      if (nextEnabled) {
+        queueRef.current = [];
+        syncQueueLength();
+        stopCurrentPlayback();
+      }
+    };
+    window.addEventListener(AI_READING_VOICE_CHANGE_EVENT, onAIReadingVoiceChange);
+    return () => window.removeEventListener(AI_READING_VOICE_CHANGE_EVENT, onAIReadingVoiceChange);
+  }, [stopCurrentPlayback, syncQueueLength]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

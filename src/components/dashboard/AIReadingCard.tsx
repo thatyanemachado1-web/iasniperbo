@@ -26,8 +26,8 @@ const DEFAULT_LOCAL_VOICE = "pt-BR-AntonioNeural";
 type AIReadingVoiceProvider = "browser" | "edge-tts" | "elevenlabs" | "piper";
 const AI_READING_VOICE_MAX_CHARS = 180;
 const AI_READING_RESULT_WINDOW_MS = 90_000;
-const MAIN_VOICE_ASSISTANT_KEY = "sniper_voice_assistant_enabled";
 const VOICE_COORDINATION_EVENT = "sniper-voice-stop";
+const AI_READING_VOICE_CHANGE_EVENT = "sniper-ai-reading-voice-change";
 const AI_READING_VOICE_SOURCE = "ai-reading";
 const VOICE_UNAVAILABLE_MESSAGE = "Voz da leitura IA indisponível no momento.";
 
@@ -275,6 +275,7 @@ export function AIReadingCard({ data, mode }: Props) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(AI_READING_VOICE_KEY, voiceEnabled ? "true" : "false");
+    window.dispatchEvent(new CustomEvent(AI_READING_VOICE_CHANGE_EVENT, { detail: { enabled: voiceEnabled } }));
     if (!voiceEnabled) stopVoice();
   }, [stopVoice, voiceEnabled]);
 
@@ -298,7 +299,6 @@ export function AIReadingCard({ data, mode }: Props) {
       !voiceEnabled ||
       !liveReady ||
       !voiceText ||
-      isMainVoiceAssistantEnabled() ||
       lastSpokenKeyRef.current === spokenKey
     ) {
       return;
@@ -460,11 +460,6 @@ function isRecentSignalResult(finishedAt?: string) {
   if (!Number.isFinite(time)) return false;
   const age = Date.now() - time;
   return age >= -5_000 && age <= AI_READING_RESULT_WINDOW_MS;
-}
-
-function isMainVoiceAssistantEnabled() {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(MAIN_VOICE_ASSISTANT_KEY) === "true";
 }
 
 function broadcastVoiceStop(source: string) {
