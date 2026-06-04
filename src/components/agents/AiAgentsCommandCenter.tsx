@@ -69,44 +69,44 @@ type Props = {
 const toneClasses: Record<AgentTone, { text: string; border: string; bg: string; glow: string; dot: string }> = {
   cyan: {
     text: "text-neon-cyan",
-    border: "border-neon-cyan/55",
-    bg: "bg-neon-cyan/15",
-    glow: "shadow-[0_0_34px_rgba(0,229,255,0.38)]",
+    border: "border-neon-cyan/42",
+    bg: "bg-neon-cyan/10",
+    glow: "shadow-[0_0_28px_-12px_rgba(0,229,255,0.32)]",
     dot: "bg-neon-cyan",
   },
   green: {
     text: "text-success",
-    border: "border-success/55",
-    bg: "bg-success/15",
-    glow: "shadow-[0_0_34px_rgba(0,255,153,0.34)]",
+    border: "border-success/42",
+    bg: "bg-success/10",
+    glow: "shadow-[0_0_28px_-12px_rgba(0,255,153,0.3)]",
     dot: "bg-success",
   },
   amber: {
     text: "text-warning",
-    border: "border-warning/55",
-    bg: "bg-warning/15",
-    glow: "shadow-[0_0_34px_rgba(255,193,7,0.34)]",
+    border: "border-warning/42",
+    bg: "bg-warning/10",
+    glow: "shadow-[0_0_28px_-12px_rgba(255,193,7,0.3)]",
     dot: "bg-warning",
   },
   purple: {
     text: "text-neon-purple",
-    border: "border-neon-purple/55",
-    bg: "bg-neon-purple/15",
-    glow: "shadow-[0_0_34px_rgba(168,85,247,0.34)]",
+    border: "border-neon-purple/42",
+    bg: "bg-neon-purple/10",
+    glow: "shadow-[0_0_28px_-12px_rgba(168,85,247,0.3)]",
     dot: "bg-neon-purple",
   },
   red: {
     text: "text-red-300",
-    border: "border-red-400/60",
-    bg: "bg-red-500/15",
-    glow: "shadow-[0_0_38px_rgba(239,68,68,0.38)]",
+    border: "border-red-400/48",
+    bg: "bg-red-500/10",
+    glow: "shadow-[0_0_30px_-12px_rgba(239,68,68,0.34)]",
     dot: "bg-red-400",
   },
   blue: {
     text: "text-neon-blue",
-    border: "border-neon-blue/55",
-    bg: "bg-neon-blue/15",
-    glow: "shadow-[0_0_34px_rgba(59,130,246,0.34)]",
+    border: "border-neon-blue/42",
+    bg: "bg-neon-blue/10",
+    glow: "shadow-[0_0_28px_-12px_rgba(59,130,246,0.3)]",
     dot: "bg-neon-blue",
   },
 };
@@ -146,8 +146,8 @@ function AiAgentsCommandCenterContent({ data, adaptiveSnapshot, liveReady }: Pro
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <GlassCard className="min-h-[640px] p-0 sm:min-h-[720px]">
-        <div className="relative min-h-[640px] overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.13),transparent_35%),linear-gradient(145deg,rgba(4,10,26,0.96),rgba(7,10,24,0.92))] sm:min-h-[720px]">
+      <GlassCard className="min-h-[640px] border-neon-cyan/15 p-0 sm:min-h-[720px]">
+        <div className="relative min-h-[640px] overflow-hidden rounded-2xl bg-[radial-gradient(circle_at_top,rgba(0,229,255,0.08),transparent_36%),linear-gradient(145deg,rgba(4,10,26,0.97),rgba(7,10,24,0.94))] sm:min-h-[720px]">
           <CommandGrid />
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 border-b border-neon-cyan/15 px-3 py-4 sm:px-5">
             <div className="min-w-0">
@@ -158,6 +158,10 @@ function AiAgentsCommandCenterContent({ data, adaptiveSnapshot, liveReady }: Pro
               <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
                 Módulos reais conectados ao cérebro central, sem alterar a lógica de entrada.
               </p>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-black uppercase tracking-[0.1em]">
+                <span className="rounded-full border border-neon-cyan/20 bg-neon-cyan/10 px-2 py-1 text-neon-cyan">Fonte: módulos reais</span>
+                <span className="rounded-full border border-border/45 bg-background/28 px-2 py-1 text-muted-foreground">Visual sem decisão própria</span>
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <AppBadge tone={liveReady ? "green" : "amber"} pulse={liveReady}>
@@ -179,7 +183,7 @@ function AiAgentsCommandCenterContent({ data, adaptiveSnapshot, liveReady }: Pro
           </div>
 
           <div className="relative z-10 grid gap-4 p-3 sm:p-5 lg:grid-cols-[1fr_240px]">
-            <div className="relative min-h-[560px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/20 p-3 sm:min-h-[600px] sm:p-0">
+            <div className="relative min-h-[560px] overflow-hidden rounded-2xl border border-neon-cyan/15 bg-black/15 p-3 sm:min-h-[600px] sm:p-0">
               <NeonLines agents={agents} sceneMode={scene.mode} animationsEnabled={animationsEnabled} />
               <OutcomeRail side={scene.entrySide} mode={scene.mode} animationsEnabled={animationsEnabled} />
 
@@ -261,9 +265,9 @@ function AgentsSafeFallback() {
 
 function CommandGrid() {
   return (
-    <div className="pointer-events-none absolute inset-0 opacity-35">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(0,229,255,0.07)_1px,transparent_1px),linear-gradient(90deg,rgba(0,229,255,0.07)_1px,transparent_1px)] bg-[size:42px_42px]" />
-      <div className="absolute inset-x-0 top-0 h-1/2 bg-[radial-gradient(circle,rgba(122,92,255,0.16),transparent_55%)]" />
+    <div className="pointer-events-none absolute inset-0 opacity-25">
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(0,229,255,0.055)_1px,transparent_1px),linear-gradient(90deg,rgba(0,229,255,0.055)_1px,transparent_1px)] bg-[size:42px_42px]" />
+      <div className="absolute inset-x-0 top-0 h-1/2 bg-[radial-gradient(circle,rgba(122,92,255,0.11),transparent_55%)]" />
     </div>
   );
 }
@@ -301,8 +305,8 @@ function NeonLines({
             key={agent.id}
             d={`M ${from.x} ${from.y} C ${from.x} ${(from.y + centerNode.y) / 2}, ${centerNode.x} ${(from.y + centerNode.y) / 2}, ${centerNode.x} ${centerNode.y}`}
             stroke={color}
-            strokeWidth={active ? 0.42 : 0.24}
-            strokeOpacity={active ? 0.78 : 0.28}
+            strokeWidth={active ? 0.34 : 0.2}
+            strokeOpacity={active ? 0.62 : 0.2}
             fill="none"
             filter="url(#agent-glow)"
             strokeDasharray="4 7"
@@ -315,7 +319,7 @@ function NeonLines({
         d={packetPath}
         stroke={packetColor}
         strokeWidth="0.18"
-        strokeOpacity="0.18"
+        strokeOpacity="0.14"
         fill="none"
         filter="url(#agent-glow)"
       />

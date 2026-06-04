@@ -77,11 +77,13 @@ export function ModuleMiniScoreboard({
       : { label: "Seq.", value: `-${sequenceNegative}`, variant: "red" },
   ];
   const allChips = [...chips, ...sequenceChips];
+  const dataState = scoreboardDataState(chips);
+  const sequenceState = moduleSequenceState(sequencePositive, sequenceNegative, sequenceExpired);
 
   return (
     <div
       className={cn(
-        "digital-result-card relative overflow-hidden rounded-xl border bg-secondary/20 px-2.5 py-2 backdrop-blur-xl",
+        "digital-result-card relative overflow-hidden rounded-xl border bg-secondary/20 px-2.5 py-2.5 backdrop-blur-xl",
         tone.border,
         tone.glow,
       )}
@@ -98,14 +100,21 @@ export function ModuleMiniScoreboard({
               <span className="size-1.5 rounded-full bg-current shadow-[0_0_10px_currentColor]" />
               <span>{title}</span>
             </div>
-            <ScoreboardDetailsModal
-              title={title}
-              assertiveness={assertiveness}
-              chips={allChips}
-              breakdown={breakdown}
-              description={tone.description}
-              color={tone.progress}
-            />
+            <div className="flex items-center gap-1.5">
+              <span className={cn("rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.1em]", dataState.className)}>
+                {dataState.label}
+              </span>
+              <ScoreboardDetailsModal
+                moduleType={moduleType}
+                title={title}
+                assertiveness={assertiveness}
+                chips={allChips}
+                breakdown={breakdown}
+                description={tone.description}
+                color={tone.progress}
+                dataStateLabel={dataState.label}
+              />
+            </div>
           </div>
 
           <div className="result-chip-scroll">
@@ -121,10 +130,44 @@ export function ModuleMiniScoreboard({
               {breakdown}
             </div>
           )}
+          <div className="mt-1 text-[9px] font-medium text-muted-foreground">
+            Desde o último reset do painel. Sem amostra suficiente, fica em coleta.
+          </div>
+          <div className={cn("mt-1 inline-flex max-w-full rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.08em]", sequenceState.className)}>
+            <span className="truncate">Sequência atual: {sequenceState.label}</span>
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+function moduleSequenceState(sequencePositive: number, sequenceNegative: number, sequenceExpired?: number) {
+  if (sequenceExpired !== undefined && sequenceExpired > 0) {
+    return {
+      label: `${sequenceExpired} expirado${sequenceExpired === 1 ? "" : "s"}`,
+      className: "border-tie/25 bg-tie/10 text-tie",
+    };
+  }
+
+  if (sequenceNegative > 0) {
+    return {
+      label: `${sequenceNegative} RED ${sequenceNegative === 1 ? "atual" : "seguidos"}`,
+      className: "border-destructive/30 bg-destructive/10 text-destructive",
+    };
+  }
+
+  if (sequencePositive > 0) {
+    return {
+      label: `${sequencePositive} GREEN ${sequencePositive === 1 ? "atual" : "seguidos"}`,
+      className: "border-success/30 bg-success/10 text-success",
+    };
+  }
+
+  return {
+    label: "coletando",
+    className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
+  };
 }
 
 function MiniCircularProgress({
@@ -232,20 +275,26 @@ function ScoreChip({ label, value, variant }: ScoreChipData) {
 }
 
 function ScoreboardDetailsModal({
+  moduleType,
   title,
   assertiveness,
   chips,
   breakdown,
   description,
   color,
+  dataStateLabel,
 }: {
+  moduleType: ModuleMiniScoreboardProps["moduleType"];
   title: string;
   assertiveness: number;
   chips: ScoreChipData[];
   breakdown?: string;
   description: string;
   color: string;
+  dataStateLabel: string;
 }) {
+  const toolInfo = moduleToolInfo(moduleType);
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -256,13 +305,21 @@ function ScoreboardDetailsModal({
       <DialogContent className="border-neon-cyan/20 bg-background/95 sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-sm uppercase tracking-[0.16em]">{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription>{description} Fonte: dados reais desde o último reset do painel.</DialogDescription>
         </DialogHeader>
+        <div className="space-y-2 rounded-xl border border-neon-cyan/15 bg-neon-cyan/5 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          <ToolInfoLine label="Para que serve" value={toolInfo.purpose} />
+          <ToolInfoLine label="Como funciona" value={toolInfo.how} />
+          <div className={cn("rounded-lg border px-2.5 py-2 font-black uppercase tracking-[0.08em]", toolInfo.entryClassName)}>
+            {toolInfo.entry}
+          </div>
+        </div>
         <div className="flex items-center gap-4">
           <MiniCircularProgress value={assertiveness} color={color} />
           <div>
             <div className="text-xs text-muted-foreground">Assertividade</div>
             <div className="text-3xl font-black text-neon-cyan">{formatPercent(assertiveness)}</div>
+            <div className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{dataStateLabel}</div>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -281,6 +338,84 @@ function ScoreboardDetailsModal({
       </DialogContent>
     </Dialog>
   );
+}
+
+function ToolInfoLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">{label}: </span>
+      {value}
+    </div>
+  );
+}
+
+function moduleToolInfo(moduleType: ModuleMiniScoreboardProps["moduleType"]) {
+  if (moduleType === "MAIN") {
+    return {
+      purpose: "mostra se a entrada oficial está pagando.",
+      how: "conta SG, G1 e RED reais do card principal.",
+      entry: "Entrada a seguir: a do card principal.",
+      entryClassName: "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
+    };
+  }
+
+  if (moduleType === "NEURAL") {
+    return {
+      purpose: "mostra se número pagante está puxando lado.",
+      how: "conta SG, G1 e RED reais da Neural.",
+      entry: "Entrada pela Neural: o lado mostrado no ? da Leitura Neural.",
+      entryClassName: "border-neon-purple/25 bg-neon-purple/10 text-neon-purple",
+    };
+  }
+
+  if (moduleType === "TIE") {
+    return {
+      purpose: "avisa quando existe pressão de empate.",
+      how: "conta Green se o Tie aparece dentro da validade.",
+      entry: "Entrada pelo Tie: só com alerta ativo e validade aberta.",
+      entryClassName: "border-tie/25 bg-tie/10 text-tie",
+    };
+  }
+
+  return {
+    purpose: "mostra quando a mesa está puxando tendência.",
+    how: "mede força do lado e risco de quebra.",
+    entry: "Entrada pelo Surf: seguir o lado do surf com risco controlado.",
+    entryClassName: "border-neon-blue/25 bg-neon-blue/10 text-neon-blue",
+  };
+}
+
+function scoreboardDataState(chips: ScoreChipData[]) {
+  const totalChip = chips.find((chip) => normalizeLabel(chip.label) === "total" || normalizeLabel(chip.label) === "alertas");
+  const totalValue = readChipNumber(totalChip?.value);
+  const hasUsefulValue = chips.some((chip) => {
+    const label = normalizeLabel(chip.label);
+    if (label === "emp" || label === "mesa") return false;
+    return readChipNumber(chip.value) > 0;
+  });
+
+  if ((totalChip && totalValue <= 0) || !hasUsefulValue) {
+    return {
+      label: "Coletando",
+      className: "border-warning/25 bg-warning/10 text-warning",
+    };
+  }
+
+  return {
+    label: "Dados reais",
+    className: "border-success/25 bg-success/10 text-success",
+  };
+}
+
+function normalizeLabel(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function readChipNumber(value: string | number | undefined) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (!value) return 0;
+  const parsed = Number(String(value).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
 }
 
 function chipClass(variant: ScoreChipVariant) {

@@ -34,11 +34,11 @@ export function SurfAlertCard({
 
   return (
     <GlassCard className={cn("min-h-[220px]", borderTone, !enabled && "border-muted-foreground/20")}>
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/70 to-transparent" />
-      <div className="absolute -right-10 -top-10 size-32 rounded-full bg-neon-cyan/10 blur-2xl" />
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/35 to-transparent" />
+      <div className="absolute -right-10 -top-10 size-32 rounded-full bg-neon-cyan/5 blur-2xl" />
       <SectionTitle
         title="Surf Analyzer"
-        subtitle="Leitura paralela da fase da mesa."
+        subtitle="Fase da mesa, força e risco contrário."
         right={
           <div className="flex shrink-0 items-center gap-1.5">
             <AppBadge tone={strengthBand.tone} pulse={enabled && alert.surf_alert}>
@@ -55,14 +55,14 @@ export function SurfAlertCard({
 
       <div className={cn("transition duration-200", !enabled && "opacity-45 saturate-50")}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr]">
-          <div className="flex size-12 items-center justify-center rounded-xl border-neon-cyan/40 glass-strong glow-blue">
+          <div className="flex size-12 items-center justify-center rounded-xl border border-neon-cyan/25 bg-background/35">
             <Waves className="size-6 text-neon-cyan" />
           </div>
 
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <AppBadge tone={dominantSide === "BANKER" ? "red" : dominantSide === "PLAYER" ? "blue" : "muted"}>
-                {dominantSide === "NONE" ? "SEM LADO" : `RESPEITA ${dominantSide}`}
+                {dominantSide === "NONE" ? "SEM LADO" : `LADO ${dominantSide}`}
               </AppBadge>
               <AppBadge tone={strengthBand.tone}>{strengthBand.label}</AppBadge>
               <AppBadge tone={riskBand.tone}>QUEBRA {riskBand.label}</AppBadge>
@@ -77,7 +77,7 @@ export function SurfAlertCard({
           </div>
         </div>
 
-        <div className="mt-3 rounded-xl bg-secondary/35 p-3 text-xs">
+        <div className="mt-3 rounded-xl border border-neon-cyan/12 bg-background/28 p-3 text-xs">
           <div className="flex items-start gap-2">
             <Target className="mt-0.5 size-3.5 text-neon-cyan" />
             <div>
@@ -87,7 +87,7 @@ export function SurfAlertCard({
           </div>
         </div>
 
-        <div className="mt-2 rounded-xl bg-secondary/30 p-3 text-xs">
+        <div className="mt-2 rounded-xl border border-warning/12 bg-background/24 p-3 text-xs">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 size-3.5 text-warning" />
             <div>
@@ -105,7 +105,8 @@ export function SurfAlertCard({
         </div>
 
         <div className="mt-3 text-[11px] text-muted-foreground">
-          Aviso paralelo: não bloqueia e não substitui Banker/Player.
+          <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">Como usar: </span>
+          mostra tendência. Só seguir o lado do Surf quando o risco de quebra estiver controlado.
         </div>
       </div>
 
@@ -147,7 +148,7 @@ function Metric({
   }[tone];
 
   return (
-    <div className="rounded-lg bg-secondary/40 p-2">
+    <div className="rounded-xl border border-white/5 bg-secondary/30 p-2">
       <div className="flex items-center gap-1 text-muted-foreground">
         {icon}
         <span>{label}</span>
@@ -159,7 +160,7 @@ function Metric({
 
 function Panel({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border/70 bg-background/25 p-2">
+    <div className="rounded-xl border border-border/60 bg-background/22 p-2">
       <div className="font-semibold text-neon-cyan">{label}</div>
       <div className="mt-1 text-muted-foreground">{value}</div>
     </div>

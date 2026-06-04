@@ -12,6 +12,8 @@ export function SignalCard({
   signal,
   neuralReading,
   neuralScoreboard,
+  mainSequencePositive = 0,
+  mainSequenceNegative = 0,
   surfSummary,
   tieAlert,
   operationalMessage,
@@ -22,6 +24,8 @@ export function SignalCard({
   signal: MainSignal;
   neuralReading?: NeuralReading;
   neuralScoreboard?: NeuralScoreboard;
+  mainSequencePositive?: number;
+  mainSequenceNegative?: number;
   surfSummary?: SurfEntrySummary;
   tieAlert?: TieAlert;
   operationalMessage?: string;
@@ -83,6 +87,7 @@ export function SignalCard({
   const neuralTotals = neuralResultTotals(neuralReading);
   const neuralGreenCount = neuralTotals.greens;
   const neuralRedCount = neuralTotals.reds;
+  const mainSequence = buildMotorSequence(mainSequencePositive, mainSequenceNegative, "Motor principal");
   const StatusIcon = status.Icon;
   const tieRisk = !isResultStatus && tieAlert ? tieRiskBadge(tieAlert) : null;
   const riskTone =
@@ -140,15 +145,15 @@ export function SignalCard({
   return (
     <GlassCard
       className={cn(
-        priority ? "min-h-[260px] border-neon-cyan/40" : "min-h-[180px]",
+        priority ? "min-h-[260px] border-neon-cyan/30" : "min-h-[180px]",
         mainGreenFlash && "result-green-flash",
       )}
     >
       <div
-        className={`absolute inset-x-0 top-0 h-24 bg-gradient-to-b ${beamColor} to-transparent opacity-45`}
+        className={`absolute inset-x-0 top-0 h-24 bg-gradient-to-b ${beamColor} to-transparent opacity-28`}
       />
-      <div className="absolute inset-0 scan-grid opacity-10" />
-      <div className="absolute -left-12 -top-16 size-44 rounded-full bg-neon-blue/10 blur-3xl" />
+      <div className="absolute inset-0 scan-grid opacity-[0.045]" />
+      <div className="absolute -left-12 -top-16 size-44 rounded-full bg-neon-blue/5 blur-3xl" />
       <SectionTitle
         title={
           isResultStatus
@@ -165,7 +170,7 @@ export function SignalCard({
           </AppBadge>
         }
       />
-      <div className="relative grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
+      <div className="relative grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-4">
         <div className="min-w-0 pt-0.5">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-neon-cyan/25 bg-background/35 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan">
             <Zap className="size-3" />
@@ -186,29 +191,40 @@ export function SignalCard({
             )}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">{sideCaption}</div>
+          <div
+            className={cn(
+              "mt-2 inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.1em]",
+              mainSequence.className,
+            )}
+            title={mainSequence.title}
+          >
+            <span className="truncate">{mainSequence.label}</span>
+          </div>
           {operationalMessage && (
-            <div className="mt-2 max-w-[42rem] text-xs leading-relaxed text-foreground/85">
+            <div className="mt-2 max-w-[42rem] rounded-xl border border-white/5 bg-background/28 px-3 py-2 text-xs leading-relaxed text-foreground/85">
               {operationalMessage}
             </div>
           )}
         </div>
-        <LeituraNeuralMiniCard
-          {...(neuralReading ?? { mode: "SCANNING" })}
-          generalScoreboard={neuralScoreboard}
-          greenFlash={neuralGreenFlash}
-        />
+        <div className="justify-self-stretch lg:justify-self-end">
+          <LeituraNeuralMiniCard
+            {...(neuralReading ?? { mode: "SCANNING" })}
+            neuralScoreboard={neuralScoreboard}
+            greenFlash={neuralGreenFlash}
+          />
+        </div>
       </div>
-      <div className="relative mt-4 grid grid-cols-3 gap-2 text-xs">
-        <div className="rounded-lg bg-secondary/40 p-2">
+      <div className="relative mt-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+        <div className="rounded-xl border border-white/5 bg-secondary/32 p-2.5">
           <div className="text-muted-foreground">Proteção</div>
           <div className="font-semibold text-foreground">{visibleProtection}</div>
         </div>
-        <div className="rounded-lg bg-secondary/40 p-2">
-          <div className="text-muted-foreground">Força</div>
+        <div className="rounded-xl border border-white/5 bg-secondary/32 p-2.5">
+          <div className="text-muted-foreground">Confiança</div>
           <div className="font-semibold text-neon-cyan">{visibleStrength}%</div>
         </div>
-        <div className="rounded-lg bg-secondary/40 p-2">
-          <div className="text-muted-foreground">Status</div>
+        <div className="rounded-xl border border-white/5 bg-secondary/32 p-2.5">
+          <div className="text-muted-foreground">Estado</div>
           <div className={`font-semibold ${status.valueClass}`}>{status.value}</div>
         </div>
       </div>
@@ -249,6 +265,38 @@ export function SignalCard({
       )}
     </GlassCard>
   );
+}
+
+function buildMotorSequence(positive: number | null | undefined, negative: number | null | undefined, label: string) {
+  const greens = safeSequenceNumber(positive);
+  const reds = safeSequenceNumber(negative);
+
+  if (reds > 0) {
+    return {
+      label: `${label}: ${reds} RED ${reds === 1 ? "atual" : "seguidos"}`,
+      title: "Sequência atual desse motor depois da última quebra.",
+      className: "border-destructive/30 bg-destructive/10 text-destructive",
+    };
+  }
+
+  if (greens > 0) {
+    return {
+      label: `${label}: ${greens} GREEN ${greens === 1 ? "atual" : "seguidos"}`,
+      title: "Sequência atual de greens desse motor.",
+      className: "border-success/30 bg-success/10 text-success",
+    };
+  }
+
+  return {
+    label: `${label}: sem sequência ainda`,
+    title: "Aguardando o primeiro resultado real desse motor.",
+    className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
+  };
+}
+
+function safeSequenceNumber(value: number | null | undefined) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
 }
 
 function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRounds = 4) {

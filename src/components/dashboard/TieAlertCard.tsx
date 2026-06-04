@@ -24,10 +24,10 @@ export function TieAlertCard({
   return (
     <GlassCard className={cn("digital-risk-card border-warning/20 p-3 sm:p-3", !enabled && "border-muted-foreground/20")}>
       <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warning/30 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warning/22 to-transparent" />
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
-          Tie Alert estatístico
+          Tie Alert
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <AppBadge tone="amber" pulse={enabled}>Pressão Tie</AppBadge>
@@ -47,28 +47,32 @@ export function TieAlertCard({
             </div>
             <div>
               <div className="text-xl font-extrabold text-neon-purple">Nível {alert.level}</div>
-              <div className="text-[11px] text-muted-foreground">Não substitui Banker/Player</div>
+              <div className="text-[11px] text-muted-foreground">Alerta paralelo, não substitui entrada.</div>
             </div>
           </div>
-          <div className="rounded-lg border border-warning/10 bg-secondary/20 p-2 text-[11px] leading-relaxed text-foreground/85">
+          <div className="rounded-xl border border-warning/10 bg-background/25 p-2.5 text-[11px] leading-relaxed text-foreground/85">
             {message}
           </div>
         </div>
-        <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
-          <div className="rounded-lg border border-white/5 bg-secondary/20 px-2 py-1.5">
+        <div className="mt-2 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-3">
+          <div className="rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5">
             <div className="text-muted-foreground">Confiança</div>
             <div className="font-semibold text-neon-purple">{alert.confidence}%</div>
           </div>
-          <div className="rounded-lg border border-white/5 bg-secondary/20 px-2 py-1.5">
+          <div className="rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5">
             <div className="text-muted-foreground">Validade</div>
             <div className="font-semibold">{alert.validityRounds} rodadas</div>
           </div>
-          <div className="rounded-lg border border-white/5 bg-secondary/20 px-2 py-1.5">
+          <div className="rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5">
             <div className="text-muted-foreground">Status</div>
             <div className={`font-semibold ${alert.status === "expired" ? "text-neon-purple" : "text-success"}`}>
               {tieStatusLabel(alert.status)}
             </div>
           </div>
+        </div>
+        <div className="mt-2 rounded-xl border border-warning/12 bg-background/24 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+          <span className="font-black uppercase tracking-[0.1em] text-warning">Como usar: </span>
+          avisa pressão de empate. Só pensar em Tie com alerta ativo e validade aberta.
         </div>
       </div>
 

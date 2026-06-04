@@ -56,6 +56,7 @@ export function LeituraNeuralMiniCard({
   const red = optionalNumberFrom(data.reds ?? data.erros);
   const sequencePositive = numberFrom(data.sequencePositive);
   const sequenceNegative = numberFrom(data.sequenceNegative);
+  const sequenceCopy = neuralSequenceCopy(sequencePositive, sequenceNegative);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
   const resolvedTotal = numberFrom(totalGreens) + numberFrom(red);
   const showPayingStats = hasNumber || totalGreens !== null || accuracy !== null || totalAlerts !== null;
@@ -67,12 +68,13 @@ export function LeituraNeuralMiniCard({
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
+  const generalScoreState = neuralScoreState(generalScore);
 
   return (
     <aside
       className={cn(
-        "neural-mini-card relative z-10 w-[140px] shrink-0 overflow-visible rounded-xl border border-neon-cyan/35 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_28px_-14px_var(--neon-cyan)] backdrop-blur-xl sm:w-[170px] lg:w-[180px]",
-        mode === "ACTIVE" && "border-neon-purple/45 shadow-[0_0_32px_-14px_var(--neon-purple)]",
+        "neural-mini-card relative z-10 w-full shrink-0 overflow-visible rounded-xl border border-neon-cyan/25 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_24px_-18px_var(--neon-cyan)] backdrop-blur-xl sm:w-[170px] lg:w-[180px]",
+        mode === "ACTIVE" && "border-neon-purple/35 shadow-[0_0_28px_-18px_var(--neon-purple)]",
         greenFlash && "result-green-flash",
         className,
       )}
@@ -84,8 +86,10 @@ export function LeituraNeuralMiniCard({
       <div className="absolute -bottom-6 -left-5 size-16 rounded-full bg-neon-cyan/15 blur-2xl" />
       <NeuralGeneralScorePopover
         score={generalScore}
+        scoreState={generalScoreState}
         statusKind={statusKind}
         statusLabel={statusLabel(data)}
+        reading={data}
       />
       <span className="absolute inset-x-0 top-0 h-px neural-mini-shimmer" />
 
@@ -107,8 +111,14 @@ export function LeituraNeuralMiniCard({
             IA procurando números pagantes...
           </div>
           <TypingDots />
-          <div className="mt-1.5 text-[8px] leading-tight text-muted-foreground">
-            Leitura complementar da IA
+          <div
+            className={cn(
+              "mt-1.5 inline-flex max-w-full rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em]",
+              sequenceCopy.className,
+            )}
+            title={sequenceCopy.title}
+          >
+            <span className="truncate">{sequenceCopy.label}</span>
           </div>
         </div>
       ) : (
@@ -169,18 +179,11 @@ export function LeituraNeuralMiniCard({
               <div
                 className={cn(
                   "mt-1 truncate rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em]",
-                  sequenceNegative > 0
-                    ? "border-destructive/35 bg-destructive/10 text-destructive"
-                    : sequencePositive > 0
-                      ? "border-success/35 bg-success/10 text-success"
-                      : "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
+                  sequenceCopy.className,
                 )}
+                title={sequenceCopy.title}
               >
-                {sequenceNegative > 0
-                  ? `${sequenceNegative} RED`
-                  : sequencePositive > 0
-                    ? `${sequencePositive} GREEN`
-                    : "0 GREEN"}
+                {sequenceCopy.label}
               </div>
               {data.paganteWindow ? (
                 <div className="truncate text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -213,15 +216,45 @@ export function LeituraNeuralMiniCard({
   );
 }
 
+function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) {
+  if (sequenceNegative > 0) {
+    return {
+      label: `Neural: ${sequenceNegative} RED ${sequenceNegative === 1 ? "atual" : "seguidos"}`,
+      title: "Sequência atual de reds da Leitura Neural.",
+      className: "border-destructive/35 bg-destructive/10 text-destructive",
+    };
+  }
+
+  if (sequencePositive > 0) {
+    return {
+      label: `Neural: ${sequencePositive} GREEN ${sequencePositive === 1 ? "atual" : "seguidos"}`,
+      title: "Sequência atual de greens da Leitura Neural.",
+      className: "border-success/35 bg-success/10 text-success",
+    };
+  }
+
+  return {
+    label: "Neural: coletando sequência",
+    title: "Aguardando resultado real da Leitura Neural.",
+    className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
+  };
+}
+
 function NeuralGeneralScorePopover({
   score,
+  scoreState,
   statusKind,
   statusLabel,
+  reading,
 }: {
   score: NeuralScoreSummary;
+  scoreState: ReturnType<typeof neuralScoreState>;
   statusKind: "green" | "amber" | "red" | "muted";
   statusLabel: string;
+  reading: NeuralReading;
 }) {
+  const insight = neuralToolInsight(reading);
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -246,7 +279,7 @@ function NeuralGeneralScorePopover({
       <PopoverContent
         side="left"
         align="start"
-        className="w-[236px] rounded-xl border-neon-purple/25 bg-background/95 p-3 shadow-[0_0_30px_-18px_var(--neon-purple)]"
+        className="w-[268px] rounded-xl border-neon-purple/25 bg-background/95 p-3 shadow-[0_0_30px_-18px_var(--neon-purple)]"
       >
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-3">
@@ -256,6 +289,9 @@ function NeuralGeneralScorePopover({
               </div>
               <div className="mt-0.5 text-[10px] font-semibold text-muted-foreground">
                 {statusLabel}
+              </div>
+              <div className={cn("mt-1 inline-flex rounded-full border px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.1em]", scoreState.className)}>
+                {scoreState.label}
               </div>
             </div>
             <div className={cn("rounded-full border px-2 py-0.5 text-[9px] font-black", statusPillClass(statusKind))}>
@@ -271,10 +307,74 @@ function NeuralGeneralScorePopover({
             <ScoreBox label="Alertas" value={score.totalAlerts} tone="neutral" />
             <ScoreBox label="Total" value={score.total} tone="neutral" />
           </div>
+          <div className="space-y-2 rounded-lg border border-neon-cyan/15 bg-neon-cyan/5 px-2 py-2 text-[10px] leading-relaxed text-muted-foreground">
+            <div>
+              <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">Para que serve: </span>
+              mostra se o número pagante está puxando Banker, Player ou Tie.
+            </div>
+            <div>
+              <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">Como funciona: </span>
+              conta SG, G1 e RED reais da Neural. Não é entrada oficial sozinha.
+            </div>
+            <div className={cn("rounded-md border px-2 py-1.5 font-black uppercase tracking-[0.08em]", insight.className)}>
+              {insight.text}
+            </div>
+          </div>
         </div>
       </PopoverContent>
     </Popover>
   );
+}
+
+function neuralToolInsight(reading: NeuralReading) {
+  const side = reading.direcao ?? reading.origem;
+  const validity = reading.validade ?? "G1";
+  const hasNumber = typeof reading.numero === "number" && Boolean(reading.origem);
+  const originKind = neuralOriginKind(reading);
+  const trigger =
+    hasNumber && reading.origem === "TIE"
+      ? `${reading.numero}x${reading.numero} Tie`
+      : hasNumber
+        ? `${reading.numero} ${sideLabel(reading.origem)}`
+        : "";
+
+  if (!hasNumber || !side) {
+    return {
+      text: "Pela Neural agora: observar. Sem número pagante ativo.",
+      className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
+    };
+  }
+
+  const prefix =
+    originKind === "OPOSTO"
+      ? `${trigger} em gatilho oposto.`
+      : reading.postTie
+        ? `${trigger} pós-empate.`
+        : `${trigger} pagante.`;
+
+  return {
+    text: `${prefix} Pela Neural agora: ${sideLabel(side)} até ${validity}.`,
+    className:
+      side === "BANKER"
+        ? "border-banker/35 bg-banker/10 text-banker"
+        : side === "PLAYER"
+          ? "border-player/35 bg-player/10 text-player"
+          : "border-tie/35 bg-tie/10 text-tie",
+  };
+}
+
+function neuralScoreState(score: NeuralScoreSummary) {
+  const hasData = numberFrom(score.totalAlerts) > 0 || score.total > 0;
+  if (!hasData) {
+    return {
+      label: "Coletando",
+      className: "border-warning/25 bg-warning/10 text-warning",
+    };
+  }
+  return {
+    label: "Dados reais",
+    className: "border-success/25 bg-success/10 text-success",
+  };
 }
 
 function ScoreBox({

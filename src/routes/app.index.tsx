@@ -125,13 +125,15 @@ function DashboardPage() {
         <div className="contents xl:block xl:space-y-4 xl:rounded-2xl xl:border xl:border-neon-cyan/10 xl:bg-background/10 xl:p-2">
           <PremiumFeature
             title="Entrada principal VIP"
-            description="A entrada confirmada completa so aparece para clientes liberados."
+            description="A entrada confirmada completa só aparece para clientes liberados."
             className="order-1"
           >
             <SignalCard
               signal={d.currentSignal}
               neuralReading={d.neuralReading}
               neuralScoreboard={d.neuralScoreboard}
+              mainSequencePositive={mainResult.sequencePositive}
+              mainSequenceNegative={mainResult.sequenceNegative}
               surfSummary={surfSummary}
               tieAlert={tieAlertEnabled ? d.currentTieAlert : undefined}
               operationalMessage={buildSignalCopy(d)}
@@ -142,7 +144,7 @@ function DashboardPage() {
 
           <PremiumFeature
             title="Tie Alert VIP"
-            description="Alerta de pressao e risco de empate fica completo apenas no acesso liberado."
+            description="Alerta de pressão e risco de empate fica completo apenas no acesso liberado."
             className="order-2"
           >
             <TieAlertCard
@@ -169,8 +171,8 @@ function DashboardPage() {
 
         <div className="contents xl:block xl:space-y-4 xl:rounded-2xl xl:border xl:border-neon-purple/10 xl:bg-background/10 xl:p-2">
           <PremiumFeature
-            title="Decisao da engine VIP"
-            description="A decisao tecnica fica completa apenas no acesso liberado."
+            title="Decisão da engine VIP"
+            description="A decisão técnica fica completa apenas no acesso liberado."
             className="order-3"
           >
             <EngineDecisionCard decision={d.engineDecision} data={d} />
@@ -178,7 +180,7 @@ function DashboardPage() {
 
           <PremiumFeature
             title="Leitura IA das entradas"
-            description="Analise automatica das entradas liberada no acesso Premium."
+            description="Análise automática das entradas liberada no acesso Premium."
             className="order-3"
           >
             <AIReadingCard data={d} mode={mode} />
@@ -193,7 +195,7 @@ function DashboardPage() {
 
           <PremiumFeature
             title="Placares VIP"
-            description="Os resultados completos ficam liberados apos aprovacao do ADM."
+            description="Os resultados completos ficam liberados após aprovação do ADM."
             className="digital-score-rail order-4 space-y-3"
           >
             <ModuleMiniScoreboard
@@ -271,7 +273,7 @@ function DashboardPage() {
           <RoundHistoryAuditCard history={roundHistory} onReset={resetHistory} />
 
           <PremiumFeature
-            title="Analise estatistica VIP"
+            title="Análise estatística VIP"
             description="O demo mostra a estrutura, mas bloqueia a leitura completa."
           >
             <GlassCard>

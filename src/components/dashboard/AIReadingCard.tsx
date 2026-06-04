@@ -242,14 +242,14 @@ export function AIReadingCard({ data, mode }: Props) {
   useEffect(() => stopVoice, [stopVoice]);
 
   return (
-    <GlassCard className="relative space-y-3 overflow-hidden">
+    <GlassCard className="relative space-y-3 overflow-hidden border-neon-purple/20">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <BrainAI size={28} speaking={isFetching} />
           <div>
             <div className="text-sm font-bold">Leitura IA das entradas</div>
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-              Copiloto ao vivo
+              Analista ao vivo
             </div>
           </div>
         </div>
@@ -258,16 +258,16 @@ export function AIReadingCard({ data, mode }: Props) {
         </AppBadge>
       </div>
 
-      <div className="min-h-[4.5rem] rounded-xl border border-neon-purple/20 bg-background/30 px-3 py-2.5 text-sm leading-relaxed text-foreground">
+      <div className="min-h-[4.5rem] rounded-xl border border-neon-purple/15 bg-background/30 px-3 py-2.5 text-sm leading-relaxed text-foreground">
         {liveReady
           ? (reading?.text ?? "Aguardando primeira leitura da IA...")
-          : "A leitura automatica inicia quando os dados ao vivo estiverem conectados."}
+          : "A leitura automática inicia quando os dados ao vivo estiverem conectados."}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           <Sparkles className="mr-1 inline size-3 text-neon-purple" />
-          Atualiza a cada ~20s ou quando a mesa muda de estado. Não prometer ganho.
+          Usa apenas os dados reais enviados pelos módulos. Não decide entrada sozinha.
         </p>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <button
