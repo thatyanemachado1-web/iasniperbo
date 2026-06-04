@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { Component, useMemo, useState, type CSSProperties, type ErrorInfo, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import {
   AudioLines,
@@ -130,6 +130,14 @@ const agentNodes: Record<AgentId, { x: number; y: number; left: string; top: str
 };
 
 export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Props) {
+  return (
+    <AgentsRuntimeBoundary>
+      <AiAgentsCommandCenterContent data={data} adaptiveSnapshot={adaptiveSnapshot} liveReady={liveReady} />
+    </AgentsRuntimeBoundary>
+  );
+}
+
+function AiAgentsCommandCenterContent({ data, adaptiveSnapshot, liveReady }: Props) {
   const [selectedId, setSelectedId] = useState<AgentId>("neural");
   const [animationsEnabled, setAnimationsEnabled] = useState(true);
   const scene = useMemo(() => buildScene(data, adaptiveSnapshot, liveReady), [adaptiveSnapshot, data, liveReady]);
@@ -216,6 +224,38 @@ export function AiAgentsCommandCenter({ data, adaptiveSnapshot, liveReady }: Pro
 
       <AgentInspector agent={selectedAgent} scene={scene} />
     </div>
+  );
+}
+
+class AgentsRuntimeBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error("Central Neural de Agentes falhou em modo visual.", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) return <AgentsSafeFallback />;
+    return this.props.children;
+  }
+}
+
+function AgentsSafeFallback() {
+  return (
+    <GlassCard className="border-neon-cyan/25">
+      <SectionTitle
+        title="Central Neural de Agentes"
+        subtitle="Modo seguro ativado. A leitura principal continua funcionando."
+        right={<AppBadge tone="amber">Visual em recuperação</AppBadge>}
+      />
+      <div className="mt-4 rounded-2xl border border-neon-cyan/20 bg-background/35 p-4 text-sm text-muted-foreground">
+        A central visual recebeu dados incompletos e foi protegida para não derrubar a página. Os sinais e módulos internos não foram alterados.
+      </div>
+    </GlassCard>
   );
 }
 
@@ -530,13 +570,22 @@ function InspectorStat({
 }
 
 function buildScene(data: DashboardData, adaptiveSnapshot: AdaptiveStrategySnapshot, liveReady: boolean) {
-  const signal = data.currentSignal;
+  const signal = data.currentSignal ?? {
+    id: "safe-waiting",
+    side: "NONE",
+    status: "waiting",
+    protection: "",
+    strength: 0,
+    lastResult: null,
+  };
+  const patterns = safePatterns(adaptiveSnapshot);
+  const entryScore = safeEntryScore(adaptiveSnapshot);
   const signalSide = signal.side === "BANKER" || signal.side === "PLAYER" || signal.side === "TIE" ? signal.side : null;
   const lastResult = signal.lastResult?.status ?? "";
   const highRisk = isHighRisk(data, adaptiveSnapshot);
   const patternForming =
-    adaptiveSnapshot.patterns.some((pattern) => pattern.status === "quente" || pattern.status === "observacao") ||
-    adaptiveSnapshot.entryScore.finalScore >= 50;
+    patterns.some((pattern) => pattern.status === "quente" || pattern.status === "observacao") ||
+    entryScore.finalScore >= 50;
   const entryActive = Boolean(signalSide && (signal.status === "pending" || signal.status === "g1" || signal.status === "tie_watch"));
 
   if (!liveReady) {
@@ -584,7 +633,7 @@ function buildScene(data: DashboardData, adaptiveSnapshot: AdaptiveStrategySnaps
       label: "Risco alto",
       badgeTone: "red" as const,
       message: "Entrada bloqueada por risco",
-      detail: data.engineDecision.reason || "Risk Shield detectou pressão elevada no mercado.",
+      detail: data.engineDecision?.reason || "Risk Shield detectou pressão elevada no mercado.",
       entrySide: null,
       voiceActive: true,
       voiceText: "Cuidado. Mercado pesado. Melhor não forçar entrada agora.",
@@ -611,7 +660,7 @@ function buildScene(data: DashboardData, adaptiveSnapshot: AdaptiveStrategySnaps
       badgeTone: "purple" as const,
       message: "Padrão em formação",
       detail: "Banco de Estratégias e módulos de leitura estão validando a amostra real.",
-      entrySide: adaptiveSnapshot.entryScore.side,
+      entrySide: entryScore.side,
       voiceActive: true,
       voiceText: "Padrão começando a formar. A IA espera confirmação limpa antes de liberar entrada.",
     };
@@ -630,26 +679,53 @@ function buildScene(data: DashboardData, adaptiveSnapshot: AdaptiveStrategySnaps
 }
 
 function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, scene: ReturnType<typeof buildScene>): AgentInfo[] {
+  const rounds = safeRounds(data.rounds);
+  const patterns = safePatterns(snapshot);
+  const entryScore = safeEntryScore(snapshot);
+  const decisionLogs = safeDecisionLogs(snapshot);
+  const tieAlert = data.currentTieAlert ?? {
+    id: "safe-tie",
+    level: "Baixo",
+    confidence: 0,
+    validityRounds: 0,
+    status: "expired",
+  };
+  const engineDecision = data.engineDecision ?? { state: "AGUARDAR", reason: "", confidence: 0 };
+  const tieScore = data.tieAlertScoreboard ?? { greenTieAlerts: 0, expired: 0, totalAlerts: 0, assertiveness: 0 };
+  const surfScore = data.surfAnalyzerScoreboard ?? {
+    totalAlerts: 0,
+    hits: 0,
+    fails: 0,
+    expired: 0,
+    bankerHits: 0,
+    playerHits: 0,
+    assertiveness: 0,
+    maxBankerSurfHit: 0,
+    maxPlayerSurfHit: 0,
+    maxBreakDetected: 0,
+    maxRetakeDetected: 0,
+    currentHitStreak: 0,
+  };
   const neural = data.neuralReading;
   const neuralActive = Boolean(neural && neural.mode === "ACTIVE" && typeof neural.numero === "number");
   const surf = data.currentSurfAlert;
   const surfRisk = surf?.surf_break_risk ?? surf?.surf_risk ?? null;
   const surfActive = Boolean(surf?.surf_alert || surf?.surf_phase === "SURF_FORTE" || surf?.surf_phase === "SURF_EXTREMO");
-  const tieActive = data.currentTieAlert.status === "active";
-  const trend = buildTrendSnapshot(data.rounds);
-  const alternation = buildAlternationSnapshot(data.rounds);
-  const doubles = buildDoublesSnapshot(data.rounds);
-  const multiWindow = buildMultiWindowSnapshot(data.rounds);
-  const streak = calculateRoundStreak(data.rounds);
+  const tieActive = tieAlert.status === "active";
+  const trend = buildTrendSnapshot(rounds);
+  const alternation = buildAlternationSnapshot(rounds);
+  const doubles = buildDoublesSnapshot(rounds);
+  const multiWindow = buildMultiWindowSnapshot(rounds);
+  const streak = calculateRoundStreak(rounds);
   const topPattern =
-    snapshot.patterns.find((pattern) => pattern.status === "quente") ??
-    snapshot.patterns.find((pattern) => pattern.status === "observacao") ??
-    snapshot.patterns[0];
+    patterns.find((pattern) => pattern.status === "quente") ??
+    patterns.find((pattern) => pattern.status === "observacao") ??
+    patterns[0];
   const strategyActive = Boolean(topPattern && (topPattern.status === "quente" || topPattern.status === "observacao"));
   const riskLevel = computeRiskValue(data, snapshot);
   const marketTurnActive =
-    data.engineDecision.state === "ATENCAO" ||
-    data.engineDecision.state === "BLOQUEADO" ||
+    engineDecision.state === "ATENCAO" ||
+    engineDecision.state === "BLOQUEADO" ||
     ["QUEBRA_SURF", "CORRECAO", "VIRADA_OUTRO_LADO", "RISCO_QUEBRA"].includes(surf?.surf_phase ?? "");
   const exhaustionActive =
     scene.mode === "risk" ||
@@ -657,7 +733,7 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
     Boolean(neural?.isSaturated) ||
     surf?.surf_phase === "EXAUSTAO" ||
     streak.count >= 6;
-  const learningActive = snapshot.patternsFound > 0 || snapshot.recordsStored > 0;
+  const learningActive = safeNumber(snapshot.patternsFound) > 0 || safeNumber(snapshot.recordsStored) > 0;
   const neuralMapActive = neuralActive || surfActive || tieActive || strategyActive || marketTurnActive;
   const voiceActive = scene.voiceActive;
   const activeCount = [
@@ -715,8 +791,8 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
         surf?.surf_prediction_side ? `Predição: ${sideLabel(surf.surf_prediction_side)}` : "",
         surf?.reason,
       ]),
-      greens: numberOrNull(data.surfAnalyzerScoreboard?.hits),
-      reds: numberOrNull(data.surfAnalyzerScoreboard?.reds ?? data.surfAnalyzerScoreboard?.fails),
+      greens: numberOrNull(surfScore.hits),
+      reds: numberOrNull(surfScore.reds ?? surfScore.fails),
       active: surfActive,
       pulse: surfActive,
       nodeLabel: "Surf",
@@ -728,16 +804,16 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       icon: CircleDollarSign,
       tone: "amber",
       status: tieActive ? "Alerta de Tie pulsando" : "Empate em observação",
-      lastReading: `Nível ${data.currentTieAlert.level}. Validade ${data.currentTieAlert.validityRounds} rodada(s).`,
-      confidence: numberOrNull(data.currentTieAlert.confidence),
-      risk: data.currentTieAlert.level === "Alto" ? 75 : data.currentTieAlert.level === "Medio" || data.currentTieAlert.level === "Médio" ? 45 : 20,
+      lastReading: `Nível ${tieAlert.level}. Validade ${tieAlert.validityRounds} rodada(s).`,
+      confidence: numberOrNull(tieAlert.confidence),
+      risk: tieAlert.level === "Alto" ? 75 : tieAlert.level === "Medio" || tieAlert.level === "Médio" ? 45 : 20,
       logs: compactLogs([
-        `Status: ${data.currentTieAlert.status}`,
-        `Nível: ${data.currentTieAlert.level}`,
-        `Janela: ${data.currentTieAlert.validityRounds} rodada(s)`,
+        `Status: ${tieAlert.status}`,
+        `Nível: ${tieAlert.level}`,
+        `Janela: ${tieAlert.validityRounds} rodada(s)`,
       ]),
-      greens: numberOrNull(data.tieAlertScoreboard.greenTieAlerts),
-      reds: numberOrNull(data.tieAlertScoreboard.expired),
+      greens: numberOrNull(tieScore.greenTieAlerts),
+      reds: numberOrNull(tieScore.expired),
       active: tieActive,
       pulse: tieActive,
       nodeLabel: "Tie",
@@ -800,13 +876,13 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       icon: RefreshCw,
       tone: marketTurnActive ? "amber" : "blue",
       status: marketTurnActive ? "Virada/atenção no mercado" : "Sem virada forte",
-      lastReading: data.engineDecision.reason || surf?.reason || "Mercado sem virada confirmada agora.",
-      confidence: numberOrNull(data.engineDecision.confidence),
+      lastReading: engineDecision.reason || surf?.reason || "Mercado sem virada confirmada agora.",
+      confidence: numberOrNull(engineDecision.confidence),
       risk: marketTurnActive ? riskLevel : null,
       logs: compactLogs([
-        `Engine: ${data.engineDecision.state}`,
+        `Engine: ${engineDecision.state}`,
         surf?.surf_phase ? `Surf phase: ${phaseLabel(surf.surf_phase)}` : "",
-        data.engineDecision.reason,
+        engineDecision.reason,
       ]),
       greens: null,
       reds: null,
@@ -869,9 +945,9 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       lastReading: topPattern
         ? `${topPattern.label} puxa ${sideLabel(topPattern.direction)}`
         : "Aguardando amostra real mínima.",
-      confidence: topPattern && topPattern.occurrences >= snapshot.minOccurrences ? topPattern.assertiveness : null,
+      confidence: topPattern && topPattern.occurrences >= safeNumber(snapshot.minOccurrences) ? topPattern.assertiveness : null,
       risk: topPattern?.blocked ? 70 : null,
-      logs: compactLogs(snapshot.decisionLogs.map((log) => log.message).slice(0, 5)),
+      logs: compactLogs(decisionLogs.map((log) => log.message).slice(0, 5)),
       greens: topPattern ? topPattern.sg + topPattern.g1 : null,
       reds: numberOrNull(topPattern?.red),
       active: strategyActive,
@@ -885,13 +961,13 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
       icon: BrainCircuit,
       tone: learningActive ? "purple" : "blue",
       status: learningActive ? "Minerando histórico real" : "Aguardando base real",
-      lastReading: `${snapshot.recordsStored} rodada(s) salvas, ${snapshot.patternsFound} padrão(ões) encontrados.`,
-      confidence: snapshot.entryScore.finalScore > 0 ? snapshot.entryScore.finalScore : null,
-      risk: snapshot.pausedPatterns > 0 ? 55 : null,
+      lastReading: `${safeNumber(snapshot.recordsStored)} rodada(s) salvas, ${safeNumber(snapshot.patternsFound)} padrão(ões) encontrados.`,
+      confidence: entryScore.finalScore > 0 ? entryScore.finalScore : null,
+      risk: safeNumber(snapshot.pausedPatterns) > 0 ? 55 : null,
       logs: compactLogs([
-        `${snapshot.recordsStored} registro(s) no aprendizado.`,
-        `${snapshot.hotPatterns} quente(s), ${snapshot.pausedPatterns} pausado(s).`,
-        snapshot.entryScore.explanation[0],
+        `${safeNumber(snapshot.recordsStored)} registro(s) no aprendizado.`,
+        `${safeNumber(snapshot.hotPatterns)} quente(s), ${safeNumber(snapshot.pausedPatterns)} pausado(s).`,
+        entryScore.explanation[0],
       ]),
       greens: null,
       reds: null,
@@ -941,7 +1017,7 @@ function buildAgents(data: DashboardData, snapshot: AdaptiveStrategySnapshot, sc
 }
 
 function buildTrendSnapshot(rounds: DashboardData["rounds"]) {
-  const recent = rounds.slice(-30);
+  const recent = safeRounds(rounds).slice(-30);
   if (!recent.length) {
     return {
       active: false,
@@ -965,7 +1041,7 @@ function buildTrendSnapshot(rounds: DashboardData["rounds"]) {
 }
 
 function buildAlternationSnapshot(rounds: DashboardData["rounds"]) {
-  const recent = rounds.slice(-24).filter((round) => round.result !== "T");
+  const recent = safeRounds(rounds).slice(-24).filter((round) => round.result !== "T");
   if (recent.length < 2) {
     return {
       active: false,
@@ -992,7 +1068,7 @@ function buildAlternationSnapshot(rounds: DashboardData["rounds"]) {
 }
 
 function buildDoublesSnapshot(rounds: DashboardData["rounds"]) {
-  const recent = rounds.slice(-24).filter((round) => round.result !== "T");
+  const recent = safeRounds(rounds).slice(-24).filter((round) => round.result !== "T");
   if (recent.length < 2) {
     return {
       active: false,
@@ -1020,8 +1096,9 @@ function buildDoublesSnapshot(rounds: DashboardData["rounds"]) {
 }
 
 function buildMultiWindowSnapshot(rounds: DashboardData["rounds"]) {
-  const shortWindow = buildWindowLeader(rounds.slice(-12), "Janela 12");
-  const longWindow = buildWindowLeader(rounds.slice(-30), "Janela 30");
+  const safe = safeRounds(rounds);
+  const shortWindow = buildWindowLeader(safe.slice(-12), "Janela 12");
+  const longWindow = buildWindowLeader(safe.slice(-30), "Janela 30");
   const active = Boolean(shortWindow.side && longWindow.side && shortWindow.side === longWindow.side && shortWindow.side !== "T");
   const confidence =
     shortWindow.confidence !== null && longWindow.confidence !== null
@@ -1051,24 +1128,55 @@ function buildWindowLeader(rounds: DashboardData["rounds"], label: string) {
 }
 
 function calculateRoundStreak(rounds: DashboardData["rounds"]) {
-  const last = rounds.at(-1);
+  const safe = safeRounds(rounds);
+  const last = safe[safe.length - 1];
   if (!last) return { side: null as RoundResult | null, count: 0 };
   let count = 0;
-  for (let index = rounds.length - 1; index >= 0; index -= 1) {
-    if (rounds[index].result !== last.result) break;
+  for (let index = safe.length - 1; index >= 0; index -= 1) {
+    if (safe[index].result !== last.result) break;
     count += 1;
   }
   return { side: last.result, count };
 }
 
 function countResults(rounds: DashboardData["rounds"]) {
-  return rounds.reduce(
+  return safeRounds(rounds).reduce(
     (acc, round) => {
-      acc[round.result] += 1;
+      if (round.result === "B" || round.result === "P" || round.result === "T") acc[round.result] += 1;
       return acc;
     },
     { B: 0, P: 0, T: 0 } as Record<RoundResult, number>,
   );
+}
+
+function safeRounds(rounds: DashboardData["rounds"] | null | undefined) {
+  return Array.isArray(rounds)
+    ? rounds.filter((round) => round && (round.result === "B" || round.result === "P" || round.result === "T"))
+    : [];
+}
+
+function safePatterns(snapshot: Partial<AdaptiveStrategySnapshot> | null | undefined): AdaptivePattern[] {
+  return Array.isArray(snapshot?.patterns) ? snapshot.patterns : [];
+}
+
+function safeDecisionLogs(snapshot: Partial<AdaptiveStrategySnapshot> | null | undefined) {
+  return Array.isArray(snapshot?.decisionLogs) ? snapshot.decisionLogs : [];
+}
+
+function safeEntryScore(snapshot: Partial<AdaptiveStrategySnapshot> | null | undefined) {
+  const entryScore = snapshot?.entryScore;
+  return {
+    side: entryScore?.side ?? null,
+    finalScore: safeNumber(entryScore?.finalScore),
+    allowed: Boolean(entryScore?.allowed),
+    parts: Array.isArray(entryScore?.parts) ? entryScore.parts : [],
+    explanation: Array.isArray(entryScore?.explanation) ? entryScore.explanation : [],
+  };
+}
+
+function safeNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function maxResult(counts: Record<RoundResult, number>) {
@@ -1080,15 +1188,15 @@ function roundPercent(value: number) {
 }
 
 function isHighRisk(data: DashboardData, snapshot: AdaptiveStrategySnapshot) {
-  return data.engineDecision.state === "BLOQUEADO" || computeRiskValue(data, snapshot) >= 70;
+  return data.engineDecision?.state === "BLOQUEADO" || computeRiskValue(data, snapshot) >= 70;
 }
 
 function computeRiskValue(data: DashboardData, snapshot: AdaptiveStrategySnapshot) {
   const surfRisk = data.currentSurfAlert?.surf_break_risk ?? data.currentSurfAlert?.surf_risk ?? 0;
-  const tieRisk = data.currentTieAlert.status === "active" && data.currentTieAlert.level === "Alto" ? 75 : 0;
+  const tieRisk = data.currentTieAlert?.status === "active" && data.currentTieAlert.level === "Alto" ? 75 : 0;
   const neuralRisk = data.neuralReading?.isRedAlert || data.neuralReading?.isSaturated ? 80 : 0;
-  const engineRisk = data.engineDecision.state === "BLOQUEADO" ? Math.max(70, data.engineDecision.confidence) : 0;
-  const strategyRisk = snapshot.pausedPatterns > 0 ? 55 : 0;
+  const engineRisk = data.engineDecision?.state === "BLOQUEADO" ? Math.max(70, safeNumber(data.engineDecision.confidence)) : 0;
+  const strategyRisk = safeNumber(snapshot.pausedPatterns) > 0 ? 55 : 0;
   return Math.max(surfRisk, tieRisk, neuralRisk, engineRisk, strategyRisk);
 }
 
