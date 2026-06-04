@@ -73,6 +73,7 @@ const MERCADOPAGO_PREFERENCE_URL = "https://api.mercadopago.com/checkout/prefere
 const MERCADOPAGO_PAYMENT_URL = "https://api.mercadopago.com/v1/payments";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
+const DEFAULT_ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
 const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
@@ -3517,7 +3518,7 @@ function getElevenLabsVoiceId(env: unknown) {
     const value = normalizeSecretValue(readNamedServerSecret(env, name, ""));
     if (value) return value;
   }
-  return "";
+  return DEFAULT_ELEVENLABS_VOICE_ID;
 }
 
 let lastElevenLabsStatus: { code: number | "ok" | "network_error"; at: string } | null = null;
