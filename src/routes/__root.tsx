@@ -10,6 +10,7 @@ import {
 
 import appCss from "../styles.css?url";
 import { InstallAppPrompt } from "@/components/install/InstallAppPrompt";
+import { SiteAnnouncements } from "@/components/ui-app/SiteAnnouncements";
 
 function NotFoundComponent() {
   return (
@@ -74,14 +75,25 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { name: "theme-color", content: "#030712" },
-      { title: "SNIPER BO IA — Painel operacional com IA" },
-      { name: "description", content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real." },
-      { property: "og:title", content: "SNIPER BO IA — Painel operacional com IA" },
-      { property: "og:description", content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real." },
+      { title: "SNIPER BO IA - Painel operacional com IA" },
+      {
+        name: "description",
+        content: "Painel operacional BAC BO com leitura estatistica e assistente IA em tempo real.",
+      },
+      { property: "og:title", content: "SNIPER BO IA - Painel operacional com IA" },
+      {
+        property: "og:description",
+        content: "Painel operacional BAC BO com leitura estatistica e assistente IA em tempo real.",
+      },
       { property: "og:type", content: "website" },
+      { property: "og:image", content: "/sniper-icon.svg" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:title", content: "SNIPER BO IA — Painel operacional com IA" },
-      { name: "twitter:description", content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real." },
+      { name: "twitter:title", content: "SNIPER BO IA - Painel operacional com IA" },
+      {
+        name: "twitter:description",
+        content: "Painel operacional BAC BO com leitura estatistica e assistente IA em tempo real.",
+      },
+      { name: "twitter:image", content: "/sniper-icon.svg" },
     ],
     links: [
       {
@@ -91,6 +103,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         rel: "manifest",
         href: "/manifest.webmanifest",
+      },
+      {
+        rel: "icon",
+        href: "/sniper-icon.svg",
       },
       {
         rel: "apple-touch-icon",
@@ -125,6 +141,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <Outlet />
       <InstallAppPrompt />
+      <SiteAnnouncements />
     </QueryClientProvider>
   );
 }

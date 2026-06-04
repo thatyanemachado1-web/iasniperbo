@@ -14,6 +14,7 @@ import type {
 } from "@/types/adminPanel";
 import type { ModuleToggles } from "@/types/dashboard";
 import type { SalesSettings } from "@/lib/accessApi";
+import type { AnnouncementTone, SiteContentSettings } from "@/lib/siteContent";
 
 export interface LocalAiAdminSettings {
   enabled: boolean;
@@ -223,6 +224,22 @@ export async function updateAdminSalesSettings(
   return data.salesSettings;
 }
 
+export async function getAdminSiteContent(session: AdminSession) {
+  const data = await request<{ siteContent: SiteContentSettings }>(session, "/admin/site-content");
+  return data.siteContent;
+}
+
+export async function updateAdminSiteContent(
+  session: AdminSession,
+  payload: Partial<SiteContentSettings>,
+) {
+  const data = await request<{ siteContent: SiteContentSettings }>(session, "/admin/site-content", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.siteContent;
+}
+
 export async function listSecurityEvents(session: AdminSession) {
   return request<{ events: SecurityEvent[]; summary: SecuritySummary }>(
     session,
@@ -362,12 +379,23 @@ export async function listAdminLogs(session: AdminSession) {
 
 export async function sendAdminBroadcast(
   session: AdminSession,
-  payload: { title: string; message: string; audience: string },
+  payload: {
+    title: string;
+    message: string;
+    audience: string;
+    tone?: AnnouncementTone;
+    buttonLabel?: string;
+    buttonUrl?: string;
+  },
 ) {
-  return request<{ ok: boolean; log?: AdminActionLog }>(session, "/admin/broadcast", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return request<{ ok: boolean; log?: AdminActionLog; siteContent?: SiteContentSettings }>(
+    session,
+    "/admin/broadcast",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export async function updateModuleToggles(session: AdminSession, payload: Partial<ModuleToggles>) {

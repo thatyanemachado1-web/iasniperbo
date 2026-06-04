@@ -3,6 +3,13 @@ import "./lib/error-capture";
 import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import {
+  DEFAULT_SITE_CONTENT_SETTINGS,
+  normalizeAnnouncementTone,
+  normalizeAssetUrl,
+  normalizeSiteContentSettings,
+  type SiteContentSettings,
+} from "./lib/siteContent";
 import type {
   ActiveEntryMode,
   CurrentSignalSide,
@@ -163,6 +170,7 @@ let liveSalesSettings: SalesSettings = {
   updated_at: "",
   updated_by: "",
 };
+let liveSiteContentSettings: SiteContentSettings = DEFAULT_SITE_CONTENT_SETTINGS;
 let liveLocalAiSettings: Partial<LocalAiSettings> = {};
 let liveLocalAiLogs: LocalAiLog[] = [];
 let liveStateSaveStatus: LiveStateSaveStatus = {
@@ -277,6 +285,9 @@ export default {
       const salesSettingsResponse = await handleSalesSettingsRequest(request);
       if (salesSettingsResponse) return withSecurityHeaders(salesSettingsResponse);
 
+      const siteContentResponse = await handleSiteContentRequest(request);
+      if (siteContentResponse) return withSecurityHeaders(siteContentResponse);
+
       const billingResponse = await handleBillingRequest(request, env);
       if (billingResponse) return withSecurityHeaders(billingResponse);
 
@@ -291,7 +302,8 @@ export default {
 
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response));
+      const normalizedResponse = await normalizeCatastrophicSsrResponse(response);
+      return withSecurityHeaders(await injectSiteContentHeadResponse(request, normalizedResponse));
     } catch (error) {
       console.error(error);
       return brandedErrorResponse();
@@ -356,7 +368,15 @@ function rateLimitForRequest(method: string, pathname: string) {
     return 30;
   }
   if (pathname === "/billing/checkout") return 12;
-  if (pathname === "/sales/settings" || pathname === "/admin/sales-settings") return 120;
+  if (
+    pathname === "/sales/settings" ||
+    pathname === "/admin/sales-settings" ||
+    pathname === "/site-content" ||
+    pathname === "/admin/site-content" ||
+    pathname === "/admin/broadcast"
+  ) {
+    return 120;
+  }
   if (pathname === "/webhooks/mercadopago") return 240;
   if (pathname === "/api/webhook/hubla" || pathname === "/api/webhooks/hubla") return 240;
   if (pathname === "/auth/verify") return 60;
@@ -1148,6 +1168,16 @@ async function handleSalesSettingsRequest(request: Request) {
   return json({ salesSettings: publicSalesSettings() });
 }
 
+async function handleSiteContentRequest(request: Request) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/site-content") return null;
+
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "GET") return json({ error: "Metodo nao permitido." }, 405);
+
+  return json({ siteContent: publicSiteContentSettings() });
+}
+
 async function handleBillingRequest(request: Request, env: unknown) {
   const url = new URL(request.url);
   const billingPaths = new Set([
@@ -1798,6 +1828,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     url.pathname === "/admin/overview" ||
     url.pathname === "/admin/summary" ||
     url.pathname === "/admin/sales-settings" ||
+    url.pathname === "/admin/site-content" ||
     url.pathname === "/admin/users" ||
     url.pathname.startsWith("/admin/users/") ||
     url.pathname === "/admin/logs" ||
@@ -2120,6 +2151,38 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     return json({ error: "Metodo nao permitido." }, 405);
   }
 
+  if (url.pathname === "/admin/site-content") {
+    if (request.method === "GET") {
+      return json({ siteContent: adminSiteContentSettings(env) });
+    }
+
+    if (request.method === "POST") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const before = liveSiteContentSettings;
+      liveSiteContentSettings = normalizeSiteContentSettings(
+        {
+          ...body,
+          popupId: readString(body, "popupId") || before.popupId,
+          updatedAt: new Date().toISOString(),
+          updatedBy: adminActorEmailFromRequest(request, env, adminRole),
+        },
+        before,
+      );
+      recordAdminActionLog(env, request, adminRole, {
+        targetUserId: "site-content",
+        targetEmail: "global",
+        action: "UPDATE_USER",
+        beforeJson: before,
+        afterJson: liveSiteContentSettings,
+        reason: "Conteudo visual do site atualizado.",
+      });
+      const saveStatus = await saveLiveState(env);
+      return json({ siteContent: adminSiteContentSettings(env, saveStatus) });
+    }
+
+    return json({ error: "Metodo nao permitido." }, 405);
+  }
+
   if (request.method === "GET" && url.pathname === "/admin/summary") {
     if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
     return json({ summary: buildAdminSummary() });
@@ -2266,6 +2329,23 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const title = readString(body, "title");
     const message = readString(body, "message");
     if (!title || !message) return json({ error: "Titulo e mensagem sao obrigatorios." }, 400);
+    const before = liveSiteContentSettings;
+    liveSiteContentSettings = normalizeSiteContentSettings(
+      {
+        ...before,
+        popupEnabled: true,
+        popupTitle: title,
+        popupMessage: message,
+        popupTone: normalizeAnnouncementTone(body.tone, before.popupTone),
+        popupButtonLabel: readString(body, "buttonLabel"),
+        popupButtonUrl: normalizeAssetUrl(body.buttonUrl),
+        popupAudience: readString(body, "audience") || "all",
+        popupId: crypto.randomUUID(),
+        updatedAt: new Date().toISOString(),
+        updatedBy: adminActorEmailFromRequest(request, env, adminRole),
+      },
+      before,
+    );
     const log = recordAdminActionLog(env, request, adminRole, {
       targetUserId: "broadcast",
       targetEmail: readString(body, "audience") || "all",
@@ -2276,10 +2356,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         message,
         audience: readString(body, "audience") || "all",
       },
-      reason: "Aviso geral registrado.",
+      reason: "Aviso geral disparado como pop-up.",
     });
     await saveLiveState(env);
-    return json({ ok: true, log });
+    return json({ ok: true, log, siteContent: publicSiteContentSettings() });
   }
 
   if (url.pathname === "/telegram-recipients") {
@@ -6264,6 +6344,7 @@ function liveStateCacheRequest() {
 
 async function loadLiveState(env: unknown) {
   const currentSalesSettings = liveSalesSettings;
+  const currentSiteContentSettings = liveSiteContentSettings;
   const [durableState, cacheState] = await Promise.all([
     loadDurableLiveState(env),
     loadLiveStateCache(),
@@ -6273,6 +6354,9 @@ async function loadLiveState(env: unknown) {
     applyLiveState(state);
     if (isSalesSettingsNewer(currentSalesSettings, liveSalesSettings)) {
       liveSalesSettings = currentSalesSettings;
+    }
+    if (isSiteContentSettingsNewer(currentSiteContentSettings, liveSiteContentSettings)) {
+      liveSiteContentSettings = currentSiteContentSettings;
     }
     await saveLiveState(env);
   }
@@ -6364,6 +6448,11 @@ function applyLiveState(state: Record<string, unknown>) {
     liveSalesSettings = restoreSalesSettings(salesSettings);
   }
 
+  const siteContent = readRecord(state.siteContent);
+  if (Object.keys(siteContent).length > 0) {
+    liveSiteContentSettings = restoreSiteContentSettings(siteContent);
+  }
+
   const localAiSettings = readRecord(state.localAiSettings);
   if (Object.keys(localAiSettings).length > 0) {
     liveLocalAiSettings = normalizeLocalAiSettingsPatch(localAiSettings, getLocalAiSettings({}));
@@ -6436,6 +6525,7 @@ function mergeLiveStates(
     deletedEntities,
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
     salesSettings: pickStateObjectByUpdatedAt(durable.salesSettings, cache.salesSettings),
+    siteContent: pickStateObjectByUpdatedAt(durable.siteContent, cache.siteContent),
     savedAt:
       readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
   };
@@ -6463,6 +6553,13 @@ function isSalesSettingsNewer(left: SalesSettings, right: SalesSettings) {
   const rightTime = stateEntityUpdatedAtMs(right as unknown as Record<string, unknown>);
   if (leftTime || rightTime) return leftTime > rightTime;
   return left.salesClosed !== right.salesClosed && Boolean(left.updated_at);
+}
+
+function isSiteContentSettingsNewer(left: SiteContentSettings, right: SiteContentSettings) {
+  const leftTime = stateEntityUpdatedAtMs(left as unknown as Record<string, unknown>);
+  const rightTime = stateEntityUpdatedAtMs(right as unknown as Record<string, unknown>);
+  if (leftTime || rightTime) return leftTime > rightTime;
+  return left.popupId !== right.popupId && Boolean(left.updatedAt);
 }
 
 function pickDashboardState(primary: unknown, secondary: unknown) {
@@ -6764,6 +6861,7 @@ function buildLiveStateSnapshot() {
     deletedEntities: liveDeletedEntities,
     moduleToggles: liveModuleToggles,
     salesSettings: liveSalesSettings,
+    siteContent: liveSiteContentSettings,
     localAiSettings: liveLocalAiSettings,
     localAiLogs: liveLocalAiLogs.slice(0, 250),
     savedAt: new Date().toISOString(),
@@ -6953,10 +7051,21 @@ function restoreSalesSettings(value: Record<string, unknown>): SalesSettings {
   };
 }
 
+function restoreSiteContentSettings(value: Record<string, unknown>): SiteContentSettings {
+  return normalizeSiteContentSettings(value, liveSiteContentSettings);
+}
+
 function publicSalesSettings() {
   return {
     salesClosed: liveSalesSettings.salesClosed,
     mode: liveSalesSettings.salesClosed ? "closed" : "open",
+  };
+}
+
+function publicSiteContentSettings() {
+  return {
+    ...liveSiteContentSettings,
+    updatedBy: "",
   };
 }
 
@@ -6978,6 +7087,116 @@ function adminSalesSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
     storageReady: durableConfigured,
     warning,
   };
+}
+
+function adminSiteContentSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
+  const durableConfigured = env
+    ? Boolean(getSupabasePersistenceConfig(env))
+    : saveStatus.durableConfigured;
+  const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
+  const warning = !durableConfigured
+    ? "Persistencia fixa nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar definitivo."
+    : saveStatus.saved_at && !saveStatus.durable
+      ? "Nao foi possivel confirmar o salvamento duravel. Verifique a tabela sniper_live_state no Supabase."
+      : "";
+  return {
+    ...liveSiteContentSettings,
+    persistence: durableReady ? "durable" : "temporary",
+    storageReady: durableConfigured,
+    warning,
+  };
+}
+
+async function injectSiteContentHeadResponse(request: Request, response: Response) {
+  if (request.method !== "GET") return response;
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("text/html")) return response;
+
+  const html = await response.text();
+  const nextHtml = injectSiteContentHead(html, request.url);
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "text/html; charset=utf-8");
+  return new Response(nextHtml, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function injectSiteContentHead(html: string, requestUrl: string) {
+  const settings = publicSiteContentSettings();
+  const title = escapeHtmlText(settings.shareTitle);
+  const description = escapeHtmlAttribute(settings.shareDescription);
+  const imageUrl = absoluteSiteUrl(settings.shareImageUrl, requestUrl);
+  const faviconUrl = absoluteSiteUrl(settings.faviconUrl, requestUrl);
+  const tags = [
+    `<meta name="description" content="${description}">`,
+    `<meta property="og:title" content="${escapeHtmlAttribute(settings.shareTitle)}">`,
+    `<meta property="og:description" content="${description}">`,
+    `<meta property="og:type" content="website">`,
+    imageUrl ? `<meta property="og:image" content="${escapeHtmlAttribute(imageUrl)}">` : "",
+    `<meta name="twitter:card" content="${imageUrl ? "summary_large_image" : "summary"}">`,
+    `<meta name="twitter:title" content="${escapeHtmlAttribute(settings.shareTitle)}">`,
+    `<meta name="twitter:description" content="${description}">`,
+    imageUrl ? `<meta name="twitter:image" content="${escapeHtmlAttribute(imageUrl)}">` : "",
+    faviconUrl ? `<link rel="icon" href="${escapeHtmlAttribute(faviconUrl)}">` : "",
+    faviconUrl ? `<link rel="apple-touch-icon" href="${escapeHtmlAttribute(faviconUrl)}">` : "",
+  ]
+    .filter(Boolean)
+    .join("");
+
+  let next = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${title}</title>`);
+  if (!/<title>[\s\S]*?<\/title>/i.test(next)) {
+    next = next.replace(/<\/head>/i, `<title>${title}</title></head>`);
+  }
+
+  next = removeHeadTag(next, "meta", "name", "description");
+  next = removeHeadTag(next, "meta", "property", "og:title");
+  next = removeHeadTag(next, "meta", "property", "og:description");
+  next = removeHeadTag(next, "meta", "property", "og:type");
+  next = removeHeadTag(next, "meta", "property", "og:image");
+  next = removeHeadTag(next, "meta", "name", "twitter:card");
+  next = removeHeadTag(next, "meta", "name", "twitter:title");
+  next = removeHeadTag(next, "meta", "name", "twitter:description");
+  next = removeHeadTag(next, "meta", "name", "twitter:image");
+  next = next.replace(/<link\b(?=[^>]*\brel=["'](?:icon|apple-touch-icon)["'])[^>]*>/gi, "");
+  return next.replace(/<\/head>/i, `${tags}</head>`);
+}
+
+function removeHeadTag(html: string, tag: string, attribute: string, value: string) {
+  const pattern = new RegExp(
+    `<${tag}\\b(?=[^>]*\\b${attribute}=["']${escapeRegex(value)}["'])[^>]*>`,
+    "gi",
+  );
+  return html.replace(pattern, "");
+}
+
+function absoluteSiteUrl(value: string, requestUrl: string) {
+  const normalized = normalizeAssetUrl(value);
+  if (!normalized) return "";
+  try {
+    const url = new URL(normalized, requestUrl);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function escapeHtmlText(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeHtmlAttribute(value: string) {
+  return escapeHtmlText(value).replace(/"/g, "&quot;");
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
