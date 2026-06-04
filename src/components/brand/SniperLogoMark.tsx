@@ -1,5 +1,3 @@
-import sniperLogo from "@/assets/sniper-bo-logo.png";
-
 type SniperLogoMarkProps = {
   className?: string;
   alt?: string;
@@ -8,7 +6,7 @@ type SniperLogoMarkProps = {
 export function SniperLogoMark({ className = "", alt = "SNIPER BO IA" }: SniperLogoMarkProps) {
   return (
     <img
-      src={sniperLogo}
+      src="/assets/sniper-logo.png"
       alt={alt}
       draggable={false}
       className={`select-none object-contain ${className}`}

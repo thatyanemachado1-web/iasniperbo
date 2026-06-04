@@ -1,5 +1,4 @@
 import { motion } from "framer-motion";
-import brainImg from "@/assets/brain-ai.png";
 
 interface BrainAIProps {
   size?: number;
@@ -61,7 +60,7 @@ export function BrainAI({ size = 120, speaking = false, className = "" }: BrainA
           transition={{ duration: 1.4, repeat: speaking ? Infinity : 0, ease: "easeInOut" }}
         >
           <img
-            src={brainImg}
+            src="/assets/ai-brain.png"
             alt="Cérebro IA holográfico SNIPER BO IA"
             loading="lazy"
             draggable={false}

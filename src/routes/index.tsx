@@ -1,27 +1,32 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
   AlertCircle,
   Bell,
+  BrainCircuit,
   Crown,
   KeyRound,
   Loader2,
+  LockKeyhole,
   Mail,
   MapPin,
-  Mic,
   Phone,
   Radio,
+  Shield,
   ShieldCheck,
   Sparkles,
+  Target,
+  TrendingUp,
   UserPlus,
+  Waves,
+  Zap,
 } from "lucide-react";
 import { BrainAI } from "@/components/brand/BrainAI";
 import { NeuralLines } from "@/components/brand/NeuralLines";
 import { SniperLogoMark } from "@/components/brand/SniperLogoMark";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { SalesClosedPanel } from "@/components/ui-app/SalesClosedPanel";
 import { checkClientAccess, getSalesSettings, registerClient, saveAccessSession, type ClientAccess } from "@/lib/accessApi";
 import { readUserSession } from "@/lib/userSession";
 
@@ -44,11 +49,23 @@ export const Route = createFileRoute("/")({
   }),
 });
 
-const benefits = [
-  { icon: Activity, label: "Leitura estatistica", desc: "Padroes em tempo real" },
-  { icon: Bell, label: "Alertas operacionais", desc: "Sinais instantaneos" },
-  { icon: Mic, label: "Assistente de voz", desc: "Narrador IA dedicado" },
-  { icon: Radio, label: "Dados em tempo real", desc: "Stream continuo" },
+const WAITLIST_URL = "https://chat.whatsapp.com/Gw6qhCXXtyeDrukSxlM71u?mode=gi_t";
+
+const moduleCards = [
+  { icon: BrainCircuit, label: "Leitura Neural", desc: "Detecta numeros pagantes em tempo real." },
+  { icon: Waves, label: "Analise de Surf", desc: "Identifica forca, quebra e retomada da mesa." },
+  { icon: Bell, label: "Detector de Empates", desc: "Enxerga pressao de Tie antes da maioria." },
+  { icon: TrendingUp, label: "Tendencias da Mesa", desc: "Mostra a direcao do jogo com mais clareza." },
+  { icon: Target, label: "Entradas com Contexto", desc: "Cruza leitura, tendencia e momento operacional." },
+  { icon: Shield, label: "Gestao de Risco", desc: "Ajuda a evitar decisoes por emocao." },
+];
+
+const hudCards = [
+  { icon: Target, label: "Numero Pagante Ativo", position: "left-0 top-8", delay: "0s" },
+  { icon: Activity, label: "Analise em Tempo Real", position: "right-0 top-16", delay: "0.8s" },
+  { icon: Bell, label: "Pressao de Tie", position: "left-3 bottom-24", delay: "1.4s" },
+  { icon: TrendingUp, label: "Tendencia da Mesa", position: "right-4 bottom-20", delay: "2.1s" },
+  { icon: Radio, label: "Contexto Operacional", position: "left-1/2 top-[78%] -translate-x-1/2", delay: "2.8s" },
 ];
 
 const PARTICLES = Array.from({ length: 28 }, (_, i) => {
@@ -61,12 +78,12 @@ const PARTICLES = Array.from({ length: 28 }, (_, i) => {
 
 function LoginPage() {
   const savedUser = readUserSession();
+  const loginCardRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [pendingAccess, setPendingAccess] = useState<ClientAccess | null>(null);
   const [salesClosed, setSalesClosed] = useState<boolean | null>(null);
-  const [showClosedLogin, setShowClosedLogin] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -96,8 +113,8 @@ function LoginPage() {
         if (!salesClosed) setMode("register");
         setNotice(
           salesClosed
-            ? "Vagas encerradas no momento. Entre na fila de espera para a próxima abertura."
-            : "Email ainda não cadastrado. Faça seu cadastro para continuar.",
+            ? "Vagas encerradas no momento. Entre na fila de espera para a proxima abertura."
+            : "Email ainda nao cadastrado. Faca seu cadastro para continuar.",
         );
         return;
       }
@@ -117,7 +134,7 @@ function LoginPage() {
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (salesClosed) {
-      setNotice("Vagas encerradas no momento. Entre na fila de espera para a próxima abertura.");
+      setNotice("Vagas encerradas no momento. Entre na fila de espera para a proxima abertura.");
       return;
     }
     setLoading(true);
@@ -164,40 +181,48 @@ function LoginPage() {
 
   function goCheckout() {
     if (salesClosed) {
-      setNotice("Vagas encerradas no momento. Entre na fila de espera para a próxima abertura.");
+      setNotice("Vagas encerradas no momento. Entre na fila de espera para a proxima abertura.");
       return;
     }
     if (pendingAccess) saveAccessSession(pendingAccess);
     window.location.href = "/app/planos";
   }
 
+  function requestAccess() {
+    if (salesClosed) {
+      window.location.href = WAITLIST_URL;
+      return;
+    }
+    goCheckout();
+  }
+
+  function focusLogin() {
+    setMode("login");
+    window.setTimeout(() => {
+      loginCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 40);
+  }
+
   if (salesClosed === null) {
     return <SalesAccessLoading />;
   }
 
-  if (salesClosed && !showClosedLogin) {
-    return (
-      <SalesClosedPanel
-        onClientLogin={() => {
-          setMode("login");
-          setShowClosedLogin(true);
-        }}
-      />
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-app relative overflow-hidden flex items-center justify-center px-4 py-10 lg:py-0">
-      <div className="absolute inset-0 scan-grid opacity-[0.18] pointer-events-none" />
+    <div className="relative min-h-screen overflow-hidden bg-[#020617] text-white">
+      <div
+        className="absolute inset-0 bg-cover bg-center opacity-75"
+        style={{ backgroundImage: "url('/assets/dark-tech-bg.png')" }}
+      />
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            "radial-gradient(ellipse 60% 50% at 20% 30%, color-mix(in oklab, var(--neon-blue) 22%, transparent), transparent 60%), radial-gradient(ellipse 50% 50% at 80% 70%, color-mix(in oklab, var(--neon-purple) 22%, transparent), transparent 60%)",
+            "linear-gradient(90deg, rgba(2,6,23,0.92) 0%, rgba(2,6,23,0.68) 48%, rgba(2,6,23,0.9) 100%), radial-gradient(circle at 30% 35%, rgba(0,229,255,0.2), transparent 38%), radial-gradient(circle at 76% 20%, rgba(168,85,247,0.22), transparent 34%)",
         }}
       />
-      <div className="absolute -top-40 -left-40 size-[28rem] rounded-full bg-neon-blue/25 blur-3xl" />
-      <div className="absolute -bottom-40 -right-40 size-[28rem] rounded-full bg-neon-purple/25 blur-3xl" />
+      <div className="absolute inset-0 scan-grid opacity-[0.12] pointer-events-none" />
+      <div className="absolute -left-28 top-20 size-[24rem] rounded-full bg-neon-purple/20 blur-3xl" />
+      <div className="absolute -right-28 bottom-10 size-[24rem] rounded-full bg-neon-blue/20 blur-3xl" />
 
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {PARTICLES.map((p) => (
@@ -217,202 +242,272 @@ function LoginPage() {
         ))}
       </div>
 
-      <div className="absolute inset-y-0 left-0 w-full pointer-events-none overflow-hidden">
-        <div
-          className="scan-sweep absolute inset-x-0 h-40"
-          style={{
-            background:
-              "linear-gradient(to bottom, transparent, color-mix(in oklab, var(--neon-cyan) 10%, transparent), transparent)",
-          }}
-        />
-      </div>
-
       <div className="absolute inset-0 hidden lg:block pointer-events-none">
-        <NeuralLines cx={32} cy={50} count={16} opacity={0.5} reach={1.15} />
-      </div>
-      <div className="absolute inset-x-0 top-0 h-[55vh] lg:hidden pointer-events-none">
-        <NeuralLines cx={50} cy={42} count={10} opacity={0.4} reach={1.2} />
+        <NeuralLines cx={42} cy={48} count={14} opacity={0.34} reach={1.05} />
       </div>
 
-      <div className="relative w-full max-w-6xl grid lg:grid-cols-[1.1fr_minmax(0,420px)] gap-10 lg:gap-16 items-center">
-        <div className="relative hidden lg:flex flex-col items-center justify-center">
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="animate-orbit-slow size-[520px] rounded-full border border-neon-blue/20" />
-            </div>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="animate-orbit-reverse size-[620px] rounded-full border border-neon-purple/15 border-dashed" />
-            </div>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="size-[420px] rounded-full bg-gradient-to-br from-neon-blue/20 via-transparent to-neon-purple/20 blur-2xl" />
-            </div>
-            <BrainAI size={460} speaking />
-          </div>
-          <div className="mt-8 text-center max-w-md">
-            <h2 className="text-3xl font-bold text-gradient-brand">Inteligencia operacional ao vivo</h2>
-            <p className="mt-3 text-sm text-muted-foreground">
-              Cadastro controlado pelo administrador, acesso demo limitado e ferramentas completas apenas para VIP/Premium liberado.
-            </p>
-          </div>
-        </div>
+      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-4 py-5 sm:px-6 lg:px-10">
+        <header className="flex items-center justify-between gap-4">
+          <SniperLogoMark className="h-14 w-auto max-w-[220px] sm:h-16 sm:max-w-[280px] drop-shadow-[0_0_24px_rgba(0,229,255,0.24)]" />
+          <AppBadge tone={salesClosed ? "red" : "purple"}>
+            {salesClosed ? "Vagas limitadas" : "Acesso premium"}
+          </AppBadge>
+        </header>
 
-        <div className="relative w-full max-w-md mx-auto">
-          <div className="flex flex-col items-center mb-6 lg:hidden">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="animate-orbit-slow size-[180px] rounded-full border border-neon-blue/20" />
+        <section className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)] lg:gap-10 lg:py-10">
+          <div className="min-w-0">
+            <div className="grid items-center gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(300px,0.8fr)]">
+              <div className="order-1">
+                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)]">
+                  <Zap className="size-3.5 shrink-0" />
+                  <span className="truncate">Tecnologia que analisa. Inteligencia que antecipa.</span>
+                </div>
+
+                <h1 className="mt-5 max-w-3xl text-4xl font-black uppercase leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
+                  Chega de entrar no escuro.
+                </h1>
+                <p className="mt-4 max-w-2xl text-xl font-black uppercase leading-tight text-gradient-brand sm:text-3xl">
+                  O Sniper BO IA le a mesa antes da maioria.
+                </p>
+                <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
+                  Enquanto a maioria aposta no impulso, o SNIPER BO IA cruza leitura neural, tendencia, surf e risco para entregar contexto operacional em tempo real.
+                </p>
+                <p className="mt-3 max-w-xl text-sm text-slate-400">
+                  Dados nao eliminam risco. Mas reduzem o achismo antes da decisao.
+                </p>
               </div>
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="animate-orbit-reverse size-[220px] rounded-full border border-neon-purple/15 border-dashed" />
-              </div>
-              <BrainAI size={200} speaking />
-            </div>
-          </div>
 
-          <div className="text-center mb-5">
-            <SniperLogoMark className="mx-auto h-20 w-auto max-w-full sm:h-24 drop-shadow-[0_0_28px_rgba(0,229,255,0.3)]" />
-            <p className="mt-2 text-xs sm:text-sm text-muted-foreground max-w-xs mx-auto">
-              Entre somente com cadastro. Acesso completo depende de liberacao do ADM.
-            </p>
-          </div>
+              <HeroBrainShowcase className="order-2 xl:row-span-2" />
 
-          <GlassCard className="p-6 sm:p-8 rounded-3xl border-neon-blue/25 glow-blue">
-            <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-neon-cyan/70 to-transparent" />
-
-            <div className={`mb-4 grid rounded-2xl border border-border/70 bg-secondary/35 p-1 ${salesClosed ? "grid-cols-1" : "grid-cols-2"}`}>
-              <button
-                type="button"
-                onClick={() => setMode("login")}
-                className={`rounded-xl py-2 text-xs font-bold transition ${mode === "login" ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                Entrar
-              </button>
-              {!salesClosed && (
+              <div className="order-3 flex flex-col gap-3 sm:flex-row xl:-mt-8">
                 <button
                   type="button"
-                  onClick={() => setMode("register")}
-                  className={`rounded-xl py-2 text-xs font-bold transition ${mode === "register" ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  Cadastro
-                </button>
-              )}
-            </div>
-
-            {mode === "login" || salesClosed ? (
-              <form onSubmit={handleLogin} className="space-y-4">
-                <LoginField icon={<Mail className="size-4" />} label="Email" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
-                <LoginField icon={<ShieldCheck className="size-4" />} label="Senha" name="password" type="password" placeholder="sua senha" />
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="btn-primary-grad group relative w-full rounded-2xl py-3.5 text-sm font-semibold glow-blue flex items-center justify-center gap-2 overflow-hidden disabled:opacity-60"
+                  onClick={requestAccess}
+                  className="btn-primary-grad group relative min-h-12 flex-1 overflow-hidden rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-wide glow-purple"
                 >
                   <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
-                  {loading ? <Loader2 className="relative size-4 animate-spin" /> : <ShieldCheck className="relative size-4" />}
-                  <span className="relative">Validar acesso</span>
+                  <span className="relative">Quero acesso ao Sniper BO IA</span>
                 </button>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {salesClosed ? "Somente clientes ativos." : "Completo só com liberação ADM."}
-                  </span>
-                  {!salesClosed && (
-                    <button type="button" onClick={() => setMode("register")} className="text-neon-cyan hover:text-neon-blue">
-                      Criar cadastro
+                <button
+                  type="button"
+                  onClick={focusLogin}
+                  className="min-h-12 flex-1 rounded-2xl border border-neon-cyan/40 bg-black/35 px-5 py-3 text-sm font-black uppercase tracking-wide text-neon-cyan shadow-[0_0_22px_rgba(0,229,255,0.1)] transition hover:border-neon-cyan/70 hover:bg-neon-cyan/10"
+                >
+                  Ja sou cliente premium
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-7 flex gap-3 overflow-x-auto pb-3 lg:grid lg:grid-cols-3 lg:overflow-visible lg:pb-0">
+              {moduleCards.map((card) => (
+                <div
+                  key={card.label}
+                  className="glass min-w-[225px] rounded-2xl border-neon-purple/20 p-4 transition hover:border-neon-purple/50 hover:shadow-[0_0_24px_rgba(168,85,247,0.18)]"
+                >
+                  <div className="mb-3 flex size-10 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10">
+                    <card.icon className="size-5 text-neon-cyan" />
+                  </div>
+                  <div className="text-sm font-black text-white">{card.label}</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">{card.desc}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 rounded-3xl border border-neon-purple/30 bg-black/45 p-5 shadow-[0_0_34px_rgba(168,85,247,0.12)] backdrop-blur-xl">
+              <p className="text-lg font-black uppercase leading-tight text-white sm:text-2xl">
+                Sem leitura, voce reage. O mercado nao perdoa.
+              </p>
+              <p className="mt-2 text-sm text-slate-400">
+                A maioria entra no impulso. Quem tem contexto sabe quando esperar.
+              </p>
+            </div>
+          </div>
+
+          <aside ref={loginCardRef} className="w-full max-w-md justify-self-center lg:justify-self-end">
+            <GlassCard className="rounded-[2rem] border-neon-purple/35 bg-background/80 p-5 shadow-[0_0_44px_rgba(168,85,247,0.18)] sm:p-7">
+              <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-neon-purple/80 to-transparent" />
+              <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10">
+                <LockKeyhole className="size-6 text-neon-cyan" />
+              </div>
+              <div className="text-center">
+                <h2 className="text-2xl font-black text-white">{mode === "register" && !salesClosed ? "Criar cadastro" : "Acesso Premium"}</h2>
+                <p className="mt-2 text-xs leading-5 text-slate-400">
+                  {mode === "register" && !salesClosed
+                    ? "Cadastre seus dados para solicitar acesso ao SNIPER BO IA."
+                    : "Entre com sua conta para acessar o painel do SNIPER BO IA."}
+                </p>
+              </div>
+
+              <div className={`mt-5 mb-4 grid rounded-2xl border border-border/70 bg-secondary/35 p-1 ${salesClosed ? "grid-cols-1" : "grid-cols-2"}`}>
+                <button
+                  type="button"
+                  onClick={() => setMode("login")}
+                  className={`rounded-xl py-2 text-xs font-black uppercase transition ${mode === "login" || salesClosed ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Entrar
+                </button>
+                {!salesClosed && (
+                  <button
+                    type="button"
+                    onClick={() => setMode("register")}
+                    className={`rounded-xl py-2 text-xs font-black uppercase transition ${mode === "register" ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Cadastro
+                  </button>
+                )}
+              </div>
+
+              {mode === "login" || salesClosed ? (
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <LoginField icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
+                  <LoginField icon={<ShieldCheck className="size-4" />} label="Senha" name="password" type="password" placeholder="sua senha" />
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl py-3.5 text-sm font-black uppercase tracking-wide glow-blue disabled:opacity-60"
+                  >
+                    <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
+                    {loading ? <Loader2 className="relative size-4 animate-spin" /> : <ShieldCheck className="relative size-4" />}
+                    <span className="relative">Entrar no painel</span>
+                  </button>
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setNotice("Para recuperar sua senha, fale com o suporte oficial.")}
+                      className="text-slate-400 transition hover:text-neon-cyan"
+                    >
+                      Esqueci minha senha
                     </button>
-                  )}
+                    <a href={WAITLIST_URL} target="_blank" rel="noreferrer" className="text-neon-cyan transition hover:text-neon-blue">
+                      Suporte oficial
+                    </a>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleRegister} className="space-y-3">
+                  <LoginField icon={<UserPlus className="size-4" />} label="Nome completo" name="full_name" placeholder="Nome completo" />
+                  <LoginField icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
+                  <LoginField icon={<KeyRound className="size-4" />} label="Criar senha" name="password" type="password" placeholder="minimo 4 caracteres" />
+                  <LoginField icon={<ShieldCheck className="size-4" />} label="Confirmar senha" name="password_confirm" type="password" placeholder="repita sua senha" />
+                  <LoginField icon={<Phone className="size-4" />} label="Telefone" name="phone" placeholder="+55 11 99999-9999" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <LoginField icon={<MapPin className="size-4" />} label="Cidade" name="city" placeholder="Cidade" />
+                    <LoginField icon={<Radio className="size-4" />} label="Pais" name="country" placeholder="Pais" />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl py-3.5 text-sm font-black uppercase tracking-wide glow-blue disabled:opacity-60"
+                  >
+                    <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
+                    {loading ? <Loader2 className="relative size-4 animate-spin" /> : <UserPlus className="relative size-4" />}
+                    <span className="relative">Cadastrar e continuar</span>
+                  </button>
+                </form>
+              )}
+
+              {notice && (
+                <div className="mt-4 flex gap-2 rounded-2xl border border-warning/35 bg-warning/10 px-3 py-2 text-xs text-warning">
+                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                  <span>{notice}</span>
                 </div>
-              </form>
-            ) : (
-              <form onSubmit={handleRegister} className="space-y-3">
-                <LoginField icon={<UserPlus className="size-4" />} label="Nome completo" name="full_name" placeholder="Nome completo" />
-                <LoginField icon={<Mail className="size-4" />} label="Email" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
-                <LoginField icon={<KeyRound className="size-4" />} label="Criar senha" name="password" type="password" placeholder="minimo 4 caracteres" />
-                <LoginField icon={<ShieldCheck className="size-4" />} label="Confirmar senha" name="password_confirm" type="password" placeholder="repita sua senha" />
-                <LoginField icon={<Phone className="size-4" />} label="Telefone" name="phone" placeholder="+55 11 99999-9999" />
-                <div className="grid grid-cols-2 gap-2">
-                  <LoginField icon={<MapPin className="size-4" />} label="Cidade" name="city" placeholder="Cidade" />
-                  <LoginField icon={<Radio className="size-4" />} label="Pais" name="country" placeholder="Pais" />
+              )}
+
+              {pendingAccess && !salesClosed && (
+                <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={goCheckout}
+                    className="btn-gold-grad inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-3 text-xs font-black glow-gold"
+                  >
+                    <Crown className="size-4" /> Ir para checkout
+                  </button>
+                  <button
+                    type="button"
+                    onClick={enterDemo}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-3 text-xs font-black text-neon-cyan"
+                  >
+                    <Sparkles className="size-4" /> Entrar no demo
+                  </button>
                 </div>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="btn-primary-grad group relative w-full rounded-2xl py-3.5 text-sm font-semibold glow-blue flex items-center justify-center gap-2 overflow-hidden disabled:opacity-60"
-                >
-                  <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
-                  {loading ? <Loader2 className="relative size-4 animate-spin" /> : <UserPlus className="relative size-4" />}
-                  <span className="relative">Cadastrar e continuar</span>
-                </button>
-              </form>
-            )}
+              )}
 
-            {notice && (
-              <div className="mt-4 rounded-2xl border border-warning/35 bg-warning/10 px-3 py-2 text-xs text-warning flex gap-2">
-                <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                <span>{notice}</span>
+              <div className="mt-5 border-t border-border/60 pt-4 text-center text-[11px] text-slate-400">
+                Acesso exclusivo para clientes ativos.
+                {!salesClosed && (
+                  <span>
+                    {" "}A partir de <span className="font-semibold text-gold">R$ 297/mes</span>.
+                  </span>
+                )}
               </div>
-            )}
+            </GlassCard>
 
-            {pendingAccess && !salesClosed && (
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={goCheckout}
-                  className="btn-gold-grad inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-3 text-xs font-black glow-gold"
-                >
-                  <Crown className="size-4" /> Ir para checkout
-                </button>
-                <button
-                  type="button"
-                  onClick={enterDemo}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-3 text-xs font-black text-neon-cyan"
-                >
-                  <Sparkles className="size-4" /> Entrar no demo
-                </button>
-              </div>
-            )}
-
-            {!salesClosed && (
-              <div className="mt-5 pt-4 border-t border-border/60 text-[11px] text-center text-muted-foreground flex items-center justify-center gap-1.5">
-                <ShieldCheck className="size-3 text-neon-cyan" />
-                A partir de <span className="text-gold font-semibold">R$ 297/mês</span>. Demo limitado.
-              </div>
-            )}
-          </GlassCard>
-
-          <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            {benefits.map((b) => (
-              <div key={b.label} className="glass rounded-2xl p-3 text-center hover:border-neon-blue/40 transition-colors">
-                <div className="mx-auto mb-1.5 size-8 rounded-xl flex items-center justify-center bg-gradient-to-br from-neon-blue/20 to-neon-purple/20 border border-neon-blue/30">
-                  <b.icon className="size-4 text-neon-cyan" />
+            <GlassCard className="mt-4 rounded-3xl border-warning/30 bg-black/55 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-warning/35 bg-warning/10">
+                  <Crown className="size-5 text-warning" />
                 </div>
-                <div className="text-[10px] font-semibold leading-tight text-foreground">{b.label}</div>
-                <div className="mt-0.5 text-[9px] leading-tight text-muted-foreground">{b.desc}</div>
+                <div>
+                  <h3 className="text-sm font-black uppercase text-white">Vagas limitadas</h3>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">
+                    Liberamos novas vagas apenas em periodos especificos. Quando fechar, nao sabemos quando abriremos novamente.
+                  </p>
+                </div>
               </div>
-            ))}
-          </div>
+              <a
+                href={WAITLIST_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-warning/40 bg-warning/10 px-4 text-xs font-black uppercase tracking-wide text-warning transition hover:bg-warning/15"
+              >
+                Entrar na fila de espera
+              </a>
+            </GlassCard>
+          </aside>
+        </section>
 
-          <div className="mt-5 flex justify-center">
-            <AppBadge tone={salesClosed ? "red" : "amber"}>
-              {salesClosed ? "Vagas encerradas" : "Cadastro obrigatório"}
-            </AppBadge>
-          </div>
-        </div>
+        <footer className="relative z-10 pb-4 text-center text-[11px] leading-5 text-slate-500">
+          O SNIPER BO IA e uma ferramenta de leitura e analise operacional. Nao existe garantia de lucro. Use sempre gestao de banca e responsabilidade.
+        </footer>
+      </main>
+    </div>
+  );
+}
+
+function HeroBrainShowcase({ className = "" }: { className?: string }) {
+  return (
+    <div className={`relative mx-auto h-[300px] w-full max-w-[440px] sm:h-[360px] ${className}`}>
+      <div className="absolute inset-0 rounded-full bg-gradient-to-br from-neon-cyan/10 via-neon-purple/10 to-transparent blur-3xl" />
+      <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 scale-[0.78] items-center justify-center sm:scale-100">
+        <div className="absolute size-[320px] rounded-full border border-neon-blue/20 animate-orbit-slow sm:size-[390px]" />
+        <div className="absolute size-[380px] rounded-full border border-neon-purple/20 border-dashed animate-orbit-reverse sm:size-[460px]" />
+        <BrainAI size={320} speaking />
       </div>
+      <div className="absolute inset-x-8 bottom-6 hidden h-px bg-gradient-to-r from-transparent via-neon-cyan/50 to-transparent sm:block" />
+      {hudCards.map((card) => (
+        <div
+          key={card.label}
+          className={`landing-hud-card absolute hidden min-w-[150px] items-center gap-2 rounded-2xl border border-neon-cyan/30 bg-black/55 px-3 py-2 shadow-[0_0_24px_rgba(0,229,255,0.12)] backdrop-blur-xl sm:flex ${card.position}`}
+          style={{ animationDelay: card.delay }}
+        >
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-neon-purple/30 bg-neon-purple/10">
+            <card.icon className="size-4 text-neon-cyan" />
+          </div>
+          <span className="text-[10px] font-black uppercase tracking-wide text-white">{card.label}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
 function SalesAccessLoading() {
   return (
-    <div className="min-h-screen bg-app relative overflow-hidden flex items-center justify-center px-4 py-10">
-      <div className="absolute inset-0 scan-grid opacity-[0.18] pointer-events-none" />
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#020617] px-4 py-10">
       <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background:
-            "radial-gradient(ellipse 60% 50% at 20% 30%, color-mix(in oklab, var(--neon-blue) 18%, transparent), transparent 60%), radial-gradient(ellipse 50% 50% at 80% 70%, color-mix(in oklab, var(--neon-purple) 18%, transparent), transparent 60%)",
-        }}
+        className="absolute inset-0 bg-cover bg-center opacity-70"
+        style={{ backgroundImage: "url('/assets/dark-tech-bg.png')" }}
       />
+      <div className="absolute inset-0 bg-background/80" />
       <div className="relative w-full max-w-sm rounded-3xl border border-neon-cyan/30 bg-background/75 p-6 text-center shadow-[0_0_40px_rgba(0,229,255,0.12)] backdrop-blur-xl">
         <div className="mx-auto mb-4 flex justify-center">
           <BrainAI size={92} speaking />
@@ -456,14 +551,14 @@ function LoginField({
     <label className="block">
       <span className="text-[11px] uppercase tracking-widest text-muted-foreground">{label}</span>
       <div className="mt-1.5 flex items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
-        <span className="text-neon-cyan/70">{icon}</span>
+        <span className="text-neon-cyan">{icon}</span>
         <input
           name={name}
           type={type}
           required
           defaultValue={defaultValue}
-          className="bg-transparent flex-1 outline-none text-sm min-w-0"
           placeholder={placeholder}
+          className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
       </div>
     </label>

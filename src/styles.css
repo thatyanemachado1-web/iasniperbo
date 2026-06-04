@@ -394,6 +394,14 @@
 .animate-orbit-slow { animation: orbit-slow 28s linear infinite; }
 .animate-orbit-reverse { animation: orbit-slow 40s linear infinite reverse; }
 
+@keyframes landing-hud-float {
+  0%, 100% { transform: translateY(0); opacity: 0.86; }
+  50% { transform: translateY(-8px); opacity: 1; }
+}
+.landing-hud-card {
+  animation: landing-hud-float 5.2s ease-in-out infinite;
+}
+
 @keyframes sweep {
   0% { transform: translateY(-100%); opacity: 0; }
   20% { opacity: 1; }
