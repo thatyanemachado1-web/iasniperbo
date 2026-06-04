@@ -16,7 +16,9 @@ export type AIReadingSnapshot = {
   surfConfidence?: number;
   paganteNumero?: number | null;
   paganteOrigem?: string | null;
+  paganteDirecao?: string | null;
   paganteAlert?: string | null;
+  paganteAssertiveness?: number | null;
   lastRounds: string;
   assertiveness: number;
   sequencePositive?: number;
@@ -48,8 +50,9 @@ O QUE NARRAR (baseado no snapshot):
 - engineState BLOQUEADO => deixe claro que está bloqueado por risco, sem forçar.
 - signalStatus "pending" ou "g1" com signalSide BANKER ou PLAYER => entrada principal confirmada. Diga lado + proteção (se houver).
 - signalSide TIE com status pending/g1 => janela de Tie, atenção, mas sem substituir Banker/Player.
-- Se entrada principal alinhada com paganteNumero e surf a favor => pode falar com mais confiança ("tá mais limpa", "painéis conversando bem").
-- Se entrada principal existe MAS surf contra ou pagante conflitando => avisar com cautela, sugerir mão baixa.
+- Só fale de número pagante quando paganteNumero existir E paganteAssertiveness for 100. Abaixo de 100, ignore o pagante na fala.
+- Se entrada principal alinhar com paganteNumero 100% e paganteDirecao => pode falar: "hum, essa entrada tá interessando nesse número pagante, viu. Vamos nele: pode entrar no Banker/Player, protege empate."
+- Se entrada principal existe MAS surf contra ou pagante 100% conflitando => avisar com cautela, sugerir mão baixa.
 - tieStatus ativo sem entrada principal => "Tie pressionando, atenção".
 - Sem entrada (waiting, sem signalSide útil) => orientar a observar mais uma ou duas rodadas.
 
@@ -151,11 +154,14 @@ function buildLocalReading(data: AIReadingSnapshot) {
   const surfSide = normalizeSide(data.surfSide || "");
   const surfAgainst = Boolean(hasEntry && surfSide && surfSide !== side);
   const surfAligned = Boolean(hasEntry && surfSide && surfSide === side);
-  const hasPagante = data.paganteNumero !== null && data.paganteNumero !== undefined;
+  const paganteSide = normalizeSide(data.paganteDirecao || data.paganteOrigem || "");
+  const hasPagante =
+    data.paganteNumero !== null &&
+    data.paganteNumero !== undefined &&
+    typeof data.paganteAssertiveness === "number" &&
+    data.paganteAssertiveness >= 100;
   const paganteText = hasPagante
-    ? `número pagante ${data.paganteNumero}${
-        data.paganteOrigem ? ` em ${normalizeSide(data.paganteOrigem) || data.paganteOrigem}` : ""
-      }`
+    ? `número pagante ${data.paganteNumero}${paganteSide ? ` puxando ${sideLabel(paganteSide)}` : ""}`
     : "";
 
   if (String(data.engineState || "").toUpperCase().includes("BLOQUE")) {
@@ -168,7 +174,13 @@ function buildLocalReading(data: AIReadingSnapshot) {
 
   if (hasEntry) {
     if (surfAgainst && hasPagante) {
-      return `${name}entrada principal em ${side}, mas tem conflito: surf contra e ${paganteText}. Se for entrar, vai com mão baixa.`;
+      return `${name}tem ${paganteText} em 100%, mas o surf está contra. Se for nessa, vai com mão baixa e protege empate.`;
+    }
+    if (hasPagante && paganteSide === side) {
+      return `${name}hum, essa entrada tá interessando nesse número pagante ${data.paganteNumero}, viu. Vamos nele: pode entrar no ${sideLabel(side)}, protege empate${data.signalProtection ? ` até ${data.signalProtection}` : ""}.`;
+    }
+    if (hasPagante && paganteSide && paganteSide !== side) {
+      return `${name}tem ${paganteText} em 100%, mas ele não está alinhado com a entrada em ${sideLabel(side)}. Eu seguraria e esperaria outra confirmação.`;
     }
     if (surfAgainst) {
       return `${name}entrada principal em ${side}, só que o surf está contra. Eu trataria como mão leve e cuidado na proteção.`;
@@ -189,7 +201,7 @@ function buildLocalReading(data: AIReadingSnapshot) {
   }
 
   if (hasPagante) {
-    return `${name}${paganteText} apareceu na leitura. Ainda não tem entrada principal limpa, então acompanha sem antecipar.`;
+    return `${name}hum, ${paganteText} em 100% apareceu na leitura. Ainda não tem entrada principal limpa, então espera confirmação antes de ir.`;
   }
 
   if (surfSide) {
@@ -205,6 +217,14 @@ function normalizeSide(value: string) {
   if (text.includes("PLAYER")) return "PLAYER";
   if (text.includes("TIE") || text.includes("EMPATE")) return "TIE";
   return "";
+}
+
+function sideLabel(value: string) {
+  const side = normalizeSide(value);
+  if (side === "BANKER") return "Banker";
+  if (side === "PLAYER") return "Player";
+  if (side === "TIE") return "Tie";
+  return "mesa";
 }
 
 function beautifyPortugueseText(value: string) {

@@ -352,6 +352,7 @@ function buildNeuralResultEvent(
   style: VoiceNarrationStyle,
 ): VoiceEvent | null {
   if (!previousReading || !reading || !isSameNeuralReading(previousReading, reading)) return null;
+  if (!isPerfectPagante(reading)) return null;
 
   const previousGreens = neuralGreens(previousReading);
   const currentGreens = neuralGreens(reading);
@@ -477,7 +478,7 @@ function buildPaganteContext(
   entrySide: CurrentSignalSide | undefined,
   style: VoiceNarrationStyle,
 ) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number" || !isPerfectPagante(reading)) {
     return { key: "no-pagante", text: "", isAlignedWithEntry: false };
   }
 
@@ -626,7 +627,7 @@ function buildNeuralEvent(
   style: VoiceNarrationStyle,
   roundId: string,
 ): VoiceEvent | null {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number" || !isPerfectPagante(reading)) return null;
 
   const side = reading.direcao ?? reading.origem;
   if (!side) return null;
@@ -779,9 +780,16 @@ function buildTieEvent(
 
 function isFavorablePagante(reading?: NeuralReading) {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
+  if (!isPerfectPagante(reading)) return false;
   if (isOppositeTrigger(reading)) return false;
   const side = reading.direcao ?? reading.origem;
   return Boolean(side) && paganteStatusKind(reading) === "favorable";
+}
+
+function isPerfectPagante(reading?: NeuralReading | null) {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
+  if (isOppositeTrigger(reading)) return false;
+  return safeNumber(reading.assertividade) >= 100;
 }
 
 function isOppositeTrigger(reading?: NeuralReading | null) {

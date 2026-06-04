@@ -45,6 +45,8 @@ function buildSnapshot(
   userFirstName: string,
   allowUseName: boolean,
 ): AIReadingSnapshot {
+  const perfectPagante = isPerfectPagante(d.neuralReading);
+  const paganteSide = d.neuralReading?.direcao ?? d.neuralReading?.origem ?? null;
   const lastRounds = d.rounds
     .slice(-12)
     .map((r) => r.result)
@@ -63,9 +65,11 @@ function buildSnapshot(
     surfSide: d.currentSurfAlert?.surf_side,
     surfRisk: d.currentSurfAlert?.surf_risk,
     surfConfidence: d.currentSurfAlert?.surf_confidence,
-    paganteNumero: d.neuralReading?.numero ?? null,
-    paganteOrigem: d.neuralReading?.origem ?? null,
-    paganteAlert: d.neuralReading?.paganteAlert ?? null,
+    paganteNumero: perfectPagante ? d.neuralReading?.numero ?? null : null,
+    paganteOrigem: perfectPagante ? d.neuralReading?.origem ?? null : null,
+    paganteDirecao: perfectPagante ? paganteSide : null,
+    paganteAlert: perfectPagante ? d.neuralReading?.paganteAlert ?? null : null,
+    paganteAssertiveness: perfectPagante ? d.neuralReading?.assertividade ?? null : null,
     lastRounds,
     assertiveness: d.mainScoreboard.assertiveness,
     sequencePositive: d.mainScoreboard.sequencePositive,
@@ -73,6 +77,12 @@ function buildSnapshot(
     userFirstName,
     allowUseName,
   };
+}
+
+function isPerfectPagante(reading?: DashboardData["neuralReading"]) {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
+  if (reading.origemTipo === "OPOSTO") return false;
+  return typeof reading.assertividade === "number" && reading.assertividade >= 100;
 }
 
 export function AIReadingCard({ data, mode }: Props) {
@@ -110,7 +120,7 @@ export function AIReadingCard({ data, mode }: Props) {
   );
 
   // Chave de cache estavel: muda sempre que o estado relevante muda
-  const stateKey = `${snapshot.engineState}|${snapshot.signalSide}|${snapshot.signalStatus}|${snapshot.tieStatus}|${snapshot.surfPhase ?? "-"}|${snapshot.paganteNumero ?? "-"}|${snapshot.lastRounds}`;
+  const stateKey = `${snapshot.engineState}|${snapshot.signalSide}|${snapshot.signalStatus}|${snapshot.tieStatus}|${snapshot.surfPhase ?? "-"}|${snapshot.paganteNumero ?? "-"}|${snapshot.paganteDirecao ?? "-"}|${snapshot.paganteAssertiveness ?? "-"}|${snapshot.lastRounds}`;
 
   const liveReady = mode === "live" && data.mockMode === false;
 
