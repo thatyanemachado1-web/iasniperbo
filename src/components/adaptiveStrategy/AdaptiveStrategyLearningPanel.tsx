@@ -33,13 +33,13 @@ export function AdaptiveStrategyLearningPanel({ snapshot, onReset }: Props) {
           <div className="text-xs uppercase tracking-[0.22em] text-neon-cyan">Aprendizado IA</div>
           <h1 className="text-xl font-black">Adaptive Strategy Learning Engine</h1>
           <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
-            Motor independente para minerar padroes reais de Bac Bo, pontuar estrategias e bloquear
+            Motor independente para minerar padrões reais de Bac Bo, pontuar estratégias e bloquear
             entradas com amostra fraca.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <AppBadge tone={snapshot.syncStatus.mode === "database" ? "green" : "amber"}>
-            {snapshot.syncStatus.mode === "database" ? "Banco ativo" : "Historico local"}
+            {snapshot.syncStatus.mode === "database" ? "Banco ativo" : "Histórico local"}
           </AppBadge>
           <AppBadge tone={snapshot.entryScore.allowed ? "green" : "red"}>
             Score {snapshot.entryScore.finalScore}/100
@@ -56,7 +56,7 @@ export function AdaptiveStrategyLearningPanel({ snapshot, onReset }: Props) {
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
         <Metric icon={Database} label="Rodadas salvas" value={snapshot.recordsStored} tone="cyan" />
-        <Metric icon={BarChart3} label="Padroes" value={snapshot.patternsFound} tone="blue" />
+        <Metric icon={BarChart3} label="Padrões" value={snapshot.patternsFound} tone="blue" />
         <Metric icon={Flame} label="Quentes" value={snapshot.hotPatterns} tone="green" />
         <Metric icon={PauseCircle} label="Pausados" value={snapshot.pausedPatterns} tone="red" />
         <Metric icon={ShieldCheck} label="Min. ocorr." value={snapshot.minOccurrences} tone="amber" />
@@ -72,7 +72,7 @@ export function AdaptiveStrategyLearningPanel({ snapshot, onReset }: Props) {
         <div className="mt-4 grid gap-3 lg:grid-cols-[0.8fr_1.2fr]">
           <div>
             <div className="text-4xl font-black text-neon-cyan">{snapshot.entryScore.finalScore}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Entrada so aparece acima de 75.</div>
+            <div className="mt-1 text-xs text-muted-foreground">Entrada só aparece acima de 75.</div>
             <div className="mt-4 h-2 rounded-full bg-secondary">
               <div
                 className={`h-2 rounded-full ${snapshot.entryScore.allowed ? "bg-success" : "bg-red-500"}`}
@@ -111,18 +111,18 @@ export function AdaptiveStrategyLearningPanel({ snapshot, onReset }: Props) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <PatternList title="Padroes quentes" patterns={hot} empty="Nenhum padrao quente com amostra real ainda." />
-        <PatternList title="Padroes pausados" patterns={paused} empty="Nenhum padrao pausado agora." />
-        <PatternList title="Maior assertividade" patterns={strongest} empty="Aguardando 30 ocorrencias por padrao." />
-        <PatternList title="Maior volume" patterns={volume} empty="Aguardando historico real." />
+        <PatternList title="Padrões quentes" patterns={hot} empty="Nenhum padrão quente com amostra real ainda." />
+        <PatternList title="Padrões pausados" patterns={paused} empty="Nenhum padrão pausado agora." />
+        <PatternList title="Maior assertividade" patterns={strongest} empty="Aguardando 30 ocorrências por padrão." />
+        <PatternList title="Maior volume" patterns={volume} empty="Aguardando histórico real." />
         <PatternList title="Top por mesa" patterns={snapshot.ranking.byTable} empty="Aguardando dados por mesa." />
-        <PatternList title="Top por horario" patterns={snapshot.ranking.byHour} empty="Aguardando dados por horario." />
+        <PatternList title="Top por horário" patterns={snapshot.ranking.byHour} empty="Aguardando dados por horário." />
       </div>
 
       <GlassCard>
         <SectionTitle
-          title="Logs de decisao"
-          subtitle="Cada decisao fica explicada para auditoria, sem porcentagem inventada."
+          title="Logs de decisão"
+          subtitle="Cada decisão fica explicada para auditoria, sem porcentagem inventada."
           right={<AppBadge tone="blue">Tempo real</AppBadge>}
         />
         <div className="mt-3 space-y-2">
@@ -178,7 +178,7 @@ function RankingCard({ title, patterns }: { title: string; patterns: AdaptivePat
         {patterns.length ? (
           patterns.map((pattern) => <PatternRow key={pattern.id} pattern={pattern} />)
         ) : (
-          <EmptyLine text="Sem padrao aprovado ainda." />
+          <EmptyLine text="Sem padrão aprovado ainda." />
         )}
       </div>
     </GlassCard>
@@ -235,7 +235,12 @@ function SmallStat({ label, value, tone }: { label: string; value: number | stri
 
 function StatusBadge({ status }: { status: AdaptivePattern["status"] }) {
   const tone = status === "quente" ? "green" : status === "pausado" ? "red" : status === "observacao" ? "amber" : "blue";
-  return <AppBadge tone={tone}>{status}</AppBadge>;
+  return <AppBadge tone={tone}>{statusLabel(status)}</AppBadge>;
+}
+
+function statusLabel(status: AdaptivePattern["status"]) {
+  if (status === "observacao") return "observação";
+  return status;
 }
 
 function EmptyLine({ text }: { text: string }) {

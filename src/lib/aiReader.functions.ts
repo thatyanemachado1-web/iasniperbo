@@ -21,53 +21,53 @@ export type AIReadingSnapshot = {
   assertiveness: number;
   sequencePositive?: number;
   sequenceNegative?: number;
-  /** Primeiro nome do usuario logado. Vazio = sem nome. */
+  /** Primeiro nome do usuário logado. Vazio = sem nome. */
   userFirstName?: string;
-  /** Se true, a IA pode (mas nao precisa) chamar o usuario pelo primeiro nome nesta fala. */
+  /** Se true, a IA pode, mas não precisa, chamar o usuário pelo primeiro nome nesta fala. */
   allowUseName?: boolean;
 };
 
-const SYSTEM_PROMPT = `Voce e um copiloto humano que acompanha uma mesa de Bac Bo ao vivo junto com o operador.
-Seu papel: LER os dados reais do painel e narrar de forma natural, descolada porem responsavel, como um amigo experiente sentado do lado.
+const SYSTEM_PROMPT = `Você é um copiloto humano que acompanha uma mesa de Bac Bo ao vivo junto com o operador.
+Seu papel: LER os dados reais do painel e narrar de forma natural, descolada porém responsável, como um amigo experiente sentado do lado.
 
-ESTILO DA FALA (obrigatorio):
-- Humano, natural, conversacional. NUNCA pareca um robo lendo metricas.
-- Frases curtas, no maximo 2 a 3 frases por resposta, ate ~55 palavras.
-- VARIE as frases. Nao repita as mesmas aberturas ("Atencao", "Leitura", "Sinal confirmado") em respostas seguidas.
-- Pode usar expressoes leves: "olha", "boa", "calma nessa", "essa eu seguraria", "ta bonito agora", "mao baixa", "ta dividida".
-- Portugues do Brasil. Sem emoji. Sem markdown. Sem listas.
+ESTILO DA FALA (obrigatório):
+- Humano, natural, conversacional. NUNCA pareça um robô lendo métricas.
+- Frases curtas, no máximo 2 a 3 frases por resposta, até ~55 palavras.
+- VARIE as frases. Não repita as mesmas aberturas ("Atenção", "Leitura", "Sinal confirmado") em respostas seguidas.
+- Pode usar expressões leves: "olha", "boa", "calma nessa", "essa eu seguraria", "tá bonito agora", "mão baixa", "tá dividida".
+- Português do Brasil com acentos corretos. Sem emoji. Sem markdown. Sem listas.
 
 REGRAS DURAS (nunca quebrar):
 - NUNCA prometa ganho. NUNCA diga "vai dar", "garantido", "certeza", "entra forte que ganha".
-- NUNCA mande dobrar mao, recuperar prejuizo ou aumentar aposta apos red.
-- Se houver risco (surf contra, tie pressionando, conflito com pagante), sempre lembrar gestao / mao baixa.
-- Use SOMENTE os dados reais do snapshot. Nao invente numero, porcentagem, lado ou motivo.
-- Nao cite metricas internas cruas (confidence X%, risk Y) a menos que ajude o operador.
+- NUNCA mande dobrar mão, recuperar prejuízo ou aumentar aposta após red.
+- Se houver risco (surf contra, tie pressionando, conflito com pagante), sempre lembrar gestão / mão baixa.
+- Use SOMENTE os dados reais do snapshot. Não invente número, porcentagem, lado ou motivo.
+- Não cite métricas internas cruas (confidence X%, risk Y) a menos que ajude o operador.
 
 O QUE NARRAR (baseado no snapshot):
-- engineState BLOQUEADO => deixe claro que esta bloqueado por risco, sem forcar.
-- signalStatus "pending" ou "g1" com signalSide BANKER ou PLAYER => entrada principal confirmada. Diga lado + protecao (se houver).
-- signalSide TIE com status pending/g1 => janela de Tie, atenção mas sem substituir Banker/Player.
-- Se entrada principal alinhada com paganteNumero e surf a favor => pode falar com mais confianca ("ta mais limpa", "painéis conversando bem").
-- Se entrada principal existe MAS surf contra ou pagante conflitando => avisar com cautela, sugerir mao baixa.
+- engineState BLOQUEADO => deixe claro que está bloqueado por risco, sem forçar.
+- signalStatus "pending" ou "g1" com signalSide BANKER ou PLAYER => entrada principal confirmada. Diga lado + proteção (se houver).
+- signalSide TIE com status pending/g1 => janela de Tie, atenção, mas sem substituir Banker/Player.
+- Se entrada principal alinhada com paganteNumero e surf a favor => pode falar com mais confiança ("tá mais limpa", "painéis conversando bem").
+- Se entrada principal existe MAS surf contra ou pagante conflitando => avisar com cautela, sugerir mão baixa.
 - tieStatus ativo sem entrada principal => "Tie pressionando, atenção".
-- Sem entrada (waiting, sem signalSide util) => orientar a observar mais uma ou duas rodadas.
+- Sem entrada (waiting, sem signalSide útil) => orientar a observar mais uma ou duas rodadas.
 
-PERSONALIZACAO COM NOME:
+PERSONALIZAÇÃO COM NOME:
 - Se userFirstName vier vazio, NUNCA invente nome, NUNCA escreva "[nome]". Fale sem nome, normal.
-- Se userFirstName vier preenchido E allowUseName for true, voce PODE (nao obriga) usar o primeiro nome UMA vez na fala, de forma natural ("Boa, Gabriel.", "Gabriel, essa eu seguraria.").
-- Se allowUseName for false, NAO use o nome do usuario nesta fala.
+- Se userFirstName vier preenchido E allowUseName for true, você PODE usar o primeiro nome UMA vez na fala, de forma natural ("Boa, Gabriel.", "Gabriel, essa eu seguraria.").
+- Se allowUseName for false, NÃO use o nome do usuário nesta fala.
 - Nunca use o nome duas vezes na mesma resposta. Nunca use sobrenome.
 
-EXEMPLOS de tom (apenas referencia, NAO copiar literal):
-- "Essa eu seguraria um pouco. A principal ate tentou formar, mas ainda nao alinhou."
-- "Se for nessa, vai com mao baixa. Tem sinal, mas o risco ainda ta no radar."
-- "Olha o surf aqui, ta pressionando contra. Mao baixa."
-- "Agora ficou mais bonito: principal alinhou com numero pagante e surf. Leitura mais limpa."
+EXEMPLOS de tom (apenas referência, NÃO copiar literal):
+- "Essa eu seguraria um pouco. A principal até tentou formar, mas ainda não alinhou."
+- "Se for nessa, vai com mão baixa. Tem sinal, mas o risco ainda tá no radar."
+- "Olha o surf aqui, tá pressionando contra. Mão baixa."
+- "Agora ficou mais bonito: principal alinhou com número pagante e surf. Leitura mais limpa."
 - "Sem entrada boa por enquanto. Melhor observar mais uma ou duas rodadas."
-- "Tie pressionando. Nao substitui Banker ou Player, mas merece atencao."
+- "Tie pressionando. Não substitui Banker ou Player, mas merece atenção."
 
-Saida: apenas o texto da narracao, sem prefixos, sem aspas.`;
+Saída: apenas o texto da narração, sem prefixos, sem aspas.`;
 
 const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
 const DEFAULT_OLLAMA_MODEL = "qwen2.5:7b";
@@ -78,7 +78,7 @@ export const generateAIReading = createServerFn({ method: "POST" })
     const userPrompt = `Snapshot atual da mesa (JSON):
 ${JSON.stringify(data, null, 2)}
 
-Gere AGORA a narracao curta, humana e natural seguindo todas as regras do system.`;
+Gere AGORA a narração curta, humana e natural seguindo todas as regras do sistema.`;
 
     const ollamaText = await runOllamaReading(userPrompt);
     if (ollamaText) {
@@ -124,11 +124,11 @@ async function runOllamaReading(userPrompt: string) {
 }
 
 function cleanAiText(value: string) {
-  return value
+  return beautifyPortugueseText(value)
     .replace(/entrada garantida/gi, "entrada confirmada")
     .replace(/\bgarantid[ao]s?\b/gi, "confirmado")
     .replace(/\bcerteza\b/gi, "leitura")
-    .replace(/lucro certo/gi, "gestao")
+    .replace(/lucro certo/gi, "gestão")
     .trim();
 }
 
@@ -145,53 +145,58 @@ function buildLocalReading(data: AIReadingSnapshot) {
   const side = normalizeSide(data.signalSide);
   const status = String(data.signalStatus || "").toLowerCase();
   const hasEntry = side && side !== "TIE" && ["pending", "g1", "active"].includes(status);
-  const tieActive = String(data.tieStatus || "").toLowerCase().includes("ativo") ||
+  const tieActive =
+    String(data.tieStatus || "").toLowerCase().includes("ativo") ||
     String(data.tieStatus || "").toLowerCase().includes("active");
   const surfSide = normalizeSide(data.surfSide || "");
   const surfAgainst = Boolean(hasEntry && surfSide && surfSide !== side);
   const surfAligned = Boolean(hasEntry && surfSide && surfSide === side);
   const hasPagante = data.paganteNumero !== null && data.paganteNumero !== undefined;
   const paganteText = hasPagante
-    ? `numero pagante ${data.paganteNumero}${data.paganteOrigem ? ` em ${normalizeSide(data.paganteOrigem) || data.paganteOrigem}` : ""}`
+    ? `número pagante ${data.paganteNumero}${
+        data.paganteOrigem ? ` em ${normalizeSide(data.paganteOrigem) || data.paganteOrigem}` : ""
+      }`
     : "";
 
   if (String(data.engineState || "").toUpperCase().includes("BLOQUE")) {
-    return `${name}essa eu seguraria. A engine bloqueou por risco, entao melhor observar mais uma rodada e manter gestao.`;
+    return `${name}essa eu seguraria. A engine bloqueou por risco, então melhor observar mais uma rodada e manter gestão.`;
   }
 
   if (side === "TIE" && ["pending", "g1", "active"].includes(status)) {
-    return `${name}Tie entrou na janela. Ele merece atencao, mas continua sendo leitura de risco e pede mao baixa.`;
+    return `${name}Tie entrou na janela. Ele merece atenção, mas continua sendo leitura de risco e pede mão baixa.`;
   }
 
   if (hasEntry) {
     if (surfAgainst && hasPagante) {
-      return `${name}entrada principal em ${side}, mas tem conflito: surf contra e ${paganteText}. Se for entrar, vai com mao baixa.`;
+      return `${name}entrada principal em ${side}, mas tem conflito: surf contra e ${paganteText}. Se for entrar, vai com mão baixa.`;
     }
     if (surfAgainst) {
-      return `${name}entrada principal em ${side}, so que o surf esta contra. Eu trataria como mao leve e cuidado na protecao.`;
+      return `${name}entrada principal em ${side}, só que o surf está contra. Eu trataria como mão leve e cuidado na proteção.`;
     }
     if (surfAligned && hasPagante) {
-      return `${name}agora ficou mais limpa: entrada em ${side}, surf alinhado e ${paganteText}. Ainda assim, entra com gestao.`;
+      return `${name}agora ficou mais limpa: entrada em ${side}, surf alinhado e ${paganteText}. Ainda assim, entra com gestão.`;
     }
     if (hasPagante) {
-      return `${name}entrada principal em ${side}. Tambem tem ${paganteText} no radar, entao acompanha essa leitura sem forcar a mao.`;
+      return `${name}entrada principal em ${side}. Também tem ${paganteText} no radar, então acompanha essa leitura sem forçar a mão.`;
     }
-    return `${name}entrada principal em ${side}${data.signalProtection ? ` com protecao ${data.signalProtection}` : ""}. Leitura valida, mas sem exagerar na mao.`;
+    return `${name}entrada principal em ${side}${
+      data.signalProtection ? ` com proteção ${data.signalProtection}` : ""
+    }. Leitura válida, mas sem exagerar na mão.`;
   }
 
   if (tieActive) {
-    return `${name}Tie esta pressionando, mas sem entrada principal limpa agora. Melhor observar e esperar alinhamento.`;
+    return `${name}Tie está pressionando, mas sem entrada principal limpa agora. Melhor observar e esperar alinhamento.`;
   }
 
   if (hasPagante) {
-    return `${name}${paganteText} apareceu na leitura. Ainda nao tem entrada principal limpa, entao acompanha sem antecipar.`;
+    return `${name}${paganteText} apareceu na leitura. Ainda não tem entrada principal limpa, então acompanha sem antecipar.`;
   }
 
   if (surfSide) {
-    return `${name}surf esta puxando para ${surfSide}, mas a entrada principal ainda nao confirmou. Melhor aguardar mais uma rodada.`;
+    return `${name}surf está puxando para ${surfSide}, mas a entrada principal ainda não confirmou. Melhor aguardar mais uma rodada.`;
   }
 
-  return `${name}sem entrada boa por enquanto. Mesa em observacao, melhor esperar a proxima confirmacao.`;
+  return `${name}sem entrada boa por enquanto. Mesa em observação, melhor esperar a próxima confirmação.`;
 }
 
 function normalizeSide(value: string) {
@@ -200,4 +205,57 @@ function normalizeSide(value: string) {
   if (text.includes("PLAYER")) return "PLAYER";
   if (text.includes("TIE") || text.includes("EMPATE")) return "TIE";
   return "";
+}
+
+function beautifyPortugueseText(value: string) {
+  const mojibakeFixed = value
+    .replace(/nÃ£o/g, "não")
+    .replace(/NÃ£o/g, "Não")
+    .replace(/atenÃ§Ã£o/g, "atenção")
+    .replace(/AtenÃ§Ã£o/g, "Atenção")
+    .replace(/painÃ©is/g, "painéis")
+    .replace(/indisponÃ­vel/g, "indisponível");
+
+  return [
+    ["voce", "você"],
+    ["nao", "não"],
+    ["atencao", "atenção"],
+    ["observacao", "observação"],
+    ["narracao", "narração"],
+    ["analise", "análise"],
+    ["numero", "número"],
+    ["padrao", "padrão"],
+    ["gestao", "gestão"],
+    ["confianca", "confiança"],
+    ["direcao", "direção"],
+    ["protecao", "proteção"],
+    ["confirmacao", "confirmação"],
+    ["proxima", "próxima"],
+    ["forcar", "forçar"],
+    ["modulos", "módulos"],
+    ["metricas", "métricas"],
+    ["estatisticas", "estatísticas"],
+    ["usuario", "usuário"],
+    ["usuarios", "usuários"],
+    ["responsavel", "responsável"],
+    ["prejuizo", "prejuízo"],
+    ["apos", "após"],
+    ["ate", "até"],
+    ["esta", "está"],
+    ["ta", "tá"],
+    ["so", "só"],
+    ["mao", "mão"],
+    ["tambem", "também"],
+    ["valida", "válida"],
+    ["possivel", "possível"],
+    ["saida", "saída"],
+  ].reduce((text, [plain, accented]) => replaceWord(text, plain, accented), mojibakeFixed);
+}
+
+function replaceWord(text: string, plain: string, accented: string) {
+  return text.replace(new RegExp(`\\b${plain}\\b`, "gi"), (match) =>
+    match[0] === match[0]?.toUpperCase()
+      ? `${accented[0]?.toUpperCase() ?? ""}${accented.slice(1)}`
+      : accented,
+  );
 }

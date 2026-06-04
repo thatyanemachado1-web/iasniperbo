@@ -74,7 +74,7 @@ export function AIReadingCard({ data, mode }: Props) {
   const lastSpokenKeyRef = useRef("");
   const playbackIdRef = useRef(0);
 
-  // Nome do usuario logado (so primeiro nome). Vazio se nao houver.
+  // Nome do usuário logado (só primeiro nome). Vazio se não houver.
   const userFirstName = useMemo(() => {
     const session = readUserSession();
     return firstNameOf(session.name) || firstNameOf(session.email.split("@")[0]);

@@ -128,7 +128,7 @@ export function useVoiceAssistant(
 
   const speakWithBrowser = useCallback(
     async (text: string) => {
-      if (!speechSupported) return "Web Speech API indisponivel neste navegador.";
+      if (!speechSupported) return "Web Speech API indisponível neste navegador.";
       try {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
@@ -220,7 +220,7 @@ export function useVoiceAssistant(
   const speakText = useCallback(
     (text: string, priority: VoicePriority, updateCooldown: boolean) => {
       if (!supported) {
-        setVoiceError("Voz indisponivel no momento.");
+        setVoiceError("Voz indisponível no momento.");
         return;
       }
       const playbackId = playbackIdRef.current + 1;

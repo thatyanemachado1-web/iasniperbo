@@ -16,19 +16,19 @@ type Props = {
 };
 
 const quickQuestions = [
-  "Por que nao teve entrada ainda?",
+  "Por que não teve entrada ainda?",
   "Qual o risco atual?",
-  "O Surf esta ativo?",
-  "O numero pagante esta forte?",
+  "O Surf está ativo?",
+  "O número pagante está forte?",
   "Tem risco de Tie?",
-  "O que a IA esta vendo agora?",
+  "O que a IA está vendo agora?",
 ];
 
 export function LocalAiChatCard({ adaptiveSnapshot }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      text: "Estou pronto para explicar a leitura real da mesa. As entradas continuam vindo dos modulos internos.",
+      text: "Estou pronto para explicar a leitura real da mesa. As entradas continuam vindo dos módulos internos.",
     },
   ]);
   const [text, setText] = useState("");
@@ -56,7 +56,7 @@ export function LocalAiChatCard({ adaptiveSnapshot }: Props) {
         ...current,
         {
           role: "assistant",
-          text: "Mesa em observacao. A IA local nao respondeu agora, entao vou manter apenas a leitura dos modulos internos.",
+          text: "Mesa em observação. A IA local não respondeu agora, então vou manter apenas a leitura dos módulos internos.",
         },
       ]);
     } finally {
@@ -69,7 +69,7 @@ export function LocalAiChatCard({ adaptiveSnapshot }: Props) {
       <div className="border-b border-border/60 p-4">
         <SectionTitle
           title="Assistente IA Local"
-          subtitle="Ollama/Qwen explica as decisoes; nao decide entradas."
+          subtitle="Ollama/Qwen explica as decisões; não decide entradas."
           right={<AppBadge tone="green">Local</AppBadge>}
         />
       </div>

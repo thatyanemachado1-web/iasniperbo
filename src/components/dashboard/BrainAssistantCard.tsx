@@ -60,7 +60,7 @@ export function BrainAssistantCard({ data, mode, adaptiveSnapshot, locked = fals
         {active ? "Narrando a mesa em tempo real." : "IA acompanhando a mesa"}
       </div>
       <p className="relative max-w-[24rem] text-xs leading-relaxed text-muted-foreground">
-        Quando ativado, usa Edge TTS local e fallback Web Speech para narrar numero pagante,
+        Quando ativado, usa Edge TTS local e fallback Web Speech para narrar número pagante,
         surf, tie, bloqueios e entradas confirmadas.
       </p>
 
@@ -83,7 +83,7 @@ export function BrainAssistantCard({ data, mode, adaptiveSnapshot, locked = fals
 
       <div className="relative w-full rounded-xl border border-border/60 bg-secondary/20 px-3 py-2 text-left">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-xs font-bold">Estilo da narracao</span>
+          <span className="text-xs font-bold">Estilo da narração</span>
           <span className="text-[11px] text-muted-foreground">
             {voice.style === "aggressive"
               ? "Agressivo"
@@ -165,7 +165,7 @@ export function BrainAssistantCard({ data, mode, adaptiveSnapshot, locked = fals
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="pt-BR-AntonioNeural">pt-BR Antonio Neural</SelectItem>
-            <SelectItem value="browser_auto">Automatico do navegador</SelectItem>
+            <SelectItem value="browser_auto">Automático do navegador</SelectItem>
           </SelectContent>
         </Select>
         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
@@ -181,7 +181,7 @@ export function BrainAssistantCard({ data, mode, adaptiveSnapshot, locked = fals
 
       <div className="relative min-h-[3.75rem] w-full rounded-xl border border-border/60 bg-background/25 px-3 py-2 text-left">
         <div className="mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-          <span>Ultima analise</span>
+          <span>Última análise</span>
           {voice.queueLength > 0 && <span>{voice.queueLength} na fila</span>}
         </div>
         <div className="text-xs leading-relaxed text-foreground">
@@ -192,7 +192,7 @@ export function BrainAssistantCard({ data, mode, adaptiveSnapshot, locked = fals
 
       {!voice.supported && (
         <div className="relative rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          Voz local indisponivel no momento.
+          Voz local indisponível no momento.
         </div>
       )}
       {voice.voiceError && (
@@ -208,7 +208,7 @@ export function BrainAssistantCard({ data, mode, adaptiveSnapshot, locked = fals
         className="relative inline-flex w-full items-center justify-center gap-2 rounded-xl border border-neon-cyan/30 px-3 py-2 text-xs font-bold text-neon-cyan transition hover:bg-neon-cyan/10 disabled:cursor-not-allowed disabled:opacity-45"
       >
         <Volume2 className="size-4" />
-        Ouvir ultima analise
+        Ouvir última análise
       </button>
 
       <div className="relative size-14 rounded-full btn-primary-grad flex items-center justify-center glow-blue">

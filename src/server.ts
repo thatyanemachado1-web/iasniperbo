@@ -549,9 +549,9 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
   if (url.pathname !== "/api/voice/speak") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "Método não permitido." }, 405);
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "Nao autorizado." }, 401);
+    return json({ error: "Não autorizado." }, 401);
   }
 
   const body = readRecord(await request.json().catch(() => ({})));
@@ -564,12 +564,12 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
   const settings = getLocalAiSettings(env);
   const provider = readString(body, "provider") || settings.voiceProvider;
   if (provider !== "edge-tts") {
-    return json({ fallback: "browser", reason: "Provedor local ainda nao ativo no backend." });
+    return json({ fallback: "browser", reason: "Provedor local ainda não ativo no backend." });
   }
 
   const edgeTtsUrl = readServerEnvString(env, "EDGE_TTS_URL", "").replace(/\/+$/, "");
   if (!edgeTtsUrl) {
-    return json({ fallback: "browser", reason: "EDGE_TTS_URL nao configurado no backend." });
+    return json({ fallback: "browser", reason: "EDGE_TTS_URL não configurado no backend." });
   }
 
   try {
@@ -586,7 +586,7 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
       }),
     });
     if (!response.ok) {
-      return json({ fallback: "browser", reason: `Edge TTS indisponivel (${response.status}).` });
+      return json({ fallback: "browser", reason: `Edge TTS indisponível (${response.status}).` });
     }
 
     return new Response(await response.arrayBuffer(), {
@@ -601,8 +601,8 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
       },
     });
   } catch (error) {
-    console.warn("Edge TTS indisponivel.", error);
-    return json({ fallback: "browser", reason: "Falha de conexao com Edge TTS." });
+    console.warn("Edge TTS indisponível.", error);
+    return json({ fallback: "browser", reason: "Falha de conexão com Edge TTS." });
   }
 }
 
@@ -612,7 +612,7 @@ async function handleLocalAiRequest(request: Request, env: unknown) {
   if (url.pathname === "/admin/local-ai") {
     if (request.method === "OPTIONS") return json(null, 204);
     const role = await getAdminRequestRole(request, env);
-    if (!role) return json({ error: "Nao autorizado." }, 401);
+    if (!role) return json({ error: "Não autorizado." }, 401);
     if (request.method === "GET") {
       return json({
         settings: getLocalAiSettings(env),
@@ -630,14 +630,14 @@ async function handleLocalAiRequest(request: Request, env: unknown) {
         status: await probeOllamaStatus(env),
       });
     }
-    return json({ error: "Metodo nao permitido." }, 405);
+    return json({ error: "Método não permitido." }, 405);
   }
 
   if (url.pathname !== "/api/ai/local-commentary") return null;
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "Método não permitido." }, 405);
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "Nao autorizado." }, 401);
+    return json({ error: "Não autorizado." }, 401);
   }
 
   const startedAt = Date.now();
@@ -809,17 +809,17 @@ function buildLocalAiPrompt(
   summary: Record<string, unknown>,
 ) {
   return [
-    "Voce e o Sniper Voice IA, analista virtual de Bac Bo dentro do Sniper Bo IA.",
-    "Voce NAO decide entradas. As entradas ja foram decididas pelos modulos internos.",
-    "Use somente os dados reais enviados em JSON. Nao invente porcentagens, estatisticas ou fatos.",
+    "Você é o Sniper Voice IA, analista virtual de Bac Bo dentro do Sniper Bo IA.",
+    "Você NÃO decide entradas. As entradas já foram decididas pelos módulos internos.",
+    "Use somente os dados reais enviados em JSON. Não invente porcentagens, estatísticas ou fatos.",
     "Nunca prometa lucro. Nunca diga certeza, garantida ou entrada garantida.",
-    "Se nao houver dados suficientes, diga que a mesa esta em observacao.",
+    "Se não houver dados suficientes, diga que a mesa está em observação.",
     "Tom: natural, agressivo, confiante, profissional, frases curtas, sala ao vivo.",
     "Sempre mencione risco quando o risco estiver alto.",
-    "Responda em portugues do Brasil com no maximo 3 frases curtas.",
+    "Responda em português do Brasil com acentos corretos e no máximo 3 frases curtas.",
     `Evento: ${event || "chat"}`,
-    question ? `Pergunta do usuario: ${question}` : "",
-    fallbackText ? `Comentario base do sistema: ${fallbackText}` : "",
+    question ? `Pergunta do usuário: ${question}` : "",
+    fallbackText ? `Comentário base do sistema: ${fallbackText}` : "",
     `Dados reais do Sniper Bo IA: ${JSON.stringify(summary).slice(0, 6000)}`,
     "Resposta:",
   ]
@@ -897,23 +897,77 @@ function fallbackLocalAiCommentary(event: string, summary: Record<string, unknow
   const entry = readRecord(summary.entradaAtual);
   const side = readString(entry, "side");
   if (readString(risk, "nivel") === "alto") {
-    return "Cuidado. O mercado esta pesado e o risco subiu. Melhor nao forcar entrada agora.";
+    return "Cuidado. O mercado está pesado e o risco subiu. Melhor não forçar entrada agora.";
   }
-  if (event.includes("green")) return "Bateu. Green confirmado. A leitura respeitou o padrao.";
-  if (event.includes("red")) return "Red confirmado. O mercado quebrou a leitura. Gestao primeiro.";
+  if (event.includes("green")) return "Bateu. Green confirmado. A leitura respeitou o padrão.";
+  if (event.includes("red")) return "Red confirmado. O mercado quebrou a leitura. Gestão primeiro.";
   if (side === "BANKER" || side === "PLAYER" || side === "TIE") {
-    return `Entrada confirmada em ${side}. A leitura veio dos modulos internos e o risco esta monitorado.`;
+    return `Entrada confirmada em ${side}. A leitura veio dos módulos internos e o risco está monitorado.`;
   }
-  return "Mesa ainda em observacao. Tem movimento, mas nao existe confirmacao limpa para entrada.";
+  return "Mesa ainda em observação. Tem movimento, mas não existe confirmação limpa para entrada.";
 }
 
 function cleanLocalAiResponse(value: string) {
-  const text = sanitizeQuestion(value, 520)
-    .replace(/entrada\s+garantida/gi, "entrada confirmada pelos modulos")
+  const text = beautifyPortugueseText(sanitizeQuestion(value, 520))
+    .replace(/entrada\s+garantida/gi, "entrada confirmada pelos módulos")
     .replace(/\bgarantid[ao]\b/gi, "confirmado pelos dados")
     .replace(/\bcerteza\b/gi, "leitura")
     .replace(/lucro\s+certo/gi, "resultado ainda depende do mercado");
-  return text || "Mesa em observacao. Ainda sem dados suficientes para comentario seguro.";
+  return text || "Mesa em observação. Ainda sem dados suficientes para comentário seguro.";
+}
+
+function beautifyPortugueseText(value: string) {
+  const mojibakeFixed = value
+    .replace(/nÃ£o/g, "não")
+    .replace(/NÃ£o/g, "Não")
+    .replace(/atenÃ§Ã£o/g, "atenção")
+    .replace(/AtenÃ§Ã£o/g, "Atenção")
+    .replace(/painÃ©is/g, "painéis")
+    .replace(/indisponÃ­vel/g, "indisponível");
+
+  return [
+    ["voce", "você"],
+    ["nao", "não"],
+    ["atencao", "atenção"],
+    ["observacao", "observação"],
+    ["narracao", "narração"],
+    ["comentario", "comentário"],
+    ["analise", "análise"],
+    ["numero", "número"],
+    ["padrao", "padrão"],
+    ["gestao", "gestão"],
+    ["confianca", "confiança"],
+    ["direcao", "direção"],
+    ["protecao", "proteção"],
+    ["confirmacao", "confirmação"],
+    ["proxima", "próxima"],
+    ["forcar", "forçar"],
+    ["modulos", "módulos"],
+    ["metricas", "métricas"],
+    ["estatisticas", "estatísticas"],
+    ["usuario", "usuário"],
+    ["usuarios", "usuários"],
+    ["responsavel", "responsável"],
+    ["prejuizo", "prejuízo"],
+    ["apos", "após"],
+    ["ate", "até"],
+    ["esta", "está"],
+    ["ta", "tá"],
+    ["so", "só"],
+    ["mao", "mão"],
+    ["tambem", "também"],
+    ["valida", "válida"],
+    ["possivel", "possível"],
+    ["saida", "saída"],
+  ].reduce((text, [plain, accented]) => replacePortugueseWord(text, plain, accented), mojibakeFixed);
+}
+
+function replacePortugueseWord(text: string, plain: string, accented: string) {
+  return text.replace(new RegExp(`\\b${plain}\\b`, "gi"), (match) =>
+    match[0] === match[0]?.toUpperCase()
+      ? `${accented[0]?.toUpperCase() ?? ""}${accented.slice(1)}`
+      : accented,
+  );
 }
 
 function sanitizeQuestion(value: unknown, maxLength = 260) {

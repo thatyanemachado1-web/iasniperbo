@@ -117,7 +117,7 @@ function minePatternBuckets(records: AdaptiveRoundRecord[]) {
         kind: "paying_number",
         tableName: record.tableName,
         hour: null,
-        label: `Numero pagante ${payingNumber} ${sideLabel(record.result)}`,
+        label: `Número pagante ${payingNumber} ${sideLabel(record.result)}`,
         hit,
       });
     }
@@ -193,11 +193,11 @@ function buildPattern(bucket: PatternBucket): AdaptivePattern {
   const score = Math.round((sg * 2 + g1 - red * 2 - expired * 0.5) * 10) / 10;
   const blocked = sampleWeak || belowAssertiveness || tooManyRecentReds;
   const pausedReason = tooManyRecentReds
-    ? "Sequencia ruim recente: 3 ou mais REDs no padrao."
+    ? "Sequência ruim recente: 3 ou mais REDs no padrão."
     : belowAssertiveness
       ? "Assertividade real abaixo de 65%."
       : sampleWeak
-        ? "Amostra abaixo de 30 ocorrencias."
+        ? "Amostra abaixo de 30 ocorrências."
         : null;
   const status = tooManyRecentReds
     ? "pausado"
@@ -289,7 +289,7 @@ function buildEntryScore(
       finalScore: 0,
       allowed: false,
       parts: [],
-      explanation: ["Sem padrao real suficiente para confirmar entrada."],
+      explanation: ["Sem padrão real suficiente para confirmar entrada."],
     };
   }
 
@@ -306,7 +306,7 @@ function buildEntryScore(
     {
       label: "Neural Pagante",
       value: neuralSide === side ? 20 : 0,
-      reason: neuralSide === side ? `Favorece ${sideLabel(side)}.` : "Sem confirmacao a favor.",
+      reason: neuralSide === side ? `Favorece ${sideLabel(side)}.` : "Sem confirmação a favor.",
     },
     {
       label: "Surf Analyzer",
@@ -314,21 +314,21 @@ function buildEntryScore(
       reason: surfSide === side ? `Surf aponta ${sideLabel(side)}.` : "Sem surf alinhado.",
     },
     {
-      label: "Tendencia",
+      label: "Tendência",
       value: trendSide === side ? 20 : 0,
-      reason: trendSide === side ? "Ultimas 30 rodadas confirmam lado." : "Tendencia sem alinhamento.",
+      reason: trendSide === side ? "Últimas 30 rodadas confirmam lado." : "Tendência sem alinhamento.",
     },
     {
-      label: "Banco de Estrategias",
+      label: "Banco de Estratégias",
       value: strategyPoints,
       reason: strategyPoints
-        ? `Padrao ${candidate.label} aprovado pela amostra.`
-        : "Padrao bloqueado pela protecao estatistica.",
+        ? `Padrão ${candidate.label} aprovado pela amostra.`
+        : "Padrão bloqueado pela proteção estatística.",
     },
     {
-      label: "Risco de Exaustao",
+      label: "Risco de Exaustão",
       value: exhaustionRisk ? -15 : 0,
-      reason: exhaustionRisk ? "Exaustao ou sequencia ruim detectada." : "Risco controlado.",
+      reason: exhaustionRisk ? "Exaustão ou sequência ruim detectada." : "Risco controlado.",
     },
     {
       label: "Market Turn contra",
@@ -346,13 +346,13 @@ function buildEntryScore(
     parts,
     explanation: [
       `Entrada ${allowed ? "confirmada" : "bloqueada"} em ${sideLabel(side)}.`,
-      `Padrao ${candidate.label} apareceu ${candidate.occurrences} vezes e puxou ${sideLabel(
+      `Padrão ${candidate.label} apareceu ${candidate.occurrences} vezes e puxou ${sideLabel(
         side,
       )} em ${candidate.assertiveness.toFixed(2)}%.`,
-      neuralSide === side ? "Neural Pagante favorece a mesma direcao." : "Neural Pagante nao confirmou.",
-      surfSide === side ? "Surf ativo para a mesma direcao." : "Surf nao confirmou.",
-      trendSide === side ? "Tendencia das ultimas 30 rodadas confirma." : "Tendencia nao confirmou.",
-      exhaustionRisk ? "Risco de exaustao reduziu o score." : "Risco controlado.",
+      neuralSide === side ? "Neural Pagante favorece a mesma direção." : "Neural Pagante não confirmou.",
+      surfSide === side ? "Surf ativo para a mesma direção." : "Surf não confirmou.",
+      trendSide === side ? "Tendência das últimas 30 rodadas confirma." : "Tendência não confirmou.",
+      exhaustionRisk ? "Risco de exaustão reduziu o score." : "Risco controlado.",
     ],
   };
 }
@@ -388,7 +388,7 @@ function buildDecisionLogs(
         patternId: pattern.id,
         status: pattern.status,
         score: pattern.score,
-        message: `${pattern.label}: ${pattern.pausedReason ?? "bloqueado pela protecao estatistica"}`,
+        message: `${pattern.label}: ${pattern.pausedReason ?? "bloqueado pela proteção estatística"}`,
       });
     }
   }

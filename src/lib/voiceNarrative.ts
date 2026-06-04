@@ -669,8 +669,8 @@ function buildAdaptiveEvent(
     return high(
       `adaptive-entry:${roundId}:${topPattern.id}:${score}:${side}:${style}`,
       style === "aggressive"
-        ? `${voiceLead("entry", style, `${topPattern.id}:${score}:${side}`, name)}Banco de estrategias confirmou. Entrada em ${sideLabel(side)} ate G1. Score ${score}. Risco controlado.`
-        : `Banco de estrategias confirmou ${sideLabel(side)}. Score ${score}. Padrao ${topPattern.label} validado pela amostra real.`,
+        ? `${voiceLead("entry", style, `${topPattern.id}:${score}:${side}`, name)}Banco de estratégias confirmou. Entrada em ${sideLabel(side)} até G1. Score ${score}. Risco controlado.`
+        : `Banco de estratégias confirmou ${sideLabel(side)}. Score ${score}. Padrão ${topPattern.label} validado pela amostra real.`,
     );
   }
 
@@ -678,8 +678,8 @@ function buildAdaptiveEvent(
     return medium(
       `adaptive-risk:${roundId}:${snapshot.pausedPatterns}:${score}:${style}`,
       style === "aggressive"
-        ? `${voiceLead("blocked", style, `${snapshot.pausedPatterns}:${score}`, name)}Cuidado. Banco de estrategias reduziu confianca. Score ${score}. Melhor nao forcar.`
-        : `Banco de estrategias em cautela. Score ${score}. A IA esta bloqueando padroes com risco ou amostra fraca.`,
+        ? `${voiceLead("blocked", style, `${snapshot.pausedPatterns}:${score}`, name)}Cuidado. Banco de estratégias reduziu confiança. Score ${score}. Melhor não forçar.`
+        : `Banco de estratégias em cautela. Score ${score}. A IA está bloqueando padrões com risco ou amostra fraca.`,
     );
   }
 
@@ -687,8 +687,8 @@ function buildAdaptiveEvent(
     return analysis(
       `adaptive-forming:${roundId}:${topPattern.id}:${score}:${style}`,
       style === "aggressive"
-        ? `${voiceLead("currentReading", style, `${topPattern.id}:${score}`, name)}Padrao comecando a formar. ${sideLabel(topPattern.direction)} ganhou leitura, mas ainda precisa confirmar.`
-        : `Padrao em observacao. ${topPattern.label} puxa ${sideLabel(topPattern.direction)}, mas a entrada ainda depende do score final.`,
+        ? `${voiceLead("currentReading", style, `${topPattern.id}:${score}`, name)}Padrão começando a formar. ${sideLabel(topPattern.direction)} ganhou leitura, mas ainda precisa confirmar.`
+        : `Padrão em observação. ${topPattern.label} puxa ${sideLabel(topPattern.direction)}, mas a entrada ainda depende do score final.`,
     );
   }
 

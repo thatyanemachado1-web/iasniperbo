@@ -34,7 +34,7 @@ function VozPage() {
         {!fullAccess && (
           <PremiumLock
             title="Narrador IA Premium"
-            description="Assistente de Voz IA disponivel no plano Premium"
+            description="Assistente de Voz IA disponível no plano Premium"
             intensity="light"
           />
         )}
@@ -43,7 +43,7 @@ function VozPage() {
       <GlassCard>
         <SectionTitle
           title="Assistente de Voz IA"
-          subtitle="Narracao automatica baseada nos dados ao vivo da mesa."
+          subtitle="Narração automática baseada nos dados ao vivo da mesa."
           right={
             <AppBadge tone={liveReady ? "green" : "amber"}>
               {liveReady ? "Ao vivo" : "Standby"}
@@ -53,7 +53,7 @@ function VozPage() {
         <div className="space-y-3">
           <StatusRow
             icon={<Volume2 className="size-4" />}
-            label="Prioridade maxima"
+            label="Prioridade máxima"
             value="Entrada, Tie, Green e Red"
           />
           <StatusRow
@@ -64,12 +64,12 @@ function VozPage() {
           <StatusRow
             icon={<ShieldCheck className="size-4" />}
             label="Fonte"
-            value="Modulos internos + Ollama local"
+            value="Módulos internos + Ollama local"
           />
           <StatusRow
             icon={<Radio className="size-4" />}
             label="Fila"
-            value="Analises comuns aguardam a vez"
+            value="Análises comuns aguardam a vez"
           />
         </div>
       </GlassCard>

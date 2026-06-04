@@ -37,7 +37,7 @@ function AdminModulesPage() {
 
   useEffect(() => {
     if (!session) return;
-    getModuleToggles(session).then(setToggles).catch((err) => setError(err instanceof Error ? err.message : "Falha ao carregar modulos."));
+    getModuleToggles(session).then(setToggles).catch((err) => setError(err instanceof Error ? err.message : "Falha ao carregar módulos."));
     getLocalAiAdmin(session)
       .then((data) => {
         setLocalAi(data.settings);
@@ -71,7 +71,7 @@ function AdminModulesPage() {
     return (
       <GlassCard className="border-destructive/35">
         <SectionTitle title="Acesso administrativo bloqueado" />
-        <p className="text-sm text-muted-foreground">Somente admin ou owner pode configurar modulos.</p>
+        <p className="text-sm text-muted-foreground">Somente admin ou owner pode configurar módulos.</p>
       </GlassCard>
     );
   }
@@ -102,7 +102,7 @@ function AdminModulesPage() {
         />
         <div className="mt-5 grid gap-3 md:grid-cols-2">
           <ModuleSwitch label="Ativar IA Local" checked={localAi.enabled} onChange={(checked) => void saveLocalAi({ enabled: checked })} />
-          <ModuleSwitch label="Ativar Narracao IA" checked={localAi.narrationEnabled} onChange={(checked) => void saveLocalAi({ narrationEnabled: checked })} />
+          <ModuleSwitch label="Ativar Narração IA" checked={localAi.narrationEnabled} onChange={(checked) => void saveLocalAi({ narrationEnabled: checked })} />
           <AdminField label="URL do Ollama" value={localAi.ollamaBaseUrl} onChange={(value) => setLocalAi((current) => ({ ...current, ollamaBaseUrl: value }))} onBlur={() => void saveLocalAi({ ollamaBaseUrl: localAi.ollamaBaseUrl })} />
           <AdminField label="Modelo Ollama" value={localAi.ollamaModel} onChange={(value) => setLocalAi((current) => ({ ...current, ollamaModel: value }))} onBlur={() => void saveLocalAi({ ollamaModel: localAi.ollamaModel })} />
           <AdminField label="Provedor de voz" value={localAi.voiceProvider} onChange={(value) => setLocalAi((current) => ({ ...current, voiceProvider: value }))} onBlur={() => void saveLocalAi({ voiceProvider: localAi.voiceProvider })} icon={<Volume2 className="size-4" />} />

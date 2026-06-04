@@ -168,20 +168,20 @@ async function syncAdaptiveSnapshot(
       return {
         mode: "database",
         lastSyncedAt: payload.lastSyncedAt || new Date().toISOString(),
-        message: payload.message || "Rodadas e decisoes salvas no Supabase.",
+        message: payload.message || "Rodadas e decisões salvas no Supabase.",
       };
     }
 
     return {
       mode: "local",
       lastSyncedAt: payload.lastSyncedAt || new Date().toISOString(),
-      message: payload.message || payload.warning || "Historico local ativo.",
+      message: payload.message || payload.warning || "Histórico local ativo.",
     };
   } catch {
     return {
       mode: "error",
       lastSyncedAt: new Date().toISOString(),
-      message: "Sem conexao com o endpoint de sincronizacao. Historico local preservado.",
+      message: "Sem conexão com o endpoint de sincronização. Histórico local preservado.",
     };
   }
 }
@@ -222,7 +222,7 @@ function emptyStore(): AdaptiveStore {
     syncStatus: {
       mode: "local",
       lastSyncedAt: null,
-      message: "Historico local ativo. Aguardando primeiras rodadas reais.",
+      message: "Histórico local ativo. Aguardando primeiras rodadas reais.",
     },
   };
 }
@@ -241,7 +241,7 @@ function normalizeSyncStatus(value: unknown): AdaptiveSyncStatus {
     message:
       typeof record.message === "string"
         ? record.message
-        : "Historico local ativo. Aguardando sincronizacao do banco.",
+        : "Histórico local ativo. Aguardando sincronização do banco.",
   };
 }
 

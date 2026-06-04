@@ -49,7 +49,7 @@ export async function requestLocalAiCommentary(payload: LocalAiCommentaryRequest
     throw new Error(data.error || "Falha ao consultar IA local.");
   }
   return {
-    commentary: data.commentary || "Mesa em observacao. Ainda sem dados suficientes.",
+    commentary: data.commentary || "Mesa em observação. Ainda sem dados suficientes.",
     cached: data.cached === true,
     provider: data.provider || "fallback",
     model: data.model || "qwen2.5:7b",

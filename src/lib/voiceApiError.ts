@@ -1,5 +1,5 @@
 const VOICE_CONFIG_ERROR =
-  "Voz local sem configuracao no backend. Configure EDGE_TTS_URL ou use Web Speech API no navegador.";
+  "Voz local sem configuração no backend. Configure EDGE_TTS_URL ou use Web Speech API no navegador.";
 
 export async function readVoiceResponseError(response: Response, fallback: string) {
   const detail = await readResponseErrorDetail(response);
@@ -8,12 +8,12 @@ export async function readVoiceResponseError(response: Response, fallback: strin
     return VOICE_CONFIG_ERROR;
   }
 
-  if (/nao autorizado|sessao/i.test(detail)) {
-    return "Voz indisponivel: sessao sem autorizacao para o backend.";
+  if (/nao autorizado|sessao|não autorizado|sessão/i.test(detail)) {
+    return "Voz indisponível: sessão sem autorização para o backend.";
   }
 
   if (response.status === 429) {
-    return "Voz em espera: muitas solicitacoes em pouco tempo.";
+    return "Voz em espera: muitas solicitações em pouco tempo.";
   }
 
   return detail || fallback;
