@@ -1,8 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { Bell, Cpu, Logs, Megaphone, Settings2, ShieldCheck, Users } from "lucide-react";
 import type { ReactNode } from "react";
-import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
+import { GlassCard } from "@/components/ui-app/GlassCard";
 import type { AdminPanelOverview } from "@/types/adminPanel";
 
 const fallbackOverview: AdminPanelOverview = {
@@ -17,8 +17,16 @@ const fallbackOverview: AdminPanelOverview = {
   lastSignalAt: "sem sinal",
 };
 
-export function AdminPanelCard({ overview = fallbackOverview }: { overview?: Partial<AdminPanelOverview> }) {
+export function AdminPanelCard({
+  overview = fallbackOverview,
+  loading = false,
+}: {
+  overview?: Partial<AdminPanelOverview>;
+  loading?: boolean;
+}) {
   const stats = { ...fallbackOverview, ...overview };
+  const metricValue = (value: number) => (loading ? "..." : value);
+
   return (
     <GlassCard className="md:col-span-2 border-neon-cyan/35">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/80 to-transparent" />
@@ -39,18 +47,24 @@ export function AdminPanelCard({ overview = fallbackOverview }: { overview?: Par
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <AppBadge tone="green" pulse>Engine: {stats.engineStatus}</AppBadge>
-            <AppBadge tone="blue" pulse>Mesa: {stats.tableStatus}</AppBadge>
-            <AppBadge tone="gold">Último sinal: {stats.lastSignal} - {stats.lastSignalAt}</AppBadge>
+            <AppBadge tone="green" pulse>
+              Engine: {stats.engineStatus}
+            </AppBadge>
+            <AppBadge tone="blue" pulse>
+              Mesa: {stats.tableStatus}
+            </AppBadge>
+            <AppBadge tone="gold">
+              Último sinal: {stats.lastSignal} - {stats.lastSignalAt}
+            </AppBadge>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-          <Metric icon={<Users className="size-4" />} label="Usuários ativos" value={stats.activeUsers} />
-          <Metric icon={<Cpu className="size-4" />} label="Assinaturas ativas" value={stats.activeSubscriptions} />
-          <Metric icon={<Bell className="size-4" />} label="Trials ativos" value={stats.activeTrials} />
-          <Metric icon={<ShieldCheck className="size-4" />} label="Premium ativos" value={stats.premiumUsers} />
-          <Metric icon={<Cpu className="size-4" />} label="Online agora" value={stats.onlineNow} />
+          <Metric icon={<Users className="size-4" />} label="Usuários ativos" value={metricValue(stats.activeUsers)} />
+          <Metric icon={<Cpu className="size-4" />} label="Assinaturas ativas" value={metricValue(stats.activeSubscriptions)} />
+          <Metric icon={<Bell className="size-4" />} label="Trials ativos" value={metricValue(stats.activeTrials)} />
+          <Metric icon={<ShieldCheck className="size-4" />} label="Premium ativos" value={metricValue(stats.premiumUsers)} />
+          <Metric icon={<Cpu className="size-4" />} label="Online agora" value={metricValue(stats.onlineNow)} />
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -64,10 +78,15 @@ export function AdminPanelCard({ overview = fallbackOverview }: { overview?: Par
   );
 }
 
-function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
+function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: number | string }) {
   return (
     <div className="rounded-xl border border-neon-cyan/15 bg-background/35 px-3 py-3">
-      <div className="flex items-center gap-2 text-neon-cyan">{icon}<span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</span></div>
+      <div className="flex items-center gap-2 text-neon-cyan">
+        {icon}
+        <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          {label}
+        </span>
+      </div>
       <div className="mt-2 text-2xl font-black">{value}</div>
     </div>
   );
