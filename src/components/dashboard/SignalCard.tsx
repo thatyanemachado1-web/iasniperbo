@@ -34,11 +34,8 @@ export function SignalCard({
   enableResultFlash?: boolean;
 }) {
   const [mainGreenFlash, setMainGreenFlash] = useState(false);
-  const [neuralGreenFlash, setNeuralGreenFlash] = useState(false);
   const mainResultSeen = useRef(false);
-  const neuralResultSeen = useRef(false);
   const previousMainResultKey = useRef<string | null>(null);
-  const previousNeuralTotals = useRef({ greens: 0, reds: 0 });
   const isBanker = signal.side === "BANKER";
   const isPlayer = signal.side === "PLAYER";
   const tieAlertIsActive = tieAlert?.status === "active";
@@ -84,9 +81,6 @@ export function SignalCard({
   const status = signalStatus(signal, tieAlertIsActive, tieAlert?.validityRounds);
   const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
   const lastResultKey = signal.lastResult ? signalResultKey(signal.lastResult) : null;
-  const neuralTotals = neuralResultTotals(neuralReading);
-  const neuralGreenCount = neuralTotals.greens;
-  const neuralRedCount = neuralTotals.reds;
   const mainSequence = buildMotorSequence(mainSequencePositive, mainSequenceNegative, "Motor principal");
   const StatusIcon = status.Icon;
   const tieRisk = !isResultStatus && tieAlert ? tieRiskBadge(tieAlert) : null;
@@ -121,26 +115,6 @@ export function SignalCard({
 
     previousMainResultKey.current = lastResultKey;
   }, [enableResultFlash, lastResultKey, signal.lastResult]);
-
-  useEffect(() => {
-    if (!enableResultFlash) {
-      neuralResultSeen.current = false;
-      previousNeuralTotals.current = { greens: neuralGreenCount, reds: neuralRedCount };
-      return;
-    }
-
-    if (!neuralResultSeen.current) {
-      neuralResultSeen.current = true;
-      previousNeuralTotals.current = { greens: neuralGreenCount, reds: neuralRedCount };
-      return;
-    }
-
-    if (neuralGreenCount > previousNeuralTotals.current.greens) {
-      pulseGreen(setNeuralGreenFlash);
-    }
-
-    previousNeuralTotals.current = { greens: neuralGreenCount, reds: neuralRedCount };
-  }, [enableResultFlash, neuralGreenCount, neuralRedCount]);
 
   return (
     <GlassCard
@@ -210,7 +184,7 @@ export function SignalCard({
           <LeituraNeuralMiniCard
             {...(neuralReading ?? { mode: "SCANNING" })}
             neuralScoreboard={neuralScoreboard}
-            greenFlash={neuralGreenFlash}
+            greenFlash={false}
           />
         </div>
       </div>
