@@ -56,8 +56,11 @@ export function LeituraNeuralMiniCard({
   const sg = optionalNumberFrom(data.greenSemGale);
   const g1 = optionalNumberFrom(data.greenG1);
   const red = optionalNumberFrom(data.reds ?? data.erros);
-  const sequencePositive = numberFrom(data.sequencePositive);
-  const sequenceNegative = numberFrom(data.sequenceNegative);
+  const scoreboardSequencePositive = numberFrom(neuralScoreboard?.sequencePositive);
+  const scoreboardSequenceNegative = numberFrom(neuralScoreboard?.sequenceNegative);
+  const hasGeneralSequence = scoreboardSequencePositive > 0 || scoreboardSequenceNegative > 0;
+  const sequencePositive = hasGeneralSequence ? scoreboardSequencePositive : numberFrom(data.sequencePositive);
+  const sequenceNegative = hasGeneralSequence ? scoreboardSequenceNegative : numberFrom(data.sequenceNegative);
   const sequenceCopy = neuralSequenceCopy(sequencePositive, sequenceNegative);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
   const resolvedTotal = numberFrom(totalGreens) + numberFrom(red);
@@ -119,12 +122,12 @@ export function LeituraNeuralMiniCard({
           <TypingDots />
           <div
             className={cn(
-              "mt-1.5 inline-flex max-w-full rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em]",
+              "mt-1.5 inline-flex max-w-full rounded-full border px-1.5 py-0.5 text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[7px]",
               sequenceCopy.className,
             )}
             title={sequenceCopy.title}
           >
-            <span className="truncate">{sequenceCopy.label}</span>
+            <span className="max-w-full whitespace-normal break-words">{sequenceCopy.label}</span>
           </div>
         </div>
       ) : (
@@ -184,7 +187,7 @@ export function LeituraNeuralMiniCard({
               </div>
               <div
                 className={cn(
-                  "mt-1 truncate rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em]",
+                  "mt-1 rounded-full border px-1.5 py-0.5 text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[7px]",
                   sequenceCopy.className,
                 )}
                 title={sequenceCopy.title}
@@ -225,7 +228,7 @@ export function LeituraNeuralMiniCard({
 function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) {
   if (sequenceNegative > 0) {
     return {
-      label: `Neural: ${sequenceNegative} RED ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
+      label: `Neural: ${sequenceNegative} ${sequenceNegative === 1 ? "RED" : "REDS"} ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de reds da Leitura Neural.",
       className: "border-destructive/35 bg-destructive/10 text-destructive",
     };
@@ -233,14 +236,14 @@ function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) 
 
   if (sequencePositive > 0) {
     return {
-      label: `Neural: ${sequencePositive} GREEN ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
+      label: `Neural: ${sequencePositive} ${sequencePositive === 1 ? "GREEN" : "GREENS"} ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de greens da Leitura Neural.",
       className: "border-success/35 bg-success/10 text-success",
     };
   }
 
   return {
-    label: "Neural: coletando sequência",
+    label: "Neural: 0 GREEN / 0 RED",
     title: "Aguardando resultado real da Leitura Neural.",
     className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
   };
