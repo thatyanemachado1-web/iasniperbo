@@ -1311,7 +1311,10 @@ async function recoverCheckoutClientFromBody(
   const email = readString(body, "email").toLowerCase();
   if (!email) return null;
 
-  const client = findClientByEmail(email) || (await hydrateClientFromBilling(env, email));
+  const client =
+    findClientByEmail(email) ||
+    (await hydrateClientFromBilling(env, email)) ||
+    (await createCheckoutLeadClientFromBody(env, request, body, email, auth));
   if (!client) return null;
 
   const binding = await requestSessionBinding(env, request);
@@ -1324,6 +1327,55 @@ async function recoverCheckoutClientFromBody(
   });
   await saveLiveState(env);
   return client;
+}
+
+async function createCheckoutLeadClientFromBody(
+  env: unknown,
+  request: Request,
+  body: Record<string, unknown>,
+  email: string,
+  auth: { ok: false; status: number; error: string },
+) {
+  if (!email.includes("@")) return null;
+
+  const now = new Date().toISOString();
+  const binding = await requestSessionBinding(env, request);
+  const client: Record<string, unknown> = {
+    id: crypto.randomUUID(),
+    full_name: readString(body, "full_name") || readString(body, "name") || nameFromEmail(email),
+    email,
+    phone: readString(body, "phone"),
+    phone_full: readString(body, "phone_full") || readString(body, "phoneFull"),
+    city: readString(body, "city"),
+    country: readString(body, "country"),
+    country_code: readString(body, "country_code") || readString(body, "countryCode"),
+    plan: "free",
+    access_status: "pending",
+    enabled: false,
+    starts_at: todayIso(),
+    validity_days: 0,
+    expires_at: "",
+    trial_started_at: "",
+    trial_expires_at: "",
+    trial_ip_hash: binding.ipHash,
+    trial_user_agent_hash: binding.userAgentHash,
+    trial_blocked_reason: `Checkout iniciado apos falha de sessao: ${auth.error}`,
+    created_at: now,
+    updated_at: now,
+  };
+
+  upsertLiveClient(client);
+  upsertRecipientFromClient(client);
+  recordAccessEvent("checkout_lead_created", {
+    ...client,
+    risk: "low",
+    detail: "Contato pendente criado para nao perder checkout com sessao vencida.",
+    ip_hash: binding.ipHash || "",
+    user_agent_hash: binding.userAgentHash || "",
+  });
+  await saveLiveState(env);
+  await persistBillingUser(env, client);
+  return findClientByEmail(email) || client;
 }
 
 async function createMercadoPagoCheckout(
