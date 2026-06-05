@@ -81,6 +81,7 @@ export function SignalCard({
   const status = signalStatus(signal, tieAlertIsActive, tieAlert?.validityRounds);
   const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
   const lastResultKey = signal.lastResult ? signalResultKey(signal.lastResult) : null;
+  const shouldShowLastResult = Boolean(lastResult && isResultStatus);
   const mainSequence = buildMotorSequence(mainSequencePositive, mainSequenceNegative, "Motor principal");
   const StatusIcon = status.Icon;
   const tieRisk = !isResultStatus && tieAlert ? tieRiskBadge(tieAlert) : null;
@@ -108,6 +109,7 @@ export function SignalCard({
       lastResultKey &&
       lastResultKey !== previousMainResultKey.current &&
       signal.lastResult &&
+      isResultStatus &&
       isGreenSignalResult(signal.lastResult)
     ) {
       pulseGreen(setMainGreenFlash);
@@ -202,7 +204,7 @@ export function SignalCard({
           <div className={`font-semibold ${status.valueClass}`}>{status.value}</div>
         </div>
       </div>
-      {lastResult && (
+      {shouldShowLastResult && lastResult && (
         <div className="relative mt-3 rounded-lg border border-success/20 bg-secondary/35 p-3 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex items-center gap-1.5 font-semibold text-muted-foreground">
