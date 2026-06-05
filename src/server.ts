@@ -4479,10 +4479,10 @@ async function loadBillingClientByEmail(env: unknown, email: string) {
 async function hydrateClientsFromBillingUsers(env: unknown) {
   if (!getSupabasePersistenceConfig(env)) return false;
 
-  const users = await fetchSupabaseRows(
+  const users = await fetchSupabaseRowsPaged(
     env,
     "users",
-    "select=*&order=created_at.desc.nullslast&limit=1000",
+    "select=*&order=created_at.desc.nullslast",
   );
   if (!users.length) return false;
 
@@ -4739,6 +4739,57 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
     return Array.isArray(rows) ? rows.map(readRecord).filter(hasRecordFields) : [];
   } catch (error) {
     console.warn(`Não foi possível carregar ${table}.`, error);
+    return [];
+  }
+}
+
+async function fetchSupabaseRowsPaged(
+  env: unknown,
+  table: string,
+  query: string,
+  pageSize = 1000,
+) {
+  const rows: Record<string, unknown>[] = [];
+  let page = 0;
+
+  while (true) {
+    const pageRows = await fetchSupabaseRowsRange(env, table, query, page * pageSize, pageSize);
+    rows.push(...pageRows);
+    if (pageRows.length < pageSize) break;
+    page += 1;
+  }
+
+  return rows;
+}
+
+async function fetchSupabaseRowsRange(
+  env: unknown,
+  table: string,
+  query: string,
+  offset: number,
+  pageSize: number,
+) {
+  const config = getSupabasePersistenceConfig(env);
+  if (!config) return [];
+
+  try {
+    const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
+      headers: {
+        ...supabasePersistenceHeaders(config.key),
+        Range: `${offset}-${offset + pageSize - 1}`,
+        "Range-Unit": "items",
+      },
+    });
+    if (response.status === 404 || response.status === 406) return [];
+    if (!response.ok) {
+      console.warn(`NÃ£o foi possÃ­vel carregar ${table} (${response.status}).`);
+      return [];
+    }
+
+    const rows = await response.json().catch(() => null);
+    return Array.isArray(rows) ? rows.map(readRecord).filter(hasRecordFields) : [];
+  } catch (error) {
+    console.warn(`NÃ£o foi possÃ­vel carregar ${table}.`, error);
     return [];
   }
 }
@@ -6632,8 +6683,7 @@ function applyLiveState(state: Record<string, unknown>) {
   if (Array.isArray(state.adminUsers)) {
     liveAdminUsers = state.adminUsers
       .map(readRecord)
-      .filter((user) => Object.keys(user).length > 0)
-      .slice(0, 1000);
+      .filter((user) => Object.keys(user).length > 0);
   }
 
   if (Array.isArray(state.adminActionLogs)) {
@@ -6735,7 +6785,7 @@ function mergeLiveStates(
         true,
       ),
       deletedEntities,
-    ).slice(0, 1000),
+    ),
     adminActionLogs: mergeStateArrays(durable.adminActionLogs, cache.adminActionLogs).slice(0, 500),
     deletedEntities,
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
