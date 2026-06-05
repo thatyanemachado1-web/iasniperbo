@@ -143,12 +143,17 @@ export async function getBillingPayments() {
 }
 
 export async function createBillingCheckout(plan: "premium" | "vip") {
+  const session = readUserSession();
   return apiRequest<{ checkout_url: string; provider?: string; preference_id?: string; subscription: BillingSubscriptionOverview["subscription"] }>(
     "/billing/checkout",
     {
       method: "POST",
       authenticated: true,
-      body: { plan },
+      body: {
+        plan,
+        email: session.email,
+        full_name: session.name,
+      },
     },
   );
 }

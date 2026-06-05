@@ -1213,6 +1213,32 @@ async function handleBillingRequest(request: Request, env: unknown) {
     return handleHublaWebhook(request, env);
   }
 
+  if (request.method === "POST" && url.pathname === "/billing/checkout") {
+    if (liveSalesSettings.salesClosed) {
+      return json(
+        { error: "Vendas encerradas no momento. Entre na fila de espera para a próxima abertura." },
+        403,
+      );
+    }
+    const body = readRecord(await request.json().catch(() => ({})));
+    const plan = normalizeBillingPlanId(body.plan);
+    if (!plan || plan === "free") {
+      return json({ error: "Escolha um plano VIP ou Premium para abrir o checkout." }, 400);
+    }
+    const auth = await requireClientBillingSession(request, env);
+    const client = auth.ok ? auth.client : await recoverCheckoutClientFromBody(env, request, body, auth);
+    if (!client) {
+      return json(
+        {
+          error:
+            "Sessão expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
+        },
+        auth.status,
+      );
+    }
+    return createMercadoPagoCheckout(request, env, client, plan);
+  }
+
   const auth = await requireClientBillingSession(request, env);
   if (!auth.ok) {
     return json({ error: auth.error }, auth.status);
@@ -1235,21 +1261,6 @@ async function handleBillingRequest(request: Request, env: unknown) {
         .filter((payment) => readString(payment, "email").toLowerCase() === email)
         .sort((a, b) => readString(b, "created_at").localeCompare(readString(a, "created_at"))),
     });
-  }
-
-  if (request.method === "POST" && url.pathname === "/billing/checkout") {
-    if (liveSalesSettings.salesClosed) {
-      return json(
-        { error: "Vendas encerradas no momento. Entre na fila de espera para a próxima abertura." },
-        403,
-      );
-    }
-    const body = readRecord(await request.json().catch(() => ({})));
-    const plan = normalizeBillingPlanId(body.plan);
-    if (!plan || plan === "free") {
-      return json({ error: "Escolha um plano VIP ou Premium para abrir o checkout." }, 400);
-    }
-    return createMercadoPagoCheckout(request, env, auth.client, plan);
   }
 
   return json({ error: "Rota de assinatura não encontrada." }, 404);
@@ -1289,6 +1300,30 @@ async function requireClientBillingSession(
   }
 
   return { ok: true, client, session };
+}
+
+async function recoverCheckoutClientFromBody(
+  env: unknown,
+  request: Request,
+  body: Record<string, unknown>,
+  auth: { ok: false; status: number; error: string },
+) {
+  const email = readString(body, "email").toLowerCase();
+  if (!email) return null;
+
+  const client = findClientByEmail(email) || (await hydrateClientFromBilling(env, email));
+  if (!client) return null;
+
+  const binding = await requestSessionBinding(env, request);
+  recordAccessEvent("checkout_session_recovered", {
+    ...client,
+    risk: auth.status >= 500 ? "medium" : "low",
+    detail: `Checkout liberado por e-mail após falha de sessão: ${auth.error}`,
+    ip_hash: binding.ipHash || "",
+    user_agent_hash: binding.userAgentHash || "",
+  });
+  await saveLiveState(env);
+  return client;
 }
 
 async function createMercadoPagoCheckout(
