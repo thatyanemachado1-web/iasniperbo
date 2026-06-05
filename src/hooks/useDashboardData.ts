@@ -697,11 +697,10 @@ function applyNeuralScoreBaseline(
   const totalGreens = greenSemGale + greenG1 || acertos;
   const totalLosses = reds || erros;
   const total = totalGreens + totalLosses;
-  const liveSequence = currentNeuralSequence(reading, scoreboard);
-  const sequencePositive = liveSequence.sequencePositive;
-  const sequenceNegative = liveSequence.sequenceNegative;
-  const maxSequencePositive = liveSequence.maxSequencePositive;
-  const maxSequenceNegative = liveSequence.maxSequenceNegative;
+  const sequencePositive = 0;
+  const sequenceNegative = 0;
+  const maxSequencePositive = 0;
+  const maxSequenceNegative = 0;
 
   const neuralReading = {
     ...reading,

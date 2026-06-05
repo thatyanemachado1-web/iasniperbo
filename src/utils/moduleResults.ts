@@ -67,10 +67,10 @@ export function calculateNeuralResult(reading?: NeuralReading): NeuralResult {
     reds,
     total,
     assertiveness: total > 0 ? calculateAssertiveness(greens, reds) : safeNumber(providedAssertiveness),
-    sequencePositive: safeNumber(reading?.sequencePositive),
-    sequenceNegative: safeNumber(reading?.sequenceNegative),
-    maxSequencePositive: safeNumber(reading?.maxSequencePositive),
-    maxSequenceNegative: safeNumber(reading?.maxSequenceNegative),
+    sequencePositive: 0,
+    sequenceNegative: 0,
+    maxSequencePositive: 0,
+    maxSequenceNegative: 0,
     breakdown: `SG ${greenSemGale} / G1 ${greenG1} / RED ${reds}`,
   };
 }

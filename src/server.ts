@@ -3062,95 +3062,22 @@ function trackServerNeuralSequences(
 ): LiveDashboardData {
   if (!dashboard.neuralReading && !dashboard.neuralScoreboard) return dashboard;
 
-  const totals = serverReadNeuralTotalsFromDashboard(dashboard);
-  const previousTotals = serverReadNeuralTotalsFromDashboard(previousDashboard);
-  const countersWentBack = totals.greens < previousTotals.greens || totals.reds < previousTotals.reds;
-  const previousPositive = countersWentBack
-    ? 0
-    : serverSafeCounter(
-        previousDashboard.neuralReading?.sequencePositive ??
-          previousDashboard.neuralScoreboard?.sequencePositive,
-      );
-  const previousNegative = countersWentBack
-    ? 0
-    : serverSafeCounter(
-        previousDashboard.neuralReading?.sequenceNegative ??
-          previousDashboard.neuralScoreboard?.sequenceNegative,
-      );
-  const explicitPositive = serverSafeCounter(
-    dashboard.neuralReading?.sequencePositive ?? dashboard.neuralScoreboard?.sequencePositive,
-  );
-  const explicitNegative = serverSafeCounter(
-    dashboard.neuralReading?.sequenceNegative ?? dashboard.neuralScoreboard?.sequenceNegative,
-  );
-  const hasExplicitSequence =
-    (explicitPositive > 0 && explicitNegative === 0) ||
-    (explicitNegative > 0 && explicitPositive === 0);
-  let sequencePositive = hasExplicitSequence ? explicitPositive : previousPositive;
-  let sequenceNegative = hasExplicitSequence ? explicitNegative : previousNegative;
-  let lastOutcome: LiveDashboardData["neuralSequenceLastOutcome"] =
-    previousDashboard.neuralSequenceLastOutcome ??
-    inferServerNeuralOutcome(previousPositive, previousNegative);
-
-  const greenDelta = countersWentBack
-    ? totals.greens
-    : Math.max(0, totals.greens - previousTotals.greens);
-  const redDelta = countersWentBack
-    ? totals.reds
-    : Math.max(0, totals.reds - previousTotals.reds);
-
-  if (hasExplicitSequence) {
-    lastOutcome = explicitPositive > 0 ? "GREEN" : "RED";
-  } else if (greenDelta > 0 && redDelta > 0) {
-    sequencePositive = 0;
-    sequenceNegative = 0;
-    lastOutcome = null;
-  } else if (greenDelta > 0) {
-    sequencePositive = lastOutcome === "GREEN" ? previousPositive + greenDelta : greenDelta;
-    sequenceNegative = 0;
-    lastOutcome = "GREEN";
-  } else if (redDelta > 0) {
-    sequenceNegative = lastOutcome === "RED" ? previousNegative + redDelta : redDelta;
-    sequencePositive = 0;
-    lastOutcome = "RED";
-  }
-
-  const previousMaxPositive = countersWentBack
-    ? 0
-    : serverSafeCounter(
-        previousDashboard.neuralReading?.maxSequencePositive ??
-          previousDashboard.neuralScoreboard?.maxSequencePositive,
-      );
-  const previousMaxNegative = countersWentBack
-    ? 0
-    : serverSafeCounter(
-        previousDashboard.neuralReading?.maxSequenceNegative ??
-          previousDashboard.neuralScoreboard?.maxSequenceNegative,
-      );
-  const explicitMaxPositive = serverSafeCounter(
-    dashboard.neuralReading?.maxSequencePositive ?? dashboard.neuralScoreboard?.maxSequencePositive,
-  );
-  const explicitMaxNegative = serverSafeCounter(
-    dashboard.neuralReading?.maxSequenceNegative ?? dashboard.neuralScoreboard?.maxSequenceNegative,
-  );
-  const maxSequencePositive = Math.max(previousMaxPositive, explicitMaxPositive, sequencePositive);
-  const maxSequenceNegative = Math.max(previousMaxNegative, explicitMaxNegative, sequenceNegative);
   const neuralReading = dashboard.neuralReading
     ? {
         ...dashboard.neuralReading,
-        sequencePositive,
-        sequenceNegative,
-        maxSequencePositive,
-        maxSequenceNegative,
+        sequencePositive: 0,
+        sequenceNegative: 0,
+        maxSequencePositive: 0,
+        maxSequenceNegative: 0,
       }
     : dashboard.neuralReading;
   const neuralScoreboard = dashboard.neuralScoreboard
     ? {
         ...dashboard.neuralScoreboard,
-        sequencePositive,
-        sequenceNegative,
-        maxSequencePositive,
-        maxSequenceNegative,
+        sequencePositive: 0,
+        sequenceNegative: 0,
+        maxSequencePositive: 0,
+        maxSequenceNegative: 0,
       }
     : dashboard.neuralScoreboard;
 
@@ -3158,7 +3085,7 @@ function trackServerNeuralSequences(
     ...dashboard,
     neuralReading,
     neuralScoreboard,
-    neuralSequenceLastOutcome: lastOutcome,
+    neuralSequenceLastOutcome: null,
   };
 }
 
