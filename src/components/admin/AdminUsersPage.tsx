@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { RefreshCw, Search, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Check, Loader2, Power, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   blockAdminUser,
@@ -7,18 +7,22 @@ import {
   changeAdminUserRole,
   deleteAdminUser,
   extendAdminUserAccess,
+  getAdminSalesSettings,
   listAdminUsers,
   unblockAdminUser,
+  updateAdminSalesSettings,
   updateAdminUser,
 } from "@/lib/adminApi";
 import { effectiveAdminRole, readEffectiveAdminSession } from "@/lib/adminSession";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
+import { AppBadge } from "@/components/ui-app/AppBadge";
 import { AdminPanelCard } from "@/components/admin/AdminPanelCard";
 import { AdminUserCard } from "@/components/admin/AdminUserCard";
 import { AdminUsersTable } from "@/components/admin/AdminUsersTable";
 import { AdminUserEditModal } from "@/components/admin/AdminUserEditModal";
 import type { QuickAction } from "@/components/admin/AdminQuickActions";
+import type { SalesSettings } from "@/lib/accessApi";
 import type { AdminSession } from "@/types/admin";
 import type { AdminManagedUser, AdminPanelOverview } from "@/types/adminPanel";
 
@@ -47,6 +51,12 @@ export function AdminUsersPage() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [salesSettings, setSalesSettings] = useState<SalesSettings>({
+    salesClosed: false,
+    mode: "open",
+  });
+  const [salesSaving, setSalesSaving] = useState(false);
+  const [salesNotice, setSalesNotice] = useState("");
 
   const canOpen = Boolean(session);
 
@@ -65,8 +75,22 @@ export function AdminUsersPage() {
     }
   }
 
+  async function loadSalesSettings() {
+    if (!session) return;
+    try {
+      setSalesSettings(await getAdminSalesSettings(session));
+    } catch (err) {
+      setSalesNotice(
+        err instanceof Error ? err.message : "Nao foi possivel carregar status das vagas.",
+      );
+    }
+  }
+
   useEffect(() => {
-    if (canOpen) void load();
+    if (canOpen) {
+      void load();
+      void loadSalesSettings();
+    }
   }, [canOpen]);
 
   const filteredUsers = useMemo(() => applyFilters(users, filters), [users, filters]);
@@ -91,6 +115,32 @@ export function AdminUsersPage() {
   }
 
   const role = effectiveAdminRole(session);
+
+  async function handleSalesSettingsChange(nextClosed: boolean) {
+    if (!session || salesSaving || salesSettings.salesClosed === nextClosed) return;
+    setSalesSaving(true);
+    setSalesNotice("");
+    const previous = salesSettings;
+    setSalesSettings({
+      ...previous,
+      salesClosed: nextClosed,
+      mode: nextClosed ? "closed" : "open",
+    });
+    try {
+      const updated = await updateAdminSalesSettings(session, { salesClosed: nextClosed });
+      setSalesSettings(updated);
+      setSalesNotice(
+        nextClosed
+          ? "Vagas encerradas. Novos cadastros e checkout foram bloqueados."
+          : "Vagas abertas. Cadastro e checkout foram liberados.",
+      );
+    } catch (err) {
+      setSalesSettings(previous);
+      setSalesNotice(err instanceof Error ? err.message : "Nao foi possivel atualizar as vagas.");
+    } finally {
+      setSalesSaving(false);
+    }
+  }
 
   async function saveUser(payload: Partial<AdminManagedUser> & { reason?: string }) {
     if (!session || !selected) return;
@@ -147,6 +197,13 @@ export function AdminUsersPage() {
     <div className="space-y-5">
       <AdminPanelCard overview={realOverview} />
 
+      <AdminSalesControlCard
+        settings={salesSettings}
+        saving={salesSaving}
+        notice={salesNotice}
+        onChange={handleSalesSettingsChange}
+      />
+
       <GlassCard className="border-neon-cyan/25">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <SectionTitle
@@ -156,7 +213,10 @@ export function AdminUsersPage() {
           />
           <button
             type="button"
-            onClick={() => void load()}
+            onClick={() => {
+              void load();
+              void loadSalesSettings();
+            }}
             className="glass inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black text-neon-cyan"
           >
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
@@ -277,6 +337,91 @@ function buildOverviewFromUsers(
   };
 }
 
+function AdminSalesControlCard({
+  settings,
+  saving,
+  notice,
+  onChange,
+}: {
+  settings: SalesSettings;
+  saving: boolean;
+  notice: string;
+  onChange: (salesClosed: boolean) => void;
+}) {
+  const closed = settings.salesClosed;
+  return (
+    <GlassCard className={`border ${closed ? "border-destructive/35" : "border-success/30"}`}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex size-10 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 text-neon-cyan">
+              <Settings2 className="size-4" />
+            </div>
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-[0.2em] text-neon-cyan">
+                Chave de vagas
+              </div>
+              <h2 className="mt-1 text-lg font-black">Liberar ou fechar novos cadastros</h2>
+            </div>
+            <AppBadge tone={closed ? "red" : "green"} pulse>
+              {closed ? "Vagas encerradas" : "Vagas abertas"}
+            </AppBadge>
+          </div>
+          <p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+            {closed
+              ? "Novos cadastros, planos e checkout ficam bloqueados. Clientes liberados continuam entrando."
+              : "Cadastro, planos e checkout estao liberados para novos clientes."}
+          </p>
+          {settings.updated_at && (
+            <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
+              Ultima alteracao: {formatDateTime(settings.updated_at)}
+            </div>
+          )}
+          {notice && (
+            <div className="mt-3 rounded-xl border border-neon-cyan/25 bg-neon-cyan/8 px-3 py-2 text-xs font-semibold text-neon-cyan">
+              {notice}
+            </div>
+          )}
+          {(settings.warning || settings.persistence === "temporary") && (
+            <div className="mt-3 rounded-xl border border-warning/35 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
+              {settings.warning || "Atenção: esta chave ainda não foi confirmada em armazenamento fixo."}
+            </div>
+          )}
+        </div>
+
+        <div className="grid min-w-full grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 sm:min-w-[340px]">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => onChange(false)}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black transition disabled:opacity-60 ${
+              !closed
+                ? "border border-success/40 bg-success/20 text-success"
+                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+            }`}
+          >
+            {saving && closed ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+            Vagas abertas
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => onChange(true)}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black transition disabled:opacity-60 ${
+              closed
+                ? "border border-destructive/40 bg-destructive/18 text-destructive"
+                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+            }`}
+          >
+            {saving && !closed ? <Loader2 className="size-3.5 animate-spin" /> : <Power className="size-3.5" />}
+            Vagas encerradas
+          </button>
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
+
 function isActiveUser(user: AdminManagedUser, now = Date.now()) {
   if (user.isBlocked) return false;
   if (!["active", "manual_vip", "trial"].includes(user.subscriptionStatus)) return false;
@@ -301,6 +446,15 @@ function isRecentAccessLabel(value: string) {
   const minutes = label.match(/h[aá]\s+(\d+)\s+min/i);
   if (!minutes) return false;
   return Number(minutes[1]) < 5;
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
 }
 
 function UserGroupSection({
