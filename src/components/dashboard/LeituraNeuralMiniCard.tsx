@@ -364,7 +364,7 @@ function neuralToolInsight(reading: NeuralReading) {
       text:
         originKind === "OPOSTO"
           ? `Leitura oposta em observacao${redSequence >= 2 ? ` com ${redSequence} RED seguidos` : ""}. Nao enviar como pagante.`
-          : `${trigger} ainda nao bateu 100%. Pela Neural agora: observar.`,
+          : `${trigger} aguardando confirmacao 100% da Neural. Pela Neural agora: observar.`,
       className: "border-warning/25 bg-warning/10 text-warning",
     };
   }
