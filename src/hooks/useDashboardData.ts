@@ -333,36 +333,10 @@ function normalizeNeuralScoreboard(
           record.win_rate,
         ),
       ) ?? fallback?.assertividade ?? null,
-    sequencePositive:
-      readOptionalNumber(
-        firstDefined(record.sequencePositive, record.sequence_positive, record.seqPositive),
-      ) ?? fallback?.sequencePositive ?? null,
-    sequenceNegative:
-      readOptionalNumber(
-        firstDefined(record.sequenceNegative, record.sequence_negative, record.seqNegative),
-      ) ?? fallback?.sequenceNegative ?? null,
-    maxSequencePositive:
-      readOptionalNumber(
-        firstDefined(
-          record.maxSequencePositive,
-          record.max_sequence_positive,
-          record.maxGreenSequence,
-          record.max_green_sequence,
-          record.maxGreensStreak,
-          record.max_greens_streak,
-        ),
-      ) ?? fallback?.maxSequencePositive ?? null,
-    maxSequenceNegative:
-      readOptionalNumber(
-        firstDefined(
-          record.maxSequenceNegative,
-          record.max_sequence_negative,
-          record.maxRedSequence,
-          record.max_red_sequence,
-          record.maxRedsStreak,
-          record.max_reds_streak,
-        ),
-      ) ?? fallback?.maxSequenceNegative ?? null,
+    sequencePositive: 0,
+    sequenceNegative: 0,
+    maxSequencePositive: 0,
+    maxSequenceNegative: 0,
   };
 }
 
@@ -511,44 +485,10 @@ function normalizeNeuralReading(value: unknown, fallback?: NeuralReading): Neura
       ) ??
       fallback?.assertividade ??
       null,
-    sequencePositive:
-      readOptionalNumber(
-        firstDefined(record.sequencePositive, record.sequence_positive, record.seqPositive),
-      ) ??
-      fallback?.sequencePositive ??
-      null,
-    sequenceNegative:
-      readOptionalNumber(
-        firstDefined(record.sequenceNegative, record.sequence_negative, record.seqNegative),
-      ) ??
-      fallback?.sequenceNegative ??
-      null,
-    maxSequencePositive:
-      readOptionalNumber(
-        firstDefined(
-          record.maxSequencePositive,
-          record.max_sequence_positive,
-          record.maxGreenSequence,
-          record.max_green_sequence,
-          record.maxGreensStreak,
-          record.max_greens_streak,
-        ),
-      ) ??
-      fallback?.maxSequencePositive ??
-      null,
-    maxSequenceNegative:
-      readOptionalNumber(
-        firstDefined(
-          record.maxSequenceNegative,
-          record.max_sequence_negative,
-          record.maxRedSequence,
-          record.max_red_sequence,
-          record.maxRedsStreak,
-          record.max_reds_streak,
-        ),
-      ) ??
-      fallback?.maxSequenceNegative ??
-      null,
+    sequencePositive: 0,
+    sequenceNegative: 0,
+    maxSequencePositive: 0,
+    maxSequenceNegative: 0,
     paganteStatus:
       readOptionalString(
         firstDefined(record.paganteStatus, record.pagante_status, record.statusPagante),

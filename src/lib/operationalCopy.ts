@@ -89,8 +89,7 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
 
   if (!isPerfectPagante) {
     if (isOpposite) {
-      const redSequence = typeof reading.sequenceNegative === "number" ? reading.sequenceNegative : 0;
-      return `Leitura oposta em observação${redSequence >= 2 ? ` com ${redSequence} RED seguidos` : ""}. Não enviar como número pagante favorável agora.`;
+      return "Leitura oposta em observação. Não enviar como número pagante favorável agora.";
     }
     return `Número ${number} ${side} aguardando confirmação 100% da Neural. Aguardar novo padrão confirmado.`;
   }

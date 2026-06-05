@@ -2603,7 +2603,7 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       liveDashboardData = cycle.dashboard;
       await saveLiveState(env);
     }
-    return json(liveDashboardData);
+    return json(publicDashboardSnapshot(liveDashboardData));
   }
 
   if (
@@ -2617,10 +2617,43 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     const body = await request.json().catch(() => ({}));
     liveDashboardData = updateDashboardData(liveDashboardData, body);
     await saveLiveState(env);
-    return json({ ok: true, dashboard: liveDashboardData });
+    return json({ ok: true, dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
 
   return null;
+}
+
+function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
+  const signal = dashboard.currentSignal;
+  const hasVisibleResult = Boolean(terminalSignalStatus(signal.status));
+  return {
+    ...dashboard,
+    currentSignal: hasVisibleResult
+      ? signal
+      : {
+          ...signal,
+          lastResult: null,
+        },
+    neuralReading: dashboard.neuralReading
+      ? {
+          ...dashboard.neuralReading,
+          sequencePositive: 0,
+          sequenceNegative: 0,
+          maxSequencePositive: 0,
+          maxSequenceNegative: 0,
+        }
+      : dashboard.neuralReading,
+    neuralScoreboard: dashboard.neuralScoreboard
+      ? {
+          ...dashboard.neuralScoreboard,
+          sequencePositive: 0,
+          sequenceNegative: 0,
+          maxSequencePositive: 0,
+          maxSequenceNegative: 0,
+        }
+      : dashboard.neuralScoreboard,
+    neuralSequenceLastOutcome: null,
+  };
 }
 
 async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
@@ -3216,27 +3249,43 @@ function normalizeSignal(
     signal.protection || signal.validade || signal.gale || fallback.protection || "G1",
   );
   const terminalStatus = terminalSignalStatus(status);
-  const incomingLastResult = (signal.lastResult ??
-    null) as DashboardData["currentSignal"]["lastResult"];
-  const lastResult: DashboardData["currentSignal"]["lastResult"] =
-    incomingLastResult ||
-    fallback.lastResult ||
-    (terminalStatus && (side === "BANKER" || side === "PLAYER")
-      ? {
-          id: String(signal.id || signal.signalId || `result-${Date.now()}`),
-          side,
-          status: terminalStatus,
-          protection,
-          finishedAt: readString(signal, "finishedAt") || new Date().toISOString(),
-        }
-      : null);
+  const previousVisibleEntry =
+    (fallback.status === "pending" || fallback.status === "g1") &&
+    fallback.side === side &&
+    (side === "BANKER" || side === "PLAYER");
+  const incomingLastResult = readServerLastResult(signal.lastResult);
+  const canAcceptTerminalResult = Boolean(terminalStatus && previousVisibleEntry);
 
   if (terminalStatus) {
+    if (!canAcceptTerminalResult || (side !== "BANKER" && side !== "PLAYER")) {
+      return {
+        id: "waiting",
+        side: "NONE",
+        status: "waiting",
+        protection: "-",
+        strength: clampPercent(
+          signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
+        ),
+        lastResult: null,
+      };
+    }
+
+    const lastResult: DashboardData["currentSignal"]["lastResult"] =
+      incomingLastResult && incomingLastResult.side === side
+        ? incomingLastResult
+        : {
+            id: String(signal.id || signal.signalId || fallback.id || `result-${Date.now()}`),
+            side,
+            status: terminalStatus,
+            protection,
+            finishedAt: readString(signal, "finishedAt") || new Date().toISOString(),
+          };
+
     return {
-      id: "waiting",
-      side: "NONE",
-      status: "waiting",
-      protection: "-",
+      id: String(signal.id || signal.signalId || fallback.id || `result-${Date.now()}`),
+      side,
+      status: terminalStatus,
+      protection,
       strength: clampPercent(
         signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
       ),
@@ -3252,7 +3301,22 @@ function normalizeSignal(
     strength: clampPercent(
       signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
     ),
-    lastResult,
+    lastResult: null,
+  };
+}
+
+function readServerLastResult(value: unknown): DashboardData["currentSignal"]["lastResult"] {
+  const record = readRecord(value);
+  if (!Object.keys(record).length) return null;
+  const side = normalizeSignalSide(record.side || record.direcao || record.entry || record.entrada);
+  const status = terminalSignalStatus(normalizeSignalStatus(record.status || record.resultado || record.state, side));
+  if (!status || (side !== "BANKER" && side !== "PLAYER")) return null;
+  return {
+    id: String(record.id || record.signalId || `result-${Date.now()}`),
+    side,
+    status,
+    protection: String(record.protection || record.validade || record.gale || "G1"),
+    finishedAt: readString(record, "finishedAt") || new Date().toISOString(),
   };
 }
 
