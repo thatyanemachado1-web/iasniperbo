@@ -2017,8 +2017,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       email,
       password_hash: passwordHash,
       phone: readString(body, "phone"),
+      phone_full: readString(body, "phone_full"),
       city: readString(body, "city"),
       country: readString(body, "country"),
+      country_code: readString(body, "country_code") || readString(body, "countryCode"),
       plan: trialAccess.plan,
       access_status: trialAccess.accessStatus,
       enabled: trialAccess.enabled,
@@ -4839,8 +4841,10 @@ function normalizeRecipient(recipient: Record<string, unknown>) {
     full_name: readString(recipient, "full_name") || readString(recipient, "name"),
     email: readString(recipient, "email"),
     phone: readString(recipient, "phone"),
+    phone_full: readString(recipient, "phone_full") || readString(recipient, "phoneFull"),
     city: readString(recipient, "city"),
     country: readString(recipient, "country"),
+    country_code: readString(recipient, "country_code") || readString(recipient, "countryCode"),
     chat_id: readString(recipient, "chat_id"),
     kind: ["group", "channel", "user"].includes(readString(recipient, "kind"))
       ? readString(recipient, "kind")
@@ -5543,6 +5547,11 @@ function adminManagedUserFromClient(client: Record<string, unknown>, env?: unkno
       id: readString(client, "id") || email || crypto.randomUUID(),
       name: readString(client, "full_name") || readString(client, "name") || nameFromEmail(email),
       email,
+      phone: readString(client, "phone"),
+      phoneFull: readString(client, "phone_full") || readString(client, "phoneFull"),
+      city: readString(client, "city"),
+      country: readString(client, "country"),
+      countryCode: readString(client, "country_code") || readString(client, "countryCode"),
       role: readString(client, "role"),
       plan: mapClientPlanToAdminPlan(
         readString(client, "plan"),
@@ -5586,6 +5595,11 @@ function normalizeAdminManagedUser(user: Record<string, unknown>, env?: unknown)
     id: readString(user, "id") || email || crypto.randomUUID(),
     name: readString(user, "name") || readString(user, "full_name") || nameFromEmail(email),
     email,
+    phone: readString(user, "phone"),
+    phoneFull: readString(user, "phoneFull") || readString(user, "phone_full"),
+    city: readString(user, "city"),
+    country: readString(user, "country"),
+    countryCode: readString(user, "countryCode") || readString(user, "country_code"),
     role: normalizeManagedUserRole(
       isAdminOwnerEmailForEnv(env, email)
         ? "owner"
@@ -5649,6 +5663,19 @@ async function updateAdminManagedUser(
       ...before,
       name: Object.hasOwn(body, "name") ? readString(body, "name") : before.name,
       email: Object.hasOwn(body, "email") ? readString(body, "email").toLowerCase() : before.email,
+      phone: Object.hasOwn(body, "phone") ? readString(body, "phone") : before.phone,
+      phoneFull: Object.hasOwn(body, "phoneFull")
+        ? readString(body, "phoneFull")
+        : Object.hasOwn(body, "phone_full")
+          ? readString(body, "phone_full")
+          : before.phoneFull,
+      city: Object.hasOwn(body, "city") ? readString(body, "city") : before.city,
+      country: Object.hasOwn(body, "country") ? readString(body, "country") : before.country,
+      countryCode: Object.hasOwn(body, "countryCode")
+        ? readString(body, "countryCode")
+        : Object.hasOwn(body, "country_code")
+          ? readString(body, "country_code")
+          : before.countryCode,
       role: nextRole,
       plan: requestedPlan,
       subscriptionStatus: requestedBlocked ? "blocked" : status,
@@ -5934,6 +5961,11 @@ function adminManagedUserToClient(user: Record<string, unknown>) {
     id: readString(user, "id"),
     full_name: readString(user, "name"),
     email: readString(user, "email").toLowerCase(),
+    phone: readString(user, "phone"),
+    phone_full: readString(user, "phoneFull") || readString(user, "phone_full"),
+    city: readString(user, "city"),
+    country: readString(user, "country"),
+    country_code: readString(user, "countryCode") || readString(user, "country_code"),
     role: normalizeManagedUserRole(user.role),
     plan: mapAdminPlanToClientPlan(normalizeAdminPlan(readString(user, "plan"))),
     access_status: blocked ? "blocked" : active ? "approved" : status,
@@ -6260,8 +6292,10 @@ function upsertRecipientFromClient(client: Record<string, unknown>) {
     full_name: readString(client, "full_name") || email,
     email,
     phone: readString(client, "phone"),
+    phone_full: readString(client, "phone_full") || readString(client, "phoneFull"),
     city: readString(client, "city"),
     country: readString(client, "country"),
+    country_code: readString(client, "country_code") || readString(client, "countryCode"),
     enabled: Boolean(client.enabled),
     plan: readString(client, "plan") || "free",
     access_status: readString(client, "access_status") || "pending",
@@ -6289,8 +6323,10 @@ function upsertClientFromRecipient(recipient: Record<string, unknown>) {
     full_name: readString(recipient, "full_name") || readString(recipient, "name") || email,
     email,
     phone: readString(recipient, "phone"),
+    phone_full: readString(recipient, "phone_full") || readString(recipient, "phoneFull"),
     city: readString(recipient, "city"),
     country: readString(recipient, "country"),
+    country_code: readString(recipient, "country_code") || readString(recipient, "countryCode"),
     plan: readString(recipient, "plan") || "free",
     access_status: readString(recipient, "access_status") || "pending",
     enabled: Boolean(recipient.enabled),

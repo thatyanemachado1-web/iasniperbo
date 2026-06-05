@@ -1,9 +1,10 @@
-import { ChevronDown, Settings2 } from "lucide-react";
+import { ChevronDown, MessageCircle, Settings2 } from "lucide-react";
 import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
 import { AdminBadge, planLabel, planTone, statusLabel, statusTone } from "@/components/admin/AdminBadge";
 import { AdminUserDetailsPanel } from "@/components/admin/AdminUserDetailsPanel";
 import type { QuickAction } from "@/components/admin/AdminQuickActions";
+import { buildWhatsAppUrl, formatPhoneDisplay } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import type { AdminManagedUser } from "@/types/adminPanel";
 
@@ -41,6 +42,7 @@ export function AdminUsersTable({
                     <div className="mt-1 break-all text-[11px] leading-snug text-muted-foreground">
                       {user.email || "-"}
                     </div>
+                    <PhoneLine user={user} />
                   </div>
                   <button
                     type="button"
@@ -53,7 +55,7 @@ export function AdminUsersTable({
                   </button>
                 </div>
 
-                <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-4">
+                <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-5">
                   <InfoPill label="Plano">
                     <AdminBadge tone={planTone(user.plan)}>{planLabel(user.plan)}</AdminBadge>
                   </InfoPill>
@@ -69,6 +71,9 @@ export function AdminUsersTable({
                     <AdminBadge tone={user.isBlocked ? "blocked" : "active"}>
                       {user.isBlocked ? "Bloqueado" : "Ativo"}
                     </AdminBadge>
+                  </InfoPill>
+                  <InfoPill label="WhatsApp">
+                    <PhoneLink user={user} compact />
                   </InfoPill>
                 </div>
               </article>
@@ -88,6 +93,40 @@ export function AdminUsersTable({
         })}
       </div>
     </div>
+  );
+}
+
+function PhoneLine({ user }: { user: AdminManagedUser }) {
+  const phone = formatPhoneDisplay(user.phoneFull || user.phone, user.countryCode);
+  if (!phone) {
+    return <div className="mt-1 text-[11px] text-muted-foreground/70">Sem WhatsApp</div>;
+  }
+  return (
+    <a
+      href={buildWhatsAppUrl(user.phoneFull || user.phone, user.countryCode)}
+      target="_blank"
+      rel="noreferrer"
+      className="mt-1 inline-flex max-w-full items-center gap-1.5 text-[11px] font-bold text-neon-cyan hover:text-neon-blue"
+    >
+      <MessageCircle className="size-3.5 shrink-0" />
+      <span className="truncate">{phone}</span>
+    </a>
+  );
+}
+
+function PhoneLink({ user, compact }: { user: AdminManagedUser; compact?: boolean }) {
+  const phone = formatPhoneDisplay(user.phoneFull || user.phone, user.countryCode);
+  if (!phone) return <span className="text-xs font-bold text-muted-foreground">Sem telefone</span>;
+  return (
+    <a
+      href={buildWhatsAppUrl(user.phoneFull || user.phone, user.countryCode)}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex max-w-full items-center gap-1.5 text-xs font-black text-neon-cyan hover:text-neon-blue"
+    >
+      <MessageCircle className="size-3.5 shrink-0" />
+      <span className={compact ? "truncate" : "break-words"}>{compact ? "Abrir" : phone}</span>
+    </a>
   );
 }
 

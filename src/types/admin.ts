@@ -8,8 +8,10 @@ export interface SignalRecipient {
   email?: string;
   password?: string;
   phone?: string;
+  phone_full?: string;
   city?: string;
   country?: string;
+  country_code?: string;
   chat_id?: string;
   kind: RecipientKind;
   enabled: boolean;

@@ -84,6 +84,41 @@ export function AdminUserEditModal({
                   onChange={(event) => setDraft({ ...draft, email: event.target.value })}
                 />
               </Field>
+              <Field label="DDI">
+                <input
+                  className="admin-input"
+                  value={draft.countryCode}
+                  disabled={!adminCanEditTarget}
+                  placeholder="+55"
+                  onChange={(event) => setDraft({ ...draft, countryCode: event.target.value })}
+                />
+              </Field>
+              <Field label="WhatsApp">
+                <input
+                  className="admin-input"
+                  value={draft.phone}
+                  disabled={!adminCanEditTarget}
+                  placeholder="67992308362"
+                  onChange={(event) => setDraft({ ...draft, phone: event.target.value })}
+                />
+              </Field>
+              <Field label="Cidade">
+                <input
+                  className="admin-input"
+                  value={draft.city}
+                  disabled={!adminCanEditTarget}
+                  onChange={(event) => setDraft({ ...draft, city: event.target.value })}
+                />
+              </Field>
+              <Field label="País">
+                <input
+                  className="admin-input"
+                  value={draft.country}
+                  disabled={!adminCanEditTarget}
+                  placeholder="Brasil"
+                  onChange={(event) => setDraft({ ...draft, country: event.target.value })}
+                />
+              </Field>
               <Field label="Role">
                 <select
                   className="admin-input"

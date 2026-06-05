@@ -1,8 +1,9 @@
-import { CalendarClock, FileText, Settings2, ShieldCheck } from "lucide-react";
+import { CalendarClock, FileText, MapPin, MessageCircle, Settings2, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { AdminBadge, planLabel, planTone, roleTone, statusLabel, statusTone } from "@/components/admin/AdminBadge";
 import { AdminQuickActions, type QuickAction } from "@/components/admin/AdminQuickActions";
+import { buildRemarketingMessage, buildWhatsAppUrl, formatPhoneDisplay } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import type { AdminManagedUser } from "@/types/adminPanel";
 
@@ -37,13 +38,16 @@ export function AdminUserDetailsPanel({
           <AdminBadge tone={roleTone(user.role)}>{user.role}</AdminBadge>
           {user.isBlocked && <AdminBadge tone="blocked">Bloqueado</AdminBadge>}
         </div>
-        <button
-          type="button"
-          onClick={() => onEdit(user)}
-          className="rounded-xl border border-neon-cyan/25 bg-neon-cyan/8 px-3 py-2 text-xs font-black text-neon-cyan hover:bg-neon-cyan/12"
-        >
-          Editar completo
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <RemarketingButton user={user} />
+          <button
+            type="button"
+            onClick={() => onEdit(user)}
+            className="rounded-xl border border-neon-cyan/25 bg-neon-cyan/8 px-3 py-2 text-xs font-black text-neon-cyan hover:bg-neon-cyan/12"
+          >
+            Editar completo
+          </button>
+        </div>
       </div>
 
       <div className="mt-3 grid grid-cols-4 rounded-xl border border-border/55 bg-black/20 p-1">
@@ -66,8 +70,10 @@ export function AdminUserDetailsPanel({
 
       <div className="mt-3">
         {tab === "resumo" && (
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             <Info icon={<ShieldCheck className="size-4" />} label="E-mail" value={user.email || "-"} />
+            <Info icon={<MessageCircle className="size-4" />} label="WhatsApp" value={formatPhoneDisplay(user.phoneFull || user.phone, user.countryCode) || "Sem telefone"} />
+            <Info icon={<MapPin className="size-4" />} label="Localização" value={[user.city, user.country].filter(Boolean).join(" / ") || "Sem local"} />
             <Info icon={<CalendarClock className="size-4" />} label="Criado em" value={formatDate(user.createdAt)} />
             <Info icon={<CalendarClock className="size-4" />} label="Último acesso" value={user.lastAccess || "Sem registro"} />
             <Info icon={<Settings2 className="size-4" />} label="Role" value={user.role} />
@@ -119,6 +125,27 @@ function Info({ label, value, icon }: { label: string; value: string; icon?: Rea
       </div>
       <div className="mt-1 break-words text-sm font-bold text-foreground/90">{value}</div>
     </div>
+  );
+}
+
+function RemarketingButton({ user }: { user: AdminManagedUser }) {
+  if (hasLiveAccess(user)) return null;
+  const url = buildWhatsAppUrl(
+    user.phoneFull || user.phone,
+    user.countryCode,
+    buildRemarketingMessage(user.name),
+  );
+  if (!url) return null;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-2 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs font-black text-success hover:bg-success/15"
+    >
+      <MessageCircle className="size-3.5" />
+      Remarketing
+    </a>
   );
 }
 

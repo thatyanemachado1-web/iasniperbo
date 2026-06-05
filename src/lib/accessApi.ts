@@ -20,8 +20,10 @@ export interface ClientRegistrationPayload {
   email: string;
   password: string;
   phone: string;
+  phone_full?: string;
   city: string;
   country: string;
+  country_code?: string;
   [key: string]: unknown;
 }
 

@@ -26,6 +26,11 @@ export interface AdminManagedUser {
   id: string;
   name: string;
   email: string;
+  phone: string;
+  phoneFull: string;
+  city: string;
+  country: string;
+  countryCode: string;
   role: AdminUserRole;
   plan: AdminUserPlan;
   subscriptionStatus: AdminSubscriptionStatus;

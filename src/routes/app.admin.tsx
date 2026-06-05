@@ -33,6 +33,7 @@ import type {
   SignalRecipient,
 } from "@/types/admin";
 import type { SalesSettings } from "@/lib/accessApi";
+import { buildWhatsAppUrl, formatPhoneDisplay, getInternationalPhoneDigits } from "@/lib/phone";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -441,7 +442,13 @@ function AdminPage() {
     }
     if (kind === "phones") {
       const content = recipients
-        .map((recipient) => recipient.phone)
+        .map((recipient) => {
+          const digits = getInternationalPhoneDigits(
+            recipient.phone_full || recipient.phone,
+            recipient.country_code,
+          );
+          return digits ? `+${digits}` : "";
+        })
         .filter(Boolean)
         .join("\n");
       downloadText("sniper-clientes-telefones.txt", content);
@@ -1457,7 +1464,7 @@ function RecipientRow({
           </div>
           <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
             {recipient.email && <span>{recipient.email}</span>}
-            {recipient.phone && <span>{recipient.phone}</span>}
+            {recipient.phone && <RecipientPhoneLink recipient={recipient} />}
             {(recipient.city || recipient.country) && (
               <span>{[recipient.city, recipient.country].filter(Boolean).join(" / ")}</span>
             )}
@@ -1724,7 +1731,7 @@ function RecipientRowV2({
               </div>
               <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
                 {recipient.email && <span>{recipient.email}</span>}
-                {recipient.phone && <span>{recipient.phone}</span>}
+                {recipient.phone && <RecipientPhoneLink recipient={recipient} />}
                 {(recipient.city || recipient.country) && (
                   <span>{[recipient.city, recipient.country].filter(Boolean).join(" / ")}</span>
                 )}
@@ -2045,6 +2052,17 @@ function recipientValidityLabel(recipient: SignalRecipient) {
   return recipient.validity_days ? `${recipient.validity_days} dias` : "";
 }
 
+function RecipientPhoneLink({ recipient }: { recipient: SignalRecipient }) {
+  const phone = formatPhoneDisplay(recipient.phone_full || recipient.phone, recipient.country_code);
+  const url = buildWhatsAppUrl(recipient.phone_full || recipient.phone, recipient.country_code);
+  if (!phone || !url) return <span>{recipient.phone}</span>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="font-bold text-neon-cyan hover:text-neon-blue">
+      {phone}
+    </a>
+  );
+}
+
 function datesFromEditForm(form: RecipientEditForm) {
   const startsAt = form.starts_at || todayIso();
   const months = Number(form.validity_months);
@@ -2103,7 +2121,9 @@ function recipientsToCsv(recipients: SignalRecipient[]) {
   const rows = recipients.map((recipient) => [
     recipient.full_name || recipient.name || "",
     recipient.email || "",
-    recipient.phone || "",
+    formatPhoneDisplay(recipient.phone_full || recipient.phone, recipient.country_code) ||
+      recipient.phone ||
+      "",
     recipient.city || "",
     recipient.country || "",
     recipient.plan || "",

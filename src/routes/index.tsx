@@ -28,6 +28,14 @@ import { SniperLogoMark } from "@/components/brand/SniperLogoMark";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { checkClientAccess, getSalesSettings, registerClient, saveAccessSession, type ClientAccess } from "@/lib/accessApi";
+import {
+  COUNTRY_DIAL_OPTIONS,
+  DEFAULT_COUNTRY_DIAL,
+  buildInternationalPhone,
+  digitsOnly,
+  maskPhoneForCountry,
+  validatePhoneForCountry,
+} from "@/lib/phone";
 import { readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/")({
@@ -84,6 +92,10 @@ function LoginPage() {
   const [notice, setNotice] = useState("");
   const [pendingAccess, setPendingAccess] = useState<ClientAccess | null>(null);
   const [salesClosed, setSalesClosed] = useState<boolean | null>(null);
+  const [selectedCountryId, setSelectedCountryId] = useState(DEFAULT_COUNTRY_DIAL.id);
+  const [whatsappPhone, setWhatsappPhone] = useState("");
+  const selectedCountry =
+    COUNTRY_DIAL_OPTIONS.find((option) => option.id === selectedCountryId) ?? DEFAULT_COUNTRY_DIAL;
 
   useEffect(() => {
     let active = true;
@@ -155,14 +167,22 @@ function LoginPage() {
       setLoading(false);
       return;
     }
+    const phoneDigits = digitsOnly(whatsappPhone);
+    if (!validatePhoneForCountry(phoneDigits, selectedCountry)) {
+      setNotice(`Informe um WhatsApp válido para ${selectedCountry.country}.`);
+      setLoading(false);
+      return;
+    }
     try {
       const access = await registerClient({
         full_name: fullName,
         email,
         password,
-        phone: String(data.get("phone") || "").trim(),
+        phone: phoneDigits,
+        phone_full: buildInternationalPhone(selectedCountry.code, phoneDigits),
         city: String(data.get("city") || "").trim(),
-        country: String(data.get("country") || "").trim(),
+        country: selectedCountry.country,
+        country_code: selectedCountry.code,
       });
       saveAccessSession(access, email);
       window.location.href = "/app";
@@ -201,6 +221,17 @@ function LoginPage() {
     window.setTimeout(() => {
       loginCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 40);
+  }
+
+  function changeCountry(nextId: string) {
+    const nextCountry =
+      COUNTRY_DIAL_OPTIONS.find((option) => option.id === nextId) ?? DEFAULT_COUNTRY_DIAL;
+    setSelectedCountryId(nextCountry.id);
+    setWhatsappPhone((current) => maskPhoneForCountry(current, nextCountry));
+  }
+
+  function changeWhatsapp(value: string) {
+    setWhatsappPhone(maskPhoneForCountry(value, selectedCountry));
   }
 
   if (salesClosed === null) {
@@ -389,11 +420,22 @@ function LoginPage() {
                   <LoginField icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
                   <LoginField icon={<KeyRound className="size-4" />} label="Criar senha" name="password" type="password" placeholder="mínimo 4 caracteres" />
                   <LoginField icon={<ShieldCheck className="size-4" />} label="Confirmar senha" name="password_confirm" type="password" placeholder="repita sua senha" />
-                  <LoginField icon={<Phone className="size-4" />} label="Telefone" name="phone" placeholder="+55 11 99999-9999" />
-                  <div className="grid grid-cols-2 gap-2">
-                    <LoginField icon={<MapPin className="size-4" />} label="Cidade" name="city" placeholder="Cidade" />
-                    <LoginField icon={<Radio className="size-4" />} label="País" name="country" placeholder="País" />
-                  </div>
+                  <CountryDialField
+                    icon={<Radio className="size-4" />}
+                    selectedId={selectedCountry.id}
+                    onChange={changeCountry}
+                  />
+                  <WhatsAppField
+                    icon={<Phone className="size-4" />}
+                    countryCode={selectedCountry.code}
+                    value={whatsappPhone}
+                    onChange={changeWhatsapp}
+                    placeholder={selectedCountry.id === "BR" ? "67 99230-8362" : "número sem DDI"}
+                  />
+                  <input type="hidden" name="country" value={selectedCountry.country} />
+                  <input type="hidden" name="country_code" value={selectedCountry.code} />
+                  <input type="hidden" name="phone_full" value={buildInternationalPhone(selectedCountry.code, whatsappPhone)} />
+                  <LoginField icon={<MapPin className="size-4" />} label="Cidade" name="city" placeholder="Cidade" />
                   <button
                     type="submit"
                     disabled={loading}
@@ -557,6 +599,72 @@ function LoginField({
           type={type}
           required
           defaultValue={defaultValue}
+          placeholder={placeholder}
+          className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+        />
+      </div>
+    </label>
+  );
+}
+
+function CountryDialField({
+  icon,
+  selectedId,
+  onChange,
+}: {
+  icon: ReactNode;
+  selectedId: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[11px] uppercase tracking-widest text-muted-foreground">País</span>
+      <div className="mt-1.5 flex items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
+        <span className="text-neon-cyan">{icon}</span>
+        <select
+          value={selectedId}
+          onChange={(event) => onChange(event.target.value)}
+          className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-foreground outline-none"
+        >
+          {COUNTRY_DIAL_OPTIONS.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.flag} {option.country} ({option.code})
+            </option>
+          ))}
+        </select>
+      </div>
+    </label>
+  );
+}
+
+function WhatsAppField({
+  icon,
+  countryCode,
+  value,
+  onChange,
+  placeholder,
+}: {
+  icon: ReactNode;
+  countryCode: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[11px] uppercase tracking-widest text-muted-foreground">WhatsApp</span>
+      <div className="mt-1.5 flex items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
+        <span className="text-neon-cyan">{icon}</span>
+        <span className="rounded-lg border border-neon-cyan/25 bg-neon-cyan/10 px-2 py-1 text-xs font-black text-neon-cyan">
+          {countryCode}
+        </span>
+        <input
+          name="phone"
+          type="tel"
+          inputMode="tel"
+          required
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
           className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />

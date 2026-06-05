@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Check, Loader2, Power, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Check, Copy, Link2, Loader2, Power, RefreshCw, Search, Settings2, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   blockAdminUser,
@@ -22,6 +22,7 @@ import { AdminUserCard } from "@/components/admin/AdminUserCard";
 import { AdminUsersTable } from "@/components/admin/AdminUsersTable";
 import { AdminUserEditModal } from "@/components/admin/AdminUserEditModal";
 import type { QuickAction } from "@/components/admin/AdminQuickActions";
+import { buildWhatsAppUrl, getInternationalPhoneDigits } from "@/lib/phone";
 import type { SalesSettings } from "@/lib/accessApi";
 import type { AdminSession } from "@/types/admin";
 import type { AdminManagedUser, AdminPanelOverview } from "@/types/adminPanel";
@@ -57,6 +58,7 @@ export function AdminUsersPage() {
   });
   const [salesSaving, setSalesSaving] = useState(false);
   const [salesNotice, setSalesNotice] = useState("");
+  const [exportNotice, setExportNotice] = useState("");
 
   const canOpen = Boolean(session);
 
@@ -157,6 +159,36 @@ export function AdminUsersPage() {
     }
   }
 
+  async function copyRemarketingContacts(kind: "numbers" | "links") {
+    setExportNotice("");
+    const source = groupedUsers.nonClients;
+    const rows = source
+      .map((user) => {
+        if (kind === "numbers") {
+          const digits = getInternationalPhoneDigits(user.phoneFull || user.phone, user.countryCode);
+          return digits ? `+${digits}` : "";
+        }
+        return buildWhatsAppUrl(user.phoneFull || user.phone, user.countryCode);
+      })
+      .filter(Boolean);
+
+    if (!rows.length) {
+      setExportNotice("Nenhum WhatsApp encontrado nos não clientes filtrados.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(rows.join("\n"));
+      setExportNotice(
+        kind === "numbers"
+          ? `${rows.length} número(s) copiado(s).`
+          : `${rows.length} link(s) wa.me copiado(s).`,
+      );
+    } catch {
+      setExportNotice("Não foi possível copiar automaticamente. Abra o navegador e tente de novo.");
+    }
+  }
+
   async function runQuickAction(action: QuickAction, user: AdminManagedUser) {
     if (!session) return;
     if (action === "deleteUser") {
@@ -211,17 +243,35 @@ export function AdminUsersPage() {
             subtitle="Busque, filtre, aprove, prorrogue e bloqueie acessos."
             right={<ShieldCheck className="size-5 text-neon-cyan" />}
           />
-          <button
-            type="button"
-            onClick={() => {
-              void load();
-              void loadSalesSettings();
-            }}
-            className="glass inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black text-neon-cyan"
-          >
-            <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
-            Atualizar
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void copyRemarketingContacts("numbers")}
+              className="glass inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black text-success"
+            >
+              <Copy className="size-4" />
+              Copiar números
+            </button>
+            <button
+              type="button"
+              onClick={() => void copyRemarketingContacts("links")}
+              className="glass inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black text-neon-cyan"
+            >
+              <Link2 className="size-4" />
+              Copiar wa.me
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void load();
+                void loadSalesSettings();
+              }}
+              className="glass inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black text-neon-cyan"
+            >
+              <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+              Atualizar
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 grid gap-3 xl:grid-cols-[1.2fr_0.8fr_0.8fr_0.7fr_0.9fr]">
@@ -231,7 +281,7 @@ export function AdminUsersPage() {
               value={filters.search}
               onChange={(event) => setFilters({ ...filters, search: event.target.value })}
               className="w-full bg-transparent text-sm outline-none"
-              placeholder="Buscar por nome/e-mail"
+              placeholder="Buscar nome, e-mail ou WhatsApp"
             />
           </label>
           <FilterSelect
@@ -263,6 +313,11 @@ export function AdminUsersPage() {
         {error && (
           <div className="mt-4 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {error}
+          </div>
+        )}
+        {exportNotice && (
+          <div className="mt-4 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm font-semibold text-success">
+            {exportNotice}
           </div>
         )}
       </GlassCard>
@@ -551,7 +606,13 @@ function applyFilters(users: AdminManagedUser[], filters: FilterState) {
   const search = filters.search.trim().toLowerCase();
   const now = Date.now();
   return users.filter((user) => {
-    if (search && !`${user.name} ${user.email}`.toLowerCase().includes(search)) return false;
+    if (
+      search &&
+      !`${user.name} ${user.email} ${user.phone} ${user.phoneFull} ${user.countryCode} ${user.country} ${user.city}`
+        .toLowerCase()
+        .includes(search)
+    )
+      return false;
     if (filters.plan !== "all" && user.plan !== filters.plan) return false;
     if (filters.status !== "all" && user.subscriptionStatus !== filters.status) return false;
     if (filters.role !== "all" && user.role !== filters.role) return false;
