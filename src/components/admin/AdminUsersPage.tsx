@@ -33,6 +33,7 @@ type FilterState = {
   status: string;
   role: string;
   quick: "all" | "active" | "expired" | "blocked";
+  sort: "recent" | "oldest" | "name" | "lastAccess";
 };
 
 const defaultFilters: FilterState = {
@@ -41,6 +42,7 @@ const defaultFilters: FilterState = {
   status: "all",
   role: "all",
   quick: "all",
+  sort: "recent",
 };
 
 export function AdminUsersPage() {
@@ -274,7 +276,7 @@ export function AdminUsersPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 xl:grid-cols-[1.2fr_0.8fr_0.8fr_0.7fr_0.9fr]">
+        <div className="mt-4 grid gap-3 xl:grid-cols-[1.2fr_0.8fr_0.8fr_0.7fr_0.9fr_0.9fr]">
           <label className="flex items-center gap-2 rounded-xl border border-border/60 bg-secondary/25 px-3 py-2 focus-within:border-neon-cyan/70">
             <Search className="size-4 text-neon-cyan" />
             <input
@@ -307,6 +309,12 @@ export function AdminUsersPage() {
             value={filters.quick}
             onChange={(quick) => setFilters({ ...filters, quick: quick as FilterState["quick"] })}
             options={["all", "active", "expired", "blocked"]}
+          />
+          <FilterSelect
+            label="Ordem"
+            value={filters.sort}
+            onChange={(sort) => setFilters({ ...filters, sort: sort as FilterState["sort"] })}
+            options={["recent", "oldest", "name", "lastAccess"]}
           />
         </div>
 
@@ -594,12 +602,36 @@ function FilterSelect({
       >
         {options.map((option) => (
           <option key={option} value={option}>
-            {option === "all" ? label : option}
+            {optionLabel(option, label)}
           </option>
         ))}
       </select>
     </label>
   );
+}
+
+function optionLabel(option: string, fallbackLabel: string) {
+  const labels: Record<string, string> = {
+    all: fallbackLabel,
+    free: "Free",
+    trial: "Trial",
+    monthly: "Mensal",
+    premium: "Premium",
+    vip_manual: "VIP manual",
+    active: "Ativos",
+    expired: "Vencidos",
+    canceled: "Cancelados",
+    blocked: "Bloqueados",
+    manual_vip: "VIP manual",
+    user: "Cliente",
+    admin: "Admin",
+    owner: "Owner",
+    recent: "Mais recentes",
+    oldest: "Mais antigos",
+    name: "Nome A-Z",
+    lastAccess: "Ultimo acesso",
+  };
+  return labels[option] || option;
 }
 
 function applyFilters(users: AdminManagedUser[], filters: FilterState) {
@@ -624,7 +656,31 @@ function applyFilters(users: AdminManagedUser[], filters: FilterState) {
     if (filters.quick === "expired" && parseAccessDate(user.currentPeriodEnd) > now) return false;
     if (filters.quick === "blocked" && !user.isBlocked) return false;
     return true;
-  });
+  }).sort((a, b) => compareUsers(a, b, filters.sort));
+}
+
+function compareUsers(
+  a: AdminManagedUser,
+  b: AdminManagedUser,
+  sort: FilterState["sort"],
+) {
+  if (sort === "name") return a.name.localeCompare(b.name);
+  if (sort === "oldest") return parseAccessDate(a.createdAt) - parseAccessDate(b.createdAt);
+  if (sort === "lastAccess") return accessLabelScore(a.lastAccess) - accessLabelScore(b.lastAccess);
+  return parseAccessDate(b.createdAt) - parseAccessDate(a.createdAt);
+}
+
+function accessLabelScore(value: string) {
+  const label = value.trim().toLowerCase();
+  if (!label) return Number.MAX_SAFE_INTEGER;
+  if (label === "agora") return 0;
+  const minutes = label.match(/h[aÃ¡]\s+(\d+)\s+min/i);
+  if (minutes) return Number(minutes[1]);
+  const hours = label.match(/h[aÃ¡]\s+(\d+)\s+h/i);
+  if (hours) return Number(hours[1]) * 60;
+  const days = label.match(/h[aÃ¡]\s+(\d+)\s+d/i);
+  if (days) return Number(days[1]) * 24 * 60;
+  return Number.MAX_SAFE_INTEGER;
 }
 
 function splitClientGroups(users: AdminManagedUser[]) {
