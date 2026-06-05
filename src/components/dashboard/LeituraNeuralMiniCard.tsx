@@ -55,8 +55,8 @@ export function LeituraNeuralMiniCard({
   const sg = optionalNumberFrom(data.greenSemGale);
   const g1 = optionalNumberFrom(data.greenG1);
   const red = optionalNumberFrom(data.reds ?? data.erros);
-  const sequencePositive = numberFrom(data.sequencePositive);
-  const sequenceNegative = numberFrom(data.sequenceNegative);
+  const sequencePositive = 0;
+  const sequenceNegative = 0;
   const sequenceCopy = neuralSequenceCopy(sequencePositive, sequenceNegative);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
   const totalAlerts = totalFrom(data.alertas, data.acertos, data.erros);
@@ -496,12 +496,8 @@ function buildGeneralScore(
   const total = numberFrom(greens) + numberFrom(reds);
   const totalAlerts = optionalNumberFrom(scoreboard?.totalAlerts ?? fallbackReading.alertas ?? total) ?? total;
   const accuracy = accuracyFrom(null, greens, reds) ?? optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
-  const maxGreenSequence = optionalPositiveNumberFrom(
-    scoreboard?.maxSequencePositive ?? fallbackReading.maxSequencePositive,
-  );
-  const maxRedSequence = optionalPositiveNumberFrom(
-    scoreboard?.maxSequenceNegative ?? fallbackReading.maxSequenceNegative,
-  );
+  const maxGreenSequence = null;
+  const maxRedSequence = null;
 
   return {
     totalAlerts,
