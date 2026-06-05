@@ -9,6 +9,8 @@ import type {
 } from "@/types/dashboard";
 
 type PaganteKind = "favorable" | "watch" | "risk";
+const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 90;
+const NEURAL_PAGANTE_MIN_GREENS = 2;
 
 export function buildEngineDecisionCopy(data: DashboardData) {
   if (data.entryModeFilter?.blocked) {
@@ -84,14 +86,13 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
   const isPerfectPagante =
     !isOpposite &&
     status === "favorable" &&
-    typeof reading.assertividade === "number" &&
-    reading.assertividade >= 100;
+    hasQualifiedNeuralPerformance(reading);
 
   if (!isPerfectPagante) {
     if (isOpposite) {
       return "Leitura oposta em observação. Não enviar como número pagante favorável agora.";
     }
-    return `Número ${number} ${side} aguardando confirmação 100% da Neural. Aguardar novo padrão confirmado.`;
+    return `Número ${number} ${side} aguardando confirmação 90%+ da Neural com pelo menos 2 greens. Aguardar novo padrão confirmado.`;
   }
 
   if (status === "risk") {
@@ -109,10 +110,10 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
   }
 
   if (direction) {
-    return `Padrão 100% confirmado. ${side} ${number} aponta ${sideLabel(direction)} até ${reading.validade ?? "G1"}.`;
+    return `Padrão 90%+ confirmado. ${side} ${number} aponta ${sideLabel(direction)} até ${reading.validade ?? "G1"}.`;
   }
 
-  return `Padrão 100% confirmado. ${side} ${number} apareceu com força nas últimas rodadas.`;
+  return `Padrão 90%+ confirmado. ${side} ${number} apareceu com força nas últimas rodadas.`;
 }
 
 export function buildTieCopy(alert: TieAlert) {
@@ -175,10 +176,21 @@ function entryRisk(data: DashboardData, side: SignalSide) {
 function activePaganteSide(reading?: NeuralReading | null, favorableOnly = true): CurrentSignalSide | null {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
   if (isOppositeTrigger(reading)) return null;
-  if (typeof reading.assertividade !== "number" || reading.assertividade < 100) return null;
+  if (!hasQualifiedNeuralPerformance(reading)) return null;
   const status = paganteKind(reading);
   if (status === "risk" || (favorableOnly && status !== "favorable")) return null;
   return reading.direcao ?? reading.origem ?? null;
+}
+
+function hasQualifiedNeuralPerformance(reading: NeuralReading) {
+  const greens = neuralGreens(reading);
+  if (greens < NEURAL_PAGANTE_MIN_GREENS) return false;
+  return typeof reading.assertividade === "number" && reading.assertividade >= NEURAL_PAGANTE_MIN_ASSERTIVENESS;
+}
+
+function neuralGreens(reading?: NeuralReading | null) {
+  const splitGreens = safeNumber(reading?.greenSemGale) + safeNumber(reading?.greenG1);
+  return splitGreens || safeNumber(reading?.acertos);
 }
 
 function isOppositeTrigger(reading?: NeuralReading | null) {
@@ -243,6 +255,11 @@ function roundsText(value: number) {
 function joinReasons(reasons: string[]) {
   if (reasons.length <= 1) return reasons[0] ?? "confirmação da engine";
   return `${reasons.slice(0, -1).join(", ")} e ${reasons[reasons.length - 1]}`;
+}
+
+function safeNumber(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function normalizeText(value?: string | null) {

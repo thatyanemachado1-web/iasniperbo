@@ -59,8 +59,9 @@ const EMPTY_DIRECTION_STATS: DirectionStats = {
   lastOutcome: null,
 };
 
-const MIN_ACTIVE_VALIDATED = 3;
-const MIN_ACTIVE_ACCURACY = 100;
+const MIN_ACTIVE_VALIDATED = 2;
+const MIN_ACTIVE_GREENS = 2;
+const MIN_ACTIVE_ACCURACY = 90;
 const RED_ALERT_ACCURACY = 45;
 
 export function buildNumeroPaganteNeural(
@@ -84,6 +85,7 @@ export function buildNumeroPaganteNeural(
   const isPerfectPagante =
     origemTipo === "PAGANTE" &&
     total >= MIN_ACTIVE_VALIDATED &&
+    totalGreens >= MIN_ACTIVE_GREENS &&
     accuracy >= MIN_ACTIVE_ACCURACY;
   const mode = isPerfectPagante ? "ACTIVE" : "OBSERVING";
   const isRedAlert =

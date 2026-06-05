@@ -14,6 +14,8 @@ export type VoiceNarrationStyle = "discreet" | "aggressive" | "professional";
 export type VoicePriority = 1 | 2 | 3 | 4 | 5;
 type VoiceLeadStyle = Exclude<VoiceNarrationStyle, "discreet">;
 type PaganteStatusKind = "favorable" | "watch" | "risk";
+const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 90;
+const NEURAL_PAGANTE_MIN_GREENS = 2;
 type VoiceLeadKind =
   | "blocked"
   | "resultGreen"
@@ -792,8 +794,9 @@ function isPerfectPagante(reading?: NeuralReading | null) {
   if (isOppositeTrigger(reading)) return false;
   const greens = neuralGreens(reading);
   const reds = neuralReds(reading);
-  if (greens + reds > 0) return calculateMotorAssertiveness(greens, reds) >= 100;
-  return safeNumber(reading.assertividade) >= 100;
+  if (greens < NEURAL_PAGANTE_MIN_GREENS) return false;
+  if (greens + reds > 0) return calculateMotorAssertiveness(greens, reds) >= NEURAL_PAGANTE_MIN_ASSERTIVENESS;
+  return safeNumber(reading.assertividade) >= NEURAL_PAGANTE_MIN_ASSERTIVENESS;
 }
 
 function isOppositeTrigger(reading?: NeuralReading | null) {

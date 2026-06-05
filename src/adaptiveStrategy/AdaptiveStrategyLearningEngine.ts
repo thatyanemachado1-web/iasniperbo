@@ -13,6 +13,8 @@ import type { DashboardData, NeuralReading, SignalSide } from "@/types/dashboard
 
 const MIN_OCCURRENCES = 30;
 const MIN_ASSERTIVENESS = 65;
+const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 90;
+const NEURAL_PAGANTE_MIN_GREENS = 2;
 const TOP_LIMIT = 8;
 const DEFAULT_SYNC_STATUS: AdaptiveSyncStatus = {
   mode: "local",
@@ -306,7 +308,7 @@ function buildEntryScore(
     {
       label: "Neural Pagante",
       value: neuralSide === side ? 20 : 0,
-      reason: neuralSide === side ? `Pagante 100% favorece ${sideLabel(side)}.` : "Sem confirmação 100% a favor.",
+      reason: neuralSide === side ? `Pagante 90%+ favorece ${sideLabel(side)}.` : "Sem confirmação 90%+ a favor.",
     },
     {
       label: "Surf Analyzer",
@@ -472,7 +474,8 @@ function neuralPaganteScoreSide(reading?: NeuralReading | null): AdaptiveSide | 
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
   if (reading.origemTipo === "OPOSTO" || reading.origem === "TIE" || reading.direcao === "TIE") return null;
   if (reading.isRedAlert || reading.isSaturated) return null;
-  if (typeof reading.assertividade !== "number" || reading.assertividade < 100) return null;
+  if (neuralGreens(reading) < NEURAL_PAGANTE_MIN_GREENS) return null;
+  if (typeof reading.assertividade !== "number" || reading.assertividade < NEURAL_PAGANTE_MIN_ASSERTIVENESS) return null;
   const status = normalizeText(reading.paganteStatus);
   if (
     status.includes("RISCO") ||
@@ -485,6 +488,16 @@ function neuralPaganteScoreSide(reading?: NeuralReading | null): AdaptiveSide | 
     return null;
   }
   return normalizeModuleSide(reading.direcao ?? reading.origem);
+}
+
+function neuralGreens(reading?: NeuralReading | null) {
+  const splitGreens = safeNumber(reading?.greenSemGale) + safeNumber(reading?.greenG1);
+  return splitGreens || safeNumber(reading?.acertos);
+}
+
+function safeNumber(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function compareRecords(left: AdaptiveRoundRecord, right: AdaptiveRoundRecord) {
