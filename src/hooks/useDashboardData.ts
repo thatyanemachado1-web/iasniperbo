@@ -4,6 +4,8 @@ import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
 import { useEffect, useMemo, useState } from "react";
 import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } from "@/types/dashboard";
+import { calculateMotorAssertiveness } from "@/utils/assertiveness";
+import { buildNumeroPaganteNeural } from "@/utils/numeroPaganteNeural";
 
 const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
@@ -215,6 +217,7 @@ function normalizeModuleToggles(value: unknown, fallback: ModuleToggles): Module
 
 function normalizeDashboardData(payload: unknown): DashboardData {
   const data = readRecord(payload) as unknown as DashboardData;
+  const generatedNeural = buildNumeroPaganteNeural(data.rounds);
   const neuralReading =
     data.neuralReading ??
     (data as unknown as Record<string, unknown>).neural_reading ??
@@ -227,15 +230,26 @@ function normalizeDashboardData(payload: unknown): DashboardData {
     (data as unknown as Record<string, unknown>).pagante_scoreboard ??
     (data as unknown as Record<string, unknown>).neuralStats ??
     (data as unknown as Record<string, unknown>).neural_stats;
+  let normalizedNeuralReading = normalizeNeuralReading(
+    neuralReading,
+    data.neuralReading ?? generatedNeural?.reading,
+  );
+  if (!hasNeuralPayingNumber(normalizedNeuralReading) && generatedNeural?.reading) {
+    normalizedNeuralReading = normalizeNeuralReading(generatedNeural.reading, normalizedNeuralReading);
+  }
 
   return {
     ...data,
     ...applyNeuralScoreBaseline(
-      normalizeNeuralReading(neuralReading, data.neuralReading),
-      normalizeNeuralScoreboard(neuralScoreboard, data.neuralScoreboard),
+      normalizedNeuralReading,
+      normalizeNeuralScoreboard(neuralScoreboard, data.neuralScoreboard ?? generatedNeural?.scoreboard),
       dashboardDayKey(data),
     ),
   };
+}
+
+function hasNeuralPayingNumber(reading: NeuralReading) {
+  return typeof reading.numero === "number" && Boolean(reading.origem);
 }
 
 function normalizeNeuralScoreboard(
@@ -671,7 +685,7 @@ interface NeuralLiveSequence {
 function applyNeuralScoreBaseline(
   reading: NeuralReading,
   scoreboard: NeuralScoreboard | undefined,
-  _day: string,
+  day: string,
 ): Pick<DashboardData, "neuralReading" | "neuralScoreboard"> {
   const current = neuralScoreFrom(reading, scoreboard);
   const greenSemGale = current.greenSemGale;
@@ -683,10 +697,15 @@ function applyNeuralScoreBaseline(
   const totalGreens = greenSemGale + greenG1 || acertos;
   const totalLosses = reds || erros;
   const total = totalGreens + totalLosses;
-  const sequencePositive = safeCounter(reading.sequencePositive ?? scoreboard?.sequencePositive);
-  const sequenceNegative = safeCounter(reading.sequenceNegative ?? scoreboard?.sequenceNegative);
-  const maxSequencePositive = safeCounter(reading.maxSequencePositive ?? scoreboard?.maxSequencePositive);
-  const maxSequenceNegative = safeCounter(reading.maxSequenceNegative ?? scoreboard?.maxSequenceNegative);
+  const sourceSequence = currentNeuralSequence(reading, scoreboard);
+  const liveSequence =
+    typeof window === "undefined"
+      ? sourceSequence
+      : updateNeuralLiveSequence(day, totalGreens, totalLosses, sourceSequence);
+  const sequencePositive = liveSequence.sequencePositive;
+  const sequenceNegative = liveSequence.sequenceNegative;
+  const maxSequencePositive = liveSequence.maxSequencePositive;
+  const maxSequenceNegative = liveSequence.maxSequenceNegative;
 
   const neuralReading = {
     ...reading,
@@ -696,7 +715,7 @@ function applyNeuralScoreBaseline(
     greenG1,
     erros: totalLosses,
     reds: totalLosses,
-    assertividade: total > 0 ? Math.round((totalGreens / total) * 1000) / 10 : 0,
+    assertividade: calculateMotorAssertiveness(totalGreens, totalLosses),
     sequencePositive,
     sequenceNegative,
     maxSequencePositive: Math.max(maxSequencePositive, sequencePositive),
@@ -713,12 +732,43 @@ function applyNeuralScoreBaseline(
       greenG1,
       erros: totalLosses,
       reds: totalLosses,
-      assertividade: total > 0 ? Math.round((totalGreens / total) * 1000) / 10 : 0,
+      assertividade: calculateMotorAssertiveness(totalGreens, totalLosses),
       sequencePositive,
       sequenceNegative,
       maxSequencePositive: Math.max(maxSequencePositive, sequencePositive),
       maxSequenceNegative: Math.max(maxSequenceNegative, sequenceNegative),
     },
+  };
+}
+
+function currentNeuralSequence(
+  reading: NeuralReading,
+  scoreboard?: NeuralScoreboard,
+): Pick<
+  NeuralLiveSequence,
+  "sequencePositive" | "sequenceNegative" | "maxSequencePositive" | "maxSequenceNegative"
+> {
+  const scoreboardPositive = safeCounter(scoreboard?.sequencePositive);
+  const scoreboardNegative = safeCounter(scoreboard?.sequenceNegative);
+  const readingPositive = safeCounter(reading.sequencePositive);
+  const readingNegative = safeCounter(reading.sequenceNegative);
+  const hasReadingCurrent = readingPositive > 0 || readingNegative > 0;
+  const sequencePositive = hasReadingCurrent ? readingPositive : scoreboardPositive;
+  const sequenceNegative = hasReadingCurrent ? readingNegative : scoreboardNegative;
+
+  return {
+    sequencePositive,
+    sequenceNegative,
+    maxSequencePositive: Math.max(
+      safeCounter(scoreboard?.maxSequencePositive),
+      safeCounter(reading.maxSequencePositive),
+      sequencePositive,
+    ),
+    maxSequenceNegative: Math.max(
+      safeCounter(scoreboard?.maxSequenceNegative),
+      safeCounter(reading.maxSequenceNegative),
+      sequenceNegative,
+    ),
   };
 }
 

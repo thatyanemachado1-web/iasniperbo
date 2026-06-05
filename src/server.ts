@@ -3,6 +3,7 @@ import "./lib/error-capture";
 import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import {
   DEFAULT_SITE_CONTENT_SETTINGS,
   normalizeAnnouncementTone,
@@ -3438,8 +3439,7 @@ function incrementServerEntryModeStats(
     totalGreens,
     totalEntries,
     total: totalEntries + nextEmp,
-    assertiveness:
-      totalEntries > 0 ? Math.round((totalGreens / totalEntries) * 1000) / 10 : undefined,
+    assertiveness: calculateMotorAssertiveness(totalGreens, nextReds),
   };
 }
 
@@ -3557,6 +3557,15 @@ function serverReadNeuralPerformance(reading: NeuralReading) {
   const total = greens + reds;
   const providedAssertiveness = serverReadOptionalNumber(reading.assertividade);
 
+  if (total > 0) {
+    return {
+      greens,
+      reds,
+      total,
+      assertiveness: calculateMotorAssertiveness(greens, reds),
+    };
+  }
+
   if (typeof providedAssertiveness === "number") {
     return {
       greens,
@@ -3566,13 +3575,7 @@ function serverReadNeuralPerformance(reading: NeuralReading) {
     };
   }
 
-  if (total <= 0) return null;
-  return {
-    greens,
-    reds,
-    total,
-    assertiveness: Math.round((greens / total) * 1000) / 10,
-  };
+  return null;
 }
 
 function normalizeServerEntryModeStatsByMode(

@@ -6,6 +6,7 @@ import type {
   TieAlert,
   TieAlertScoreboard,
 } from "@/types/dashboard";
+import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 
 export function calculateBankerFrequency(rounds: Round[]) {
   if (!rounds.length) return 0;
@@ -53,7 +54,7 @@ export function calculateMainAssertiveness(signals: MainSignal[]): MainScoreboar
   const reds = signals.filter((s) => s.status === "red").length;
   const totalGreens = greens + greensG1;
   const totalEntries = totalGreens + reds;
-  const assertiveness = totalEntries ? (totalGreens / totalEntries) * 100 : 0;
+  const assertiveness = calculateMotorAssertiveness(totalGreens, reds);
   return { greens, greensG1, reds, totalGreens, totalEntries, assertiveness };
 }
 
@@ -61,7 +62,7 @@ export function calculateTieAlertAssertiveness(alerts: TieAlert[]): TieAlertScor
   const greenTieAlerts = alerts.filter((a) => a.status === "green").length;
   const expired = alerts.filter((a) => a.status === "expired").length;
   const totalAlerts = greenTieAlerts + expired;
-  const assertiveness = totalAlerts ? (greenTieAlerts / totalAlerts) * 100 : 0;
+  const assertiveness = calculateMotorAssertiveness(greenTieAlerts, expired);
   return { greenTieAlerts, expired, totalAlerts, assertiveness };
 }
 

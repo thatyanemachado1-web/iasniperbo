@@ -1,6 +1,7 @@
 import { CircleHelp, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buildNeuralCopy } from "@/lib/operationalCopy";
+import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import {
   Popover,
   PopoverContent,
@@ -51,18 +52,15 @@ export function LeituraNeuralMiniCard({
   const data = { ...SCANNING_READING, ...reading };
   const mode = data.mode ?? "SCANNING";
   const hasNumber = typeof data.numero === "number" && Boolean(data.origem);
-  const totalAlerts = totalFrom(data.alertas, data.acertos, data.erros);
-  const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
   const sg = optionalNumberFrom(data.greenSemGale);
   const g1 = optionalNumberFrom(data.greenG1);
   const red = optionalNumberFrom(data.reds ?? data.erros);
-  const scoreboardSequencePositive = numberFrom(neuralScoreboard?.sequencePositive);
-  const scoreboardSequenceNegative = numberFrom(neuralScoreboard?.sequenceNegative);
-  const hasGeneralSequence = scoreboardSequencePositive > 0 || scoreboardSequenceNegative > 0;
-  const sequencePositive = hasGeneralSequence ? scoreboardSequencePositive : numberFrom(data.sequencePositive);
-  const sequenceNegative = hasGeneralSequence ? scoreboardSequenceNegative : numberFrom(data.sequenceNegative);
+  const sequencePositive = numberFrom(data.sequencePositive);
+  const sequenceNegative = numberFrom(data.sequenceNegative);
   const sequenceCopy = neuralSequenceCopy(sequencePositive, sequenceNegative);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
+  const totalAlerts = totalFrom(data.alertas, data.acertos, data.erros);
+  const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
   const resolvedTotal = numberFrom(totalGreens) + numberFrom(red);
   const showPayingStats = hasNumber || totalGreens !== null || accuracy !== null || totalAlerts !== null;
   const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
@@ -228,7 +226,7 @@ export function LeituraNeuralMiniCard({
 function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) {
   if (sequenceNegative > 0) {
     return {
-      label: `Neural: ${sequenceNegative} ${sequenceNegative === 1 ? "RED" : "REDS"} ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
+      label: `Neural: ${sequenceNegative} RED ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de reds da Leitura Neural.",
       className: "border-destructive/35 bg-destructive/10 text-destructive",
     };
@@ -236,14 +234,14 @@ function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) 
 
   if (sequencePositive > 0) {
     return {
-      label: `Neural: ${sequencePositive} ${sequencePositive === 1 ? "GREEN" : "GREENS"} ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
+      label: `Neural: ${sequencePositive} GREEN ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de greens da Leitura Neural.",
       className: "border-success/35 bg-success/10 text-success",
     };
   }
 
   return {
-    label: "Neural: 0 GREEN / 0 RED",
+    label: "Neural: aguardando resultado",
     title: "Aguardando resultado real da Leitura Neural.",
     className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
   };
@@ -461,7 +459,7 @@ function accuracyFrom(
 ) {
   if (typeof acertos === "number" || typeof erros === "number") {
     const total = (acertos ?? 0) + (erros ?? 0);
-    return total > 0 ? ((acertos ?? 0) / total) * 100 : null;
+    return total > 0 ? calculateMotorAssertiveness(acertos ?? 0, erros ?? 0) : null;
   }
   if (typeof assertividade === "number") return assertividade;
   return null;
@@ -555,12 +553,10 @@ function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
 }
 
 function neuralHeaderLabel(
-  kind: NonNullable<NeuralReading["origemTipo"]>,
+  _kind: NonNullable<NeuralReading["origemTipo"]>,
   ready: boolean,
 ) {
   if (ready) return "padrao 100%";
-  if (kind === "OPOSTO") return "oposto em observacao";
-  if (kind === "TIE") return "tie em observacao";
   return "aguardando 100%";
 }
 

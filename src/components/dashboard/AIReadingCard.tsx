@@ -9,6 +9,7 @@ import { readAdminSession } from "@/lib/adminApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import { readVoiceResponseError } from "@/lib/voiceApiError";
 import type { DashboardData } from "@/types/dashboard";
+import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import { Sparkles, RefreshCw, Volume2, VolumeX } from "lucide-react";
 
 type Props = {
@@ -71,7 +72,10 @@ function buildSnapshot(
     paganteAlert: perfectPagante ? d.neuralReading?.paganteAlert ?? null : null,
     paganteAssertiveness: perfectPagante ? d.neuralReading?.assertividade ?? null : null,
     lastRounds,
-    assertiveness: d.mainScoreboard.assertiveness,
+    assertiveness: calculateMotorAssertiveness(
+      (d.mainScoreboard.greens ?? 0) + (d.mainScoreboard.greensG1 ?? 0),
+      d.mainScoreboard.reds,
+    ),
     sequencePositive: d.mainScoreboard.sequencePositive,
     sequenceNegative: d.mainScoreboard.sequenceNegative,
     userFirstName,

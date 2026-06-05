@@ -8,6 +8,7 @@ import type {
   TieAlertScoreboard,
   TieResult,
 } from "@/types/dashboard";
+import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 
 export function calculateMainResult(scoreboard: MainScoreboard): MainResult {
   const greenSemGale = safeNumber(scoreboard.greens);
@@ -21,7 +22,7 @@ export function calculateMainResult(scoreboard: MainScoreboard): MainResult {
     greenG1,
     reds,
     total,
-    assertiveness: calculateAssertiveness(greens, total),
+    assertiveness: calculateAssertiveness(greens, reds),
     sequencePositive: safeNumber(scoreboard.sequencePositive),
     sequenceNegative: safeNumber(scoreboard.sequenceNegative),
     breakdown: `SG ${greenSemGale} / G1 ${greenG1} / RED ${reds}`,
@@ -38,7 +39,7 @@ export function calculateTieResult(scoreboard: TieAlertScoreboard): TieResult {
     greens,
     expired,
     total,
-    assertiveness: calculateAssertiveness(greens, total),
+    assertiveness: calculateAssertiveness(greens, expired),
     sequencePositive: safeNumber(scoreboard.sequencePositive),
     sequenceExpired: safeNumber(scoreboard.sequenceExpired),
     breakdown: `Green ${greens} / Exp. ${expired}`,
@@ -65,7 +66,7 @@ export function calculateNeuralResult(reading?: NeuralReading): NeuralResult {
     greenG1,
     reds,
     total,
-    assertiveness: total > 0 ? calculateAssertiveness(greens, total) : safeNumber(providedAssertiveness),
+    assertiveness: total > 0 ? calculateAssertiveness(greens, reds) : safeNumber(providedAssertiveness),
     sequencePositive: safeNumber(reading?.sequencePositive),
     sequenceNegative: safeNumber(reading?.sequenceNegative),
     maxSequencePositive: safeNumber(reading?.maxSequencePositive),
@@ -95,7 +96,7 @@ export function calculateSurfResult(scoreboard?: SurfAnalyzerScoreboard): SurfRe
     total,
     blocked: safeNumber(scoreboard?.blocked),
     noRisk: safeNumber(scoreboard?.noRisk),
-    assertiveness: calculateAssertiveness(greens, total),
+    assertiveness: calculateAssertiveness(greens, reds),
     sequencePositive: safeNumber(scoreboard?.sequencePositive ?? scoreboard?.currentHitStreak),
     sequenceNegative: safeNumber(scoreboard?.sequenceNegative),
     breakdown: `SG ${greenSemGale} / G1 ${greenG1} / RED ${reds}`,
@@ -113,7 +114,6 @@ function optionalNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-export function calculateAssertiveness(part: number, total: number) {
-  if (total <= 0) return 0;
-  return Math.round((part / total) * 1000) / 10;
+export function calculateAssertiveness(greens: number, reds: number) {
+  return calculateMotorAssertiveness(greens, reds);
 }

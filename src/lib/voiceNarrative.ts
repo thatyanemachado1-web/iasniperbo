@@ -7,6 +7,7 @@ import type {
 } from "@/types/dashboard";
 import type { AdaptiveStrategySnapshot } from "@/types/adaptiveStrategy";
 import { buildSurfCopy, buildTieCopy } from "@/lib/operationalCopy";
+import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import { buildSurfEntrySummary } from "@/utils/surf";
 
 export type VoiceNarrationStyle = "discreet" | "aggressive" | "professional";
@@ -789,6 +790,9 @@ function isFavorablePagante(reading?: NeuralReading) {
 function isPerfectPagante(reading?: NeuralReading | null) {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
   if (isOppositeTrigger(reading)) return false;
+  const greens = neuralGreens(reading);
+  const reds = neuralReds(reading);
+  if (greens + reds > 0) return calculateMotorAssertiveness(greens, reds) >= 100;
   return safeNumber(reading.assertividade) >= 100;
 }
 
