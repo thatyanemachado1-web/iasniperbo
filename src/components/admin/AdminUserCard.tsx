@@ -21,12 +21,12 @@ export function AdminUserCard({
 
   return (
     <article className="rounded-2xl border border-neon-cyan/15 bg-background/45 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-black">{user.name || "Sem nome"}</h3>
-          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Mail className="size-3.5" />
-            {user.email || "-"}
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="break-words text-base font-black">{user.name || "Sem nome"}</h3>
+          <p className="mt-1 flex min-w-0 items-start gap-1.5 text-xs text-muted-foreground">
+            <Mail className="mt-0.5 size-3.5 shrink-0" />
+            <span className="break-all">{user.email || "-"}</span>
           </p>
         </div>
         <button

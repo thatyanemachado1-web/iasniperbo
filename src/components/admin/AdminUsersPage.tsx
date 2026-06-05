@@ -207,7 +207,7 @@ export function AdminUsersPage() {
         )}
       </GlassCard>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid min-w-0 gap-4 2xl:grid-cols-2">
         <UserGroupSection
           title="Clientes"
           subtitle="Pagantes, aprovados ou premium com acesso ativo."
@@ -321,7 +321,7 @@ function UserGroupSection({
   actionsDisabled: (user: AdminManagedUser) => boolean;
 }) {
   return (
-    <section className="space-y-3">
+    <section className="min-w-0 space-y-3">
       <div className="flex items-end justify-between gap-3 border-b border-border/50 pb-2">
         <div>
           <h2 className="text-sm font-black uppercase tracking-[0.18em] text-foreground">
