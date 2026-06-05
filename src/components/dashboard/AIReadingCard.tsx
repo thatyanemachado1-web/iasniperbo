@@ -161,6 +161,7 @@ export function AIReadingCard({ data, mode }: Props) {
     playbackIdRef.current += 1;
     disposeAudio();
     setIsSpeaking(false);
+    broadcastAIReadingVoiceActive(false);
   }, [disposeAudio]);
 
   const speakReading = useCallback(
@@ -181,6 +182,7 @@ export function AIReadingCard({ data, mode }: Props) {
       }
 
       broadcastVoiceStop(AI_READING_VOICE_SOURCE);
+      broadcastAIReadingVoiceActive(true);
       const playbackId = playbackIdRef.current + 1;
       playbackIdRef.current = playbackId;
       disposeAudio();
@@ -270,6 +272,7 @@ export function AIReadingCard({ data, mode }: Props) {
         if (playbackIdRef.current === playbackId) {
           disposeAudio();
           setIsSpeaking(false);
+          broadcastAIReadingVoiceActive(false);
         }
       }
     },
@@ -294,7 +297,6 @@ export function AIReadingCard({ data, mode }: Props) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(AI_READING_VOICE_KEY, voiceEnabled ? "true" : "false");
-    window.dispatchEvent(new CustomEvent(AI_READING_VOICE_CHANGE_EVENT, { detail: { enabled: voiceEnabled } }));
     if (!voiceEnabled) stopVoice();
   }, [stopVoice, voiceEnabled]);
 
@@ -490,6 +492,11 @@ function isRecentSignalResult(finishedAt?: string) {
 function broadcastVoiceStop(source: string) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(VOICE_COORDINATION_EVENT, { detail: { source } }));
+}
+
+function broadcastAIReadingVoiceActive(enabled: boolean) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(AI_READING_VOICE_CHANGE_EVENT, { detail: { enabled } }));
 }
 
 function compactVoiceText(text: string) {

@@ -329,7 +329,7 @@ export function useVoiceAssistant(
     setVolume(readStoredNumber(VOICE_VOLUME_STORAGE_KEY, 0.9, 0, 1));
     setRate(readStoredNumber(VOICE_RATE_STORAGE_KEY, 1, 0.7, 1.35));
     setPitch(readStoredNumber(VOICE_PITCH_STORAGE_KEY, 0.95, 0.6, 1.45));
-    setAiReadingVoiceEnabled(window.localStorage.getItem(AI_READING_VOICE_KEY) === "true");
+    setAiReadingVoiceEnabled(false);
   }, []);
 
   useEffect(() => {
@@ -341,6 +341,10 @@ export function useVoiceAssistant(
         : window.localStorage.getItem(AI_READING_VOICE_KEY) === "true";
       setAiReadingVoiceEnabled(nextEnabled);
       if (nextEnabled) {
+        for (const voiceEvent of events) {
+          seenKeysRef.current.add(voiceEvent.key);
+        }
+        lastNarrationAtRef.current = Date.now();
         queueRef.current = [];
         syncQueueLength();
         stopCurrentPlayback();
@@ -348,7 +352,7 @@ export function useVoiceAssistant(
     };
     window.addEventListener(AI_READING_VOICE_CHANGE_EVENT, onAIReadingVoiceChange);
     return () => window.removeEventListener(AI_READING_VOICE_CHANGE_EVENT, onAIReadingVoiceChange);
-  }, [stopCurrentPlayback, syncQueueLength]);
+  }, [events, stopCurrentPlayback, syncQueueLength]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
