@@ -11,8 +11,8 @@ export function BrainAI({ size = 120, speaking = false, className = "" }: BrainA
   const particleCount = visualSize >= 220 ? 14 : visualSize >= 120 ? 8 : 0;
   return (
     <div
-      className={`relative inline-flex items-center justify-center ${className}`}
-      style={{ width: visualSize, height: visualSize }}
+      className={`relative inline-flex max-w-full items-center justify-center ${className}`}
+      style={{ width: visualSize, height: visualSize, maxWidth: "100%" }}
     >
       {/* outer halo */}
       <div
@@ -48,7 +48,7 @@ export function BrainAI({ size = 120, speaking = false, className = "" }: BrainA
         className="relative animate-brain-pulse"
         animate={{ y: [0, -6, 0] }}
         transition={{ duration: 4.2, repeat: Infinity, ease: "easeInOut" }}
-        style={{ width: visualSize, height: visualSize }}
+        style={{ width: visualSize, height: visualSize, maxWidth: "100%" }}
       >
         <motion.div
           className="w-full h-full"

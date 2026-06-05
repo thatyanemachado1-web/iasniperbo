@@ -239,7 +239,7 @@ function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#020617] text-white">
+    <div className="landing-safe relative min-h-screen overflow-hidden bg-[#020617] text-white">
       <div
         className="absolute inset-0 bg-cover bg-center opacity-75"
         style={{ backgroundImage: "url('/assets/dark-tech-bg.png')" }}
@@ -252,8 +252,8 @@ function LoginPage() {
         }}
       />
       <div className="absolute inset-0 scan-grid opacity-[0.12] pointer-events-none" />
-      <div className="absolute -left-28 top-20 size-[24rem] rounded-full bg-neon-purple/20 blur-3xl" />
-      <div className="absolute -right-28 bottom-10 size-[24rem] rounded-full bg-neon-blue/20 blur-3xl" />
+      <div className="absolute -left-28 top-20 hidden size-[24rem] rounded-full bg-neon-purple/20 blur-3xl sm:block" />
+      <div className="absolute -right-28 bottom-10 hidden size-[24rem] rounded-full bg-neon-blue/20 blur-3xl sm:block" />
 
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {PARTICLES.map((p) => (
@@ -277,27 +277,27 @@ function LoginPage() {
         <NeuralLines cx={42} cy={48} count={14} opacity={0.34} reach={1.05} />
       </div>
 
-      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-4 py-5 sm:px-6 lg:px-10">
-        <header className="flex items-center justify-between gap-4">
-          <SniperLogoMark className="h-14 w-auto max-w-[220px] sm:h-16 sm:max-w-[280px] drop-shadow-[0_0_24px_rgba(0,229,255,0.24)]" />
+      <main className="landing-safe-inner relative z-10 mx-auto flex min-h-screen flex-col px-5 py-5 sm:px-6 lg:px-10">
+        <header className="flex min-w-0 items-center justify-between gap-3">
+          <SniperLogoMark className="h-12 w-auto max-w-[170px] min-w-0 sm:h-16 sm:max-w-[280px] drop-shadow-[0_0_24px_rgba(0,229,255,0.24)]" />
           <AppBadge tone={salesClosed ? "red" : "purple"}>
             {salesClosed ? "Vagas limitadas" : "Acesso premium"}
           </AppBadge>
         </header>
 
-        <section className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)] lg:gap-10 lg:py-10">
+        <section className="grid min-w-0 flex-1 items-center gap-8 py-8 lg:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)] lg:gap-10 lg:py-10">
           <div className="min-w-0">
-            <div className="grid items-center gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(300px,0.8fr)]">
-              <div className="order-1">
+            <div className="grid min-w-0 items-center gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(300px,0.8fr)]">
+              <div className="order-1 min-w-0">
                 <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)]">
                   <Zap className="size-3.5 shrink-0" />
                   <span className="truncate">Tecnologia que analisa. Inteligência que antecipa.</span>
                 </div>
 
-                <h1 className="mt-5 max-w-3xl text-4xl font-black uppercase leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
+                <h1 className="landing-title mt-5 max-w-3xl font-black uppercase leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
                   Chega de entrar no escuro.
                 </h1>
-                <p className="mt-4 max-w-2xl text-xl font-black uppercase leading-tight text-gradient-brand sm:text-3xl">
+                <p className="landing-subtitle mt-4 max-w-2xl font-black uppercase leading-tight text-gradient-brand sm:text-3xl">
                   O Sniper BO IA lê a mesa antes da maioria.
                 </p>
                 <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
@@ -310,11 +310,11 @@ function LoginPage() {
 
               <HeroBrainShowcase className="order-2 xl:row-span-2" />
 
-              <div className="order-3 flex flex-col gap-3 sm:flex-row xl:-mt-8">
+              <div className="order-3 flex min-w-0 flex-col gap-3 sm:flex-row xl:-mt-8">
                 <button
                   type="button"
                   onClick={requestAccess}
-                  className="btn-primary-grad group relative min-h-12 flex-1 overflow-hidden rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-wide glow-purple"
+                  className="btn-primary-grad group relative min-h-12 w-full flex-1 overflow-hidden rounded-2xl px-5 py-3 text-center text-sm font-black uppercase tracking-wide glow-purple"
                 >
                   <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
                   <span className="relative">Quero acesso ao Sniper BO IA</span>
@@ -322,18 +322,18 @@ function LoginPage() {
                 <button
                   type="button"
                   onClick={focusLogin}
-                  className="min-h-12 flex-1 rounded-2xl border border-neon-cyan/40 bg-black/35 px-5 py-3 text-sm font-black uppercase tracking-wide text-neon-cyan shadow-[0_0_22px_rgba(0,229,255,0.1)] transition hover:border-neon-cyan/70 hover:bg-neon-cyan/10"
+                  className="min-h-12 w-full flex-1 rounded-2xl border border-neon-cyan/40 bg-black/35 px-5 py-3 text-center text-sm font-black uppercase tracking-wide text-neon-cyan shadow-[0_0_22px_rgba(0,229,255,0.1)] transition hover:border-neon-cyan/70 hover:bg-neon-cyan/10"
                 >
                   Já sou cliente premium
                 </button>
               </div>
             </div>
 
-            <div className="mt-7 flex gap-3 overflow-x-auto pb-3 lg:grid lg:grid-cols-3 lg:overflow-visible lg:pb-0">
+            <div className="landing-card-grid mt-7 grid w-full gap-2.5 sm:gap-3 lg:grid-cols-3">
               {moduleCards.map((card) => (
                 <div
                   key={card.label}
-                  className="glass min-w-[225px] rounded-2xl border-neon-purple/20 p-4 transition hover:border-neon-purple/50 hover:shadow-[0_0_24px_rgba(168,85,247,0.18)]"
+                  className="glass min-w-0 rounded-2xl border-neon-purple/20 p-3 transition hover:border-neon-purple/50 hover:shadow-[0_0_24px_rgba(168,85,247,0.18)] sm:p-4"
                 >
                   <div className="mb-3 flex size-10 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10">
                     <card.icon className="size-5 text-neon-cyan" />
@@ -344,7 +344,7 @@ function LoginPage() {
               ))}
             </div>
 
-            <div className="mt-6 rounded-3xl border border-neon-purple/30 bg-black/45 p-5 shadow-[0_0_34px_rgba(168,85,247,0.12)] backdrop-blur-xl">
+            <div className="mt-6 min-w-0 rounded-3xl border border-neon-purple/30 bg-black/45 p-5 shadow-[0_0_34px_rgba(168,85,247,0.12)] backdrop-blur-xl">
               <p className="text-lg font-black uppercase leading-tight text-white sm:text-2xl">
                 Sem leitura, você reage. O mercado não perdoa.
               </p>
@@ -354,8 +354,8 @@ function LoginPage() {
             </div>
           </div>
 
-          <aside ref={loginCardRef} className="w-full max-w-md justify-self-center lg:justify-self-end">
-            <GlassCard className="rounded-[2rem] border-neon-purple/35 bg-background/80 p-5 shadow-[0_0_44px_rgba(168,85,247,0.18)] sm:p-7">
+          <aside ref={loginCardRef} className="min-w-0 w-full max-w-md justify-self-center lg:justify-self-end">
+            <GlassCard className="max-w-full rounded-[2rem] border-neon-purple/35 bg-background/80 p-5 shadow-[0_0_44px_rgba(168,85,247,0.18)] sm:p-7">
               <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-neon-purple/80 to-transparent" />
               <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10">
                 <LockKeyhole className="size-6 text-neon-cyan" />
@@ -401,7 +401,7 @@ function LoginPage() {
                     {loading ? <Loader2 className="relative size-4 animate-spin" /> : <ShieldCheck className="relative size-4" />}
                     <span className="relative">Entrar no painel</span>
                   </button>
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 text-xs">
                     <button
                       type="button"
                       onClick={() => setNotice("Para recuperar sua senha, fale com o suporte oficial.")}
@@ -460,14 +460,14 @@ function LoginPage() {
                   <button
                     type="button"
                     onClick={goCheckout}
-                    className="btn-gold-grad inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-3 text-xs font-black glow-gold"
+                    className="btn-gold-grad inline-flex w-full items-center justify-center gap-2 rounded-2xl px-3 py-3 text-center text-xs font-black glow-gold"
                   >
                     <Crown className="size-4" /> Ir para checkout
                   </button>
                   <button
                     type="button"
                     onClick={enterDemo}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-3 text-xs font-black text-neon-cyan"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-3 text-center text-xs font-black text-neon-cyan"
                   >
                     <Sparkles className="size-4" /> Entrar no demo
                   </button>
@@ -484,7 +484,7 @@ function LoginPage() {
               </div>
             </GlassCard>
 
-            <GlassCard className="mt-4 rounded-3xl border-warning/30 bg-black/55 p-4">
+            <GlassCard className="mt-4 max-w-full rounded-3xl border-warning/30 bg-black/55 p-4">
               <div className="flex items-start gap-3">
                 <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-warning/35 bg-warning/10">
                   <Crown className="size-5 text-warning" />
@@ -518,12 +518,12 @@ function LoginPage() {
 
 function HeroBrainShowcase({ className = "" }: { className?: string }) {
   return (
-    <div className={`relative mx-auto h-[300px] w-full max-w-[440px] sm:h-[360px] ${className}`}>
+    <div className={`relative mx-auto h-[260px] w-full max-w-[440px] overflow-hidden sm:h-[360px] ${className}`}>
       <div className="absolute inset-0 rounded-full bg-gradient-to-br from-neon-cyan/10 via-neon-purple/10 to-transparent blur-3xl" />
-      <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 scale-[0.78] items-center justify-center sm:scale-100">
-        <div className="absolute size-[320px] rounded-full border border-neon-blue/20 animate-orbit-slow sm:size-[390px]" />
-        <div className="absolute size-[380px] rounded-full border border-neon-purple/20 border-dashed animate-orbit-reverse sm:size-[460px]" />
-        <BrainAI size={320} speaking />
+      <div className="absolute left-1/2 top-1/2 flex max-w-full -translate-x-1/2 -translate-y-1/2 scale-[0.62] items-center justify-center sm:scale-100">
+        <div className="absolute size-[300px] rounded-full border border-neon-blue/20 animate-orbit-slow sm:size-[390px]" />
+        <div className="absolute size-[340px] rounded-full border border-neon-purple/20 border-dashed animate-orbit-reverse sm:size-[460px]" />
+        <BrainAI size={300} speaking />
       </div>
       <div className="absolute inset-x-8 bottom-6 hidden h-px bg-gradient-to-r from-transparent via-neon-cyan/50 to-transparent sm:block" />
       {hudCards.map((card) => (
@@ -544,7 +544,7 @@ function HeroBrainShowcase({ className = "" }: { className?: string }) {
 
 function SalesAccessLoading() {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#020617] px-4 py-10">
+    <div className="landing-safe relative flex min-h-screen items-center justify-center overflow-hidden bg-[#020617] px-5 py-10">
       <div
         className="absolute inset-0 bg-cover bg-center opacity-70"
         style={{ backgroundImage: "url('/assets/dark-tech-bg.png')" }}
@@ -590,9 +590,9 @@ function LoginField({
   defaultValue?: string;
 }) {
   return (
-    <label className="block">
+    <label className="block min-w-0">
       <span className="text-[11px] uppercase tracking-widest text-muted-foreground">{label}</span>
-      <div className="mt-1.5 flex items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
+      <div className="mt-1.5 flex min-w-0 items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
         <span className="text-neon-cyan">{icon}</span>
         <input
           name={name}
@@ -617,9 +617,9 @@ function CountryDialField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="block">
+    <label className="block min-w-0">
       <span className="text-[11px] uppercase tracking-widest text-muted-foreground">País</span>
-      <div className="mt-1.5 flex items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
+      <div className="mt-1.5 flex min-w-0 items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
         <span className="text-neon-cyan">{icon}</span>
         <select
           value={selectedId}
@@ -651,9 +651,9 @@ function WhatsAppField({
   placeholder?: string;
 }) {
   return (
-    <label className="block">
+    <label className="block min-w-0">
       <span className="text-[11px] uppercase tracking-widest text-muted-foreground">WhatsApp</span>
-      <div className="mt-1.5 flex items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
+      <div className="mt-1.5 flex min-w-0 items-center gap-2 rounded-2xl bg-secondary/50 border border-border/80 px-3.5 py-3 focus-within:border-neon-blue/70 focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--neon-blue)_18%,transparent)] transition-all">
         <span className="text-neon-cyan">{icon}</span>
         <span className="rounded-lg border border-neon-cyan/25 bg-neon-cyan/10 px-2 py-1 text-xs font-black text-neon-cyan">
           {countryCode}
