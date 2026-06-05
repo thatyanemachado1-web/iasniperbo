@@ -2189,10 +2189,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "GET" && url.pathname === "/admin/overview") {
+    await hydrateClientsFromBillingUsers(env);
     return json({ overview: buildAdminPanelOverview(syncAdminManagedUsers(env)) });
   }
 
   if (request.method === "GET" && url.pathname === "/admin/users") {
+    await hydrateClientsFromBillingUsers(env);
     const users = syncAdminManagedUsers(env);
     await saveLiveState(env);
     return json({
@@ -4382,25 +4384,78 @@ async function loadBillingClientByEmail(env: unknown, email: string) {
     return null;
   }
 
+  return billingClientFromPersistedRows(env, cleanEmail, user, subscription, payment);
+}
+
+async function hydrateClientsFromBillingUsers(env: unknown) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+
+  const users = await fetchSupabaseRows(
+    env,
+    "users",
+    "select=*&order=created_at.desc.nullslast&limit=1000",
+  );
+  if (!users.length) return false;
+
+  let changed = false;
+  for (const user of users) {
+    const email = readString(user, "email").toLowerCase();
+    if (!email || isEntityDeleted(user)) continue;
+    const client = billingClientFromPersistedRows(env, email, user, {}, {});
+    if (!client || isEntityDeleted(client)) continue;
+    upsertLiveClient(client);
+    upsertRecipientFromClient(client);
+    changed = true;
+  }
+  return changed;
+}
+
+function billingClientFromPersistedRows(
+  env: unknown,
+  cleanEmail: string,
+  user: Record<string, unknown>,
+  subscription: Record<string, unknown>,
+  payment: Record<string, unknown>,
+) {
   const paidAt = readString(payment, "paid_at") || readString(payment, "created_at");
-  const startsAt = readString(subscription, "starts_at") || paidAt.slice(0, 10) || todayIso();
+  const startsAt =
+    readString(user, "starts_at") ||
+    readString(subscription, "starts_at") ||
+    paidAt.slice(0, 10) ||
+    readString(user, "created_at") ||
+    todayIso();
   const plan =
+    normalizeBillingPlanId(readString(user, "plan")) ||
     normalizeBillingPlanId(readString(subscription, "plan")) ||
     normalizeBillingPlanId(readString(payment, "plan")) ||
-    getHublaDefaultPlan(env);
+    "free";
   const planConfig = getBillingPlan(plan, env);
   const expiresAt =
+    readString(user, "expires_at") ||
     readString(subscription, "expires_at") ||
     (billingPaymentIsPaid(payment) ? addDaysIso(startsAt, planConfig.durationDays) : "");
   const subscriptionActive = billingSubscriptionIsActive(subscription, expiresAt);
   const paymentActive =
     billingPaymentIsPaid(payment) && Boolean(expiresAt) && !isExpiredIso(expiresAt);
-  const enabled = subscriptionActive || paymentActive;
-  const accessStatus = enabled
-    ? "approved"
-    : isExpiredIso(expiresAt)
+  const persistedStatus = readString(user, "access_status").toLowerCase();
+  const trialActive = persistedStatus === "trial" && Boolean(expiresAt) && !isExpiredIso(expiresAt);
+  const enabled =
+    readBooleanField(user, "enabled") ||
+    subscriptionActive ||
+    paymentActive ||
+    trialActive ||
+    ["approved", "active", "manual_vip"].includes(persistedStatus);
+  const accessStatus =
+    persistedStatus === "trial" && isExpiredIso(expiresAt)
       ? "expired"
-      : readString(subscription, "status") || readString(payment, "status") || "pending";
+      : persistedStatus ||
+        (enabled
+          ? subscriptionActive || paymentActive
+            ? "approved"
+            : "trial"
+          : isExpiredIso(expiresAt)
+            ? "expired"
+            : readString(subscription, "status") || readString(payment, "status") || "expired");
 
   return {
     id:
@@ -4416,10 +4471,17 @@ async function loadBillingClientByEmail(env: unknown, email: string) {
     password_hash: readString(user, "password_hash"),
     plan,
     access_status: accessStatus,
-    enabled,
+    enabled: enabled && accessStatus !== "expired",
     starts_at: startsAt,
-    validity_days: planConfig.durationDays,
+    validity_days: Number(user.validity_days || planConfig.durationDays || 0),
     expires_at: expiresAt,
+    trial_started_at: readString(user, "trial_started_at"),
+    trial_expires_at: readString(user, "trial_expires_at") || expiresAt,
+    trial_ip_hash: readString(user, "trial_ip_hash"),
+    trial_user_agent_hash: readString(user, "trial_user_agent_hash"),
+    trial_blocked_reason: readString(user, "trial_blocked_reason"),
+    is_blocked: readBooleanField(user, "is_blocked"),
+    adminNote: readString(user, "admin_note") || readString(user, "adminNote"),
     created_at:
       readString(user, "created_at") ||
       readString(subscription, "created_at") ||
@@ -4508,7 +4570,7 @@ async function persistBillingRecords(
 async function persistBillingUser(env: unknown, client: Record<string, unknown>) {
   const email = readString(client, "email").toLowerCase();
   if (!email) return;
-  await persistSupabaseRow(env, "users", {
+  const baseRow = {
     id: readString(client, "id") || crypto.randomUUID(),
     email,
     full_name: readString(client, "full_name") || nameFromEmail(email),
@@ -4518,7 +4580,25 @@ async function persistBillingUser(env: unknown, client: Record<string, unknown>)
     password_hash: readString(client, "password_hash"),
     created_at: readString(client, "created_at") || new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  });
+  };
+  const fullRow = {
+    ...baseRow,
+    plan: normalizeBillingPlanId(readString(client, "plan")) || "free",
+    access_status: readString(client, "access_status") || "expired",
+    enabled: Boolean(client.enabled),
+    starts_at: readString(client, "starts_at"),
+    validity_days: Number(client.validity_days || 0),
+    expires_at: readString(client, "expires_at"),
+    trial_started_at: readString(client, "trial_started_at"),
+    trial_expires_at: readString(client, "trial_expires_at"),
+    trial_ip_hash: readString(client, "trial_ip_hash"),
+    trial_user_agent_hash: readString(client, "trial_user_agent_hash"),
+    trial_blocked_reason: readString(client, "trial_blocked_reason"),
+    is_blocked: Boolean(client.isBlocked) || Boolean(client.is_blocked),
+    admin_note: readString(client, "adminNote") || readString(client, "notes"),
+  };
+  const savedFull = await persistSupabaseRow(env, "users", fullRow);
+  if (!savedFull) await persistSupabaseRow(env, "users", baseRow);
 }
 
 async function deletePersistedBillingUser(env: unknown, user: Record<string, unknown>) {
@@ -4576,7 +4656,7 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
 
 async function persistSupabaseRow(env: unknown, table: string, row: Record<string, unknown>) {
   const config = getSupabasePersistenceConfig(env);
-  if (!config || Object.keys(row).length === 0) return;
+  if (!config || Object.keys(row).length === 0) return false;
 
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}`, {
@@ -4590,9 +4670,12 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
     });
     if (!response.ok && response.status !== 404) {
       console.warn(`Nao foi possivel salvar ${table} (${response.status}).`);
+      return false;
     }
+    return response.ok;
   } catch (error) {
     console.warn(`Nao foi possivel salvar ${table}.`, error);
+    return false;
   }
 }
 
@@ -6279,6 +6362,15 @@ function isExpiredIso(value: string) {
 
 function readString(record: Record<string, unknown>, key: string) {
   return String(record[key] || "").trim();
+}
+
+function readBooleanField(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (typeof value === "boolean") return value;
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+  return ["1", "true", "sim", "yes", "on", "approved", "active"].includes(text);
 }
 
 function parseEmailList(value: unknown) {
