@@ -65,6 +65,8 @@ export function LeituraNeuralMiniCard({
   const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
   const postTie = Boolean(data.postTie);
   const originKind = neuralOriginKind(data);
+  const canShowNeuralPattern = isNeuralPatternReady(data, accuracy, originKind);
+  const headerLabel = neuralHeaderLabel(originKind, canShowNeuralPattern);
   const originBadge = originBadgeFor(originKind);
   const pullingSide = data.direcao ?? data.origem;
   const message = buildNeuralCopy(data);
@@ -76,7 +78,9 @@ export function LeituraNeuralMiniCard({
     <aside
       className={cn(
         "neural-mini-card relative z-10 w-full shrink-0 overflow-visible rounded-xl border border-neon-cyan/25 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_24px_-18px_var(--neon-cyan)] backdrop-blur-xl sm:w-[170px] lg:w-[180px]",
-        mode === "ACTIVE" && "border-neon-purple/35 shadow-[0_0_28px_-18px_var(--neon-purple)]",
+        mode === "ACTIVE" &&
+          canShowNeuralPattern &&
+          "border-neon-purple/35 shadow-[0_0_28px_-18px_var(--neon-purple)]",
         greenFlash && "result-green-flash",
         className,
       )}
@@ -102,15 +106,15 @@ export function LeituraNeuralMiniCard({
             Leitura Neural
           </div>
           <div className="truncate text-[7px] font-bold uppercase tracking-[0.1em] text-neon-cyan/75 sm:text-[8px]">
-            {originKind === "OPOSTO" ? "gatilho oposto" : postTie ? "cor pos-empate" : "numero pagante"}
+            {headerLabel}
           </div>
         </div>
       </div>
 
-      {mode === "SCANNING" || !hasNumber ? (
+      {mode === "SCANNING" || !hasNumber || !canShowNeuralPattern ? (
         <div className="relative mt-2">
           <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
-            IA procurando números pagantes...
+            {hasNumber ? "IA aguardando padrão 100% da Neural..." : "IA procurando números pagantes..."}
           </div>
           <TypingDots />
           <div
@@ -335,6 +339,8 @@ function neuralToolInsight(reading: NeuralReading) {
   const validity = reading.validade ?? "G1";
   const hasNumber = typeof reading.numero === "number" && Boolean(reading.origem);
   const originKind = neuralOriginKind(reading);
+  const accuracy = accuracyFrom(reading.assertividade, reading.acertos, reading.erros);
+  const ready = isNeuralPatternReady(reading, accuracy, originKind);
   const trigger =
     hasNumber && reading.origem === "TIE"
       ? `${reading.numero}x${reading.numero} Tie`
@@ -346,6 +352,17 @@ function neuralToolInsight(reading: NeuralReading) {
     return {
       text: "Pela Neural agora: observar. Sem número pagante ativo.",
       className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
+    };
+  }
+
+  if (!ready) {
+    const redSequence = numberFrom(reading.sequenceNegative);
+    return {
+      text:
+        originKind === "OPOSTO"
+          ? `Leitura oposta em observacao${redSequence >= 2 ? ` com ${redSequence} RED seguidos` : ""}. Nao enviar como pagante.`
+          : `${trigger} ainda nao bateu 100%. Pela Neural agora: observar.`,
+      className: "border-warning/25 bg-warning/10 text-warning",
     };
   }
 
@@ -529,9 +546,42 @@ function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
     };
   }
   return {
-    label: "Pagante",
+    label: "100%",
     className: "border-success/35 bg-success/10 text-success",
   };
+}
+
+function neuralHeaderLabel(
+  kind: NonNullable<NeuralReading["origemTipo"]>,
+  ready: boolean,
+) {
+  if (ready) return "padrao 100%";
+  if (kind === "OPOSTO") return "oposto em observacao";
+  if (kind === "TIE") return "tie em observacao";
+  return "aguardando 100%";
+}
+
+function isNeuralPatternReady(
+  reading: NeuralReading,
+  accuracy: number | null,
+  originKind: NonNullable<NeuralReading["origemTipo"]>,
+) {
+  if (reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
+  if (originKind !== "PAGANTE") return false;
+  if (reading.isRedAlert || reading.isSaturated) return false;
+  const status = normalizeStatus(reading.paganteStatus);
+  if (
+    status.includes("RISCO") ||
+    status.includes("ESTICADO") ||
+    status.includes("RED") ||
+    status.includes("FALH") ||
+    status.includes("OBSERV") ||
+    status.includes("AMOSTRA") ||
+    status.includes("AGUARD")
+  ) {
+    return false;
+  }
+  return typeof accuracy === "number" && accuracy >= 100;
 }
 
 function formatPercent(value: number | null) {

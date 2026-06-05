@@ -9,7 +9,7 @@ import type {
   AdaptiveStrategySnapshot,
   AdaptiveSyncStatus,
 } from "@/types/adaptiveStrategy";
-import type { DashboardData, SignalSide } from "@/types/dashboard";
+import type { DashboardData, NeuralReading, SignalSide } from "@/types/dashboard";
 
 const MIN_OCCURRENCES = 30;
 const MIN_ASSERTIVENESS = 65;
@@ -293,7 +293,7 @@ function buildEntryScore(
     };
   }
 
-  const neuralSide = normalizeModuleSide(data.neuralReading?.direcao ?? data.neuralReading?.origem);
+  const neuralSide = neuralPaganteScoreSide(data.neuralReading);
   const surfSide = normalizeModuleSide(
     data.currentSurfAlert?.surf_prediction_side ?? data.currentSurfAlert?.surf_side,
   );
@@ -306,7 +306,7 @@ function buildEntryScore(
     {
       label: "Neural Pagante",
       value: neuralSide === side ? 20 : 0,
-      reason: neuralSide === side ? `Favorece ${sideLabel(side)}.` : "Sem confirmação a favor.",
+      reason: neuralSide === side ? `Pagante 100% favorece ${sideLabel(side)}.` : "Sem confirmação 100% a favor.",
     },
     {
       label: "Surf Analyzer",
@@ -458,6 +458,33 @@ function normalizeModuleSide(value: unknown): AdaptiveSide | null {
   if (["P", "PLAYER", "JOGADOR"].includes(text)) return "PLAYER";
   if (["T", "TIE", "EMPATE"].includes(text)) return "TIE";
   return null;
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/_/g, " ");
+}
+
+function neuralPaganteScoreSide(reading?: NeuralReading | null): AdaptiveSide | null {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
+  if (reading.origemTipo === "OPOSTO" || reading.origem === "TIE" || reading.direcao === "TIE") return null;
+  if (reading.isRedAlert || reading.isSaturated) return null;
+  if (typeof reading.assertividade !== "number" || reading.assertividade < 100) return null;
+  const status = normalizeText(reading.paganteStatus);
+  if (
+    status.includes("RISCO") ||
+    status.includes("ESTICADO") ||
+    status.includes("RED") ||
+    status.includes("OBSERV") ||
+    status.includes("AMOSTRA") ||
+    status.includes("AGUARD")
+  ) {
+    return null;
+  }
+  return normalizeModuleSide(reading.direcao ?? reading.origem);
 }
 
 function compareRecords(left: AdaptiveRoundRecord, right: AdaptiveRoundRecord) {

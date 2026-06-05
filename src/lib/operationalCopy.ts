@@ -81,6 +81,19 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
   const direction = reading.direcao;
   const status = paganteKind(reading);
   const isOpposite = isOppositeTrigger(reading);
+  const isPerfectPagante =
+    !isOpposite &&
+    status === "favorable" &&
+    typeof reading.assertividade === "number" &&
+    reading.assertividade >= 100;
+
+  if (!isPerfectPagante) {
+    if (isOpposite) {
+      const redSequence = typeof reading.sequenceNegative === "number" ? reading.sequenceNegative : 0;
+      return `Leitura oposta em observação${redSequence >= 2 ? ` com ${redSequence} RED seguidos` : ""}. Não enviar como número pagante favorável agora.`;
+    }
+    return `Número ${number} ${side} ainda não bateu 100% na Neural. Aguardar novo padrão confirmado.`;
+  }
 
   if (status === "risk") {
     if (isOpposite) {
@@ -97,17 +110,10 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
   }
 
   if (direction) {
-    if (isOpposite) {
-      return `Gatilho oposto identificado. ${number} ${side} apareceu e aponta ${sideLabel(direction)} até ${reading.validade ?? "G1"}. Não tratar como número pagante favorável.`;
-    }
-    return `Número pagante identificado. ${side} ${number} apareceu com força e está puxando ${sideLabel(direction)} até ${reading.validade ?? "G1"}.`;
+    return `Padrão 100% confirmado. ${side} ${number} aponta ${sideLabel(direction)} até ${reading.validade ?? "G1"}.`;
   }
 
-  if (isOpposite) {
-    return `Gatilho oposto identificado. ${number} ${side} apareceu nas últimas rodadas. Aguardar alinhamento da engine.`;
-  }
-
-  return `Número pagante identificado. ${side} ${number} apareceu com força nas últimas rodadas.`;
+  return `Padrão 100% confirmado. ${side} ${number} apareceu com força nas últimas rodadas.`;
 }
 
 export function buildTieCopy(alert: TieAlert) {
