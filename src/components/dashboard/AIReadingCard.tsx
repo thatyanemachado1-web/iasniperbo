@@ -36,7 +36,7 @@ function firstNameOf(full?: string) {
   if (!cleaned) return "";
   const first = cleaned.split(/\s+/)[0] ?? "";
   // Evita placeholders genericos virarem "nome" na fala.
-  if (/^usuario$/i.test(first)) return "";
+  if (/^usuario$/i.test(first) || /^usuário$/i.test(first)) return "";
   return first;
 }
 
@@ -468,12 +468,12 @@ function buildSignalResultVoiceText(data: DashboardData) {
   if (!result || !isRecentSignalResult(result.finishedAt)) return "";
   const side = result.side === "BANKER" ? "Banker" : "Player";
   if (result.status === "red") {
-    return `Red confirmado em ${side}. Aguarda a proxima leitura.`;
+    return `Red confirmado em ${side}. Aguarde a próxima leitura.`;
   }
   if (result.status === "green_g1") {
-    return `Green no G1 em ${side}. Entrada finalizada. Aguarda a proxima leitura.`;
+    return `Green no G1 em ${side}. Entrada finalizada. Aguarde a próxima leitura.`;
   }
-  return `Green confirmado em ${side}. Entrada finalizada. Aguarda a proxima leitura.`;
+  return `Green confirmado em ${side}. Entrada finalizada. Aguarde a próxima leitura.`;
 }
 
 function shouldSuppressReadingText(data: DashboardData) {

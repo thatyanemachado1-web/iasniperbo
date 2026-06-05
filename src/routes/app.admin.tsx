@@ -613,7 +613,7 @@ function AdminPage() {
             </button>
             <AdminInput
               icon={<ShieldCheck className="size-4" />}
-              label="Email admin"
+              label="E-mail admin"
               value={email}
               onChange={setEmail}
               placeholder="admin@sniperbo.local"
@@ -828,7 +828,7 @@ function AdminPage() {
           <div className="mt-3 space-y-2">
             {securityEvents.length === 0 && (
               <div className="rounded-xl border border-border/60 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
-                Nenhuma tentativa suspeita registrada nesta execucao da API.
+                Nenhuma tentativa suspeita registrada nesta execução da API.
               </div>
             )}
             {securityEvents.slice(0, 5).map((event) => (
@@ -918,7 +918,7 @@ function AdminPage() {
                 />
                 <AdminInput
                   icon={<Mail className="size-4" />}
-                  label="Email"
+                  label="E-mail"
                   type="email"
                   value={form.email}
                   onChange={(value) => setForm((current) => ({ ...current, email: value }))}
@@ -1327,7 +1327,7 @@ function AdminSummaryPanel({ summary }: { summary: AdminSummary }) {
         <GlassCard>
           <SectionTitle
             title="Ultimos acessos"
-            subtitle="Log simples desta execucao."
+            subtitle="Log simples desta execução."
             right={<Users className="size-4 text-neon-cyan" />}
           />
           <div className="space-y-2">
@@ -1592,7 +1592,7 @@ function RecipientRowV2({
             />
             <AdminInput
               icon={<Mail className="size-4" />}
-              label="Email"
+              label="E-mail"
               type="email"
               value={editForm.email}
               onChange={(value) => updateEdit("email", value)}

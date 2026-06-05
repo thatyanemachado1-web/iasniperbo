@@ -165,7 +165,7 @@ export function isLimitedAccess(session: UserSession = readUserSession()) {
 function emptyUserSession(): UserSession {
   return {
     email: "",
-    name: "Usuario",
+    name: "Usuário",
     role: "user",
     accessMode: "none",
     accessStatus: "none",
@@ -215,7 +215,7 @@ function normalizeEmail(value: unknown) {
 
 function nameFromEmail(email: string) {
   const localPart = email.split("@")[0]?.trim();
-  if (!localPart) return "Usuario";
+  if (!localPart) return "Usuário";
   return localPart
     .replace(/[._-]+/g, " ")
     .split(" ")

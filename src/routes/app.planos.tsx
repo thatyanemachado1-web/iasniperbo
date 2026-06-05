@@ -97,7 +97,7 @@ function PlanosPage() {
       const checkout = await createBillingCheckout(plan.id);
       window.location.href = checkout.checkout_url;
     } catch (checkoutError) {
-      setError(checkoutError instanceof Error ? checkoutError.message : "Nao foi possivel abrir o checkout.");
+      setError(checkoutError instanceof Error ? checkoutError.message : "Não foi possível abrir o checkout.");
       setLoadingPlan("");
     }
   }
@@ -167,7 +167,7 @@ function PlanosPage() {
                 <span className="text-3xl font-extrabold">
                   {plan.amount > 0 ? formatMoney(plan.amount, plan.currency) : "Gratis"}
                 </span>
-                {plan.amount > 0 && <span className="pb-1 text-sm text-muted-foreground">/mes</span>}
+                {plan.amount > 0 && <span className="pb-1 text-sm text-muted-foreground">/mês</span>}
               </div>
 
               <ul className="mt-5 flex-1 space-y-2">
@@ -201,7 +201,7 @@ function PlanosPage() {
                     ? plan.checkoutProvider === "hubla"
                       ? "Abrir checkout Hubla"
                       : "Ir para checkout"
-                    : "Checkout nao configurado"}
+                    : "Checkout não configurado"}
                 </button>
               ) : (
                 <Link

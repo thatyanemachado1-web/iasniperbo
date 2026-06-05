@@ -23,7 +23,7 @@ export function AdminLogsPage() {
     try {
       setLogs(await listAdminLogs(session));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel carregar logs.");
+      setError(err instanceof Error ? err.message : "Não foi possível carregar logs.");
     } finally {
       setLoading(false);
     }
@@ -56,7 +56,7 @@ export function AdminLogsPage() {
     <div className="space-y-5">
       <GlassCard className="border-neon-cyan/25">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <SectionTitle title="LOGS ADMINISTRATIVOS" subtitle="Auditoria de alteracoes em usuarios, planos e permissoes." />
+          <SectionTitle title="LOGS ADMINISTRATIVOS" subtitle="Auditoria de alterações em usuários, planos e permissões." />
           <button type="button" onClick={() => void load()} className="glass inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black text-neon-cyan">
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
             Atualizar
@@ -66,10 +66,10 @@ export function AdminLogsPage() {
         <div className="mt-4 grid gap-3 lg:grid-cols-[1.2fr_0.9fr_0.7fr]">
           <label className="flex items-center gap-2 rounded-xl border border-border/60 bg-secondary/25 px-3 py-2 focus-within:border-neon-cyan/70">
             <Search className="size-4 text-neon-cyan" />
-            <input className="w-full bg-transparent text-sm outline-none" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filtrar por admin ou usuario" />
+            <input className="w-full bg-transparent text-sm outline-none" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filtrar por admin ou usuário" />
           </label>
           <select className="admin-input" value={action} onChange={(event) => setAction(event.target.value)}>
-            <option value="all">Todas as acoes</option>
+            <option value="all">Todas as ações</option>
             <option value="UPDATE_USER">UPDATE_USER</option>
             <option value="UPDATE_PLAN">UPDATE_PLAN</option>
             <option value="EXTEND_ACCESS">EXTEND_ACCESS</option>

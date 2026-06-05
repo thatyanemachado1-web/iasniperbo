@@ -92,7 +92,7 @@ function AdminBroadcastPage() {
       if (response.siteContent) {
         setSettings({ ...DEFAULT_SITE_CONTENT_SETTINGS, ...response.siteContent });
       }
-      setStatus("Pop-up disparado. Quem estiver no site recebe na proxima leitura.");
+      setStatus("Pop-up disparado. Quem estiver no site recebe na próxima leitura.");
       setBroadcast((current) => ({ ...current, title: "", message: "" }));
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Falha ao disparar pop-up.");

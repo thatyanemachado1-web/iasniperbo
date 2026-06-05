@@ -17,9 +17,9 @@ function NotFoundComponent() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-7xl font-bold text-foreground">404</h1>
-        <h2 className="mt-4 text-xl font-semibold text-foreground">Pagina nao encontrada</h2>
+        <h2 className="mt-4 text-xl font-semibold text-foreground">Página não encontrada</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          O endereco acessado nao existe ou foi movido.
+          O endereço acessado não existe ou foi movido.
         </p>
         <div className="mt-6">
           <Link
@@ -42,10 +42,10 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          A pagina nao carregou
+          A página não carregou
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Ocorreu uma falha temporaria. Tente novamente ou volte para o inicio.
+          Ocorreu uma falha temporária. Tente novamente ou volte para o início.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
@@ -78,12 +78,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "SNIPER BO IA - Painel operacional com IA" },
       {
         name: "description",
-        content: "Painel operacional BAC BO com leitura estatistica e assistente IA em tempo real.",
+        content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
       },
       { property: "og:title", content: "SNIPER BO IA - Painel operacional com IA" },
       {
         property: "og:description",
-        content: "Painel operacional BAC BO com leitura estatistica e assistente IA em tempo real.",
+        content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
       },
       { property: "og:type", content: "website" },
       { property: "og:image", content: "/sniper-icon.svg" },
@@ -91,7 +91,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:title", content: "SNIPER BO IA - Painel operacional com IA" },
       {
         name: "twitter:description",
-        content: "Painel operacional BAC BO com leitura estatistica e assistente IA em tempo real.",
+        content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
       },
       { name: "twitter:image", content: "/sniper-icon.svg" },
     ],

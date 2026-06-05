@@ -190,7 +190,7 @@ async function apiRequest<T>(
     ) {
       return { access: buildLocalDemoAccess(init.body ?? {}) } as T;
     }
-    throw new Error(message || "Nao foi possivel validar o acesso.");
+    throw new Error(message || "Não foi possível validar o acesso.");
   }
   return (await response.json()) as T;
 }
@@ -234,7 +234,7 @@ function normalizeBaseUrl(apiUrl: string) {
 
 export function accessLabel(session: UserSession) {
   if (session.accessMode === "full") return session.plan === "vip" ? "VIP liberado" : "Premium liberado";
-  if (session.accessMode === "pending") return "Aguardando liberacao";
+  if (session.accessMode === "pending") return "Aguardando liberação";
   if (session.accessMode === "expired") return "Acesso expirado";
   if (session.accessMode === "demo") return "Teste gratuito";
   return "Sem cadastro";

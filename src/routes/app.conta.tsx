@@ -74,7 +74,7 @@ function ContaPage() {
       <GlassCard>
         <SectionTitle title="Conta" />
         <Field label="Nome" value={userSession.name} />
-        <Field label="Email" value={userSession.email || "Nao informado"} />
+        <Field label="E-mail" value={userSession.email || "Não informado"} />
         <Field
           label="Plano atual"
           value={<AppBadge tone={userSession.approved ? "green" : "amber"}>{accessLabel(userSession)}</AppBadge>}
@@ -97,7 +97,7 @@ function ContaPage() {
         <SectionTitle title="Preferencias de voz" />
         <Toggle label="Narrar entradas" defaultOn />
         <Toggle label="Narrar Tie Alert" defaultOn />
-        <Toggle label="Falar ultima decisao" />
+        <Toggle label="Falar última decisão" />
       </GlassCard>
 
       <GlassCard>

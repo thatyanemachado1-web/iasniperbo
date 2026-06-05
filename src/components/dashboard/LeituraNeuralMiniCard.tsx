@@ -80,7 +80,7 @@ export function LeituraNeuralMiniCard({
         greenFlash && "result-green-flash",
         className,
       )}
-      aria-label="Leitura neural de numeros pagantes"
+      aria-label="Leitura neural de números pagantes"
       title={message}
     >
       <div className="absolute inset-0 neural-mini-grid opacity-40" />
@@ -165,7 +165,7 @@ export function LeituraNeuralMiniCard({
                     : postTie
                       ? "Pos-empate"
                       : typeof data.numero === "number"
-                        ? `Numero ${data.numero}`
+                        ? `Número ${data.numero}`
                         : "Pagando"}
                 </span>
                 <span className="text-[11px] font-black text-neon-cyan">
@@ -589,7 +589,7 @@ function statusLabel(reading: NeuralReading) {
   const status = reading.paganteStatus?.trim();
   if (status) return status.toLocaleLowerCase("pt-BR").replace(/_/g, " ");
   if (neuralStatusKind(reading) === "green") return "leitura batendo";
-  return "em observacao";
+  return "em observação";
 }
 
 function normalizeStatus(value?: string | null) {

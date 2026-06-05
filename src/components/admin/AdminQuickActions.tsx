@@ -81,10 +81,10 @@ const actions: Array<{
     icon: <CalendarPlus className="size-4" />,
   },
   { id: "cancel", label: "Cancelar acesso", tone: "red", icon: <UserMinus className="size-4" /> },
-  { id: "block", label: "Bloquear usuario", tone: "red", icon: <Ban className="size-4" /> },
+  { id: "block", label: "Bloquear usuário", tone: "red", icon: <Ban className="size-4" /> },
   {
     id: "unblock",
-    label: "Reativar usuario",
+    label: "Reativar usuário",
     tone: "primary",
     icon: <UserCheck className="size-4" />,
   },

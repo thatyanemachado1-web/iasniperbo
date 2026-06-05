@@ -11,7 +11,7 @@ type DetailTab = "resumo" | "acesso" | "acoes" | "nota";
 const tabs: Array<{ id: DetailTab; label: string }> = [
   { id: "resumo", label: "Resumo" },
   { id: "acesso", label: "Acesso" },
-  { id: "acoes", label: "Acoes" },
+  { id: "acoes", label: "Ações" },
   { id: "nota", label: "Nota" },
 ];
 
@@ -67,9 +67,9 @@ export function AdminUserDetailsPanel({
       <div className="mt-3">
         {tab === "resumo" && (
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <Info icon={<ShieldCheck className="size-4" />} label="Email" value={user.email || "-"} />
+            <Info icon={<ShieldCheck className="size-4" />} label="E-mail" value={user.email || "-"} />
             <Info icon={<CalendarClock className="size-4" />} label="Criado em" value={formatDate(user.createdAt)} />
-            <Info icon={<CalendarClock className="size-4" />} label="Ultimo acesso" value={user.lastAccess || "Sem registro"} />
+            <Info icon={<CalendarClock className="size-4" />} label="Último acesso" value={user.lastAccess || "Sem registro"} />
             <Info icon={<Settings2 className="size-4" />} label="Role" value={user.role} />
           </div>
         )}
@@ -78,17 +78,17 @@ export function AdminUserDetailsPanel({
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <Info label="Plano atual" value={planLabel(user.plan)} />
             <Info label="Status" value={statusLabel(user.subscriptionStatus)} />
-            <Info label="Inicio" value={formatDate(user.currentPeriodStart)} />
+            <Info label="Início" value={formatDate(user.currentPeriodStart)} />
             <Info label="Validade" value={formatDate(user.currentPeriodEnd)} />
             <Info label="Acesso" value={user.isBlocked ? "Bloqueado" : "Ativo"} />
-            <Info label="Pode acessar sinais" value={hasLiveAccess(user) ? "Sim" : "Nao"} />
+            <Info label="Pode acessar sinais" value={hasLiveAccess(user) ? "Sim" : "Não"} />
           </div>
         )}
 
         {tab === "acoes" && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Use essas acoes para liberar, prorrogar, bloquear ou reativar o acesso sem poluir a lista principal.
+              Use essas ações para liberar, prorrogar, bloquear ou reativar o acesso sem poluir a lista principal.
             </p>
             <AdminQuickActions disabled={actionsDisabled} onAction={(action) => onQuickAction(action, user)} compact />
           </div>
@@ -98,10 +98,10 @@ export function AdminUserDetailsPanel({
           <div className="rounded-xl border border-border/45 bg-secondary/20 p-3">
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">
               <FileText className="size-4 text-neon-cyan" />
-              Observacao interna
+              Observação interna
             </div>
             <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/85">
-              {user.adminNote || "Nenhuma observacao registrada para este cliente."}
+              {user.adminNote || "Nenhuma observação registrada para este cliente."}
             </p>
           </div>
         )}

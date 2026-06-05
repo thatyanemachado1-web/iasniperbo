@@ -121,7 +121,7 @@ export async function adminLogin(apiUrl: string, email: string, password: string
     body: JSON.stringify({ email, password }),
   });
   if (!response.ok) {
-    throw new Error(`Email ou senha admin invalidos na API ${normalizedApiUrl}.`);
+    throw new Error(`E-mail ou senha admin inválidos na API ${normalizedApiUrl}.`);
   }
   const data = (await response.json()) as {
     token?: string;
@@ -129,7 +129,7 @@ export async function adminLogin(apiUrl: string, email: string, password: string
     role?: AdminSession["role"];
   };
   if (!data.token) {
-    throw new Error("A API nao retornou uma chave de sessao.");
+    throw new Error("A API não retornou uma chave de sessão.");
   }
   return {
     apiUrl: normalizedApiUrl,
@@ -359,7 +359,7 @@ export async function changeAdminUserRole(
   session: AdminSession,
   userId: string,
   role: AdminManagedUser["role"],
-  reason = "Alteracao de permissao",
+  reason = "Alteração de permissão",
 ) {
   const data = await request<{ user: AdminManagedUser }>(
     session,
@@ -425,7 +425,7 @@ async function request<T>(session: AdminSession, path: string, init: RequestInit
   if (!response.ok) {
     if (response.status === 401) {
       clearAdminSession();
-      throw new Error("Sessao admin expirada ou nao autorizada.");
+      throw new Error("Sessão admin expirada ou não autorizada.");
     }
     const text = await response.text();
     throw new Error(text || "Falha ao conversar com a API admin.");

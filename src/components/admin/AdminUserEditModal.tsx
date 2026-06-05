@@ -51,7 +51,7 @@ export function AdminUserEditModal({
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-background/95 px-4 py-4 backdrop-blur-xl sm:px-6">
           <div>
             <div className="text-[11px] uppercase tracking-[0.22em] text-neon-cyan">
-              Editar usuario
+              Editar usuário
             </div>
             <h2 className="mt-1 text-xl font-black">{user.name}</h2>
           </div>
@@ -76,7 +76,7 @@ export function AdminUserEditModal({
                   onChange={(event) => setDraft({ ...draft, name: event.target.value })}
                 />
               </Field>
-              <Field label="Email">
+              <Field label="E-mail">
                 <input
                   className="admin-input"
                   value={draft.email}
@@ -184,7 +184,7 @@ export function AdminUserEditModal({
                 onChange={(event) => setDraft({ ...draft, adminNote: event.target.value })}
               />
             </Field>
-            <Field label="Motivo da alteracao">
+            <Field label="Motivo da alteração">
               <textarea
                 className="admin-input min-h-20 resize-none"
                 value={reason}
@@ -215,7 +215,7 @@ export function AdminUserEditModal({
                 Acoes rapidas
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Toda acao fica registrada em logs administrativos.
+                Toda ação fica registrada em logs administrativos.
               </p>
             </div>
             <AdminQuickActions

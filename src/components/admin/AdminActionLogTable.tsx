@@ -5,7 +5,7 @@ export function AdminActionLogTable({ logs }: { logs: AdminActionLog[] }) {
   if (logs.length === 0) {
     return (
       <div className="rounded-2xl border border-neon-cyan/15 bg-background/35 px-4 py-12 text-center text-sm text-muted-foreground">
-        Nenhuma alteracao administrativa registrada ainda.
+        Nenhuma alteração administrativa registrada ainda.
       </div>
     );
   }
@@ -18,8 +18,8 @@ export function AdminActionLogTable({ logs }: { logs: AdminActionLog[] }) {
             <tr>
               <th className="px-4 py-3">Data/hora</th>
               <th className="px-4 py-3">Admin</th>
-              <th className="px-4 py-3">Usuario</th>
-              <th className="px-4 py-3">Acao</th>
+              <th className="px-4 py-3">Usuário</th>
+              <th className="px-4 py-3">Ação</th>
               <th className="px-4 py-3">Motivo</th>
               <th className="px-4 py-3">Antes/depois</th>
             </tr>
@@ -53,7 +53,7 @@ export function AdminActionLogTable({ logs }: { logs: AdminActionLog[] }) {
             </div>
             <div className="mt-3 space-y-1 text-sm">
               <div><span className="text-muted-foreground">Admin:</span> {log.adminEmail || log.adminUserId}</div>
-              <div><span className="text-muted-foreground">Usuario:</span> {log.targetEmail || log.targetUserId}</div>
+              <div><span className="text-muted-foreground">Usuário:</span> {log.targetEmail || log.targetUserId}</div>
               <div><span className="text-muted-foreground">Motivo:</span> {log.reason || "-"}</div>
             </div>
           </article>

@@ -81,7 +81,7 @@ export function AdminUsersPage() {
       setSalesSettings(await getAdminSalesSettings(session));
     } catch (err) {
       setSalesNotice(
-        err instanceof Error ? err.message : "Nao foi possivel carregar status das vagas.",
+        err instanceof Error ? err.message : "Não foi possível carregar status das vagas.",
       );
     }
   }
@@ -136,7 +136,7 @@ export function AdminUsersPage() {
       );
     } catch (err) {
       setSalesSettings(previous);
-      setSalesNotice(err instanceof Error ? err.message : "Nao foi possivel atualizar as vagas.");
+      setSalesNotice(err instanceof Error ? err.message : "Não foi possível atualizar as vagas.");
     } finally {
       setSalesSaving(false);
     }
@@ -165,7 +165,7 @@ export function AdminUsersPage() {
         return;
       }
       const confirmed = window.confirm(
-        `Excluir definitivamente o cadastro de ${user.email}? Esta acao remove o usuario do painel e do banco persistente.`,
+        `Excluir definitivamente o cadastro de ${user.email}? Esta ação remove o usuário do painel e do banco persistente.`,
       );
       if (!confirmed) return;
     }
@@ -231,7 +231,7 @@ export function AdminUsersPage() {
               value={filters.search}
               onChange={(event) => setFilters({ ...filters, search: event.target.value })}
               className="w-full bg-transparent text-sm outline-none"
-              placeholder="Buscar por nome/email"
+              placeholder="Buscar por nome/e-mail"
             />
           </label>
           <FilterSelect
@@ -374,7 +374,7 @@ function AdminSalesControlCard({
           </p>
           {settings.updated_at && (
             <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
-              Ultima alteracao: {formatDateTime(settings.updated_at)}
+              Última alteração: {formatDateTime(settings.updated_at)}
             </div>
           )}
           {notice && (

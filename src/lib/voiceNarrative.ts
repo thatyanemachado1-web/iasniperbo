@@ -304,11 +304,11 @@ function mainResultText(
   const resultSideText = sideLabel(side);
   const resultSeed = `${side}:${status}:${protection}`;
   if (status === "red") {
-    return `${voiceLead("resultRed", style, resultSeed, name)}Red confirmado em ${resultSideText}. Aguarda a proxima leitura.`;
+    return `${voiceLead("resultRed", style, resultSeed, name)}Red confirmado em ${resultSideText}. Aguarde a próxima leitura.`;
   }
 
   const resultGreenText = status === "green_g1" ? `Green no G1 em ${resultSideText}` : `Green em ${resultSideText}`;
-  return `${voiceLead("resultGreen", style, resultSeed, name)}${resultGreenText}. Entrada finalizada. Aguarda a proxima leitura.`;
+  return `${voiceLead("resultGreen", style, resultSeed, name)}${resultGreenText}. Entrada finalizada. Aguarde a próxima leitura.`;
 }
 
 function tieResultText(name: string, status: TieAlert["status"], style: VoiceNarrationStyle) {

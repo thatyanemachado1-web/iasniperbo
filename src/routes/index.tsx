@@ -38,12 +38,12 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Painel operacional com cadastro controlado, leitura estatistica em tempo real e acesso VIP liberado pelo administrador.",
+          "Painel operacional com cadastro controlado, leitura estatística em tempo real e acesso VIP liberado pelo administrador.",
       },
       { property: "og:title", content: "SNIPER BO IA" },
       {
         property: "og:description",
-        content: "Acesso operacional com cadastro, checkout, demo limitado e liberacao VIP.",
+        content: "Acesso operacional com cadastro, checkout, demo limitado e liberação VIP.",
       },
     ],
   }),
@@ -52,19 +52,19 @@ export const Route = createFileRoute("/")({
 const WAITLIST_URL = "https://chat.whatsapp.com/Gw6qhCXXtyeDrukSxlM71u?mode=gi_t";
 
 const moduleCards = [
-  { icon: BrainCircuit, label: "Leitura Neural", desc: "Detecta numeros pagantes em tempo real." },
-  { icon: Waves, label: "Analise de Surf", desc: "Identifica forca, quebra e retomada da mesa." },
-  { icon: Bell, label: "Detector de Empates", desc: "Enxerga pressao de Tie antes da maioria." },
-  { icon: TrendingUp, label: "Tendencias da Mesa", desc: "Mostra a direcao do jogo com mais clareza." },
-  { icon: Target, label: "Entradas com Contexto", desc: "Cruza leitura, tendencia e momento operacional." },
-  { icon: Shield, label: "Gestao de Risco", desc: "Ajuda a evitar decisoes por emocao." },
+  { icon: BrainCircuit, label: "Leitura Neural", desc: "Detecta números pagantes em tempo real." },
+  { icon: Waves, label: "Análise de Surf", desc: "Identifica força, quebra e retomada da mesa." },
+  { icon: Bell, label: "Detector de Empates", desc: "Enxerga pressão de Tie antes da maioria." },
+  { icon: TrendingUp, label: "Tendências da Mesa", desc: "Mostra a direção do jogo com mais clareza." },
+  { icon: Target, label: "Entradas com Contexto", desc: "Cruza leitura, tendência e momento operacional." },
+  { icon: Shield, label: "Gestão de Risco", desc: "Ajuda a evitar decisões por emoção." },
 ];
 
 const hudCards = [
-  { icon: Target, label: "Numero Pagante Ativo", position: "left-0 top-8", delay: "0s" },
-  { icon: Activity, label: "Analise em Tempo Real", position: "right-0 top-16", delay: "0.8s" },
-  { icon: Bell, label: "Pressao de Tie", position: "left-3 bottom-24", delay: "1.4s" },
-  { icon: TrendingUp, label: "Tendencia da Mesa", position: "right-4 bottom-20", delay: "2.1s" },
+  { icon: Target, label: "Número Pagante Ativo", position: "left-0 top-8", delay: "0s" },
+  { icon: Activity, label: "Análise em Tempo Real", position: "right-0 top-16", delay: "0.8s" },
+  { icon: Bell, label: "Pressão de Tie", position: "left-3 bottom-24", delay: "1.4s" },
+  { icon: TrendingUp, label: "Tendência da Mesa", position: "right-4 bottom-20", delay: "2.1s" },
   { icon: Radio, label: "Contexto Operacional", position: "left-1/2 top-[78%] -translate-x-1/2", delay: "2.8s" },
 ];
 
@@ -113,8 +113,8 @@ function LoginPage() {
         if (!salesClosed) setMode("register");
         setNotice(
           salesClosed
-            ? "Vagas encerradas no momento. Entre na fila de espera para a proxima abertura."
-            : "Email ainda nao cadastrado. Faca seu cadastro para continuar.",
+            ? "Vagas encerradas no momento. Entre na fila de espera para a próxima abertura."
+            : "E-mail ainda não cadastrado. Faça seu cadastro para continuar.",
         );
         return;
       }
@@ -125,7 +125,7 @@ function LoginPage() {
       saveAccessSession(access, email);
       window.location.href = "/app";
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Nao foi possivel validar seu acesso.");
+      setNotice(err instanceof Error ? err.message : "Não foi possível validar seu acesso.");
     } finally {
       setLoading(false);
     }
@@ -134,7 +134,7 @@ function LoginPage() {
   async function handleRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (salesClosed) {
-      setNotice("Vagas encerradas no momento. Entre na fila de espera para a proxima abertura.");
+      setNotice("Vagas encerradas no momento. Entre na fila de espera para a próxima abertura.");
       return;
     }
     setLoading(true);
@@ -151,7 +151,7 @@ function LoginPage() {
       return;
     }
     if (password !== passwordConfirm) {
-      setNotice("As senhas nao conferem.");
+      setNotice("As senhas não conferem.");
       setLoading(false);
       return;
     }
@@ -167,7 +167,7 @@ function LoginPage() {
       saveAccessSession(access, email);
       window.location.href = "/app";
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Nao foi possivel concluir o cadastro.");
+      setNotice(err instanceof Error ? err.message : "Não foi possível concluir o cadastro.");
     } finally {
       setLoading(false);
     }
@@ -181,7 +181,7 @@ function LoginPage() {
 
   function goCheckout() {
     if (salesClosed) {
-      setNotice("Vagas encerradas no momento. Entre na fila de espera para a proxima abertura.");
+      setNotice("Vagas encerradas no momento. Entre na fila de espera para a próxima abertura.");
       return;
     }
     if (pendingAccess) saveAccessSession(pendingAccess);
@@ -208,7 +208,7 @@ function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-screen w-full max-w-full overflow-x-hidden bg-[#020617] text-white">
+    <div className="relative min-h-screen overflow-hidden bg-[#020617] text-white">
       <div
         className="absolute inset-0 bg-cover bg-center opacity-75"
         style={{ backgroundImage: "url('/assets/dark-tech-bg.png')" }}
@@ -246,63 +246,63 @@ function LoginPage() {
         <NeuralLines cx={42} cy={48} count={14} opacity={0.34} reach={1.05} />
       </div>
 
-      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1440px] flex-col overflow-x-hidden px-3 py-5 sm:px-6 lg:px-10">
-        <header className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-          <SniperLogoMark className="h-12 w-auto max-w-[52vw] sm:h-16 sm:max-w-[280px] drop-shadow-[0_0_24px_rgba(0,229,255,0.24)]" />
-          <AppBadge tone={salesClosed ? "red" : "purple"} className="shrink-0">
+      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-4 py-5 sm:px-6 lg:px-10">
+        <header className="flex items-center justify-between gap-4">
+          <SniperLogoMark className="h-14 w-auto max-w-[220px] sm:h-16 sm:max-w-[280px] drop-shadow-[0_0_24px_rgba(0,229,255,0.24)]" />
+          <AppBadge tone={salesClosed ? "red" : "purple"}>
             {salesClosed ? "Vagas limitadas" : "Acesso premium"}
           </AppBadge>
         </header>
 
-        <section className="grid min-w-0 flex-1 items-center gap-7 py-7 lg:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)] lg:gap-10 lg:py-10">
+        <section className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)] lg:gap-10 lg:py-10">
           <div className="min-w-0">
             <div className="grid items-center gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(300px,0.8fr)]">
-              <div className="order-1 min-w-0">
-                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)] sm:text-[10px] sm:tracking-[0.2em]">
+              <div className="order-1">
+                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)]">
                   <Zap className="size-3.5 shrink-0" />
-                  <span className="truncate">Tecnologia que analisa. Inteligencia que antecipa.</span>
+                  <span className="truncate">Tecnologia que analisa. Inteligência que antecipa.</span>
                 </div>
 
-                <h1 className="mt-5 max-w-3xl break-words text-[2.35rem] font-black uppercase leading-[0.96] tracking-tight text-white sm:text-6xl lg:text-7xl">
+                <h1 className="mt-5 max-w-3xl text-4xl font-black uppercase leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
                   Chega de entrar no escuro.
                 </h1>
-                <p className="mt-4 max-w-2xl break-words text-lg font-black uppercase leading-tight text-gradient-brand sm:text-3xl">
-                  O Sniper BO IA le a mesa antes da maioria.
+                <p className="mt-4 max-w-2xl text-xl font-black uppercase leading-tight text-gradient-brand sm:text-3xl">
+                  O Sniper BO IA lê a mesa antes da maioria.
                 </p>
                 <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                  Enquanto a maioria aposta no impulso, o SNIPER BO IA cruza leitura neural, tendencia, surf e risco para entregar contexto operacional em tempo real.
+                  Enquanto a maioria aposta no impulso, o SNIPER BO IA cruza leitura neural, tendência, surf e risco para entregar contexto operacional em tempo real.
                 </p>
                 <p className="mt-3 max-w-xl text-sm text-slate-400">
-                  Dados nao eliminam risco. Mas reduzem o achismo antes da decisao.
+                  Dados não eliminam risco. Mas reduzem o achismo antes da decisão.
                 </p>
               </div>
 
               <HeroBrainShowcase className="order-2 xl:row-span-2" />
 
-              <div className="order-3 flex min-w-0 flex-col gap-3 sm:flex-row xl:-mt-8">
+              <div className="order-3 flex flex-col gap-3 sm:flex-row xl:-mt-8">
                 <button
                   type="button"
                   onClick={requestAccess}
-                  className="btn-primary-grad group relative min-h-12 flex-1 overflow-hidden rounded-2xl px-4 py-3 text-xs font-black uppercase leading-tight tracking-wide glow-purple sm:text-sm"
+                  className="btn-primary-grad group relative min-h-12 flex-1 overflow-hidden rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-wide glow-purple"
                 >
                   <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
-                  <span className="relative whitespace-normal break-words">Quero acesso ao Sniper BO IA</span>
+                  <span className="relative">Quero acesso ao Sniper BO IA</span>
                 </button>
                 <button
                   type="button"
                   onClick={focusLogin}
-                  className="min-h-12 flex-1 rounded-2xl border border-neon-cyan/40 bg-black/35 px-4 py-3 text-xs font-black uppercase leading-tight tracking-wide text-neon-cyan shadow-[0_0_22px_rgba(0,229,255,0.1)] transition hover:border-neon-cyan/70 hover:bg-neon-cyan/10 sm:text-sm"
+                  className="min-h-12 flex-1 rounded-2xl border border-neon-cyan/40 bg-black/35 px-5 py-3 text-sm font-black uppercase tracking-wide text-neon-cyan shadow-[0_0_22px_rgba(0,229,255,0.1)] transition hover:border-neon-cyan/70 hover:bg-neon-cyan/10"
                 >
-                  <span className="whitespace-normal break-words">Ja sou cliente premium</span>
+                  Já sou cliente premium
                 </button>
               </div>
             </div>
 
-            <div className="mt-7 flex max-w-full gap-3 overflow-x-auto overscroll-x-contain pb-3 lg:grid lg:grid-cols-3 lg:overflow-visible lg:pb-0">
+            <div className="mt-7 flex gap-3 overflow-x-auto pb-3 lg:grid lg:grid-cols-3 lg:overflow-visible lg:pb-0">
               {moduleCards.map((card) => (
                 <div
                   key={card.label}
-                  className="glass min-w-[205px] max-w-[78vw] rounded-2xl border-neon-purple/20 p-4 transition hover:border-neon-purple/50 hover:shadow-[0_0_24px_rgba(168,85,247,0.18)] sm:min-w-[225px] lg:max-w-none"
+                  className="glass min-w-[225px] rounded-2xl border-neon-purple/20 p-4 transition hover:border-neon-purple/50 hover:shadow-[0_0_24px_rgba(168,85,247,0.18)]"
                 >
                   <div className="mb-3 flex size-10 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10">
                     <card.icon className="size-5 text-neon-cyan" />
@@ -315,7 +315,7 @@ function LoginPage() {
 
             <div className="mt-6 rounded-3xl border border-neon-purple/30 bg-black/45 p-5 shadow-[0_0_34px_rgba(168,85,247,0.12)] backdrop-blur-xl">
               <p className="text-lg font-black uppercase leading-tight text-white sm:text-2xl">
-                Sem leitura, voce reage. O mercado nao perdoa.
+                Sem leitura, você reage. O mercado não perdoa.
               </p>
               <p className="mt-2 text-sm text-slate-400">
                 A maioria entra no impulso. Quem tem contexto sabe quando esperar.
@@ -323,8 +323,8 @@ function LoginPage() {
             </div>
           </div>
 
-          <aside ref={loginCardRef} className="w-full max-w-full justify-self-center sm:max-w-md lg:justify-self-end">
-            <GlassCard className="rounded-3xl border-neon-purple/35 bg-background/80 p-4 shadow-[0_0_44px_rgba(168,85,247,0.18)] sm:rounded-[2rem] sm:p-7">
+          <aside ref={loginCardRef} className="w-full max-w-md justify-self-center lg:justify-self-end">
+            <GlassCard className="rounded-[2rem] border-neon-purple/35 bg-background/80 p-5 shadow-[0_0_44px_rgba(168,85,247,0.18)] sm:p-7">
               <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-neon-purple/80 to-transparent" />
               <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10">
                 <LockKeyhole className="size-6 text-neon-cyan" />
@@ -364,11 +364,11 @@ function LoginPage() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl px-3 py-3.5 text-xs font-black uppercase leading-tight tracking-wide glow-blue disabled:opacity-60 sm:text-sm"
+                    className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl py-3.5 text-sm font-black uppercase tracking-wide glow-blue disabled:opacity-60"
                   >
                     <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
                     {loading ? <Loader2 className="relative size-4 animate-spin" /> : <ShieldCheck className="relative size-4" />}
-                    <span className="relative whitespace-normal break-words">Entrar no painel</span>
+                    <span className="relative">Entrar no painel</span>
                   </button>
                   <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
                     <button
@@ -387,21 +387,21 @@ function LoginPage() {
                 <form onSubmit={handleRegister} className="space-y-3">
                   <LoginField icon={<UserPlus className="size-4" />} label="Nome completo" name="full_name" placeholder="Nome completo" />
                   <LoginField icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
-                  <LoginField icon={<KeyRound className="size-4" />} label="Criar senha" name="password" type="password" placeholder="minimo 4 caracteres" />
+                  <LoginField icon={<KeyRound className="size-4" />} label="Criar senha" name="password" type="password" placeholder="mínimo 4 caracteres" />
                   <LoginField icon={<ShieldCheck className="size-4" />} label="Confirmar senha" name="password_confirm" type="password" placeholder="repita sua senha" />
                   <LoginField icon={<Phone className="size-4" />} label="Telefone" name="phone" placeholder="+55 11 99999-9999" />
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <LoginField icon={<MapPin className="size-4" />} label="Cidade" name="city" placeholder="Cidade" />
-                    <LoginField icon={<Radio className="size-4" />} label="Pais" name="country" placeholder="Pais" />
+                    <LoginField icon={<Radio className="size-4" />} label="País" name="country" placeholder="País" />
                   </div>
                   <button
                     type="submit"
                     disabled={loading}
-                    className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl px-3 py-3.5 text-xs font-black uppercase leading-tight tracking-wide glow-blue disabled:opacity-60 sm:text-sm"
+                    className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl py-3.5 text-sm font-black uppercase tracking-wide glow-blue disabled:opacity-60"
                   >
                     <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
                     {loading ? <Loader2 className="relative size-4 animate-spin" /> : <UserPlus className="relative size-4" />}
-                    <span className="relative whitespace-normal break-words">Cadastrar e continuar</span>
+                    <span className="relative">Cadastrar e continuar</span>
                   </button>
                 </form>
               )}
@@ -418,7 +418,7 @@ function LoginPage() {
                   <button
                     type="button"
                     onClick={goCheckout}
-                    className="btn-gold-grad inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-3 text-xs font-black leading-tight glow-gold"
+                    className="btn-gold-grad inline-flex items-center justify-center gap-2 rounded-2xl px-3 py-3 text-xs font-black glow-gold"
                   >
                     <Crown className="size-4" /> Ir para checkout
                   </button>
@@ -436,7 +436,7 @@ function LoginPage() {
                 Acesso exclusivo para clientes ativos.
                 {!salesClosed && (
                   <span>
-                    {" "}A partir de <span className="font-semibold text-gold">R$ 297/mes</span>.
+                    {" "}A partir de <span className="font-semibold text-gold">R$ 297/mês</span>.
                   </span>
                 )}
               </div>
@@ -450,7 +450,7 @@ function LoginPage() {
                 <div>
                   <h3 className="text-sm font-black uppercase text-white">Vagas limitadas</h3>
                   <p className="mt-1 text-xs leading-5 text-slate-400">
-                    Liberamos novas vagas apenas em periodos especificos. Quando fechar, nao sabemos quando abriremos novamente.
+                    Liberamos novas vagas apenas em períodos específicos. Quando fechar, não sabemos quando abriremos novamente.
                   </p>
                 </div>
               </div>
@@ -458,7 +458,7 @@ function LoginPage() {
                 href={WAITLIST_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-warning/40 bg-warning/10 px-4 text-center text-xs font-black uppercase leading-tight tracking-wide text-warning transition hover:bg-warning/15"
+                className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-warning/40 bg-warning/10 px-4 text-xs font-black uppercase tracking-wide text-warning transition hover:bg-warning/15"
               >
                 Entrar na fila de espera
               </a>
@@ -466,8 +466,8 @@ function LoginPage() {
           </aside>
         </section>
 
-        <footer className="relative z-10 max-w-full break-words pb-4 text-center text-[11px] leading-5 text-slate-500">
-          O SNIPER BO IA e uma ferramenta de leitura e analise operacional. Nao existe garantia de lucro. Use sempre gestao de banca e responsabilidade.
+        <footer className="relative z-10 pb-4 text-center text-[11px] leading-5 text-slate-500">
+          O SNIPER BO IA é uma ferramenta de leitura e análise operacional. Não existe garantia de lucro. Use sempre gestão de banca e responsabilidade.
         </footer>
       </main>
     </div>
@@ -476,12 +476,12 @@ function LoginPage() {
 
 function HeroBrainShowcase({ className = "" }: { className?: string }) {
   return (
-    <div className={`relative mx-auto h-[260px] w-full max-w-[360px] overflow-hidden sm:h-[360px] sm:max-w-[440px] ${className}`}>
+    <div className={`relative mx-auto h-[300px] w-full max-w-[440px] sm:h-[360px] ${className}`}>
       <div className="absolute inset-0 rounded-full bg-gradient-to-br from-neon-cyan/10 via-neon-purple/10 to-transparent blur-3xl" />
-      <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 scale-[0.64] items-center justify-center sm:scale-100">
-        <div className="absolute size-[300px] rounded-full border border-neon-blue/20 animate-orbit-slow sm:size-[390px]" />
-        <div className="absolute size-[340px] rounded-full border border-neon-purple/20 border-dashed animate-orbit-reverse sm:size-[460px]" />
-        <BrainAI size={300} speaking />
+      <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 scale-[0.78] items-center justify-center sm:scale-100">
+        <div className="absolute size-[320px] rounded-full border border-neon-blue/20 animate-orbit-slow sm:size-[390px]" />
+        <div className="absolute size-[380px] rounded-full border border-neon-purple/20 border-dashed animate-orbit-reverse sm:size-[460px]" />
+        <BrainAI size={320} speaking />
       </div>
       <div className="absolute inset-x-8 bottom-6 hidden h-px bg-gradient-to-r from-transparent via-neon-cyan/50 to-transparent sm:block" />
       {hudCards.map((card) => (

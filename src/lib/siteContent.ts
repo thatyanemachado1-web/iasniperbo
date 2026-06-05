@@ -24,7 +24,7 @@ export interface SiteContentSettings {
 export const DEFAULT_SITE_CONTENT_SETTINGS: SiteContentSettings = {
   shareTitle: "SNIPER BO IA - Painel operacional com IA",
   shareDescription:
-    "Painel operacional BAC BO com leitura estatistica e assistente IA em tempo real.",
+    "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
   shareImageUrl: "/sniper-icon.svg",
   faviconUrl: "/sniper-icon.svg",
   bannerEnabled: false,
