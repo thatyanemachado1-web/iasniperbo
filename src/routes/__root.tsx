@@ -86,14 +86,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:image", content: "/sniper-icon.svg" },
+      { property: "og:image", content: "/favicon.png" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:title", content: "SNIPER BO IA - Painel operacional com IA" },
       {
         name: "twitter:description",
         content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
       },
-      { name: "twitter:image", content: "/sniper-icon.svg" },
+      { name: "twitter:image", content: "/favicon.png" },
     ],
     links: [
       {
@@ -106,11 +106,19 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       {
         rel: "icon",
-        href: "/sniper-icon.svg",
+        type: "image/png",
+        href: "/favicon.png",
+      },
+      {
+        rel: "icon",
+        type: "image/png",
+        sizes: "32x32",
+        href: "/favicon-32.png",
       },
       {
         rel: "apple-touch-icon",
-        href: "/sniper-icon.svg",
+        sizes: "180x180",
+        href: "/apple-touch-icon.png",
       },
     ],
   }),
