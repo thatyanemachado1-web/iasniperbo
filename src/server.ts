@@ -150,8 +150,7 @@ const ACTIVE_ENTRY_MODES = [
   "hunter",
   "aggressive",
 ] as const satisfies readonly ActiveEntryMode[];
-const SNIPER_NEURAL_ASSERTIVENESS_MIN = 100;
-const SNIPER_NEURAL_MIN_GREENS = 1;
+const SNIPER_NEURAL_ASSERTIVENESS_MIN = 99;
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 let liveDashboardData: LiveDashboardData = resetDashboardDailyCycle(mockDashboardData);
@@ -3510,7 +3509,6 @@ function serverReadSniperNeuralGate(
   return {
     accepted: Boolean(
       performance &&
-      performance.greens >= SNIPER_NEURAL_MIN_GREENS &&
       performance.assertiveness >= SNIPER_NEURAL_ASSERTIVENESS_MIN,
     ),
   };

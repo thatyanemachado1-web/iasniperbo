@@ -31,9 +31,6 @@ const VOICE_COORDINATION_EVENT = "sniper-voice-stop";
 const AI_READING_VOICE_CHANGE_EVENT = "sniper-ai-reading-voice-change";
 const AI_READING_VOICE_SOURCE = "ai-reading";
 const VOICE_UNAVAILABLE_MESSAGE = "Voz da leitura IA indisponível no momento.";
-const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 100;
-const NEURAL_PAGANTE_MIN_GREENS = 0;
-
 function firstNameOf(full?: string) {
   const cleaned = String(full || "").trim();
   if (!cleaned) return "";
@@ -48,7 +45,6 @@ function buildSnapshot(
   userFirstName: string,
   allowUseName: boolean,
 ): AIReadingSnapshot {
-  const perfectPagante = isPerfectPagante(d.neuralReading);
   const paganteSide = d.neuralReading?.direcao ?? d.neuralReading?.origem ?? null;
   const lastRounds = d.rounds
     .slice(-12)
@@ -68,11 +64,11 @@ function buildSnapshot(
     surfSide: d.currentSurfAlert?.surf_side,
     surfRisk: d.currentSurfAlert?.surf_risk,
     surfConfidence: d.currentSurfAlert?.surf_confidence,
-    paganteNumero: perfectPagante ? d.neuralReading?.numero ?? null : null,
-    paganteOrigem: perfectPagante ? d.neuralReading?.origem ?? null : null,
-    paganteDirecao: perfectPagante ? paganteSide : null,
-    paganteAlert: perfectPagante ? d.neuralReading?.paganteAlert ?? null : null,
-    paganteAssertiveness: perfectPagante ? d.neuralReading?.assertividade ?? null : null,
+    paganteNumero: d.neuralReading?.numero ?? null,
+    paganteOrigem: d.neuralReading?.origem ?? null,
+    paganteDirecao: paganteSide,
+    paganteAlert: d.neuralReading?.paganteAlert ?? null,
+    paganteAssertiveness: d.neuralReading?.assertividade ?? null,
     lastRounds,
     assertiveness: calculateMotorAssertiveness(
       (d.mainScoreboard.greens ?? 0) + (d.mainScoreboard.greensG1 ?? 0),
@@ -85,26 +81,6 @@ function buildSnapshot(
   };
 }
 
-function isPerfectPagante(reading?: DashboardData["neuralReading"]) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
-  if (reading.origemTipo === "OPOSTO") return false;
-  const greens = neuralGreens(reading);
-  return (
-    greens >= NEURAL_PAGANTE_MIN_GREENS &&
-    typeof reading.assertividade === "number" &&
-    reading.assertividade >= NEURAL_PAGANTE_MIN_ASSERTIVENESS
-  );
-}
-
-function neuralGreens(reading?: DashboardData["neuralReading"]) {
-  const splitGreens = safeNumber(reading?.greenSemGale) + safeNumber(reading?.greenG1);
-  return splitGreens || safeNumber(reading?.acertos);
-}
-
-function safeNumber(value: unknown) {
-  const numeric = Number(value ?? 0);
-  return Number.isFinite(numeric) ? numeric : 0;
-}
 
 export function AIReadingCard({ data, mode }: Props) {
   const callReading = useServerFn(generateAIReading);

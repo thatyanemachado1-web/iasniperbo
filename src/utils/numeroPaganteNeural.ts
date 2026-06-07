@@ -60,8 +60,7 @@ const EMPTY_DIRECTION_STATS: DirectionStats = {
 };
 
 const MIN_ACTIVE_VALIDATED = 3;
-const MIN_ACTIVE_GREENS = 0;
-const MIN_ACTIVE_ACCURACY = 100;
+const MIN_ACTIVE_ACCURACY = 99;
 const RED_ALERT_ACCURACY = 45;
 
 export function buildNumeroPaganteNeural(
@@ -82,12 +81,11 @@ export function buildNumeroPaganteNeural(
   const accuracy = calculateMotorAssertiveness(totalGreens, currentStats.red);
   const expectedSide = resultToNeuralSide(currentDirection?.expected ?? sideToResult(latestEvent.origem));
   const origemTipo = originKindFor(latestEvent.origem, expectedSide);
-  const isPerfectPagante =
+  const isActivePagante =
     origemTipo === "PAGANTE" &&
     total >= MIN_ACTIVE_VALIDATED &&
-    totalGreens >= MIN_ACTIVE_GREENS &&
     accuracy >= MIN_ACTIVE_ACCURACY;
-  const mode = isPerfectPagante ? "ACTIVE" : "OBSERVING";
+  const mode = isActivePagante ? "ACTIVE" : "OBSERVING";
   const isRedAlert =
     currentStats.sequenceNegative >= 2 ||
     (total >= MIN_ACTIVE_VALIDATED && accuracy < RED_ALERT_ACCURACY);

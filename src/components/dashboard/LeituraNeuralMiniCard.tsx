@@ -10,8 +10,6 @@ import {
 import type { NeuralReading, NeuralScoreboard, SignalSide } from "@/types/dashboard";
 
 type NeuralSide = SignalSide | "TIE";
-const NEURAL_READY_MIN_ACCURACY = 100;
-const NEURAL_READY_MIN_GREENS = 0;
 
 interface NeuralScoreSummary {
   totalAlerts: number | null;
@@ -57,8 +55,8 @@ export function LeituraNeuralMiniCard({
   const sg = optionalNumberFrom(data.greenSemGale);
   const g1 = optionalNumberFrom(data.greenG1);
   const red = optionalNumberFrom(data.reds ?? data.erros);
-  const sequencePositive = 0;
-  const sequenceNegative = 0;
+  const sequencePositive = mode === "SCANNING" || !hasNumber ? 0 : numberFrom(data.sequencePositive);
+  const sequenceNegative = mode === "SCANNING" || !hasNumber ? 0 : numberFrom(data.sequenceNegative);
   const sequenceCopy = neuralSequenceCopy(sequencePositive, sequenceNegative);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
   const totalAlerts = totalFrom(data.alertas, data.acertos, data.erros);
@@ -68,8 +66,6 @@ export function LeituraNeuralMiniCard({
   const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
   const postTie = Boolean(data.postTie);
   const originKind = neuralOriginKind(data);
-  const canShowNeuralPattern = isNeuralPatternReady(data, accuracy, originKind);
-  const headerLabel = neuralHeaderLabel(originKind, canShowNeuralPattern);
   const originBadge = originBadgeFor(originKind);
   const pullingSide = data.direcao ?? data.origem;
   const message = buildNeuralCopy(data);
@@ -81,9 +77,7 @@ export function LeituraNeuralMiniCard({
     <aside
       className={cn(
         "neural-mini-card relative z-10 w-full shrink-0 overflow-visible rounded-xl border border-neon-cyan/25 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_24px_-18px_var(--neon-cyan)] backdrop-blur-xl sm:w-[170px] lg:w-[180px]",
-        mode === "ACTIVE" &&
-          canShowNeuralPattern &&
-          "border-neon-purple/35 shadow-[0_0_28px_-18px_var(--neon-purple)]",
+        mode === "ACTIVE" && "border-neon-purple/35 shadow-[0_0_28px_-18px_var(--neon-purple)]",
         greenFlash && "result-green-flash",
         className,
       )}
@@ -109,12 +103,12 @@ export function LeituraNeuralMiniCard({
             Leitura Neural
           </div>
           <div className="truncate text-[7px] font-bold uppercase tracking-[0.1em] text-neon-cyan/75 sm:text-[8px]">
-            {headerLabel}
+            {originKind === "OPOSTO" ? "gatilho oposto" : postTie ? "cor pos-empate" : "numero pagante"}
           </div>
         </div>
       </div>
 
-      {mode === "SCANNING" || !hasNumber || !canShowNeuralPattern ? (
+      {mode === "SCANNING" || !hasNumber ? (
         <div className="relative mt-2">
           <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
             {hasNumber ? "IA aguardando padrão 100% da Neural..." : "IA procurando números pagantes..."}
@@ -342,8 +336,6 @@ function neuralToolInsight(reading: NeuralReading) {
   const validity = reading.validade ?? "G1";
   const hasNumber = typeof reading.numero === "number" && Boolean(reading.origem);
   const originKind = neuralOriginKind(reading);
-  const accuracy = accuracyFrom(reading.assertividade, reading.acertos, reading.erros);
-  const ready = isNeuralPatternReady(reading, accuracy, originKind);
   const trigger =
     hasNumber && reading.origem === "TIE"
       ? `${reading.numero}x${reading.numero} Tie`
@@ -358,15 +350,6 @@ function neuralToolInsight(reading: NeuralReading) {
     };
   }
 
-  if (!ready) {
-    return {
-      text:
-        originKind === "OPOSTO"
-          ? "Leitura oposta em observacao. Nao enviar como pagante."
-          : `${trigger} aguardando confirmacao 100% da Neural com 2 greens. Pela Neural agora: observar.`,
-      className: "border-warning/25 bg-warning/10 text-warning",
-    };
-  }
 
   const prefix =
     originKind === "OPOSTO"
@@ -497,8 +480,8 @@ function buildGeneralScore(
   const total = numberFrom(greens) + numberFrom(reds);
   const totalAlerts = optionalNumberFrom(scoreboard?.totalAlerts ?? fallbackReading.alertas ?? total) ?? total;
   const accuracy = accuracyFrom(null, greens, reds) ?? optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
-  const maxGreenSequence = null;
-  const maxRedSequence = null;
+  const maxGreenSequence = optionalPositiveNumberFrom(scoreboard?.maxSequencePositive ?? fallbackReading.maxSequencePositive);
+  const maxRedSequence = optionalPositiveNumberFrom(scoreboard?.maxSequenceNegative ?? fallbackReading.maxSequenceNegative);
 
   return {
     totalAlerts,
@@ -544,45 +527,9 @@ function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
     };
   }
   return {
-    label: "100%",
+    label: "Pagante",
     className: "border-success/35 bg-success/10 text-success",
   };
-}
-
-function neuralHeaderLabel(
-  _kind: NonNullable<NeuralReading["origemTipo"]>,
-  ready: boolean,
-) {
-  if (ready) return "padrao 100%";
-  return "aguardando 100%";
-}
-
-function isNeuralPatternReady(
-  reading: NeuralReading,
-  accuracy: number | null,
-  originKind: NonNullable<NeuralReading["origemTipo"]>,
-) {
-  if (reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
-  if (originKind !== "PAGANTE") return false;
-  if (reading.isRedAlert || reading.isSaturated) return false;
-  const status = normalizeStatus(reading.paganteStatus);
-  if (
-    status.includes("RISCO") ||
-    status.includes("ESTICADO") ||
-    status.includes("RED") ||
-    status.includes("FALH") ||
-    status.includes("OBSERV") ||
-    status.includes("AMOSTRA") ||
-    status.includes("AGUARD")
-  ) {
-    return false;
-  }
-  return (
-    typeof accuracy === "number" &&
-    accuracy >= NEURAL_READY_MIN_ACCURACY &&
-    numberFrom(totalGreensFrom(reading.acertos, reading.greenSemGale, reading.greenG1)) >=
-      NEURAL_READY_MIN_GREENS
-  );
 }
 
 function formatPercent(value: number | null) {

@@ -9,9 +9,6 @@ import type {
 } from "@/types/dashboard";
 
 type PaganteKind = "favorable" | "watch" | "risk";
-const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 100;
-const NEURAL_PAGANTE_MIN_GREENS = 0;
-
 export function buildEngineDecisionCopy(data: DashboardData) {
   if (data.entryModeFilter?.blocked) {
     return data.entryModeFilter.reason;
@@ -75,7 +72,7 @@ export function buildSurfCopy(alert?: SurfAlert | null) {
 
 export function buildNeuralCopy(reading?: NeuralReading | null) {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number" || !reading.origem) {
-    return "Nenhum número pagante confirmado no momento. Aguardar.";
+    return "Nenhum nÃºmero pagante confirmado no momento. Aguardar.";
   }
 
   const side = sideLabel(reading.origem);
@@ -83,39 +80,34 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
   const direction = reading.direcao;
   const status = paganteKind(reading);
   const isOpposite = isOppositeTrigger(reading);
-  const isPerfectPagante =
-    !isOpposite &&
-    status === "favorable" &&
-    hasQualifiedNeuralPerformance(reading);
-
-  if (!isPerfectPagante) {
-    if (isOpposite) {
-      return "Leitura oposta em observação. Não enviar como número pagante favorável agora.";
-    }
-    return `Número ${number} ${side} aguardando confirmação 100% da Neural com pelo menos 2 greens. Aguardar novo padrão confirmado.`;
-  }
 
   if (status === "risk") {
     if (isOpposite) {
-      return `Gatilho oposto ${number} ${side} apareceu, mas está em risco elevado. Não tratar como número pagante favorável agora.`;
+      return `Gatilho oposto ${number} ${side} apareceu, mas estÃ¡ em risco elevado. NÃ£o tratar como nÃºmero pagante favorÃ¡vel agora.`;
     }
-    return `Número ${number} apareceu em ${side}, mas está em risco elevado. Aguardar nova confirmação.`;
+    return `NÃºmero ${number} apareceu em ${side}, mas estÃ¡ em risco elevado. Aguardar nova confirmaÃ§Ã£o.`;
   }
 
   if (status === "watch") {
     if (isOpposite) {
-      return `Gatilho oposto ${number} ${side} apareceu como leitura complementar. Aguardar confirmação da engine.`;
+      return `Gatilho oposto ${number} ${side} apareceu como leitura complementar. Aguardar confirmaÃ§Ã£o da engine.`;
     }
-    return `Número ${number} apareceu em ${side}, ainda como leitura complementar. Aguardar confirmação da engine.`;
+    return `NÃºmero ${number} apareceu em ${side}, ainda como leitura complementar. Aguardar confirmaÃ§Ã£o da engine.`;
   }
 
   if (direction) {
-    return `Padrão 100% confirmado. ${side} ${number} aponta ${sideLabel(direction)} até ${reading.validade ?? "G1"}.`;
+    if (isOpposite) {
+      return `Gatilho oposto identificado. ${number} ${side} apareceu e aponta ${sideLabel(direction)} atÃ© ${reading.validade ?? "G1"}. NÃ£o tratar como nÃºmero pagante favorÃ¡vel.`;
+    }
+    return `NÃºmero pagante identificado. ${side} ${number} apareceu com forÃ§a e estÃ¡ puxando ${sideLabel(direction)} atÃ© ${reading.validade ?? "G1"}.`;
   }
 
-  return `Padrão 100% confirmado. ${side} ${number} apareceu com força nas últimas rodadas.`;
-}
+  if (isOpposite) {
+    return `Gatilho oposto identificado. ${number} ${side} apareceu nas Ãºltimas rodadas. Aguardar alinhamento da engine.`;
+  }
 
+  return `NÃºmero pagante identificado. ${side} ${number} apareceu com forÃ§a nas Ãºltimas rodadas.`;
+}
 export function buildTieCopy(alert: TieAlert) {
   if (alert.status === "green") {
     return "Empate confirmado dentro da validade. Green Tie Alert registrado no placar paralelo.";
@@ -176,21 +168,10 @@ function entryRisk(data: DashboardData, side: SignalSide) {
 function activePaganteSide(reading?: NeuralReading | null, favorableOnly = true): CurrentSignalSide | null {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
   if (isOppositeTrigger(reading)) return null;
-  if (!hasQualifiedNeuralPerformance(reading)) return null;
+
   const status = paganteKind(reading);
   if (status === "risk" || (favorableOnly && status !== "favorable")) return null;
   return reading.direcao ?? reading.origem ?? null;
-}
-
-function hasQualifiedNeuralPerformance(reading: NeuralReading) {
-  const greens = neuralGreens(reading);
-  if (greens < NEURAL_PAGANTE_MIN_GREENS) return false;
-  return typeof reading.assertividade === "number" && reading.assertividade >= NEURAL_PAGANTE_MIN_ASSERTIVENESS;
-}
-
-function neuralGreens(reading?: NeuralReading | null) {
-  const splitGreens = safeNumber(reading?.greenSemGale) + safeNumber(reading?.greenG1);
-  return splitGreens || safeNumber(reading?.acertos);
 }
 
 function isOppositeTrigger(reading?: NeuralReading | null) {

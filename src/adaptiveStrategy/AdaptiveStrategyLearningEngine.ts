@@ -9,12 +9,10 @@ import type {
   AdaptiveStrategySnapshot,
   AdaptiveSyncStatus,
 } from "@/types/adaptiveStrategy";
-import type { DashboardData, NeuralReading, SignalSide } from "@/types/dashboard";
+import type { DashboardData, SignalSide } from "@/types/dashboard";
 
 const MIN_OCCURRENCES = 30;
 const MIN_ASSERTIVENESS = 65;
-const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 100;
-const NEURAL_PAGANTE_MIN_GREENS = 0;
 const TOP_LIMIT = 8;
 const DEFAULT_SYNC_STATUS: AdaptiveSyncStatus = {
   mode: "local",
@@ -295,7 +293,7 @@ function buildEntryScore(
     };
   }
 
-  const neuralSide = neuralPaganteScoreSide(data.neuralReading);
+  const neuralSide = normalizeModuleSide(data.neuralReading?.direcao ?? data.neuralReading?.origem);
   const surfSide = normalizeModuleSide(
     data.currentSurfAlert?.surf_prediction_side ?? data.currentSurfAlert?.surf_side,
   );
@@ -308,7 +306,7 @@ function buildEntryScore(
     {
       label: "Neural Pagante",
       value: neuralSide === side ? 20 : 0,
-      reason: neuralSide === side ? `Pagante 100% favorece ${sideLabel(side)}.` : "Sem confirmação 100% a favor.",
+      reason: neuralSide === side ? `Pagante favorece ${sideLabel(side)}.` : "Sem confirmação 100% a favor.",
     },
     {
       label: "Surf Analyzer",
@@ -460,44 +458,6 @@ function normalizeModuleSide(value: unknown): AdaptiveSide | null {
   if (["P", "PLAYER", "JOGADOR"].includes(text)) return "PLAYER";
   if (["T", "TIE", "EMPATE"].includes(text)) return "TIE";
   return null;
-}
-
-function normalizeText(value: unknown) {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/_/g, " ");
-}
-
-function neuralPaganteScoreSide(reading?: NeuralReading | null): AdaptiveSide | null {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
-  if (reading.origemTipo === "OPOSTO" || reading.origem === "TIE" || reading.direcao === "TIE") return null;
-  if (reading.isRedAlert || reading.isSaturated) return null;
-  if (neuralGreens(reading) < NEURAL_PAGANTE_MIN_GREENS) return null;
-  if (typeof reading.assertividade !== "number" || reading.assertividade < NEURAL_PAGANTE_MIN_ASSERTIVENESS) return null;
-  const status = normalizeText(reading.paganteStatus);
-  if (
-    status.includes("RISCO") ||
-    status.includes("ESTICADO") ||
-    status.includes("RED") ||
-    status.includes("OBSERV") ||
-    status.includes("AMOSTRA") ||
-    status.includes("AGUARD")
-  ) {
-    return null;
-  }
-  return normalizeModuleSide(reading.direcao ?? reading.origem);
-}
-
-function neuralGreens(reading?: NeuralReading | null) {
-  const splitGreens = safeNumber(reading?.greenSemGale) + safeNumber(reading?.greenG1);
-  return splitGreens || safeNumber(reading?.acertos);
-}
-
-function safeNumber(value: unknown) {
-  const numeric = Number(value ?? 0);
-  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function compareRecords(left: AdaptiveRoundRecord, right: AdaptiveRoundRecord) {

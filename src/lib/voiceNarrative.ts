@@ -7,15 +7,12 @@ import type {
 } from "@/types/dashboard";
 import type { AdaptiveStrategySnapshot } from "@/types/adaptiveStrategy";
 import { buildSurfCopy, buildTieCopy } from "@/lib/operationalCopy";
-import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import { buildSurfEntrySummary } from "@/utils/surf";
 
 export type VoiceNarrationStyle = "discreet" | "aggressive" | "professional";
 export type VoicePriority = 1 | 2 | 3 | 4 | 5;
 type VoiceLeadStyle = Exclude<VoiceNarrationStyle, "discreet">;
 type PaganteStatusKind = "favorable" | "watch" | "risk";
-const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 100;
-const NEURAL_PAGANTE_MIN_GREENS = 0;
 type VoiceLeadKind =
   | "blocked"
   | "resultGreen"
@@ -355,7 +352,6 @@ function buildNeuralResultEvent(
   style: VoiceNarrationStyle,
 ): VoiceEvent | null {
   if (!previousReading || !reading || !isSameNeuralReading(previousReading, reading)) return null;
-  if (!isPerfectPagante(reading)) return null;
 
   const previousGreens = neuralGreens(previousReading);
   const currentGreens = neuralGreens(reading);
@@ -481,7 +477,7 @@ function buildPaganteContext(
   entrySide: CurrentSignalSide | undefined,
   style: VoiceNarrationStyle,
 ) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number" || !isPerfectPagante(reading)) {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") {
     return { key: "no-pagante", text: "", isAlignedWithEntry: false };
   }
 
@@ -630,7 +626,7 @@ function buildNeuralEvent(
   style: VoiceNarrationStyle,
   roundId: string,
 ): VoiceEvent | null {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number" || !isPerfectPagante(reading)) return null;
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
 
   const side = reading.direcao ?? reading.origem;
   if (!side) return null;
@@ -783,20 +779,9 @@ function buildTieEvent(
 
 function isFavorablePagante(reading?: NeuralReading) {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
-  if (!isPerfectPagante(reading)) return false;
   if (isOppositeTrigger(reading)) return false;
   const side = reading.direcao ?? reading.origem;
   return Boolean(side) && paganteStatusKind(reading) === "favorable";
-}
-
-function isPerfectPagante(reading?: NeuralReading | null) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
-  if (isOppositeTrigger(reading)) return false;
-  const greens = neuralGreens(reading);
-  const reds = neuralReds(reading);
-  if (greens < NEURAL_PAGANTE_MIN_GREENS) return false;
-  if (greens + reds > 0) return calculateMotorAssertiveness(greens, reds) >= NEURAL_PAGANTE_MIN_ASSERTIVENESS;
-  return safeNumber(reading.assertividade) >= NEURAL_PAGANTE_MIN_ASSERTIVENESS;
 }
 
 function isOppositeTrigger(reading?: NeuralReading | null) {
