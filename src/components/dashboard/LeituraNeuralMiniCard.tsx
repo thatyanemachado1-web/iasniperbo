@@ -111,7 +111,7 @@ export function LeituraNeuralMiniCard({
       {mode === "SCANNING" || !hasNumber ? (
         <div className="relative mt-2">
           <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
-            {hasNumber ? "IA aguardando padrão 100% da Neural..." : "IA procurando números pagantes..."}
+            "IA procurando números pagantes..."
           </div>
           <TypingDots />
           <div

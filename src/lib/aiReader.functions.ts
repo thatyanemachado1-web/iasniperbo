@@ -50,8 +50,8 @@ O QUE NARRAR (baseado no snapshot):
 - engineState BLOQUEADO => deixe claro que está bloqueado por risco, sem forçar.
 - signalStatus "pending" ou "g1" com signalSide BANKER ou PLAYER => entrada principal confirmada. Diga lado + proteção (se houver).
 - signalSide TIE com status pending/g1 => janela de Tie, atenção, mas sem substituir Banker/Player.
-- Só fale de número pagante quando paganteNumero existir E paganteAssertiveness for 100. Abaixo de 100, ignore o pagante na fala.
-- Se entrada principal alinhar com paganteNumero 100% e paganteDirecao => pode falar: "hum, essa entrada tá interessando nesse número pagante, viu. Vamos nele: pode entrar no Banker/Player, protege empate."
+- Fale de número pagante somente quando paganteNumero existir nos dados reais enviados pelo backend.
+- Se entrada principal alinhar com paganteNumero e paganteDirecao => pode falar: "hum, essa entrada tá interessando nesse número pagante, viu. Vamos nele: pode entrar no Banker/Player, protege empate."
 - Se entrada principal existe MAS surf contra ou pagante conflitando => avisar com cautela, sugerir mão baixa.
 - tieStatus ativo sem entrada principal => "Tie pressionando, atenção".
 - Sem entrada (waiting, sem signalSide útil) => orientar a observar mais uma ou duas rodadas.

@@ -306,7 +306,7 @@ function buildEntryScore(
     {
       label: "Neural Pagante",
       value: neuralSide === side ? 20 : 0,
-      reason: neuralSide === side ? `Pagante favorece ${sideLabel(side)}.` : "Sem confirmação 100% a favor.",
+      reason: neuralSide === side ? `Pagante favorece ${sideLabel(side)}.` : "Sem confirmação a favor.",
     },
     {
       label: "Surf Analyzer",
