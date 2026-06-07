@@ -10,8 +10,8 @@ import {
 import type { NeuralReading, NeuralScoreboard, SignalSide } from "@/types/dashboard";
 
 type NeuralSide = SignalSide | "TIE";
-const NEURAL_READY_MIN_ACCURACY = 90;
-const NEURAL_READY_MIN_GREENS = 2;
+const NEURAL_READY_MIN_ACCURACY = 100;
+const NEURAL_READY_MIN_GREENS = 0;
 
 interface NeuralScoreSummary {
   totalAlerts: number | null;
@@ -117,7 +117,7 @@ export function LeituraNeuralMiniCard({
       {mode === "SCANNING" || !hasNumber || !canShowNeuralPattern ? (
         <div className="relative mt-2">
           <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
-            {hasNumber ? "IA aguardando padrão 90%+ da Neural..." : "IA procurando números pagantes..."}
+            {hasNumber ? "IA aguardando padrão 100% da Neural..." : "IA procurando números pagantes..."}
           </div>
           <TypingDots />
           <div
@@ -363,7 +363,7 @@ function neuralToolInsight(reading: NeuralReading) {
       text:
         originKind === "OPOSTO"
           ? "Leitura oposta em observacao. Nao enviar como pagante."
-          : `${trigger} aguardando confirmacao 90%+ da Neural com 2 greens. Pela Neural agora: observar.`,
+          : `${trigger} aguardando confirmacao 100% da Neural com 2 greens. Pela Neural agora: observar.`,
       className: "border-warning/25 bg-warning/10 text-warning",
     };
   }
@@ -544,7 +544,7 @@ function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
     };
   }
   return {
-    label: "90%+",
+    label: "100%",
     className: "border-success/35 bg-success/10 text-success",
   };
 }
@@ -553,8 +553,8 @@ function neuralHeaderLabel(
   _kind: NonNullable<NeuralReading["origemTipo"]>,
   ready: boolean,
 ) {
-  if (ready) return "padrao 90%+";
-  return "aguardando 90%+";
+  if (ready) return "padrao 100%";
+  return "aguardando 100%";
 }
 
 function isNeuralPatternReady(

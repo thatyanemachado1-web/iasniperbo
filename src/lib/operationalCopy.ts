@@ -9,8 +9,8 @@ import type {
 } from "@/types/dashboard";
 
 type PaganteKind = "favorable" | "watch" | "risk";
-const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 90;
-const NEURAL_PAGANTE_MIN_GREENS = 2;
+const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 100;
+const NEURAL_PAGANTE_MIN_GREENS = 0;
 
 export function buildEngineDecisionCopy(data: DashboardData) {
   if (data.entryModeFilter?.blocked) {
@@ -92,7 +92,7 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
     if (isOpposite) {
       return "Leitura oposta em observação. Não enviar como número pagante favorável agora.";
     }
-    return `Número ${number} ${side} aguardando confirmação 90%+ da Neural com pelo menos 2 greens. Aguardar novo padrão confirmado.`;
+    return `Número ${number} ${side} aguardando confirmação 100% da Neural com pelo menos 2 greens. Aguardar novo padrão confirmado.`;
   }
 
   if (status === "risk") {
@@ -110,10 +110,10 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
   }
 
   if (direction) {
-    return `Padrão 90%+ confirmado. ${side} ${number} aponta ${sideLabel(direction)} até ${reading.validade ?? "G1"}.`;
+    return `Padrão 100% confirmado. ${side} ${number} aponta ${sideLabel(direction)} até ${reading.validade ?? "G1"}.`;
   }
 
-  return `Padrão 90%+ confirmado. ${side} ${number} apareceu com força nas últimas rodadas.`;
+  return `Padrão 100% confirmado. ${side} ${number} apareceu com força nas últimas rodadas.`;
 }
 
 export function buildTieCopy(alert: TieAlert) {

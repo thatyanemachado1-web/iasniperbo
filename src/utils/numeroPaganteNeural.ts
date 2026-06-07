@@ -59,9 +59,9 @@ const EMPTY_DIRECTION_STATS: DirectionStats = {
   lastOutcome: null,
 };
 
-const MIN_ACTIVE_VALIDATED = 2;
-const MIN_ACTIVE_GREENS = 2;
-const MIN_ACTIVE_ACCURACY = 90;
+const MIN_ACTIVE_VALIDATED = 3;
+const MIN_ACTIVE_GREENS = 0;
+const MIN_ACTIVE_ACCURACY = 100;
 const RED_ALERT_ACCURACY = 45;
 
 export function buildNumeroPaganteNeural(

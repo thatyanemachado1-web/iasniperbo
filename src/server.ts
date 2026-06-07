@@ -150,8 +150,8 @@ const ACTIVE_ENTRY_MODES = [
   "hunter",
   "aggressive",
 ] as const satisfies readonly ActiveEntryMode[];
-const SNIPER_NEURAL_ASSERTIVENESS_MIN = 90;
-const SNIPER_NEURAL_MIN_GREENS = 2;
+const SNIPER_NEURAL_ASSERTIVENESS_MIN = 100;
+const SNIPER_NEURAL_MIN_GREENS = 1;
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 let liveDashboardData: LiveDashboardData = resetDashboardDailyCycle(mockDashboardData);

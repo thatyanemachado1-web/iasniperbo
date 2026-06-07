@@ -13,8 +13,8 @@ import type { DashboardData, NeuralReading, SignalSide } from "@/types/dashboard
 
 const MIN_OCCURRENCES = 30;
 const MIN_ASSERTIVENESS = 65;
-const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 90;
-const NEURAL_PAGANTE_MIN_GREENS = 2;
+const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 100;
+const NEURAL_PAGANTE_MIN_GREENS = 0;
 const TOP_LIMIT = 8;
 const DEFAULT_SYNC_STATUS: AdaptiveSyncStatus = {
   mode: "local",
@@ -308,7 +308,7 @@ function buildEntryScore(
     {
       label: "Neural Pagante",
       value: neuralSide === side ? 20 : 0,
-      reason: neuralSide === side ? `Pagante 90%+ favorece ${sideLabel(side)}.` : "Sem confirmação 90%+ a favor.",
+      reason: neuralSide === side ? `Pagante 100% favorece ${sideLabel(side)}.` : "Sem confirmação 100% a favor.",
     },
     {
       label: "Surf Analyzer",

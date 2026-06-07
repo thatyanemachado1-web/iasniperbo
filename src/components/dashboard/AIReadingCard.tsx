@@ -31,8 +31,8 @@ const VOICE_COORDINATION_EVENT = "sniper-voice-stop";
 const AI_READING_VOICE_CHANGE_EVENT = "sniper-ai-reading-voice-change";
 const AI_READING_VOICE_SOURCE = "ai-reading";
 const VOICE_UNAVAILABLE_MESSAGE = "Voz da leitura IA indisponível no momento.";
-const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 90;
-const NEURAL_PAGANTE_MIN_GREENS = 2;
+const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 100;
+const NEURAL_PAGANTE_MIN_GREENS = 0;
 
 function firstNameOf(full?: string) {
   const cleaned = String(full || "").trim();

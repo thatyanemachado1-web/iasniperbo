@@ -14,8 +14,8 @@ export type VoiceNarrationStyle = "discreet" | "aggressive" | "professional";
 export type VoicePriority = 1 | 2 | 3 | 4 | 5;
 type VoiceLeadStyle = Exclude<VoiceNarrationStyle, "discreet">;
 type PaganteStatusKind = "favorable" | "watch" | "risk";
-const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 90;
-const NEURAL_PAGANTE_MIN_GREENS = 2;
+const NEURAL_PAGANTE_MIN_ASSERTIVENESS = 100;
+const NEURAL_PAGANTE_MIN_GREENS = 0;
 type VoiceLeadKind =
   | "blocked"
   | "resultGreen"

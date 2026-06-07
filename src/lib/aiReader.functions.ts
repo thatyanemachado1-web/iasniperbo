@@ -51,8 +51,8 @@ O QUE NARRAR (baseado no snapshot):
 - signalStatus "pending" ou "g1" com signalSide BANKER ou PLAYER => entrada principal confirmada. Diga lado + proteção (se houver).
 - signalSide TIE com status pending/g1 => janela de Tie, atenção, mas sem substituir Banker/Player.
 - Só fale de número pagante quando paganteNumero existir E paganteAssertiveness for 100. Abaixo de 100, ignore o pagante na fala.
-- Se entrada principal alinhar com paganteNumero 90%+ e paganteDirecao => pode falar: "hum, essa entrada tá interessando nesse número pagante, viu. Vamos nele: pode entrar no Banker/Player, protege empate."
-- Se entrada principal existe MAS surf contra ou pagante 90%+ conflitando => avisar com cautela, sugerir mão baixa.
+- Se entrada principal alinhar com paganteNumero 100% e paganteDirecao => pode falar: "hum, essa entrada tá interessando nesse número pagante, viu. Vamos nele: pode entrar no Banker/Player, protege empate."
+- Se entrada principal existe MAS surf contra ou pagante 100% conflitando => avisar com cautela, sugerir mão baixa.
 - tieStatus ativo sem entrada principal => "Tie pressionando, atenção".
 - Sem entrada (waiting, sem signalSide útil) => orientar a observar mais uma ou duas rodadas.
 
@@ -159,7 +159,7 @@ function buildLocalReading(data: AIReadingSnapshot) {
     data.paganteNumero !== null &&
     data.paganteNumero !== undefined &&
     typeof data.paganteAssertiveness === "number" &&
-    data.paganteAssertiveness >= 90;
+    data.paganteAssertiveness >= 100;
   const paganteText = hasPagante
     ? `número pagante ${data.paganteNumero}${paganteSide ? ` puxando ${sideLabel(paganteSide)}` : ""}`
     : "";
@@ -174,13 +174,13 @@ function buildLocalReading(data: AIReadingSnapshot) {
 
   if (hasEntry) {
     if (surfAgainst && hasPagante) {
-      return `${name}tem ${paganteText} em 90%+, mas o surf está contra. Se for nessa, vai com mão baixa e protege empate.`;
+      return `${name}tem ${paganteText} em 100%, mas o surf está contra. Se for nessa, vai com mão baixa e protege empate.`;
     }
     if (hasPagante && paganteSide === side) {
       return `${name}hum, essa entrada tá interessando nesse número pagante ${data.paganteNumero}, viu. Vamos nele: pode entrar no ${sideLabel(side)}, protege empate${data.signalProtection ? ` até ${data.signalProtection}` : ""}.`;
     }
     if (hasPagante && paganteSide && paganteSide !== side) {
-      return `${name}tem ${paganteText} em 90%+, mas ele não está alinhado com a entrada em ${sideLabel(side)}. Eu seguraria e esperaria outra confirmação.`;
+      return `${name}tem ${paganteText} em 100%, mas ele não está alinhado com a entrada em ${sideLabel(side)}. Eu seguraria e esperaria outra confirmação.`;
     }
     if (surfAgainst) {
       return `${name}entrada principal em ${side}, só que o surf está contra. Eu trataria como mão leve e cuidado na proteção.`;
@@ -201,7 +201,7 @@ function buildLocalReading(data: AIReadingSnapshot) {
   }
 
   if (hasPagante) {
-    return `${name}hum, ${paganteText} em 90%+ apareceu na leitura. Ainda não tem entrada principal limpa, então espera confirmação antes de ir.`;
+    return `${name}hum, ${paganteText} em 100% apareceu na leitura. Ainda não tem entrada principal limpa, então espera confirmação antes de ir.`;
   }
 
   if (surfSide) {
