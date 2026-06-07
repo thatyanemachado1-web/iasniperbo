@@ -72,7 +72,7 @@ export function buildSurfCopy(alert?: SurfAlert | null) {
 
 export function buildNeuralCopy(reading?: NeuralReading | null) {
   if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number" || !reading.origem) {
-    return "Nenhum nÃºmero pagante confirmado no momento. Aguardar.";
+    return "Nenhum número pagante confirmado no momento. Aguardar.";
   }
 
   const side = sideLabel(reading.origem);
@@ -83,30 +83,30 @@ export function buildNeuralCopy(reading?: NeuralReading | null) {
 
   if (status === "risk") {
     if (isOpposite) {
-      return `Gatilho oposto ${number} ${side} apareceu, mas estÃ¡ em risco elevado. NÃ£o tratar como nÃºmero pagante favorÃ¡vel agora.`;
+      return `Gatilho oposto ${number} ${side} apareceu, mas está em risco elevado. Não tratar como número pagante favorável agora.`;
     }
-    return `NÃºmero ${number} apareceu em ${side}, mas estÃ¡ em risco elevado. Aguardar nova confirmaÃ§Ã£o.`;
+    return `Número ${number} apareceu em ${side}, mas está em risco elevado. Aguardar nova confirmação.`;
   }
 
   if (status === "watch") {
     if (isOpposite) {
-      return `Gatilho oposto ${number} ${side} apareceu como leitura complementar. Aguardar confirmaÃ§Ã£o da engine.`;
+      return `Gatilho oposto ${number} ${side} apareceu como leitura complementar. Aguardar confirmação da engine.`;
     }
-    return `NÃºmero ${number} apareceu em ${side}, ainda como leitura complementar. Aguardar confirmaÃ§Ã£o da engine.`;
+    return `Número ${number} apareceu em ${side}, ainda como leitura complementar. Aguardar confirmação da engine.`;
   }
 
   if (direction) {
     if (isOpposite) {
-      return `Gatilho oposto identificado. ${number} ${side} apareceu e aponta ${sideLabel(direction)} atÃ© ${reading.validade ?? "G1"}. NÃ£o tratar como nÃºmero pagante favorÃ¡vel.`;
+      return `Gatilho oposto identificado. ${number} ${side} apareceu e aponta ${sideLabel(direction)} até ${reading.validade ?? "G1"}. Não tratar como número pagante favorável.`;
     }
-    return `NÃºmero pagante identificado. ${side} ${number} apareceu com forÃ§a e estÃ¡ puxando ${sideLabel(direction)} atÃ© ${reading.validade ?? "G1"}.`;
+    return `Número pagante identificado. ${side} ${number} apareceu com força e está puxando ${sideLabel(direction)} até ${reading.validade ?? "G1"}.`;
   }
 
   if (isOpposite) {
-    return `Gatilho oposto identificado. ${number} ${side} apareceu nas Ãºltimas rodadas. Aguardar alinhamento da engine.`;
+    return `Gatilho oposto identificado. ${number} ${side} apareceu nas últimas rodadas. Aguardar alinhamento da engine.`;
   }
 
-  return `NÃºmero pagante identificado. ${side} ${number} apareceu com forÃ§a nas Ãºltimas rodadas.`;
+  return `Número pagante identificado. ${side} ${number} apareceu com força nas últimas rodadas.`;
 }
 export function buildTieCopy(alert: TieAlert) {
   if (alert.status === "green") {
