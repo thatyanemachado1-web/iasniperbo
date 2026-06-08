@@ -158,6 +158,32 @@ export async function createBillingCheckout(plan: "premium" | "vip") {
   );
 }
 
+export async function createPublicBillingCheckout(
+  plan: "premium" | "vip",
+  lead: {
+    email: string;
+    full_name?: string;
+    phone?: string;
+    phone_full?: string;
+    city?: string;
+    country?: string;
+    country_code?: string;
+  },
+) {
+  return apiRequest<{
+    checkout_url: string;
+    provider?: string;
+    preference_id?: string;
+    subscription: BillingSubscriptionOverview["subscription"];
+  }>("/billing/checkout", {
+    method: "POST",
+    body: {
+      plan,
+      ...lead,
+    },
+  });
+}
+
 async function publicRequest<T>(path: string, body: Record<string, unknown>) {
   return apiRequest<T>(path, { method: "POST", body });
 }

@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Bell,
   BrainCircuit,
+  Check,
   Crown,
   KeyRound,
   Loader2,
@@ -27,7 +28,16 @@ import { NeuralLines } from "@/components/brand/NeuralLines";
 import { SniperLogoMark } from "@/components/brand/SniperLogoMark";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { checkClientAccess, getSalesSettings, registerClient, saveAccessSession, type ClientAccess } from "@/lib/accessApi";
+import {
+  checkClientAccess,
+  createPublicBillingCheckout,
+  getBillingPlans,
+  getSalesSettings,
+  registerClient,
+  saveAccessSession,
+  type BillingPlan,
+  type ClientAccess,
+} from "@/lib/accessApi";
 import {
   COUNTRY_DIAL_OPTIONS,
   DEFAULT_COUNTRY_DIAL,
@@ -59,6 +69,31 @@ export const Route = createFileRoute("/")({
 
 const WAITLIST_URL = "https://chat.whatsapp.com/Gw6qhCXXtyeDrukSxlM71u?mode=gi_t";
 
+const landingFallbackPlans: BillingPlan[] = [
+  {
+    id: "vip",
+    name: "VIP",
+    description: "Acesso mensal ao painel operacional.",
+    amount: 297,
+    currency: "BRL",
+    durationDays: 30,
+    checkoutEnabled: false,
+    checkoutProvider: "",
+    features: ["Painel ao vivo", "Sinais protegidos", "Surf, Tie e numero pagante"],
+  },
+  {
+    id: "premium",
+    name: "Premium",
+    description: "Acesso mensal com recursos completos.",
+    amount: 497,
+    currency: "BRL",
+    durationDays: 30,
+    checkoutEnabled: false,
+    checkoutProvider: "",
+    features: ["Tudo do VIP", "Narracao IA", "Leituras completas"],
+  },
+];
+
 const moduleCards = [
   { icon: BrainCircuit, label: "Leitura Neural", desc: "Detecta números pagantes em tempo real." },
   { icon: Waves, label: "Análise de Surf", desc: "Identifica força, quebra e retomada da mesa." },
@@ -87,11 +122,16 @@ const PARTICLES = Array.from({ length: 28 }, (_, i) => {
 function LoginPage() {
   const savedUser = readUserSession();
   const loginCardRef = useRef<HTMLDivElement | null>(null);
+  const plansCardRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [loading, setLoading] = useState(false);
+  const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState("");
   const [notice, setNotice] = useState("");
   const [pendingAccess, setPendingAccess] = useState<ClientAccess | null>(null);
   const [salesClosed, setSalesClosed] = useState<boolean | null>(null);
+  const [plans, setPlans] = useState<BillingPlan[]>(landingFallbackPlans);
+  const [checkoutLeadName, setCheckoutLeadName] = useState(savedUser.name || "");
+  const [checkoutLeadEmail, setCheckoutLeadEmail] = useState(savedUser.email || "");
   const [selectedCountryId, setSelectedCountryId] = useState(DEFAULT_COUNTRY_DIAL.id);
   const [whatsappPhone, setWhatsappPhone] = useState("");
   const selectedCountry =
@@ -106,10 +146,24 @@ function LoginPage() {
       .catch(() => {
         if (active) setSalesClosed(false);
       });
+    getBillingPlans()
+      .then((loadedPlans) => {
+        if (active && loadedPlans.length) setPlans(loadedPlans);
+      })
+      .catch(() => {
+        if (active) setPlans(landingFallbackPlans);
+      });
     return () => {
       active = false;
     };
   }, []);
+
+  const paidPlans = [...plans]
+    .filter((plan) => plan.id !== "free")
+    .sort((a, b) => {
+      const order = new Map([["vip", 0], ["premium", 1]]);
+      return (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99);
+    });
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -204,8 +258,44 @@ function LoginPage() {
       setNotice("Vagas encerradas no momento. Entre na fila de espera para a próxima abertura.");
       return;
     }
-    if (pendingAccess) saveAccessSession(pendingAccess);
-    window.location.href = "/app/planos";
+    if (pendingAccess) {
+      saveAccessSession(pendingAccess);
+      window.location.href = "/app/planos";
+      return;
+    }
+    setNotice("Escolha um plano abaixo e informe seu e-mail para abrir o checkout.");
+    plansCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function startDirectCheckout(plan: BillingPlan) {
+    if (plan.id === "free") return;
+    if (salesClosed) {
+      setNotice("Vagas encerradas no momento. Entre na fila de espera para a próxima abertura.");
+      return;
+    }
+    const email = checkoutLeadEmail.trim().toLowerCase();
+    const fullName = checkoutLeadName.trim();
+    if (!isValidCheckoutEmail(email)) {
+      setNotice("Informe um e-mail valido para abrir o checkout.");
+      plansCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (!plan.checkoutEnabled) {
+      setNotice("Checkout deste plano ainda nao esta configurado.");
+      return;
+    }
+    setNotice("");
+    setCheckoutLoadingPlan(plan.id);
+    try {
+      const checkout = await createPublicBillingCheckout(plan.id, {
+        email,
+        full_name: fullName,
+      });
+      window.location.href = checkout.checkout_url;
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Nao foi possivel abrir o checkout.");
+      setCheckoutLoadingPlan("");
+    }
   }
 
   function requestAccess() {
@@ -474,6 +564,79 @@ function LoginPage() {
                 </div>
               )}
 
+              {!salesClosed && (
+                <div
+                  ref={plansCardRef}
+                  className="mt-5 rounded-2xl border border-gold/30 bg-gold/10 p-4 text-left"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-gold/35 bg-gold/15">
+                      <Crown className="size-5 text-gold" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-black uppercase text-white">Comprar agora</div>
+                      <p className="mt-1 text-xs leading-5 text-slate-400">
+                        Veja os planos e abra o checkout sem precisar entrar no painel.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <input
+                      value={checkoutLeadName}
+                      onChange={(event) => setCheckoutLeadName(event.target.value)}
+                      placeholder="Nome"
+                      className="min-h-11 rounded-xl border border-border/70 bg-background/70 px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-gold/70"
+                    />
+                    <input
+                      value={checkoutLeadEmail}
+                      onChange={(event) => setCheckoutLeadEmail(event.target.value)}
+                      placeholder="Email para compra"
+                      type="email"
+                      inputMode="email"
+                      className="min-h-11 rounded-xl border border-border/70 bg-background/70 px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-gold/70"
+                    />
+                  </div>
+
+                  <div className="mt-3 grid gap-2">
+                    {paidPlans.map((plan) => (
+                      <button
+                        key={plan.id}
+                        type="button"
+                        onClick={() => startDirectCheckout(plan)}
+                        disabled={checkoutLoadingPlan === plan.id || !plan.checkoutEnabled}
+                        className="flex min-h-[72px] w-full items-center justify-between gap-3 rounded-2xl border border-gold/30 bg-black/35 px-3 py-3 text-left transition hover:border-gold/60 hover:bg-gold/10 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-black uppercase text-white">{plan.name}</span>
+                            <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-black uppercase text-gold">
+                              {formatMoney(plan.amount, plan.currency)}/mes
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {plan.features.slice(0, 3).map((feature) => (
+                              <span key={feature} className="inline-flex items-center gap-1 text-[10px] text-slate-400">
+                                <Check className="size-3 text-gold" />
+                                {feature}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-gold px-3 py-2 text-[11px] font-black uppercase text-black">
+                          {checkoutLoadingPlan === plan.id ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <Crown className="size-3.5" />
+                          )}
+                          Checkout
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="mt-5 border-t border-border/60 pt-4 text-center text-[11px] text-slate-400">
                 Acesso exclusivo para clientes ativos.
                 {!salesClosed && (
@@ -572,6 +735,17 @@ function canEnterWhenSalesClosed(access: ClientAccess) {
     access.role === "owner" ||
     access.role === "admin"
   );
+}
+
+function isValidCheckoutEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function formatMoney(amount: number, currency: string) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: currency || "BRL",
+  }).format(amount);
 }
 
 function LoginField({
