@@ -1,0 +1,1320 @@
+import { createFileRoute } from "@tanstack/react-router";
+import {
+  Activity,
+  BellRing,
+  Bot,
+  BrainCircuit,
+  CheckCircle2,
+  DatabaseZap,
+  Eraser,
+  Eye,
+  Flame,
+  History,
+  Layers3,
+  Plus,
+  RotateCcw,
+  Save,
+  Send,
+  ShieldCheck,
+  Trash2,
+  Trophy,
+  Wand2,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { AppBadge } from "@/components/ui-app/AppBadge";
+import { GlassCard } from "@/components/ui-app/GlassCard";
+import { SectionTitle } from "@/components/ui-app/SectionTitle";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { useDashboardData } from "@/hooks/useDashboardData";
+import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import {
+  DEFAULT_VALIDATOR_CONFIG,
+  NeuralValidatorEngine,
+  VALIDATOR_HISTORY_OPTIONS,
+  formatPercent,
+  formatToken,
+  matchesPattern,
+  sideName,
+  sideTone,
+  type PatternMiningFilters,
+} from "@/neuralValidator/NeuralValidatorEngine";
+import {
+  DEFAULT_MESSAGE_TEMPLATES,
+  createStorageId,
+  currentUserId,
+  encodeToken,
+  maskBotToken,
+  readNotificationChannels,
+  readPatternDraft,
+  readSavedPatterns,
+  readValidatorHistory,
+  removeNotificationChannel,
+  removeSavedPattern,
+  upsertNotificationChannel,
+  upsertSavedPattern,
+  writePatternDraft,
+  writeSavedPatterns,
+} from "@/neuralValidator/NeuralValidatorStorage";
+import type { Round, RoundResult } from "@/types/dashboard";
+import type {
+  LiveValidatorHit,
+  PatternSuggestion,
+  SavedValidatorPattern,
+  ValidatorConfig,
+  ValidatorDestination,
+  ValidatorEntryType,
+  ValidatorGaleLimit,
+  ValidatorNotificationChannel,
+  ValidatorPatternToken,
+  ValidatorResult,
+} from "@/types/neuralValidator";
+
+export const Route = createFileRoute("/app/validador")({
+  component: NeuralValidatorPage,
+});
+
+const engine = new NeuralValidatorEngine();
+
+const ENTRY_OPTIONS: Array<{ value: ValidatorEntryType; label: string }> = [
+  { value: "AI", label: "Entrada sugerida pela IA" },
+  { value: "BANKER", label: "Entrar no Banker" },
+  { value: "PLAYER", label: "Entrar no Player" },
+  { value: "TIE", label: "Entrar no Tie" },
+  { value: "OPPOSITE", label: "Entrar no lado oposto" },
+  { value: "SAME_LAST", label: "Mesmo lado do ultimo resultado" },
+];
+
+const DESTINATION_OPTIONS: Array<{ value: ValidatorDestination; label: string }> = [
+  { value: "site", label: "Somente no site" },
+  { value: "telegram", label: "Somente Telegram" },
+  { value: "site_telegram", label: "Site + Telegram" },
+  { value: "monitor", label: "Apenas monitorar" },
+  { value: "disabled", label: "Desativado" },
+];
+
+function NeuralValidatorPage() {
+  const { data, mode } = useDashboardData();
+  const session = readUserSession();
+  const fullAccess = hasFullAccess(session);
+  const [storageVersion, setStorageVersion] = useState(0);
+  const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
+  const historyRounds = useMemo(
+    () => readValidatorHistory(realTimeRounds),
+    [realTimeRounds, storageVersion],
+  );
+  const hasHistory = historyRounds.length > 0;
+  const planLimits = planLimitForSession(session.plan, fullAccess);
+  const [notice, setNotice] = useState("");
+
+  const [pattern, setPattern] = useState<ValidatorPatternToken[]>(() => {
+    const draft = readPatternDraft();
+    return draft.length ? draft : [{ side: "B" }, { side: "P" }, { side: "B" }];
+  });
+  const [tokenSide, setTokenSide] = useState<RoundResult>("B");
+  const [tokenScore, setTokenScore] = useState("");
+  const [config, setConfig] = useState<ValidatorConfig>({
+    ...DEFAULT_VALIDATOR_CONFIG,
+    name: "Estrategia Neural",
+    historySize: Math.min(DEFAULT_VALIDATOR_CONFIG.historySize, planLimits.history),
+  });
+  const [manualResult, setManualResult] = useState<ValidatorResult | null>(null);
+  const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
+  const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
+  const [selectedChannelId, setSelectedChannelId] = useState("");
+  const [destination, setDestination] = useState<ValidatorDestination>("site");
+  const [cooldownRounds, setCooldownRounds] = useState(2);
+  const [messageOverride, setMessageOverride] = useState("");
+  const [channelForm, setChannelForm] = useState({
+    name: "Sala Premium",
+    botToken: "",
+    chatId: "",
+    buttonLink: "",
+    isActive: true,
+    entryTemplate: DEFAULT_MESSAGE_TEMPLATES.entry,
+  });
+  const [filters, setFilters] = useState<PatternMiningFilters>({
+    historySize: Math.min(5000, planLimits.history),
+    patternLength: 3,
+    entryType: "AI",
+    galeLimit: 1,
+    minAccuracy: 70,
+    minOccurrences: 5,
+    includeTie: true,
+    includeNumbers: true,
+    includeOpposite: true,
+    hotOnly: false,
+    lowRedOnly: false,
+  });
+
+  const suggestions = useMemo(() => {
+    if (!hasHistory || !planLimits.ai) return [];
+    return engine.minePatterns(historyRounds, filters);
+  }, [filters, hasHistory, historyRounds, planLimits.ai]);
+
+  const liveHits = useMemo(
+    () => detectLiveHits(savedPatterns, historyRounds),
+    [savedPatterns, historyRounds],
+  );
+
+  useEffect(() => {
+    if (!liveHits.length) return;
+    const detectedSignature = liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|");
+    setSavedPatterns((current) => {
+      let changed = false;
+      const now = new Date().toISOString();
+      const next = current.map((patternItem) => {
+        const hit = liveHits.find((item) => item.pattern.id === patternItem.id);
+        if (!hit || patternItem.lastDetectedRoundId === hit.detectedRoundId) return patternItem;
+        changed = true;
+        return {
+          ...patternItem,
+          lastDetectedAt: now,
+          lastDetectedRoundId: hit.detectedRoundId,
+          updatedAt: now,
+        };
+      });
+      if (changed) writeSavedPatterns(next);
+      return changed ? next : current;
+    });
+    setStorageVersion((value) => value + 1);
+  }, [liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|")]);
+
+  function addToken(side = tokenSide, scoreText = tokenScore) {
+    const score = Number(scoreText);
+    const token: ValidatorPatternToken = {
+      side,
+      ...(Number.isFinite(score) && score > 0 ? { score } : {}),
+    };
+    setPattern((current) => [...current, token]);
+    setTokenScore("");
+  }
+
+  function validateCurrentPattern() {
+    const result = engine.validatePattern(historyRounds, pattern, config);
+    setManualResult(result);
+    showNotice(
+      result.totalValidated
+        ? `Validado com ${result.totalValidated} resultados reais.`
+        : "Padrao detectado, mas ainda sem amostra suficiente para dizer o que puxou.",
+    );
+  }
+
+  function saveCurrentPattern(sourceResult = manualResult, sourcePattern = pattern, name = config.name) {
+    if (!sourcePattern.length) return;
+    if (savedPatterns.length >= planLimits.patterns) {
+      showNotice(`Seu plano permite ate ${planLimits.patterns} padroes salvos.`);
+      return;
+    }
+    const validation =
+      sourceResult ?? engine.validatePattern(historyRounds, sourcePattern, config);
+    const now = new Date().toISOString();
+    const saved: SavedValidatorPattern = {
+      id: createStorageId("pattern"),
+      userId: currentUserId(),
+      name: name || "Estrategia Neural",
+      tableId: config.tableId,
+      pattern: sourcePattern,
+      entryType: config.entryType,
+      pulledSide: validation.pulledSide,
+      galeLimit: config.galeLimit,
+      tieProtection: config.tieProtection,
+      destination,
+      telegramChannelId: selectedChannelId,
+      messageOverride,
+      cooldownRounds,
+      isActive: true,
+      validation,
+      currentGreenStreak: validation.currentGreenStreak,
+      wins: validation.sgWins + validation.g1Wins + validation.g2Wins,
+      losses: validation.losses,
+      lastDetectedAt: "",
+      createdAt: now,
+      updatedAt: now,
+    };
+    const next = upsertSavedPattern(saved);
+    setSavedPatterns(next);
+    showNotice("Padrao salvo para monitoramento ao vivo.");
+  }
+
+  function saveSuggestion(suggestion: PatternSuggestion) {
+    saveCurrentPattern(
+      suggestion.validation,
+      suggestion.pattern,
+      `IA ${sideName(suggestion.pulledSide)} ${formatPercent(suggestion.validation.accuracy)}`,
+    );
+  }
+
+  function removePattern(id: string) {
+    setSavedPatterns(removeSavedPattern(id));
+    showNotice("Padrao removido.");
+  }
+
+  function refreshPattern(patternItem: SavedValidatorPattern) {
+    const validation = engine.validatePattern(historyRounds, patternItem.pattern, {
+      ...config,
+      entryType: patternItem.entryType,
+      galeLimit: patternItem.galeLimit,
+      tieProtection: patternItem.tieProtection,
+    });
+    const nextItem = {
+      ...patternItem,
+      validation,
+      pulledSide: validation.pulledSide,
+      wins: validation.sgWins + validation.g1Wins + validation.g2Wins,
+      losses: validation.losses,
+      currentGreenStreak: validation.currentGreenStreak,
+      updatedAt: new Date().toISOString(),
+    };
+    setSavedPatterns(upsertSavedPattern(nextItem));
+    showNotice("Padrao atualizado com o historico real disponivel.");
+  }
+
+  function resetPatternScore(patternItem: SavedValidatorPattern) {
+    const nextItem = {
+      ...patternItem,
+      wins: 0,
+      losses: 0,
+      currentGreenStreak: 0,
+      lastDetectedAt: "",
+      lastDetectedRoundId: undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    setSavedPatterns(upsertSavedPattern(nextItem));
+    showNotice("Placar do padrao zerado.");
+  }
+
+  function saveChannel() {
+    if (!planLimits.telegram) {
+      showNotice("Telegram fica bloqueado para o plano Free.");
+      return;
+    }
+    if (channels.length >= planLimits.channels) {
+      showNotice(`Seu plano permite ate ${planLimits.channels} canais.`);
+      return;
+    }
+    const now = new Date().toISOString();
+    const token = channelForm.botToken.trim();
+    const channel: ValidatorNotificationChannel = {
+      id: createStorageId("channel"),
+      userId: currentUserId(),
+      name: channelForm.name || "Canal Telegram",
+      botTokenMasked: maskBotToken(token),
+      botTokenEncoded: encodeToken(token),
+      chatId: channelForm.chatId.trim(),
+      buttonLink: channelForm.buttonLink.trim(),
+      isActive: channelForm.isActive,
+      templates: {
+        ...DEFAULT_MESSAGE_TEMPLATES,
+        entry: channelForm.entryTemplate || DEFAULT_MESSAGE_TEMPLATES.entry,
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+    const next = upsertNotificationChannel(channel);
+    setChannels(next);
+    setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
+    showNotice("Canal salvo para este usuario. Token fica mascarado depois de salvo.");
+  }
+
+  function removeChannel(id: string) {
+    setChannels(removeNotificationChannel(id));
+    showNotice("Canal removido.");
+  }
+
+  function showNotice(message: string) {
+    setNotice(message);
+    window.setTimeout(() => setNotice(""), 3200);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-xl font-black text-gradient-brand">Validador Neural de Estrategias</h1>
+            <AppBadge tone="blue" pulse>Modulo premium</AppBadge>
+            <AppBadge tone="green">Motor independente</AppBadge>
+          </div>
+          <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+            Monte, valide, salve e monitore estrategias usando apenas historico real coletado pela plataforma.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <AppBadge tone={hasHistory ? "green" : "amber"}>
+            {hasHistory ? `${historyRounds.length.toLocaleString("pt-BR")} rodadas reais` : "Sem historico real"}
+          </AppBadge>
+          <AppBadge tone={fullAccess ? "green" : "amber"}>{planLimits.label}</AppBadge>
+        </div>
+      </div>
+
+      {notice && (
+        <div className="rounded-xl border border-neon-cyan/35 bg-neon-cyan/10 px-4 py-3 text-sm text-neon-cyan">
+          {notice}
+        </div>
+      )}
+
+      {!hasHistory && (
+        <GlassCard className="border-warning/40">
+          <div className="flex items-start gap-3">
+            <DatabaseZap className="mt-0.5 size-5 text-warning" />
+            <div>
+              <div className="text-sm font-black text-warning">Aguardando historico real da mesa</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                O validador nao calcula green, red ou assertividade com dados ficticios. Assim que o dashboard coletar rodadas reais, a validacao fica ativa.
+              </p>
+            </div>
+          </div>
+        </GlassCard>
+      )}
+
+      <Tabs defaultValue="dashboard" className="space-y-4">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-5">
+          <TabsTrigger value="dashboard" className="gap-1.5"><Activity className="size-3.5" /> Dashboard</TabsTrigger>
+          <TabsTrigger value="validator" className="gap-1.5"><ShieldCheck className="size-3.5" /> Validador</TabsTrigger>
+          <TabsTrigger value="ai" className="gap-1.5"><Wand2 className="size-3.5" /> IA de Padroes</TabsTrigger>
+          <TabsTrigger value="saved" className="gap-1.5"><Save className="size-3.5" /> Padroes Salvos</TabsTrigger>
+          <TabsTrigger value="channels" className="gap-1.5"><Send className="size-3.5" /> Canais</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="dashboard" className="space-y-4">
+          <DashboardTab
+            hasHistory={hasHistory}
+            liveHits={liveHits}
+            savedPatterns={savedPatterns}
+            suggestions={suggestions}
+            channels={channels}
+            historyRounds={historyRounds}
+          />
+        </TabsContent>
+
+        <TabsContent value="validator" className="space-y-4">
+          <ValidatorTab
+            pattern={pattern}
+            setPattern={setPattern}
+            tokenSide={tokenSide}
+            setTokenSide={setTokenSide}
+            tokenScore={tokenScore}
+            setTokenScore={setTokenScore}
+            addToken={addToken}
+            config={config}
+            setConfig={setConfig}
+            destination={destination}
+            setDestination={setDestination}
+            channels={channels}
+            selectedChannelId={selectedChannelId}
+            setSelectedChannelId={setSelectedChannelId}
+            cooldownRounds={cooldownRounds}
+            setCooldownRounds={setCooldownRounds}
+            messageOverride={messageOverride}
+            setMessageOverride={setMessageOverride}
+            manualResult={manualResult}
+            validateCurrentPattern={validateCurrentPattern}
+            saveCurrentPattern={saveCurrentPattern}
+            hasHistory={hasHistory}
+            historyLimit={planLimits.history}
+          />
+        </TabsContent>
+
+        <TabsContent value="ai" className="space-y-4">
+          <AiPatternsTab
+            filters={filters}
+            setFilters={setFilters}
+            suggestions={suggestions}
+            hasHistory={hasHistory}
+            aiEnabled={planLimits.ai}
+            historyLimit={planLimits.history}
+            onValidateSuggestion={(suggestion) => {
+              setPattern(suggestion.pattern);
+              setManualResult(suggestion.validation);
+              showNotice("Sugestao carregada no validador.");
+            }}
+            onSaveSuggestion={saveSuggestion}
+          />
+        </TabsContent>
+
+        <TabsContent value="saved" className="space-y-4">
+          <SavedPatternsTab
+            patterns={savedPatterns}
+            channels={channels}
+            onRemove={removePattern}
+            onRefresh={refreshPattern}
+            onReset={resetPatternScore}
+            onToggle={(patternItem) => {
+              const updated = { ...patternItem, isActive: !patternItem.isActive, updatedAt: new Date().toISOString() };
+              setSavedPatterns(upsertSavedPattern(updated));
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="channels" className="space-y-4">
+          <ChannelsTab
+            channels={channels}
+            channelForm={channelForm}
+            setChannelForm={setChannelForm}
+            onSave={saveChannel}
+            onRemove={removeChannel}
+            telegramEnabled={planLimits.telegram}
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function DashboardTab({
+  hasHistory,
+  liveHits,
+  savedPatterns,
+  suggestions,
+  channels,
+  historyRounds,
+}: {
+  hasHistory: boolean;
+  liveHits: LiveValidatorHit[];
+  savedPatterns: SavedValidatorPattern[];
+  suggestions: PatternSuggestion[];
+  channels: ValidatorNotificationChannel[];
+  historyRounds: Round[];
+}) {
+  const activePatterns = savedPatterns.filter((pattern) => pattern.isActive);
+  const totalWins = savedPatterns.reduce((sum, pattern) => sum + pattern.wins, 0);
+  const totalLosses = savedPatterns.reduce((sum, pattern) => sum + pattern.losses, 0);
+  const accuracy = totalWins + totalLosses ? (totalWins / (totalWins + totalLosses)) * 100 : undefined;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
+        <Metric label="Padroes salvos" value={savedPatterns.length} icon={<Layers3 className="size-4" />} />
+        <Metric label="Ativos" value={activePatterns.length} icon={<Eye className="size-4" />} tone="text-neon-cyan" />
+        <Metric label="Canais" value={channels.length} icon={<Send className="size-4" />} />
+        <Metric label="Rodadas reais" value={historyRounds.length} icon={<History className="size-4" />} tone="text-success" />
+        <Metric label="Assertividade" value={formatPercent(accuracy)} icon={<Trophy className="size-4" />} tone="text-neon-cyan" />
+      </div>
+
+      {liveHits.length ? (
+        <div className="space-y-3">
+          {liveHits.map((hit) => (
+            <GlassCard key={hit.id} className="border-neon-cyan/40">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-black text-neon-cyan">
+                    <BellRing className="size-4" /> PADRAO SALVO DETECTADO
+                  </div>
+                  <div className="mt-2 text-sm">
+                    Mesa: <span className="font-bold">Bac Bo</span>
+                  </div>
+                  <div className="mt-1">
+                    <PatternLine pattern={hit.pattern.pattern} pulledSide={hit.entry} />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/70 bg-secondary/25 p-3 text-xs">
+                  <div>Entrada: <SideLabel side={hit.entry} /></div>
+                  <div>Gale: ate G{hit.pattern.galeLimit}</div>
+                  <div>Destino: {destinationLabel(hit.pattern.destination)}</div>
+                  <div>Detectado na rodada {hit.detectedRoundId}</div>
+                </div>
+              </div>
+            </GlassCard>
+          ))}
+        </div>
+      ) : (
+        <GlassCard>
+          <div className="flex items-start gap-3">
+            <Bot className="mt-0.5 size-5 text-neon-cyan" />
+            <div>
+              <div className="text-sm font-black">Monitoramento ao vivo</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {hasHistory
+                  ? "Nenhum padrao salvo apareceu nas ultimas rodadas."
+                  : "Aguardando historico real para monitorar os padroes salvos."}
+              </p>
+            </div>
+          </div>
+        </GlassCard>
+      )}
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <GlassCard>
+          <SectionTitle title="Estrategias quentes da IA" subtitle="Top sugestoes calculadas com o historico real disponivel." />
+          <div className="mt-4 space-y-2">
+            {suggestions.slice(0, 4).map((suggestion, index) => (
+              <SuggestionRow key={suggestion.id} suggestion={suggestion} rank={index + 1} />
+            ))}
+            {!suggestions.length && (
+              <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
+                Nenhuma sugestao com amostra suficiente no filtro atual.
+              </div>
+            )}
+          </div>
+        </GlassCard>
+
+        <GlassCard>
+          <SectionTitle title="Ultimos padroes salvos" subtitle="Contadores proprios, separados dos outros motores." />
+          <div className="mt-4 space-y-2">
+            {savedPatterns.slice(0, 4).map((pattern) => (
+              <div key={pattern.id} className="rounded-xl border border-border/70 bg-secondary/20 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-bold">{pattern.name}</div>
+                    <PatternLine pattern={pattern.pattern} pulledSide={pattern.pulledSide} compact />
+                  </div>
+                  <AppBadge tone={pattern.isActive ? "green" : "muted"}>{pattern.isActive ? "ativo" : "inativo"}</AppBadge>
+                </div>
+              </div>
+            ))}
+            {!savedPatterns.length && (
+              <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
+                Nenhum padrao salvo ainda.
+              </div>
+            )}
+          </div>
+        </GlassCard>
+      </div>
+    </div>
+  );
+}
+
+function ValidatorTab(props: {
+  pattern: ValidatorPatternToken[];
+  setPattern: (pattern: ValidatorPatternToken[]) => void;
+  tokenSide: RoundResult;
+  setTokenSide: (side: RoundResult) => void;
+  tokenScore: string;
+  setTokenScore: (score: string) => void;
+  addToken: (side?: RoundResult, score?: string) => void;
+  config: ValidatorConfig;
+  setConfig: (config: ValidatorConfig) => void;
+  destination: ValidatorDestination;
+  setDestination: (destination: ValidatorDestination) => void;
+  channels: ValidatorNotificationChannel[];
+  selectedChannelId: string;
+  setSelectedChannelId: (id: string) => void;
+  cooldownRounds: number;
+  setCooldownRounds: (value: number) => void;
+  messageOverride: string;
+  setMessageOverride: (value: string) => void;
+  manualResult: ValidatorResult | null;
+  validateCurrentPattern: () => void;
+  saveCurrentPattern: () => void;
+  hasHistory: boolean;
+  historyLimit: number;
+}) {
+  const {
+    pattern,
+    setPattern,
+    tokenSide,
+    setTokenSide,
+    tokenScore,
+    setTokenScore,
+    addToken,
+    config,
+    setConfig,
+    destination,
+    setDestination,
+    channels,
+    selectedChannelId,
+    setSelectedChannelId,
+    cooldownRounds,
+    setCooldownRounds,
+    messageOverride,
+    setMessageOverride,
+    manualResult,
+    validateCurrentPattern,
+    saveCurrentPattern,
+    hasHistory,
+    historyLimit,
+  } = props;
+
+  const canSave = pattern.length >= 2 && hasHistory;
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(330px,0.9fr)]">
+      <div className="space-y-4">
+        <GlassCard>
+          <SectionTitle title="Montador manual" subtitle="Adicione Banker, Player, Tie, com ou sem numero." />
+          <div className="mt-4 rounded-xl border border-border/70 bg-background/35 p-3">
+            <PatternLine pattern={pattern} pulledSide={manualResult?.pulledSide ?? null} />
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
+            <Select value={tokenSide} onValueChange={(value) => setTokenSide(value as RoundResult)}>
+              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="B">Banker</SelectItem>
+                <SelectItem value="P">Player</SelectItem>
+                <SelectItem value="T">Tie</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input
+              value={tokenScore}
+              onChange={(event) => setTokenScore(event.target.value)}
+              inputMode="numeric"
+              placeholder="Numero opcional. Ex: 10"
+              className="bg-secondary/30"
+            />
+            <Button type="button" onClick={() => addToken()} className="btn-primary-grad">
+              <Plus className="size-4" /> Adicionar
+            </Button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <QuickToken side="B" label="Banker" onClick={addToken} />
+            <QuickToken side="P" label="Player" onClick={addToken} />
+            <QuickToken side="T" label="Tie" onClick={addToken} />
+            <QuickToken side="B" score="10" label="B10" onClick={addToken} />
+            <QuickToken side="P" score="7" label="P7" onClick={addToken} />
+            <QuickToken side="T" score="6" label="T6" onClick={addToken} />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setPattern(pattern.map(invertToken))}
+            >
+              <RotateCcw className="size-4" /> Inverter
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setPattern(pattern.slice(0, -1))}
+              disabled={!pattern.length}
+            >
+              <Trash2 className="size-4" /> Remover item
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setPattern([])}>
+              <Eraser className="size-4" /> Limpar
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => writePatternDraft(pattern)}
+            >
+              <Save className="size-4" /> Salvar rascunho
+            </Button>
+          </div>
+        </GlassCard>
+
+        <GlassCard>
+          <SectionTitle title="Configuracao da entrada" />
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <Field label="Nome da estrategia">
+              <Input value={config.name} onChange={(event) => setConfig({ ...config, name: event.target.value })} />
+            </Field>
+            <Field label="Entrada">
+              <Select value={config.entryType} onValueChange={(value) => setConfig({ ...config, entryType: value as ValidatorEntryType })}>
+                <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ENTRY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Gale">
+              <Select value={String(config.galeLimit)} onValueChange={(value) => setConfig({ ...config, galeLimit: Number(value) as ValidatorGaleLimit })}>
+                <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">SG</SelectItem>
+                  <SelectItem value="1">G1</SelectItem>
+                  <SelectItem value="2">G2</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Historico para validar">
+              <Select
+                value={String(config.historySize)}
+                onValueChange={(value) => setConfig({ ...config, historySize: Math.min(Number(value), historyLimit) })}
+              >
+                <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {availableHistoryOptions(historyLimit).map((option) => (
+                    <SelectItem key={option} value={String(option)}>{option / 1000}k rodadas</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Mesa vinculada">
+              <Input value={config.tableId} onChange={(event) => setConfig({ ...config, tableId: event.target.value })} />
+            </Field>
+            <Field label="Protecao no empate">
+              <div className="flex h-9 items-center justify-between rounded-md border border-input bg-secondary/20 px-3">
+                <span className="text-sm">{config.tieProtection ? "Ativa" : "Desativada"}</span>
+                <Switch checked={config.tieProtection} onCheckedChange={(checked) => setConfig({ ...config, tieProtection: checked })} />
+              </div>
+            </Field>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button type="button" className="btn-primary-grad" onClick={validateCurrentPattern} disabled={!hasHistory || pattern.length < 2}>
+              <ShieldCheck className="size-4" /> Validar no historico real
+            </Button>
+            <Button type="button" variant="secondary" onClick={saveCurrentPattern} disabled={!canSave}>
+              <Save className="size-4" /> Salvar padrao
+            </Button>
+          </div>
+        </GlassCard>
+      </div>
+
+      <div className="space-y-4">
+        <GlassCard>
+          <SectionTitle title="Destino do sinal" subtitle="Configuracao propria deste padrao." />
+          <div className="mt-4 space-y-3">
+            <Field label="Destino">
+              <Select value={destination} onValueChange={(value) => setDestination(value as ValidatorDestination)}>
+                <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DESTINATION_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Canal Telegram">
+              <Select value={selectedChannelId || "none"} onValueChange={(value) => setSelectedChannelId(value === "none" ? "" : value)}>
+                <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nenhum canal</SelectItem>
+                  {channels.map((channel) => <SelectItem key={channel.id} value={channel.id}>{channel.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Cooldown entre alertas">
+              <Input
+                value={cooldownRounds}
+                onChange={(event) => setCooldownRounds(Math.max(0, Number(event.target.value) || 0))}
+                type="number"
+              />
+            </Field>
+            <Field label="Mensagem personalizada">
+              <Textarea
+                value={messageOverride}
+                onChange={(event) => setMessageOverride(event.target.value)}
+                placeholder="Opcional. Use {{pattern}}, {{entry}}, {{percentage}}, {{table}}"
+                className="min-h-24"
+              />
+            </Field>
+          </div>
+        </GlassCard>
+
+        <ValidationResultCard result={manualResult} />
+      </div>
+    </div>
+  );
+}
+
+function AiPatternsTab({
+  filters,
+  setFilters,
+  suggestions,
+  hasHistory,
+  aiEnabled,
+  historyLimit,
+  onValidateSuggestion,
+  onSaveSuggestion,
+}: {
+  filters: PatternMiningFilters;
+  setFilters: (filters: PatternMiningFilters) => void;
+  suggestions: PatternSuggestion[];
+  hasHistory: boolean;
+  aiEnabled: boolean;
+  historyLimit: number;
+  onValidateSuggestion: (suggestion: PatternSuggestion) => void;
+  onSaveSuggestion: (suggestion: PatternSuggestion) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <GlassCard>
+        <SectionTitle title="Filtros da IA" subtitle="A IA minera apenas o historico real da mesa." />
+        <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <Field label="Historico">
+            <Select value={String(filters.historySize)} onValueChange={(value) => setFilters({ ...filters, historySize: Math.min(Number(value), historyLimit) })}>
+              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {availableHistoryOptions(historyLimit).map((option) => <SelectItem key={option} value={String(option)}>{option / 1000}k</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Tamanho">
+            <Select value={String(filters.patternLength)} onValueChange={(value) => setFilters({ ...filters, patternLength: Number(value) })}>
+              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {[2, 3, 4, 5].map((value) => <SelectItem key={value} value={String(value)}>{value} resultados</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Entrada">
+            <Select value={filters.entryType} onValueChange={(value) => setFilters({ ...filters, entryType: value as ValidatorEntryType })}>
+              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {ENTRY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Gale maximo">
+            <Select value={String(filters.galeLimit)} onValueChange={(value) => setFilters({ ...filters, galeLimit: Number(value) as ValidatorGaleLimit })}>
+              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">SG</SelectItem>
+                <SelectItem value="1">G1</SelectItem>
+                <SelectItem value="2">G2</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Assertividade minima">
+            <Input type="number" value={filters.minAccuracy} onChange={(event) => setFilters({ ...filters, minAccuracy: Number(event.target.value) || 0 })} />
+          </Field>
+          <Field label="Minimo aparicoes">
+            <Input type="number" value={filters.minOccurrences} onChange={(event) => setFilters({ ...filters, minOccurrences: Number(event.target.value) || 1 })} />
+          </Field>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <FilterSwitch label="Incluir Tie" checked={filters.includeTie} onCheckedChange={(checked) => setFilters({ ...filters, includeTie: checked })} />
+          <FilterSwitch label="Incluir numeros" checked={filters.includeNumbers} onCheckedChange={(checked) => setFilters({ ...filters, includeNumbers: checked })} />
+          <FilterSwitch label="Lado oposto" checked={filters.includeOpposite} onCheckedChange={(checked) => setFilters({ ...filters, includeOpposite: checked })} />
+          <FilterSwitch label="Apenas quentes" checked={filters.hotOnly} onCheckedChange={(checked) => setFilters({ ...filters, hotOnly: checked })} />
+          <FilterSwitch label="Baixo RED" checked={filters.lowRedOnly} onCheckedChange={(checked) => setFilters({ ...filters, lowRedOnly: checked })} />
+        </div>
+      </GlassCard>
+
+      {!aiEnabled && (
+        <GlassCard className="border-warning/40">
+          <div className="text-sm font-black text-warning">IA de Padroes liberada para VIP/Admin.</div>
+          <p className="mt-1 text-xs text-muted-foreground">Clientes Free podem validar poucos padroes manualmente, sem mineracao completa.</p>
+        </GlassCard>
+      )}
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        {suggestions.map((suggestion, index) => (
+          <SuggestionCard
+            key={suggestion.id}
+            suggestion={suggestion}
+            rank={index + 1}
+            onValidate={() => onValidateSuggestion(suggestion)}
+            onSave={() => onSaveSuggestion(suggestion)}
+          />
+        ))}
+      </div>
+      {hasHistory && aiEnabled && !suggestions.length && (
+        <GlassCard>
+          <div className="text-sm text-muted-foreground">Nenhum padrao encontrou a assertividade minima com amostra real suficiente.</div>
+        </GlassCard>
+      )}
+    </div>
+  );
+}
+
+function SavedPatternsTab({
+  patterns,
+  channels,
+  onRemove,
+  onRefresh,
+  onReset,
+  onToggle,
+}: {
+  patterns: SavedValidatorPattern[];
+  channels: ValidatorNotificationChannel[];
+  onRemove: (id: string) => void;
+  onRefresh: (pattern: SavedValidatorPattern) => void;
+  onReset: (pattern: SavedValidatorPattern) => void;
+  onToggle: (pattern: SavedValidatorPattern) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      {patterns.map((pattern) => {
+        const channel = channels.find((item) => item.id === pattern.telegramChannelId);
+        return (
+          <GlassCard key={pattern.id}>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base font-black">{pattern.name}</h3>
+                  <AppBadge tone={pattern.isActive ? "green" : "muted"}>{pattern.isActive ? "ativo" : "inativo"}</AppBadge>
+                  <AppBadge tone="blue">{destinationLabel(pattern.destination)}</AppBadge>
+                </div>
+                <PatternLine pattern={pattern.pattern} pulledSide={pattern.pulledSide} />
+                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-7">
+                  <MiniStat label="Entrada" value={sideName(pattern.pulledSide)} />
+                  <MiniStat label="Gale" value={`G${pattern.galeLimit}`} />
+                  <MiniStat label="Tie" value={pattern.tieProtection ? "protegido" : "normal"} />
+                  <MiniStat label="Sinais" value={pattern.validation?.totalSignals ?? 0} />
+                  <MiniStat label="Green" value={pattern.wins} tone="text-success" />
+                  <MiniStat label="Red" value={pattern.losses} tone="text-destructive" />
+                  <MiniStat label="Assert." value={formatPercent(pattern.validation?.accuracy)} tone="text-neon-cyan" />
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  Canal: {channel?.name || "nenhum"} | Ultima deteccao: {pattern.lastDetectedAt ? new Date(pattern.lastDetectedAt).toLocaleString("pt-BR") : "ainda nao detectado"}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 lg:justify-end">
+                <Button type="button" variant="secondary" size="sm" onClick={() => onToggle(pattern)}>
+                  {pattern.isActive ? "Desativar" : "Ativar"}
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => onRefresh(pattern)}>
+                  Atualizar
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => onReset(pattern)}>
+                  Zerar
+                </Button>
+                <Button type="button" variant="destructive" size="sm" onClick={() => onRemove(pattern.id)}>
+                  Excluir
+                </Button>
+              </div>
+            </div>
+          </GlassCard>
+        );
+      })}
+      {!patterns.length && (
+        <GlassCard>
+          <div className="text-sm text-muted-foreground">Nenhum padrao salvo ainda. Valide uma estrategia e clique em salvar padrao.</div>
+        </GlassCard>
+      )}
+    </div>
+  );
+}
+
+function ChannelsTab({
+  channels,
+  channelForm,
+  setChannelForm,
+  onSave,
+  onRemove,
+  telegramEnabled,
+}: {
+  channels: ValidatorNotificationChannel[];
+  channelForm: {
+    name: string;
+    botToken: string;
+    chatId: string;
+    buttonLink: string;
+    isActive: boolean;
+    entryTemplate: string;
+  };
+  setChannelForm: (form: {
+    name: string;
+    botToken: string;
+    chatId: string;
+    buttonLink: string;
+    isActive: boolean;
+    entryTemplate: string;
+  }) => void;
+  onSave: () => void;
+  onRemove: (id: string) => void;
+  telegramEnabled: boolean;
+}) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
+      <GlassCard>
+        <SectionTitle title="Meus canais de envio" subtitle="Cada usuario Premium/VIP usa os proprios canais e modelos." />
+        {!telegramEnabled && (
+          <div className="mt-4 rounded-xl border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
+            Telegram bloqueado no plano Free. O alerta no site continua disponivel.
+          </div>
+        )}
+        <div className="mt-4 space-y-3">
+          <Field label="Nome do canal">
+            <Input value={channelForm.name} onChange={(event) => setChannelForm({ ...channelForm, name: event.target.value })} />
+          </Field>
+          <Field label="Bot Token">
+            <Input value={channelForm.botToken} onChange={(event) => setChannelForm({ ...channelForm, botToken: event.target.value })} placeholder="872946...XNwY" />
+          </Field>
+          <Field label="Chat ID">
+            <Input value={channelForm.chatId} onChange={(event) => setChannelForm({ ...channelForm, chatId: event.target.value })} />
+          </Field>
+          <Field label="Link do botao">
+            <Input value={channelForm.buttonLink} onChange={(event) => setChannelForm({ ...channelForm, buttonLink: event.target.value })} />
+          </Field>
+          <Field label="Status">
+            <div className="flex h-9 items-center justify-between rounded-md border border-input bg-secondary/20 px-3">
+              <span className="text-sm">{channelForm.isActive ? "Ativo" : "Inativo"}</span>
+              <Switch checked={channelForm.isActive} onCheckedChange={(checked) => setChannelForm({ ...channelForm, isActive: checked })} />
+            </div>
+          </Field>
+          <Field label="Modelo entrada">
+            <Textarea value={channelForm.entryTemplate} onChange={(event) => setChannelForm({ ...channelForm, entryTemplate: event.target.value })} className="min-h-36" />
+          </Field>
+          <Button type="button" className="w-full btn-primary-grad" onClick={onSave} disabled={!telegramEnabled}>
+            <Save className="size-4" /> Salvar configuracao
+          </Button>
+        </div>
+      </GlassCard>
+
+      <GlassCard>
+        <SectionTitle title="Canais cadastrados" subtitle="Tokens ficam mascarados depois de salvos." />
+        <div className="mt-4 space-y-3">
+          {channels.map((channel) => (
+            <div key={channel.id} className="rounded-xl border border-border/70 bg-secondary/20 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-bold">{channel.name}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Token: {channel.botTokenMasked || "sem token"} | Chat: {channel.chatId || "sem chat"}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Status: {channel.isActive ? "ativo" : "inativo"}</div>
+                </div>
+                <Button type="button" variant="destructive" size="sm" onClick={() => onRemove(channel.id)}>
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+          {!channels.length && (
+            <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
+              Nenhum canal salvo para este usuario.
+            </div>
+          )}
+        </div>
+      </GlassCard>
+    </div>
+  );
+}
+
+function ValidationResultCard({ result }: { result: ValidatorResult | null }) {
+  if (!result) {
+    return (
+      <GlassCard>
+        <SectionTitle title="Resultados da validacao" />
+        <div className="mt-4 text-sm text-muted-foreground">
+          Valide o padrao para ver SG, G1, G2, RED, TIE e assertividade real.
+        </div>
+      </GlassCard>
+    );
+  }
+
+  return (
+    <GlassCard>
+      <SectionTitle title="Resultados da validacao" right={<AppBadge tone={result.totalValidated ? "green" : "amber"}>{result.status}</AppBadge>} />
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <MiniStat label="Total sinais" value={result.totalSignals} />
+        <MiniStat label="Sem Gale" value={result.sgWins} tone="text-success" />
+        <MiniStat label="G1" value={result.g1Wins} tone="text-neon-cyan" />
+        <MiniStat label="G2" value={result.g2Wins} tone="text-neon-cyan" />
+        <MiniStat label="Red" value={result.losses} tone="text-destructive" />
+        <MiniStat label="Tie" value={result.ties} tone="text-warning" />
+        <MiniStat label="Assertividade" value={formatPercent(result.accuracy)} tone="text-neon-cyan" />
+        <MiniStat label="Sequencia atual" value={`${result.currentGreenStreak} greens`} />
+        <MiniStat label="Maior green" value={result.bestGreenStreak} />
+        <MiniStat label="Maior loss" value={result.bestLossStreak} />
+      </div>
+      <div className="mt-4 rounded-xl border border-border/70 bg-secondary/20 p-3 text-sm">
+        {result.pulledSide ? (
+          <>Puxou <SideLabel side={result.pulledSide} /></>
+        ) : (
+          <span className="text-warning">Padrao detectado, mas ainda sem amostra suficiente para dizer o que puxou.</span>
+        )}
+      </div>
+      <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
+        {result.details.slice(-30).reverse().map((detail) => (
+          <div key={`${detail.roundId}-${detail.status}-${detail.galeUsed}`} className="rounded-lg bg-background/35 px-3 py-2 text-xs">
+            {detail.roundLabel} - Entrada <SideLabel side={detail.entry} /> - <span className={detail.status === "RED" ? "text-destructive" : detail.status === "TIE" ? "text-warning" : "text-success"}>{detail.status}</span>
+          </div>
+        ))}
+      </div>
+    </GlassCard>
+  );
+}
+
+function SuggestionCard({
+  suggestion,
+  rank,
+  onValidate,
+  onSave,
+}: {
+  suggestion: PatternSuggestion;
+  rank: number;
+  onValidate: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <GlassCard className="rounded-xl">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-black">
+            <Flame className="size-4 text-warning" /> Padrao IA Top {rank}
+          </div>
+          <div className="mt-2"><PatternLine pattern={suggestion.pattern} pulledSide={suggestion.pulledSide} /></div>
+        </div>
+        <AppBadge tone={suggestion.status === "quente" ? "green" : "blue"}>{suggestion.status}</AppBadge>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+        <MiniStat label="Apareceu" value={suggestion.occurrences} />
+        <MiniStat label="SG" value={suggestion.validation.sgWins} tone="text-success" />
+        <MiniStat label="G1" value={suggestion.validation.g1Wins} tone="text-neon-cyan" />
+        <MiniStat label="RED" value={suggestion.validation.losses} tone="text-destructive" />
+        <MiniStat label="TIE" value={suggestion.validation.ties} tone="text-warning" />
+        <MiniStat label="Assert." value={formatPercent(suggestion.validation.accuracy)} tone="text-neon-cyan" />
+        <MiniStat label="Risco" value={suggestion.risk} />
+        <MiniStat label="Loss max" value={suggestion.validation.bestLossStreak} />
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button type="button" size="sm" className="btn-primary-grad" onClick={onValidate}>Validar</Button>
+        <Button type="button" size="sm" variant="secondary" onClick={onSave}>Salvar padrao</Button>
+        <Button type="button" size="sm" variant="secondary" onClick={onSave}>Monitorar ao vivo</Button>
+      </div>
+    </GlassCard>
+  );
+}
+
+function SuggestionRow({ suggestion, rank }: { suggestion: PatternSuggestion; rank: number }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-secondary/20 p-3">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="flex size-7 items-center justify-center rounded-lg bg-neon-cyan/10 font-black text-neon-cyan">{rank}</span>
+        <div className="min-w-0 flex-1"><PatternLine pattern={suggestion.pattern} pulledSide={suggestion.pulledSide} compact /></div>
+        <span className="font-black text-neon-cyan">{formatPercent(suggestion.validation.accuracy)}</span>
+      </div>
+    </div>
+  );
+}
+
+function PatternLine({
+  pattern,
+  pulledSide,
+  compact = false,
+}: {
+  pattern: ValidatorPatternToken[];
+  pulledSide?: RoundResult | null;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`flex min-w-0 flex-wrap items-center gap-1.5 ${compact ? "text-xs" : "text-sm"}`}>
+      <span className="font-semibold text-muted-foreground">Estrategia:</span>
+      {pattern.map((token, index) => (
+        <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1">
+          <TokenPill token={token} />
+          {index < pattern.length - 1 && <span className="text-muted-foreground">-&gt;</span>}
+        </span>
+      ))}
+      <span className="text-muted-foreground">= puxou</span>
+      {pulledSide ? <SideLabel side={pulledSide} /> : <span className="text-warning">sem amostra suficiente</span>}
+    </div>
+  );
+}
+
+function TokenPill({ token }: { token: ValidatorPatternToken }) {
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-black ${tokenClass(token.side)}`}>
+      {formatToken(token)}
+    </span>
+  );
+}
+
+function SideLabel({ side }: { side: RoundResult | null | undefined }) {
+  return <span className={`font-black ${sideTone(side)}`}>{sideName(side)}</span>;
+}
+
+function QuickToken({
+  side,
+  score,
+  label,
+  onClick,
+}: {
+  side: RoundResult;
+  score?: string;
+  label: string;
+  onClick: (side?: RoundResult, score?: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(side, score)}
+      className={`rounded-full border px-3 py-1.5 text-xs font-black ${tokenClass(side)}`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function Metric({ label, value, icon, tone }: { label: string; value: string | number; icon: ReactNode; tone?: string }) {
+  return (
+    <GlassCard className="rounded-xl p-3">
+      <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span className={tone ?? "text-neon-cyan"}>{icon}</span>
+        {label}
+      </div>
+      <div className={`mt-1 text-xl font-black ${tone ?? ""}`}>{value}</div>
+    </GlassCard>
+  );
+}
+
+function MiniStat({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-background/35 px-3 py-2">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={`mt-1 truncate text-sm font-black ${tone ?? ""}`}>{value}</div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="space-y-1.5">
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function FilterSwitch({ label, checked, onCheckedChange }: { label: string; checked: boolean; onCheckedChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex items-center justify-between rounded-xl border border-border/70 bg-secondary/20 px-3 py-2 text-sm">
+      <span>{label}</span>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </label>
+  );
+}
+
+function detectLiveHits(patterns: SavedValidatorPattern[], rounds: Round[]): LiveValidatorHit[] {
+  const latestRound = rounds.at(-1);
+  if (!latestRound) return [];
+  return patterns
+    .filter((pattern) => pattern.isActive && pattern.destination !== "disabled" && pattern.pattern.length)
+    .filter((pattern) => {
+      const cooldown = Math.max(0, Number(pattern.cooldownRounds) || 0);
+      if (pattern.lastDetectedRoundId && latestRound.id - pattern.lastDetectedRoundId <= cooldown) return false;
+      return rounds.length >= pattern.pattern.length &&
+        matchesPattern(rounds.slice(-pattern.pattern.length), pattern.pattern);
+    })
+    .map((pattern) => ({
+      id: `hit-${pattern.id}-${latestRound.id}`,
+      pattern,
+      matchedRounds: rounds.slice(-pattern.pattern.length),
+      entry: pattern.pulledSide,
+      detectedRoundId: latestRound.id,
+      detectedAt: new Date().toISOString(),
+    }));
+}
+
+function invertToken(token: ValidatorPatternToken): ValidatorPatternToken {
+  if (token.side === "B") return { ...token, side: "P" };
+  if (token.side === "P") return { ...token, side: "B" };
+  return token;
+}
+
+function tokenClass(side: RoundResult) {
+  if (side === "B") return "border-banker/40 bg-banker/10 text-banker";
+  if (side === "P") return "border-player/40 bg-player/10 text-player";
+  return "border-warning/50 bg-warning/10 text-warning";
+}
+
+function destinationLabel(destination: ValidatorDestination) {
+  const option = DESTINATION_OPTIONS.find((item) => item.value === destination);
+  return option?.label ?? destination;
+}
+
+function planLimitForSession(plan: string, fullAccess: boolean) {
+  if (!fullAccess) {
+    return { label: "Free", history: 1000, patterns: 3, channels: 0, telegram: false, ai: false };
+  }
+  if (plan === "vip") {
+    return { label: "VIP/Admin", history: 20000, patterns: 80, channels: 10, telegram: true, ai: true };
+  }
+  return { label: "Premium", history: 10000, patterns: 20, channels: 3, telegram: true, ai: true };
+}
+
+function availableHistoryOptions(limit: number) {
+  const options = VALIDATOR_HISTORY_OPTIONS.filter((option) => option <= limit);
+  return options.length ? options : [limit];
+}

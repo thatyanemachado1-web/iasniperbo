@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppVozRouteImport } from './routes/app.voz'
+import { Route as AppValidadorRouteImport } from './routes/app.validador'
 import { Route as AppPlanosRouteImport } from './routes/app.planos'
 import { Route as AppPagamentosRouteImport } from './routes/app.pagamentos'
 import { Route as AppPadroesRouteImport } from './routes/app.padroes'
@@ -44,6 +45,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppVozRoute = AppVozRouteImport.update({
   id: '/voz',
   path: '/voz',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppValidadorRoute = AppValidadorRouteImport.update({
+  id: '/validador',
+  path: '/validador',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPlanosRoute = AppPlanosRouteImport.update({
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/app/padroes': typeof AppPadroesRoute
   '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
+  '/app/validador': typeof AppValidadorRoute
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/broadcast': typeof AppAdminBroadcastRoute
@@ -135,6 +142,7 @@ export interface FileRoutesByTo {
   '/app/padroes': typeof AppPadroesRoute
   '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
+  '/app/validador': typeof AppValidadorRoute
   '/app/voz': typeof AppVozRoute
   '/app': typeof AppIndexRoute
   '/app/admin/broadcast': typeof AppAdminBroadcastRoute
@@ -154,6 +162,7 @@ export interface FileRoutesById {
   '/app/padroes': typeof AppPadroesRoute
   '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
+  '/app/validador': typeof AppValidadorRoute
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/broadcast': typeof AppAdminBroadcastRoute
@@ -174,6 +183,7 @@ export interface FileRouteTypes {
     | '/app/padroes'
     | '/app/pagamentos'
     | '/app/planos'
+    | '/app/validador'
     | '/app/voz'
     | '/app/'
     | '/app/admin/broadcast'
@@ -191,6 +201,7 @@ export interface FileRouteTypes {
     | '/app/padroes'
     | '/app/pagamentos'
     | '/app/planos'
+    | '/app/validador'
     | '/app/voz'
     | '/app'
     | '/app/admin/broadcast'
@@ -209,6 +220,7 @@ export interface FileRouteTypes {
     | '/app/padroes'
     | '/app/pagamentos'
     | '/app/planos'
+    | '/app/validador'
     | '/app/voz'
     | '/app/'
     | '/app/admin/broadcast'
@@ -250,6 +262,13 @@ declare module '@tanstack/react-router' {
       path: '/voz'
       fullPath: '/app/voz'
       preLoaderRoute: typeof AppVozRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/validador': {
+      id: '/app/validador'
+      path: '/validador'
+      fullPath: '/app/validador'
+      preLoaderRoute: typeof AppValidadorRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/planos': {
@@ -366,6 +385,7 @@ interface AppRouteChildren {
   AppPadroesRoute: typeof AppPadroesRoute
   AppPagamentosRoute: typeof AppPagamentosRoute
   AppPlanosRoute: typeof AppPlanosRoute
+  AppValidadorRoute: typeof AppValidadorRoute
   AppVozRoute: typeof AppVozRoute
   AppIndexRoute: typeof AppIndexRoute
 }
@@ -379,6 +399,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPadroesRoute: AppPadroesRoute,
   AppPagamentosRoute: AppPagamentosRoute,
   AppPlanosRoute: AppPlanosRoute,
+  AppValidadorRoute: AppValidadorRoute,
   AppVozRoute: AppVozRoute,
   AppIndexRoute: AppIndexRoute,
 }

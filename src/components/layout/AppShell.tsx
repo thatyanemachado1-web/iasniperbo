@@ -9,7 +9,6 @@ import {
   Bell,
   Settings,
   ShieldCheck,
-  ReceiptText,
   Network,
   ChevronLeft,
   ChevronRight,
@@ -25,8 +24,8 @@ const navItems = [
   { to: "/app/voz", label: "Voz", icon: Mic },
   { to: "/app/ia", label: "Aprendizado IA", icon: Brain },
   { to: "/app/padroes", label: "Padrões IA", icon: BrainCircuit },
+  { to: "/app/validador", label: "Validador", icon: ShieldCheck },
   { to: "/app/planos", label: "Assinar", icon: Crown },
-  { to: "/app/assinatura", label: "Assinatura", icon: ReceiptText },
   { to: "/app/conta", label: "Conta", icon: User },
 ] as const;
 

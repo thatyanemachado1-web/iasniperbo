@@ -5,7 +5,7 @@ import { AdminPanelCard } from "@/components/admin/AdminPanelCard";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
-import { LogOut } from "lucide-react";
+import { CreditCard, Crown, LogOut, ReceiptText } from "lucide-react";
 import { clearAdminSession, getAdminPanelOverview, listAdminUsers } from "@/lib/adminApi";
 import { accessLabel } from "@/lib/accessApi";
 import { canSeeAdminUi, readEffectiveAdminSession } from "@/lib/adminSession";
@@ -84,6 +84,41 @@ function ContaPage() {
           value={<AppBadge tone={userSession.approved ? "green" : "muted"}>{userSession.accessStatus}</AppBadge>}
         />
         {userSession.expiresAt && <Field label="Validade" value={formatDateBR(userSession.expiresAt)} />}
+      </GlassCard>
+
+      <GlassCard>
+        <SectionTitle title="Assinatura" />
+        <div className="mt-3 space-y-2">
+          <Link
+            to="/app/assinatura"
+            className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-secondary/20 px-3 py-3 text-sm transition hover:border-neon-cyan/45 hover:bg-neon-cyan/10"
+          >
+            <span className="inline-flex items-center gap-2 font-semibold">
+              <CreditCard className="size-4 text-neon-cyan" /> Minha assinatura
+            </span>
+            <span className="text-xs text-muted-foreground">plano e validade</span>
+          </Link>
+          <Link
+            to="/app/pagamentos"
+            className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-secondary/20 px-3 py-3 text-sm transition hover:border-neon-cyan/45 hover:bg-neon-cyan/10"
+          >
+            <span className="inline-flex items-center gap-2 font-semibold">
+              <ReceiptText className="size-4 text-neon-cyan" /> Pagamentos
+            </span>
+            <span className="text-xs text-muted-foreground">historico</span>
+          </Link>
+          {!userSession.approved && (
+            <Link
+              to="/app/planos"
+              className="flex items-center justify-between gap-3 rounded-xl border border-gold/40 bg-gold/10 px-3 py-3 text-sm font-bold text-gold transition hover:bg-gold/15"
+            >
+              <span className="inline-flex items-center gap-2">
+                <Crown className="size-4" /> Assinar agora
+              </span>
+              <span className="text-xs">checkout</span>
+            </Link>
+          )}
+        </div>
       </GlassCard>
 
       <GlassCard>
