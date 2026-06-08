@@ -645,7 +645,7 @@ function ValidatorTab(props: {
         <GlassCard>
           <SectionTitle title="Montador manual" subtitle="Adicione Banker, Player, Tie, com ou sem numero." />
           <div className="mt-4 rounded-xl border border-border/70 bg-background/35 p-3">
-            <PatternLine pattern={pattern} pulledSide={manualResult?.pulledSide ?? null} />
+            <PatternLine pattern={pattern} pulledSide={manualResult?.pulledSide} />
           </div>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
             <Select value={tokenSide} onValueChange={(value) => setTokenSide(value as RoundResult)}>
@@ -1088,6 +1088,7 @@ function ValidationResultCard({ result }: { result: ValidatorResult | null }) {
       <SectionTitle title="Resultados da validacao" right={<AppBadge tone={result.totalValidated ? "green" : "amber"}>{result.status}</AppBadge>} />
       <div className="mt-4 grid grid-cols-2 gap-2">
         <MiniStat label="Total sinais" value={result.totalSignals} />
+        <MiniStat label="Validados" value={result.totalValidated} />
         <MiniStat label="Sem Gale" value={result.sgWins} tone="text-success" />
         <MiniStat label="G1" value={result.g1Wins} tone="text-neon-cyan" />
         <MiniStat label="G2" value={result.g2Wins} tone="text-neon-cyan" />
@@ -1101,6 +1102,10 @@ function ValidationResultCard({ result }: { result: ValidatorResult | null }) {
       <div className="mt-4 rounded-xl border border-border/70 bg-secondary/20 p-3 text-sm">
         {result.pulledSide ? (
           <>Puxou <SideLabel side={result.pulledSide} /></>
+        ) : result.totalSignals > 0 ? (
+          <span className="text-warning">
+            O padrao apareceu {result.totalSignals} vez(es), mas ainda nao teve rodada de entrada suficiente para validar o que puxou.
+          </span>
         ) : (
           <span className="text-warning">Padrao detectado, mas ainda sem amostra suficiente para dizer o que puxou.</span>
         )}
@@ -1188,7 +1193,13 @@ function PatternLine({
         </span>
       ))}
       <span className="text-muted-foreground">= puxou</span>
-      {pulledSide ? <SideLabel side={pulledSide} /> : <span className="text-warning">sem amostra suficiente</span>}
+      {pulledSide === undefined ? (
+        <span className="text-muted-foreground">aguardando validacao</span>
+      ) : pulledSide ? (
+        <SideLabel side={pulledSide} />
+      ) : (
+        <span className="text-warning">sem amostra suficiente</span>
+      )}
     </div>
   );
 }
