@@ -163,10 +163,31 @@ function NeuralValidatorPage() {
     return engine.minePatterns(historyRounds, filters);
   }, [filters, hasHistory, historyRounds, planLimits.ai]);
 
+  const historySignature = `${historyRounds.length}:${historyRounds.at(-1)?.id ?? 0}:${historyRounds.at(-1)?.result ?? ""}`;
+  const patternSignature = pattern.map(formatToken).join(">");
+
   const liveHits = useMemo(
     () => detectLiveHits(savedPatterns, historyRounds),
     [savedPatterns, historyRounds],
   );
+
+  useEffect(() => {
+    if (!hasHistory || pattern.length < 2) {
+      setManualResult(null);
+      return;
+    }
+
+    setManualResult(engine.validatePattern(historyRounds, pattern, config));
+  }, [
+    config.entryType,
+    config.galeLimit,
+    config.historySize,
+    config.tableId,
+    config.tieProtection,
+    hasHistory,
+    historySignature,
+    patternSignature,
+  ]);
 
   useEffect(() => {
     if (!liveHits.length) return;
@@ -199,16 +220,6 @@ function NeuralValidatorPage() {
     };
     setPattern((current) => [...current, token]);
     setTokenScore("");
-  }
-
-  function validateCurrentPattern() {
-    const result = engine.validatePattern(historyRounds, pattern, config);
-    setManualResult(result);
-    showNotice(
-      result.totalValidated
-        ? `Validado com ${result.totalValidated} resultados reais.`
-        : "Padrao detectado, mas ainda sem amostra suficiente para dizer o que puxou.",
-    );
   }
 
   function saveCurrentPattern(sourceResult = manualResult, sourcePattern = pattern, name = config.name) {
@@ -420,7 +431,6 @@ function NeuralValidatorPage() {
             messageOverride={messageOverride}
             setMessageOverride={setMessageOverride}
             manualResult={manualResult}
-            validateCurrentPattern={validateCurrentPattern}
             saveCurrentPattern={saveCurrentPattern}
             hasHistory={hasHistory}
             historyLimit={planLimits.history}
@@ -606,7 +616,6 @@ function ValidatorTab(props: {
   messageOverride: string;
   setMessageOverride: (value: string) => void;
   manualResult: ValidatorResult | null;
-  validateCurrentPattern: () => void;
   saveCurrentPattern: () => void;
   hasHistory: boolean;
   historyLimit: number;
@@ -631,7 +640,6 @@ function ValidatorTab(props: {
     messageOverride,
     setMessageOverride,
     manualResult,
-    validateCurrentPattern,
     saveCurrentPattern,
     hasHistory,
     historyLimit,
@@ -751,15 +759,17 @@ function ValidatorTab(props: {
               </div>
             </Field>
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button type="button" className="btn-primary-grad" onClick={validateCurrentPattern} disabled={!hasHistory || pattern.length < 2}>
-              <ShieldCheck className="size-4" /> Validar no historico real
-            </Button>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-2 text-xs font-bold text-neon-cyan">
+              <CheckCircle2 className="size-4" /> Validacao automatica
+            </div>
             <Button type="button" variant="secondary" onClick={saveCurrentPattern} disabled={!canSave}>
               <Save className="size-4" /> Salvar padrao
             </Button>
           </div>
         </GlassCard>
+
+        <ValidationResultCard result={manualResult} />
       </div>
 
       <div className="space-y-4">
@@ -800,8 +810,6 @@ function ValidatorTab(props: {
             </Field>
           </div>
         </GlassCard>
-
-        <ValidationResultCard result={manualResult} />
       </div>
     </div>
   );
