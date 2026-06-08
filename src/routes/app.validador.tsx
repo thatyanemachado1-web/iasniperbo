@@ -11,7 +11,6 @@ import {
   Flame,
   History,
   Layers3,
-  Plus,
   RotateCcw,
   Save,
   Send,
@@ -26,6 +25,7 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -122,11 +122,11 @@ function NeuralValidatorPage() {
     const draft = readPatternDraft();
     return draft.length ? draft : [{ side: "B" }, { side: "P" }, { side: "B" }];
   });
-  const [tokenSide, setTokenSide] = useState<RoundResult>("B");
   const [tokenScore, setTokenScore] = useState("");
   const [config, setConfig] = useState<ValidatorConfig>({
     ...DEFAULT_VALIDATOR_CONFIG,
     name: "Estrategia Neural",
+    entryType: "BANKER",
     historySize: Math.min(DEFAULT_VALIDATOR_CONFIG.historySize, planLimits.history),
   });
   const [manualResult, setManualResult] = useState<ValidatorResult | null>(null);
@@ -212,7 +212,7 @@ function NeuralValidatorPage() {
     setStorageVersion((value) => value + 1);
   }, [liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|")]);
 
-  function addToken(side = tokenSide, scoreText = tokenScore) {
+  function addToken(side: RoundResult, scoreText = tokenScore) {
     const score = Number(scoreText);
     const token: ValidatorPatternToken = {
       side,
@@ -414,8 +414,6 @@ function NeuralValidatorPage() {
           <ValidatorTab
             pattern={pattern}
             setPattern={setPattern}
-            tokenSide={tokenSide}
-            setTokenSide={setTokenSide}
             tokenScore={tokenScore}
             setTokenScore={setTokenScore}
             addToken={addToken}
@@ -599,11 +597,9 @@ function DashboardTab({
 function ValidatorTab(props: {
   pattern: ValidatorPatternToken[];
   setPattern: (pattern: ValidatorPatternToken[]) => void;
-  tokenSide: RoundResult;
-  setTokenSide: (side: RoundResult) => void;
   tokenScore: string;
   setTokenScore: (score: string) => void;
-  addToken: (side?: RoundResult, score?: string) => void;
+  addToken: (side: RoundResult, score?: string) => void;
   config: ValidatorConfig;
   setConfig: (config: ValidatorConfig) => void;
   destination: ValidatorDestination;
@@ -623,8 +619,6 @@ function ValidatorTab(props: {
   const {
     pattern,
     setPattern,
-    tokenSide,
-    setTokenSide,
     tokenScore,
     setTokenScore,
     addToken,
@@ -651,37 +645,30 @@ function ValidatorTab(props: {
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(330px,0.9fr)]">
       <div className="space-y-4">
         <GlassCard>
-          <SectionTitle title="Montador manual" subtitle="Adicione Banker, Player, Tie, com ou sem numero." />
+          <SectionTitle title="Montador manual" subtitle="Monte tocando nas bolinhas. Use numero opcional se quiser B12, P7 ou T6." />
           <div className="mt-4 rounded-xl border border-border/70 bg-background/35 p-3">
             <PatternLine pattern={pattern} pulledSide={manualResult?.pulledSide} />
           </div>
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
-            <Select value={tokenSide} onValueChange={(value) => setTokenSide(value as RoundResult)}>
-              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="B">Banker</SelectItem>
-                <SelectItem value="P">Player</SelectItem>
-                <SelectItem value="T">Tie</SelectItem>
-              </SelectContent>
-            </Select>
-            <Input
-              value={tokenScore}
-              onChange={(event) => setTokenScore(event.target.value)}
-              inputMode="numeric"
-              placeholder="Numero opcional. Ex: 10"
-              className="bg-secondary/30"
-            />
-            <Button type="button" onClick={() => addToken()} className="btn-primary-grad">
-              <Plus className="size-4" /> Adicionar
-            </Button>
+          <div className="mt-4 grid gap-3">
+            <Field label="Numero opcional para a proxima bolinha">
+              <Input
+                value={tokenScore}
+                onChange={(event) => setTokenScore(event.target.value)}
+                inputMode="numeric"
+                placeholder="Ex: 12, 9, 7"
+                className="bg-secondary/30"
+              />
+            </Field>
+            <div className="grid grid-cols-3 gap-2">
+              <QuickToken side="B" score={tokenScore} label="Banker" onClick={addToken} />
+              <QuickToken side="P" score={tokenScore} label="Player" onClick={addToken} />
+              <QuickToken side="T" score={tokenScore} label="Tie" onClick={addToken} />
+            </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <QuickToken side="B" label="Banker" onClick={addToken} />
-            <QuickToken side="P" label="Player" onClick={addToken} />
-            <QuickToken side="T" label="Tie" onClick={addToken} />
-            <QuickToken side="B" score="10" label="B10" onClick={addToken} />
-            <QuickToken side="P" score="7" label="P7" onClick={addToken} />
-            <QuickToken side="T" score="6" label="T6" onClick={addToken} />
+            <QuickToken side="B" score="10" label="Banker" onClick={addToken} />
+            <QuickToken side="P" score="7" label="Player" onClick={addToken} />
+            <QuickToken side="T" score="6" label="Tie" onClick={addToken} />
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button
@@ -718,13 +705,19 @@ function ValidatorTab(props: {
             <Field label="Nome da estrategia">
               <Input value={config.name} onChange={(event) => setConfig({ ...config, name: event.target.value })} />
             </Field>
-            <Field label="Entrada">
-              <Select value={config.entryType} onValueChange={(value) => setConfig({ ...config, entryType: value as ValidatorEntryType })}>
-                <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {ENTRY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+            <Field label="Entrada especifica">
+              <div className="grid grid-cols-2 gap-2">
+                <EntrySideButton
+                  side="B"
+                  selected={config.entryType === "BANKER"}
+                  onClick={() => setConfig({ ...config, entryType: "BANKER" })}
+                />
+                <EntrySideButton
+                  side="P"
+                  selected={config.entryType === "PLAYER"}
+                  onClick={() => setConfig({ ...config, entryType: "PLAYER" })}
+                />
+              </div>
             </Field>
             <Field label="Gale">
               <Select value={String(config.galeLimit)} onValueChange={(value) => setConfig({ ...config, galeLimit: Number(value) as ValidatorGaleLimit })}>
@@ -752,11 +745,15 @@ function ValidatorTab(props: {
             <Field label="Mesa vinculada">
               <Input value={config.tableId} onChange={(event) => setConfig({ ...config, tableId: event.target.value })} />
             </Field>
-            <Field label="Protecao no empate">
-              <div className="flex h-9 items-center justify-between rounded-md border border-input bg-secondary/20 px-3">
-                <span className="text-sm">{config.tieProtection ? "Ativa" : "Desativada"}</span>
-                <Switch checked={config.tieProtection} onCheckedChange={(checked) => setConfig({ ...config, tieProtection: checked })} />
-              </div>
+            <Field label="Cobertura">
+              <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-warning/35 bg-warning/10 px-3 py-2 text-sm font-bold text-warning">
+                <Checkbox
+                  checked={config.tieProtection}
+                  onCheckedChange={(checked) => setConfig({ ...config, tieProtection: checked === true })}
+                  className="border-warning data-[state=checked]:bg-warning data-[state=checked]:text-background"
+                />
+                <span>{config.tieProtection ? "Cobrir empate 🟡" : "Nao cobrir empate 🟡"}</span>
+              </label>
             </Field>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -767,7 +764,7 @@ function ValidatorTab(props: {
               <Save className="size-4" /> Salvar padrao
             </Button>
           </div>
-          <ValidationResultPanel result={manualResult} />
+          <ValidationResultPanel result={manualResult} config={config} />
         </GlassCard>
       </div>
 
@@ -1078,13 +1075,19 @@ function ChannelsTab({
   );
 }
 
-function ValidationResultPanel({ result }: { result: ValidatorResult | null }) {
+function ValidationResultPanel({ result, config }: { result: ValidatorResult | null; config: ValidatorConfig }) {
+  const selectedEntry = entryTypeToSide(config.entryType) ?? result?.entry ?? null;
+
   if (!result) {
     return (
       <div className="mt-5 rounded-xl border border-border/70 bg-background/35 p-4">
         <SectionTitle title="Resultados da validacao" />
+        <div className="mt-4 flex flex-wrap gap-2">
+          <ResultChip label="Entrada" side={selectedEntry} />
+          <ResultChip label="Empate" value={config.tieProtection ? "🟡 coberto" : "🟡 sem cobertura"} />
+        </div>
         <div className="mt-4 text-sm text-muted-foreground">
-          Valide o padrao para ver SG, G1, G2, RED, TIE e assertividade real.
+          A validacao automatica aparece aqui assim que houver padrao e historico real suficiente.
         </div>
       </div>
     );
@@ -1093,6 +1096,11 @@ function ValidationResultPanel({ result }: { result: ValidatorResult | null }) {
   return (
     <div className="mt-5 rounded-xl border border-neon-cyan/25 bg-background/35 p-4">
       <SectionTitle title="Resultados da validacao" right={<AppBadge tone={result.totalValidated ? "green" : "amber"}>{result.status}</AppBadge>} />
+      <div className="mt-4 flex flex-wrap gap-2">
+        <ResultChip label="Entrada" side={selectedEntry ?? result.entry} />
+        <ResultChip label="Empate" value={config.tieProtection ? "🟡 coberto" : "🟡 sem cobertura"} />
+        <ResultChip label="Rodadas" value={result.analyzedRounds.toLocaleString("pt-BR")} />
+      </div>
       <div className="mt-4 grid grid-cols-2 gap-2">
         <MiniStat label="Total sinais" value={result.totalSignals} />
         <MiniStat label="Validados" value={result.totalValidated} />
@@ -1196,7 +1204,7 @@ function PatternLine({
       {pattern.map((token, index) => (
         <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1">
           <TokenPill token={token} />
-          {index < pattern.length - 1 && <span className="text-muted-foreground">-&gt;</span>}
+          {index < pattern.length - 1 && <span className="text-muted-foreground">→</span>}
         </span>
       ))}
       <span className="text-muted-foreground">= puxou</span>
@@ -1213,14 +1221,20 @@ function PatternLine({
 
 function TokenPill({ token }: { token: ValidatorPatternToken }) {
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-black ${tokenClass(token.side)}`}>
-      {formatToken(token)}
+    <span className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-black ${tokenClass(token.side)}`}>
+      <span className="text-base leading-none">{sideEmoji(token.side)}</span>
+      {token.score ? <span>{token.score}</span> : null}
     </span>
   );
 }
 
 function SideLabel({ side }: { side: RoundResult | null | undefined }) {
-  return <span className={`font-black ${sideTone(side)}`}>{sideName(side)}</span>;
+  return (
+    <span className={`inline-flex items-center gap-1 font-black ${sideTone(side)}`}>
+      {side ? <span className="text-base leading-none">{sideEmoji(side)}</span> : null}
+      {sideName(side)}
+    </span>
+  );
 }
 
 function QuickToken({
@@ -1232,16 +1246,44 @@ function QuickToken({
   side: RoundResult;
   score?: string;
   label: string;
-  onClick: (side?: RoundResult, score?: string) => void;
+  onClick: (side: RoundResult, score?: string) => void;
 }) {
+  const scoreText = score?.trim();
+
   return (
     <button
       type="button"
       onClick={() => onClick(side, score)}
-      className={`rounded-full border px-3 py-1.5 text-xs font-black ${tokenClass(side)}`}
+      className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border px-3 py-2 text-sm font-black transition hover:-translate-y-0.5 ${tokenClass(side)}`}
     >
-      {label}
+      <span className="text-xl leading-none">{sideEmoji(side)}</span>
+      {scoreText ? <span>{scoreText}</span> : null}
+      <span>{label}</span>
     </button>
+  );
+}
+
+function EntrySideButton({ side, selected, onClick }: { side: RoundResult; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-h-12 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-black transition ${
+        selected ? `${tokenClass(side)} ring-1 ring-current` : "border-border/70 bg-secondary/20 text-muted-foreground hover:bg-secondary/40"
+      }`}
+    >
+      <span className="text-xl leading-none">{sideEmoji(side)}</span>
+      {sideName(side)}
+    </button>
+  );
+}
+
+function ResultChip({ label, side, value }: { label: string; side?: RoundResult | null; value?: string | number }) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/20 px-3 py-2 text-xs">
+      <span className="text-muted-foreground">{label}:</span>
+      {side !== undefined ? <SideLabel side={side} /> : <span className="font-black">{value}</span>}
+    </div>
   );
 }
 
@@ -1309,6 +1351,19 @@ function invertToken(token: ValidatorPatternToken): ValidatorPatternToken {
   if (token.side === "B") return { ...token, side: "P" };
   if (token.side === "P") return { ...token, side: "B" };
   return token;
+}
+
+function sideEmoji(side: RoundResult) {
+  if (side === "B") return "🔴";
+  if (side === "P") return "🔵";
+  return "🟡";
+}
+
+function entryTypeToSide(entryType: ValidatorEntryType): RoundResult | null {
+  if (entryType === "BANKER") return "B";
+  if (entryType === "PLAYER") return "P";
+  if (entryType === "TIE") return "T";
+  return null;
 }
 
 function tokenClass(side: RoundResult) {
