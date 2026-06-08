@@ -767,9 +767,8 @@ function ValidatorTab(props: {
               <Save className="size-4" /> Salvar padrao
             </Button>
           </div>
+          <ValidationResultPanel result={manualResult} />
         </GlassCard>
-
-        <ValidationResultCard result={manualResult} />
       </div>
 
       <div className="space-y-4">
@@ -1079,20 +1078,20 @@ function ChannelsTab({
   );
 }
 
-function ValidationResultCard({ result }: { result: ValidatorResult | null }) {
+function ValidationResultPanel({ result }: { result: ValidatorResult | null }) {
   if (!result) {
     return (
-      <GlassCard>
+      <div className="mt-5 rounded-xl border border-border/70 bg-background/35 p-4">
         <SectionTitle title="Resultados da validacao" />
         <div className="mt-4 text-sm text-muted-foreground">
           Valide o padrao para ver SG, G1, G2, RED, TIE e assertividade real.
         </div>
-      </GlassCard>
+      </div>
     );
   }
 
   return (
-    <GlassCard>
+    <div className="mt-5 rounded-xl border border-neon-cyan/25 bg-background/35 p-4">
       <SectionTitle title="Resultados da validacao" right={<AppBadge tone={result.totalValidated ? "green" : "amber"}>{result.status}</AppBadge>} />
       <div className="mt-4 grid grid-cols-2 gap-2">
         <MiniStat label="Total sinais" value={result.totalSignals} />
@@ -1125,7 +1124,7 @@ function ValidationResultCard({ result }: { result: ValidatorResult | null }) {
           </div>
         ))}
       </div>
-    </GlassCard>
+    </div>
   );
 }
 
