@@ -640,147 +640,101 @@ function ValidatorTab(props: {
   } = props;
 
   const canSave = pattern.length >= 2 && hasHistory;
+  const selectedEntrySide = entryTypeToSide(config.entryType) ?? "B";
+  const historyOptions = availableHistoryOptions(historyLimit);
+  const setGaleLimit = (value: number) => {
+    setConfig({ ...config, galeLimit: Math.min(2, Math.max(0, value)) as ValidatorGaleLimit });
+  };
+  const setHistorySize = (value: number) => {
+    setConfig({ ...config, historySize: Math.min(historyLimit, Math.max(1, value || 1)) });
+  };
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(330px,0.9fr)]">
-      <div className="space-y-4">
-        <GlassCard>
-          <SectionTitle title="Montador manual" subtitle="Monte tocando nas bolinhas. Use numero opcional se quiser B12, P7 ou T6." />
-          <div className="mt-4 rounded-xl border border-border/70 bg-background/35 p-3">
-            <PatternLine pattern={pattern} pulledSide={manualResult?.pulledSide} />
+    <div className="mx-auto max-w-6xl space-y-4">
+      <GlassCard>
+        <div className="mx-auto max-w-4xl space-y-7 text-center">
+          <div>
+            <div className="text-base font-black">Ate qual gale voce quer contar?</div>
+            <div className="mx-auto mt-3 flex h-9 w-44 items-center justify-between rounded-md border border-border/70 bg-background/50 px-2">
+              <button type="button" className="px-2 text-neon-cyan" onClick={() => setGaleLimit(Number(config.galeLimit) - 1)}>-</button>
+              <span className="text-sm font-black">{Number(config.galeLimit)}</span>
+              <button type="button" className="px-2 text-neon-cyan" onClick={() => setGaleLimit(Number(config.galeLimit) + 1)}>+</button>
+            </div>
           </div>
-          <div className="mt-4 grid gap-3">
-            <Field label="Numero opcional para a proxima bolinha">
+
+          <div>
+            <div className="text-base font-black">Probabilidades a serem buscadas</div>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              <QuickToken side="B" score={tokenScore} label="Banker" onClick={addToken} />
+              <QuickToken side="P" score={tokenScore} label="Player" onClick={addToken} />
+              <QuickToken side="T" score={tokenScore} label="Tie" onClick={addToken} />
               <Input
                 value={tokenScore}
                 onChange={(event) => setTokenScore(event.target.value)}
                 inputMode="numeric"
-                placeholder="Ex: 12, 9, 7"
-                className="bg-secondary/30"
+                placeholder="No."
+                className="h-11 w-20 bg-secondary/30 text-center"
               />
-            </Field>
-            <div className="grid grid-cols-3 gap-2">
-              <QuickToken side="B" score={tokenScore} label="Banker" onClick={addToken} />
-              <QuickToken side="P" score={tokenScore} label="Player" onClick={addToken} />
-              <QuickToken side="T" score={tokenScore} label="Tie" onClick={addToken} />
+              <IconToolButton label="Inverter" onClick={() => setPattern(pattern.map(invertToken))}>
+                <RotateCcw className="size-4" />
+              </IconToolButton>
+              <IconToolButton label="Remover" onClick={() => setPattern(pattern.slice(0, -1))} disabled={!pattern.length}>
+                <Trash2 className="size-4" />
+              </IconToolButton>
+              <IconToolButton label="Limpar" onClick={() => setPattern([])}>
+                <Eraser className="size-4" />
+              </IconToolButton>
+            </div>
+            <PatternBubbleLine pattern={pattern} className="mt-4 justify-center" />
+            <div className="mt-2 flex flex-wrap justify-center gap-2">
+              <QuickToken side="B" score="10" label="Banker" onClick={addToken} />
+              <QuickToken side="P" score="7" label="Player" onClick={addToken} />
+              <QuickToken side="T" score="6" label="Tie" onClick={addToken} />
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <QuickToken side="B" score="10" label="Banker" onClick={addToken} />
-            <QuickToken side="P" score="7" label="Player" onClick={addToken} />
-            <QuickToken side="T" score="6" label="Tie" onClick={addToken} />
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setPattern(pattern.map(invertToken))}
-            >
-              <RotateCcw className="size-4" /> Inverter
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setPattern(pattern.slice(0, -1))}
-              disabled={!pattern.length}
-            >
-              <Trash2 className="size-4" /> Remover item
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => setPattern([])}>
-              <Eraser className="size-4" /> Limpar
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => writePatternDraft(pattern)}
-            >
-              <Save className="size-4" /> Salvar rascunho
-            </Button>
-          </div>
-        </GlassCard>
 
-        <GlassCard>
-          <SectionTitle title="Configuracao da entrada" />
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <Field label="Nome da estrategia">
-              <Input value={config.name} onChange={(event) => setConfig({ ...config, name: event.target.value })} />
-            </Field>
-            <Field label="Entrada especifica">
-              <div className="grid grid-cols-2 gap-2">
-                <EntrySideButton
-                  side="B"
-                  selected={config.entryType === "BANKER"}
-                  onClick={() => setConfig({ ...config, entryType: "BANKER" })}
-                />
-                <EntrySideButton
-                  side="P"
-                  selected={config.entryType === "PLAYER"}
-                  onClick={() => setConfig({ ...config, entryType: "PLAYER" })}
-                />
-              </div>
-            </Field>
-            <Field label="Gale">
-              <Select value={String(config.galeLimit)} onValueChange={(value) => setConfig({ ...config, galeLimit: Number(value) as ValidatorGaleLimit })}>
-                <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">SG</SelectItem>
-                  <SelectItem value="1">G1</SelectItem>
-                  <SelectItem value="2">G2</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Historico para validar">
-              <Select
-                value={String(config.historySize)}
-                onValueChange={(value) => setConfig({ ...config, historySize: Math.min(Number(value), historyLimit) })}
-              >
-                <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {availableHistoryOptions(historyLimit).map((option) => (
-                    <SelectItem key={option} value={String(option)}>{option / 1000}k rodadas</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Mesa vinculada">
-              <Input value={config.tableId} onChange={(event) => setConfig({ ...config, tableId: event.target.value })} />
-            </Field>
-            <Field label="Cobertura">
-              <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-warning/35 bg-warning/10 px-3 py-2 text-sm font-bold text-warning">
-                <Checkbox
-                  checked={config.tieProtection}
-                  onCheckedChange={(checked) => setConfig({ ...config, tieProtection: checked === true })}
-                  className="border-warning data-[state=checked]:bg-warning data-[state=checked]:text-background"
-                />
-                <span>{config.tieProtection ? "Cobrir empate 🟡" : "Nao cobrir empate 🟡"}</span>
-              </label>
-            </Field>
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-2 text-xs font-bold text-neon-cyan">
-              <CheckCircle2 className="size-4" /> Validacao automatica
+          <div>
+            <div className="text-base font-black">Entrada</div>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              <EntrySideButton
+                side="B"
+                selected={config.entryType === "BANKER"}
+                onClick={() => setConfig({ ...config, entryType: "BANKER" })}
+              />
+              <EntrySideButton
+                side="P"
+                selected={config.entryType === "PLAYER"}
+                onClick={() => setConfig({ ...config, entryType: "PLAYER" })}
+              />
             </div>
-            <Button type="button" variant="secondary" onClick={saveCurrentPattern} disabled={!canSave}>
-              <Save className="size-4" /> Salvar padrao
-            </Button>
+            <div className="mt-4 flex justify-center">
+              <BigTokenBubble side={selectedEntrySide} />
+            </div>
+            <label className="mx-auto mt-5 flex w-fit cursor-pointer items-center gap-3 rounded-lg border border-border/70 bg-secondary/20 px-4 py-3 text-xs font-bold">
+              <span>Protecao no empate</span>
+              <Checkbox
+                checked={config.tieProtection}
+                onCheckedChange={(checked) => setConfig({ ...config, tieProtection: checked === true })}
+                className="border-warning data-[state=checked]:bg-warning data-[state=checked]:text-background"
+              />
+            </label>
           </div>
-          <ValidationResultPanel result={manualResult} config={config} />
-        </GlassCard>
-      </div>
 
-      <div className="space-y-4">
-        <GlassCard>
-          <SectionTitle title="Destino do sinal" subtitle="Configuracao propria deste padrao." />
-          <div className="mt-4 space-y-3">
-            <Field label="Destino">
+          <div className="rounded-xl border border-neon-cyan/25 bg-neon-cyan/10 p-4">
+            <div className="flex flex-col items-center gap-2">
+              <BrainCircuit className="size-5 text-neon-cyan" />
+              <div className="text-sm font-black">Salvar Padrao</div>
+              <div className="text-xs text-muted-foreground">Salve este padrao para notificacoes e monitoramento.</div>
+            </div>
+            <div className="mt-4 grid gap-2 md:grid-cols-[minmax(0,1.5fr)_minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)_110px]">
+              <Input value={config.name} onChange={(event) => setConfig({ ...config, name: event.target.value })} placeholder="Nome da estrategia" />
+              <Input value={config.tableId} onChange={(event) => setConfig({ ...config, tableId: event.target.value })} placeholder="Mesa" />
               <Select value={destination} onValueChange={(value) => setDestination(value as ValidatorDestination)}>
                 <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {DESTINATION_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </Field>
-            <Field label="Canal Telegram">
               <Select value={selectedChannelId || "none"} onValueChange={(value) => setSelectedChannelId(value === "none" ? "" : value)}>
                 <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -788,25 +742,63 @@ function ValidatorTab(props: {
                   {channels.map((channel) => <SelectItem key={channel.id} value={channel.id}>{channel.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </Field>
-            <Field label="Cooldown entre alertas">
               <Input
                 value={cooldownRounds}
                 onChange={(event) => setCooldownRounds(Math.max(0, Number(event.target.value) || 0))}
                 type="number"
+                placeholder="Cooldown"
               />
-            </Field>
-            <Field label="Mensagem personalizada">
+            </div>
+            <details className="mt-3 rounded-lg border border-border/60 bg-background/25 px-3 py-2 text-left text-xs">
+              <summary className="cursor-pointer font-bold text-muted-foreground">Mensagem personalizada opcional</summary>
               <Textarea
                 value={messageOverride}
                 onChange={(event) => setMessageOverride(event.target.value)}
                 placeholder="Opcional. Use {{pattern}}, {{entry}}, {{percentage}}, {{table}}"
-                className="min-h-24"
+                className="mt-3 min-h-20"
               />
-            </Field>
+            </details>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button type="button" className="btn-primary-grad" onClick={saveCurrentPattern} disabled={!canSave}>
+                <Save className="size-4" /> Salvar Padrao
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => writePatternDraft(pattern)}>
+                <Save className="size-4" /> Rascunho
+              </Button>
+            </div>
           </div>
-        </GlassCard>
-      </div>
+
+          <div>
+            <div className="text-base font-black">Resultados a serem validados</div>
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
+              {historyOptions.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setHistorySize(option)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-black ${
+                    config.historySize === option ? "border-neon-cyan bg-neon-cyan/20 text-neon-cyan" : "border-border/70 bg-secondary/20 text-muted-foreground"
+                  }`}
+                >
+                  {formatHistoryOption(option)}
+                </button>
+              ))}
+            </div>
+            <div className="mx-auto mt-3 flex h-10 w-56 items-center justify-between rounded-md border border-border/70 bg-background/50 px-2">
+              <button type="button" className="px-2 text-neon-cyan" onClick={() => setHistorySize(config.historySize - 1000)}>-</button>
+              <Input
+                value={config.historySize}
+                onChange={(event) => setHistorySize(Number(event.target.value))}
+                type="number"
+                className="h-7 border-neon-cyan/50 bg-transparent text-center text-sm font-black"
+              />
+              <button type="button" className="px-2 text-neon-cyan" onClick={() => setHistorySize(config.historySize + 1000)}>+</button>
+            </div>
+          </div>
+        </div>
+      </GlassCard>
+
+      <ValidationResultPanel result={manualResult} config={config} />
     </div>
   );
 }
@@ -1080,9 +1072,9 @@ function ValidationResultPanel({ result, config }: { result: ValidatorResult | n
 
   if (!result) {
     return (
-      <div className="mt-5 rounded-xl border border-border/70 bg-background/35 p-4">
-        <SectionTitle title="Resultados da validacao" />
-        <div className="mt-4 flex flex-wrap gap-2">
+      <div className="rounded-xl border border-border/70 bg-background/35 p-4">
+        <div className="text-sm font-black text-neon-cyan">Resultados da Validacao</div>
+        <div className="mt-4 flex flex-wrap gap-2 text-xs">
           <ResultChip label="Entrada" side={selectedEntry} />
           <ResultChip label="Empate" value={config.tieProtection ? "🟡 coberto" : "🟡 sem cobertura"} />
         </div>
@@ -1093,44 +1085,60 @@ function ValidationResultPanel({ result, config }: { result: ValidatorResult | n
     );
   }
 
+  const totalGreen = result.sgWins + result.g1Wins + result.g2Wins;
+
   return (
-    <div className="mt-5 rounded-xl border border-neon-cyan/25 bg-background/35 p-4">
-      <SectionTitle title="Resultados da validacao" right={<AppBadge tone={result.totalValidated ? "green" : "amber"}>{result.status}</AppBadge>} />
-      <div className="mt-4 flex flex-wrap gap-2">
-        <ResultChip label="Entrada" side={selectedEntry ?? result.entry} />
-        <ResultChip label="Empate" value={config.tieProtection ? "🟡 coberto" : "🟡 sem cobertura"} />
-        <ResultChip label="Rodadas" value={result.analyzedRounds.toLocaleString("pt-BR")} />
+    <div className="rounded-xl border border-neon-cyan/25 bg-background/35 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-black text-neon-cyan">Resultados da Validacao</div>
+        <AppBadge tone={result.totalValidated ? "green" : "amber"}>{result.status}</AppBadge>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <MiniStat label="Total sinais" value={result.totalSignals} />
-        <MiniStat label="Validados" value={result.totalValidated} />
-        <MiniStat label="Sem Gale" value={result.sgWins} tone="text-success" />
-        <MiniStat label="G1" value={result.g1Wins} tone="text-neon-cyan" />
-        <MiniStat label="G2" value={result.g2Wins} tone="text-neon-cyan" />
-        <MiniStat label="Red" value={result.losses} tone="text-destructive" />
-        <MiniStat label="Tie" value={result.ties} tone="text-warning" />
-        <MiniStat label="Assertividade" value={formatPercent(result.accuracy)} tone="text-neon-cyan" />
-        <MiniStat label="Sequencia atual" value={`${result.currentGreenStreak} greens`} />
-        <MiniStat label="Maior green" value={result.bestGreenStreak} />
-        <MiniStat label="Maior loss" value={result.bestLossStreak} />
-      </div>
-      <div className="mt-4 rounded-xl border border-border/70 bg-secondary/20 p-3 text-sm">
-        {result.pulledSide ? (
-          <>Puxou <SideLabel side={result.pulledSide} /></>
-        ) : result.totalSignals > 0 ? (
-          <span className="text-warning">
-            O padrao apareceu {result.totalSignals} vez(es), mas ainda nao teve rodada de entrada suficiente para validar o que puxou.
-          </span>
-        ) : (
-          <span className="text-warning">Padrao detectado, mas ainda sem amostra suficiente para dizer o que puxou.</span>
-        )}
-      </div>
-      <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
-        {result.details.slice(-30).reverse().map((detail) => (
-          <div key={`${detail.roundId}-${detail.status}-${detail.galeUsed}`} className="rounded-lg bg-background/35 px-3 py-2 text-xs">
-            {detail.roundLabel} - Entrada <SideLabel side={detail.entry} /> - <span className={detail.status === "RED" ? "text-destructive" : detail.status === "TIE" ? "text-warning" : "text-success"}>{detail.status}</span>
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(220px,0.38fr)_minmax(0,1fr)]">
+        <div className="space-y-2 text-xs">
+          <ResultLine label="Total de sinais" value={result.totalSignals} tone="text-neon-cyan" />
+          <ResultLine label="Validados" value={result.totalValidated} />
+          <ResultLine label="Sem Gale" value={formatCountPercent(result.sgWins, result.totalValidated)} tone="text-success" />
+          <ResultLine label="Green G1" value={formatCountPercent(result.g1Wins, result.totalValidated)} tone="text-neon-cyan" />
+          <ResultLine label="Green G2" value={formatCountPercent(result.g2Wins, result.totalValidated)} tone="text-neon-cyan" />
+          <ResultLine label="Empates" value={result.ties ? result.ties : "Nenhum empate registrado."} tone="text-warning" />
+          <ResultLine label="Acertos" value={formatCountPercent(totalGreen, result.totalValidated)} tone="text-success" />
+          <ResultLine label="Sequencia desde o ultimo loss" value={result.currentGreenStreak} tone="text-neon-cyan" />
+          <ResultLine label="Maior sequencia" value={result.bestGreenStreak} tone="text-success" />
+          <ResultLine label="Maior sequencia de loss" value={result.bestLossStreak} tone="text-destructive" />
+          <ResultLine label="Erros" value={formatCountPercent(result.losses, result.totalValidated)} tone="text-destructive" />
+          <ResultLine label="Assertividade" value={formatPercent(result.accuracy)} tone="text-neon-cyan" />
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2 text-xs">
+            <ResultChip label="Entrada" side={selectedEntry ?? result.entry} />
+            <ResultChip label="Empate" value={config.tieProtection ? "🟡 coberto" : "🟡 sem cobertura"} />
+            <ResultChip label="Rodadas" value={result.analyzedRounds.toLocaleString("pt-BR")} />
           </div>
-        ))}
+          <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 text-sm">
+            {result.pulledSide ? (
+              <>Puxou <SideLabel side={result.pulledSide} /></>
+            ) : result.totalSignals > 0 ? (
+              <span className="text-warning">
+                O padrao apareceu {result.totalSignals} vez(es), mas ainda nao teve rodada de entrada suficiente para validar o que puxou.
+              </span>
+            ) : (
+              <span className="text-warning">Padrao detectado, mas ainda sem amostra suficiente para dizer o que puxou.</span>
+            )}
+          </div>
+          <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+            {result.details.slice(-18).reverse().map((detail) => (
+              <div key={`${detail.roundId}-${detail.status}-${detail.galeUsed}`} className="rounded-lg bg-background/35 px-3 py-2 text-xs">
+                {detail.roundLabel} - Entrada <SideLabel side={detail.entry} /> - <span className={detail.status === "RED" ? "text-destructive" : detail.status === "TIE" ? "text-warning" : "text-success"}>{detail.status}</span>
+              </div>
+            ))}
+            {!result.details.length && (
+              <div className="rounded-lg bg-background/35 px-3 py-2 text-xs text-muted-foreground">
+                Nenhuma rodada validada ainda para este padrao.
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1228,6 +1236,37 @@ function TokenPill({ token }: { token: ValidatorPatternToken }) {
   );
 }
 
+function PatternBubbleLine({ pattern, className = "" }: { pattern: ValidatorPatternToken[]; className?: string }) {
+  if (!pattern.length) {
+    return (
+      <div className={`flex min-h-14 items-center justify-center rounded-xl border border-dashed border-border/70 px-4 text-xs text-muted-foreground ${className}`}>
+        Toque nas bolinhas para montar o padrao.
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex min-w-0 flex-wrap items-center gap-2 ${className}`}>
+      {pattern.map((token, index) => (
+        <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-2">
+          <BigTokenBubble side={token.side} score={token.score} />
+          {index < pattern.length - 1 && <span className="text-lg font-black text-muted-foreground">→</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function BigTokenBubble({ side, score }: { side: RoundResult; score?: number }) {
+  return (
+    <span className={`inline-flex size-11 items-center justify-center rounded-full border text-sm font-black shadow-lg ${bubbleClass(side)}`}>
+      <span className="sr-only">{sideName(side)}</span>
+      <span aria-hidden className="text-xl leading-none">{sideEmoji(side)}</span>
+      {score ? <span className="-ml-1 text-[11px] text-white">{score}</span> : null}
+    </span>
+  );
+}
+
 function SideLabel({ side }: { side: RoundResult | null | undefined }) {
   return (
     <span className={`inline-flex items-center gap-1 font-black ${sideTone(side)}`}>
@@ -1263,6 +1302,31 @@ function QuickToken({
   );
 }
 
+function IconToolButton({
+  label,
+  children,
+  onClick,
+  disabled = false,
+}: {
+  label: string;
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex size-11 items-center justify-center rounded-lg border border-border/70 bg-secondary/20 text-muted-foreground transition hover:bg-secondary/40 disabled:cursor-not-allowed disabled:opacity-45"
+    >
+      {children}
+    </button>
+  );
+}
+
 function EntrySideButton({ side, selected, onClick }: { side: RoundResult; selected: boolean; onClick: () => void }) {
   return (
     <button
@@ -1283,6 +1347,15 @@ function ResultChip({ label, side, value }: { label: string; side?: RoundResult 
     <div className="inline-flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/20 px-3 py-2 text-xs">
       <span className="text-muted-foreground">{label}:</span>
       {side !== undefined ? <SideLabel side={side} /> : <span className="font-black">{value}</span>}
+    </div>
+  );
+}
+
+function ResultLine({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-2">
+      <span className="font-bold">{label}:</span>
+      <span className={`font-black ${tone ?? ""}`}>{value}</span>
     </div>
   );
 }
@@ -1370,6 +1443,21 @@ function tokenClass(side: RoundResult) {
   if (side === "B") return "border-banker/40 bg-banker/10 text-banker";
   if (side === "P") return "border-player/40 bg-player/10 text-player";
   return "border-warning/50 bg-warning/10 text-warning";
+}
+
+function bubbleClass(side: RoundResult) {
+  if (side === "B") return "border-banker/50 bg-banker/20 shadow-banker/20";
+  if (side === "P") return "border-player/50 bg-player/20 shadow-player/20";
+  return "border-warning/60 bg-warning/20 shadow-warning/20";
+}
+
+function formatHistoryOption(value: number) {
+  return value >= 1000 ? `${value / 1000}k` : String(value);
+}
+
+function formatCountPercent(count: number, total: number) {
+  if (!total) return String(count);
+  return `${count} (${formatPercent((count / total) * 100)})`;
 }
 
 function destinationLabel(destination: ValidatorDestination) {
