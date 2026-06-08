@@ -40,6 +40,7 @@ export interface AdminManagedUser {
   adminNote: string;
   createdAt: string;
   lastAccess: string;
+  lastAccessAt?: string;
 }
 
 export interface AdminPanelOverview {

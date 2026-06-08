@@ -74,8 +74,8 @@ export function AdminUserDetailsPanel({
             <Info icon={<ShieldCheck className="size-4" />} label="E-mail" value={user.email || "-"} />
             <Info icon={<MessageCircle className="size-4" />} label="WhatsApp" value={formatPhoneDisplay(user.phoneFull || user.phone, user.countryCode) || "Sem telefone"} />
             <Info icon={<MapPin className="size-4" />} label="Localização" value={[user.city, user.country].filter(Boolean).join(" / ") || "Sem local"} />
-            <Info icon={<CalendarClock className="size-4" />} label="Criado em" value={formatDate(user.createdAt)} />
-            <Info icon={<CalendarClock className="size-4" />} label="Último acesso" value={user.lastAccess || "Sem registro"} />
+            <Info icon={<CalendarClock className="size-4" />} label="Criado em" value={formatDateTime(user.createdAt)} />
+            <Info icon={<CalendarClock className="size-4" />} label="Último acesso" value={formatAccessDateTime(user)} />
             <Info icon={<Settings2 className="size-4" />} label="Role" value={user.role} />
           </div>
         )}
@@ -153,6 +153,20 @@ function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value || "-";
   return date.toLocaleDateString("pt-BR");
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "-";
+  return date.toLocaleString("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function formatAccessDateTime(user: AdminManagedUser) {
+  if (user.lastAccessAt) return formatDateTime(user.lastAccessAt);
+  return user.lastAccess || "Sem registro";
 }
 
 function hasLiveAccess(user: AdminManagedUser) {

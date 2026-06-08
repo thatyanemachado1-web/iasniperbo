@@ -1,4 +1,4 @@
-import { ChevronDown, Mail, MapPin, MessageCircle, Settings2 } from "lucide-react";
+import { CalendarClock, ChevronDown, Mail, MapPin, MessageCircle, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { AdminBadge, planLabel, planTone, statusLabel, statusTone } from "@/components/admin/AdminBadge";
 import { AdminUserDetailsPanel } from "@/components/admin/AdminUserDetailsPanel";
@@ -52,6 +52,14 @@ export function AdminUserCard({
               <span className="break-words">{[user.city, user.country].filter(Boolean).join(" / ")}</span>
             </p>
           )}
+          <p className="mt-2 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+            <CalendarClock className="size-3.5 shrink-0 text-neon-cyan" />
+            <span className="break-words">Cadastro: {formatDateTime(user.createdAt)}</span>
+          </p>
+          <p className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+            <CalendarClock className="size-3.5 shrink-0 text-gold" />
+            <span className="break-words">Ultimo acesso: {formatAccessDateTime(user)}</span>
+          </p>
         </div>
         <button
           type="button"
@@ -89,4 +97,18 @@ export function AdminUserCard({
       )}
     </article>
   );
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "-";
+  return date.toLocaleString("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function formatAccessDateTime(user: AdminManagedUser) {
+  if (user.lastAccessAt) return formatDateTime(user.lastAccessAt);
+  return user.lastAccess || "Sem registro";
 }

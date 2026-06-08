@@ -55,7 +55,7 @@ export function AdminUsersTable({
                   </button>
                 </div>
 
-                <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-5">
+                <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-7">
                   <InfoPill label="Plano">
                     <AdminBadge tone={planTone(user.plan)}>{planLabel(user.plan)}</AdminBadge>
                   </InfoPill>
@@ -63,6 +63,14 @@ export function AdminUsersTable({
                     <AdminBadge tone={statusTone(user.subscriptionStatus, user.isBlocked)}>
                       {statusLabel(user.subscriptionStatus)}
                     </AdminBadge>
+                  </InfoPill>
+                  <InfoPill label="Cadastro">
+                    <span className="text-xs font-black text-foreground">{formatDateTime(user.createdAt)}</span>
+                  </InfoPill>
+                  <InfoPill label="Ultimo acesso">
+                    <span className="text-xs font-black text-foreground">
+                      {formatAccessDateTime(user)}
+                    </span>
                   </InfoPill>
                   <InfoPill label="Validade">
                     <span className="text-xs font-black text-foreground">{formatDate(user.currentPeriodEnd)}</span>
@@ -145,4 +153,18 @@ function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value || "-";
   return date.toLocaleDateString("pt-BR");
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "-";
+  return date.toLocaleString("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function formatAccessDateTime(user: AdminManagedUser) {
+  if (user.lastAccessAt) return formatDateTime(user.lastAccessAt);
+  return user.lastAccess || "Sem registro";
 }

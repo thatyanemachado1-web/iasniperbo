@@ -5699,6 +5699,7 @@ function adminManagedUserFromClient(client: Record<string, unknown>, env?: unkno
       adminNote: readString(client, "adminNote") || readString(client, "notes"),
       createdAt: readString(client, "created_at") || new Date().toISOString(),
       lastAccess: latestAccessLabel(email),
+      lastAccessAt: latestAccessIso(email),
     },
     env,
   );
@@ -5752,6 +5753,8 @@ function normalizeAdminManagedUser(user: Record<string, unknown>, env?: unknown)
       readString(user, "adminNote") || readString(user, "admin_note") || readString(user, "notes"),
     createdAt:
       readString(user, "createdAt") || readString(user, "created_at") || new Date().toISOString(),
+    lastAccessAt:
+      readString(user, "lastAccessAt") || readString(user, "last_access_at") || latestAccessIso(email),
     lastAccess:
       readString(user, "lastAccess") || readString(user, "last_access") || latestAccessLabel(email),
   };
@@ -6304,10 +6307,19 @@ function isAdminApproverEmailForEnv(env: unknown, email: string) {
   );
 }
 
-function latestAccessLabel(email: string) {
-  const event = liveAccessEvents.find(
+function latestAccessEvent(email: string) {
+  return liveAccessEvents.find(
     (item) => readString(item, "email").toLowerCase() === email.toLowerCase(),
   );
+}
+
+function latestAccessIso(email: string) {
+  const event = latestAccessEvent(email);
+  return event ? readString(event, "created_at") : "";
+}
+
+function latestAccessLabel(email: string) {
+  const event = latestAccessEvent(email);
   return event ? relativeTimeFromIso(readString(event, "created_at")) : "Sem registro";
 }
 
