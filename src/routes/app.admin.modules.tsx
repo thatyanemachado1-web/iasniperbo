@@ -19,15 +19,6 @@ import type { ModuleToggles } from "@/types/dashboard";
 
 export const Route = createFileRoute("/app/admin/modules")({
   component: AdminModulesPage,
-  head: () => ({
-    meta: [
-      { title: "Módulos do sistema — SNIPER BO IA" },
-      { name: "description", content: "Ative, desative e configure módulos operacionais do SNIPER BO IA." },
-      { property: "og:url", content: "https://sniperbo.com/app/admin/modules" },
-      { name: "robots", content: "noindex,nofollow" },
-    ],
-    links: [{ rel: "canonical", href: "https://sniperbo.com/app/admin/modules" }],
-  }),
 });
 
 const futureModules = ["Leitura Neural", "Assistente de Voz", "Modo Demonstracao"];

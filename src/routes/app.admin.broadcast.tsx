@@ -25,15 +25,6 @@ import { SectionTitle } from "@/components/ui-app/SectionTitle";
 
 export const Route = createFileRoute("/app/admin/broadcast")({
   component: AdminBroadcastPage,
-  head: () => ({
-    meta: [
-      { title: "Broadcast e SEO — Administração SNIPER BO IA" },
-      { name: "description", content: "Envie comunicados em massa e ajuste metadados sociais do SNIPER BO IA." },
-      { property: "og:url", content: "https://sniperbo.com/app/admin/broadcast" },
-      { name: "robots", content: "noindex,nofollow" },
-    ],
-    links: [{ rel: "canonical", href: "https://sniperbo.com/app/admin/broadcast" }],
-  }),
 });
 
 const toneOptions: Array<{ value: AnnouncementTone; label: string }> = [
@@ -185,7 +176,7 @@ function AdminBroadcastPage() {
               </div>
               <img
                 src={settings.shareImageUrl || "/sniper-icon.svg"}
-                alt="Pré-visualização da imagem do broadcast"
+                alt="Preview"
                 className="size-24 shrink-0 rounded-lg border border-black/10 object-cover"
               />
             </div>

@@ -7,17 +7,6 @@ import { ArrowLeft, Loader2, ReceiptText } from "lucide-react";
 
 export const Route = createFileRoute("/app/pagamentos")({
   component: HistoricoPagamentosPage,
-  head: () => ({
-    meta: [
-      { title: "Histórico de pagamentos — SNIPER BO IA" },
-      { name: "description", content: "Histórico completo de faturas e pagamentos da sua assinatura SNIPER BO IA." },
-      { property: "og:title", content: "Histórico de pagamentos — SNIPER BO IA" },
-      { property: "og:description", content: "Consulte faturas e status dos seus pagamentos no SNIPER BO IA." },
-      { property: "og:url", content: "https://sniperbo.com/app/pagamentos" },
-      { name: "robots", content: "noindex,nofollow" },
-    ],
-    links: [{ rel: "canonical", href: "https://sniperbo.com/app/pagamentos" }],
-  }),
 });
 
 function HistoricoPagamentosPage() {

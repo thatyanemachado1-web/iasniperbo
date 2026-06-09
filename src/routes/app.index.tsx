@@ -39,17 +39,6 @@ import { useRoundHistory } from "@/hooks/useRoundHistory";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
-  head: () => ({
-    meta: [
-      { title: "Dashboard operacional — SNIPER BO IA" },
-      { name: "description", content: "Painel operacional ao vivo do SNIPER BO IA com leitura neural, surf, alerta de Tie e narração da mesa BAC BO." },
-      { property: "og:title", content: "Dashboard operacional — SNIPER BO IA" },
-      { property: "og:description", content: "Leitura neural, surf, Tie e narração IA da mesa BAC BO em tempo real." },
-      { property: "og:url", content: "https://sniperbo.com/app" },
-      { name: "robots", content: "noindex,nofollow" },
-    ],
-    links: [{ rel: "canonical", href: "https://sniperbo.com/app" }],
-  }),
 });
 
 function DashboardPage() {
@@ -99,9 +88,7 @@ function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="sr-only">Dashboard operacional SNIPER BO IA</h1>
       <div className="flex flex-wrap items-center justify-between gap-3">
-
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">Olá,</div>
           <div className="text-lg font-bold">

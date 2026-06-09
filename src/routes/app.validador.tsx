@@ -35,7 +35,6 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useDashboardData } from "@/hooks/useDashboardData";
-import { readAdminSession } from "@/lib/adminApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import { PatternMinerStorage } from "@/patternMiner/PatternMinerStorage";
 import {
@@ -83,17 +82,6 @@ import type {
 
 export const Route = createFileRoute("/app/validador")({
   component: NeuralValidatorPage,
-  head: () => ({
-    meta: [
-      { title: "Validador Neural de Estratégias — SNIPER BO IA" },
-      { name: "description", content: "Valide estratégias da mesa BAC BO com o motor neural do SNIPER BO IA: padrões, histórico e disparo automático em tempo real." },
-      { property: "og:title", content: "Validador Neural — SNIPER BO IA" },
-      { property: "og:description", content: "Validação automática de estratégias da mesa BAC BO com IA." },
-      { property: "og:url", content: "https://sniperbo.com/app/validador" },
-      { name: "robots", content: "noindex,nofollow" },
-    ],
-    links: [{ rel: "canonical", href: "https://sniperbo.com/app/validador" }],
-  }),
 });
 
 const engine = new NeuralValidatorEngine();
@@ -121,13 +109,11 @@ const DESTINATION_OPTIONS: Array<{ value: ValidatorDestination; label: string }>
 function NeuralValidatorPage() {
   const { data, mode } = useDashboardData();
   const session = readUserSession();
-  const adminSession = readAdminSession();
-  const adminAccess = Boolean(adminSession?.token);
-  const fullAccess = adminAccess || hasFullAccess(session);
+  const fullAccess = hasFullAccess(session);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [storageVersion, setStorageVersion] = useState(0);
   const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
-  const planLimits = adminAccess ? planLimitForSession("vip", true) : planLimitForSession(session.plan, fullAccess);
+  const planLimits = planLimitForSession(session.plan, fullAccess);
   const [serverHistory, setServerHistory] = useState<Round[]>([]);
   const [serverHistoryStatus, setServerHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [validationSnapshot, setValidationSnapshot] = useState<{
@@ -164,7 +150,6 @@ function NeuralValidatorPage() {
   const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
   const [testingTelegramId, setTestingTelegramId] = useState("");
-  const [siteAlerts, setSiteAlerts] = useState<LiveValidatorHit[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
   const [channelForm, setChannelForm] = useState({
     name: "Sala Premium",
@@ -173,9 +158,6 @@ function NeuralValidatorPage() {
     buttonLink: "",
     isActive: true,
     entryTemplate: DEFAULT_MESSAGE_TEMPLATES.entry,
-    analyzingEnabled: false,
-    analyzingCooldownRounds: 3,
-    analyzingTemplate: DEFAULT_MESSAGE_TEMPLATES.analyzing,
   });
   const [filters, setFilters] = useState<PatternMiningFilters>({
     historySize: Math.min(5000, planLimits.history),
@@ -284,12 +266,8 @@ function NeuralValidatorPage() {
         ]);
         if (cancelled) return;
 
+        const mergedPatterns = mergeValidatorItems(serverPatterns, readSavedPatterns());
         const mergedChannels = mergeValidatorItems(serverChannels, readNotificationChannels());
-        const mergedPatterns = autoPrepareAdminTelegramDelivery(
-          mergeValidatorItems(serverPatterns, readSavedPatterns()),
-          mergedChannels,
-          adminAccess,
-        );
         writeSavedPatterns(mergedPatterns);
         writeNotificationChannels(mergedChannels);
         setSavedPatterns(mergedPatterns);
@@ -309,7 +287,7 @@ function NeuralValidatorPage() {
     return () => {
       cancelled = true;
     };
-  }, [session.email, session.clientToken, adminSession?.email, adminSession?.token]);
+  }, [session.email, session.clientToken]);
 
   useEffect(() => {
     if (!hasValidationHistory || pattern.length < 1) {
@@ -331,14 +309,7 @@ function NeuralValidatorPage() {
 
   useEffect(() => {
     if (!liveHits.length) return;
-    setSiteAlerts((current) => {
-      const byId = new Map(current.map((hit) => [hit.id, hit]));
-      for (const hit of liveHits) byId.set(hit.id, hit);
-      return [...byId.values()]
-        .sort((a, b) => b.detectedRoundId - a.detectedRoundId)
-        .slice(0, 5);
-    });
-    void Promise.all(liveHits.map((hit) => sendLiveHitToTelegram(hit)));
+    const detectedSignature = liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|");
     setSavedPatterns((current) => {
       let changed = false;
       const now = new Date().toISOString();
@@ -416,11 +387,7 @@ function NeuralValidatorPage() {
     };
     const next = upsertSavedPattern(saved);
     setSavedPatterns(next);
-    void saveServerValidatorPattern(saved).then((serverPattern) => {
-      if (!serverPattern) {
-        showNotice("Padrao salvo no navegador, mas o servidor nao confirmou. Telegram precisa do padrao no servidor.");
-      }
-    });
+    void saveServerValidatorPattern(saved);
     showNotice(sourceHistory.length ? "Padrao salvo em Padroes Salvos." : "Padrao salvo sem amostra historica.");
     return true;
   }
@@ -490,51 +457,14 @@ function NeuralValidatorPage() {
     void saveServerValidatorPattern(updated);
   }
 
-  function updateAllSavedPatternDelivery(
-    destination: ValidatorDestination,
-    telegramChannelId: string,
-  ) {
-    if (!savedPatterns.length) {
-      showNotice("Nenhum padrao salvo para configurar.");
-      return;
-    }
-    const needsTelegram = destination === "telegram" || destination === "site_telegram";
-    if (needsTelegram && !telegramChannelId) {
-      showNotice("Escolha um canal Telegram antes de aplicar em todos.");
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const next = savedPatterns.map((patternItem) => ({
-      ...patternItem,
-      destination,
-      telegramChannelId: needsTelegram ? telegramChannelId : patternItem.telegramChannelId,
-      updatedAt: now,
-    }));
-    writeSavedPatterns(next);
-    setSavedPatterns(next);
-    void Promise.all(next.map((patternItem) => saveServerValidatorPattern(patternItem)));
-    showNotice(`${next.length} padroes atualizados para ${destinationLabel(destination)}.`);
-  }
-
   async function sendLiveHitToTelegram(hit: LiveValidatorHit) {
     const patternItem = hit.pattern;
-    if (patternItem.destination === "disabled" || patternItem.destination === "monitor") {
-      showNotice("Padrao detectado no site. Telegram nao enviado porque o destino esta monitorar/desativado.");
-      return;
-    }
-    const channel = channels.find((item) => item.id === patternItem.telegramChannelId) ||
-      channels.find((item) => item.isActive && item.chatId) ||
-      channels[0];
-    if (!channel || !channel.isActive) {
-      showNotice("Padrao detectado no site. Telegram nao enviado: nenhum canal ativo.");
-      return;
-    }
+    if (patternItem.destination !== "telegram" && patternItem.destination !== "site_telegram") return;
+    const channel = channels.find((item) => item.id === patternItem.telegramChannelId);
+    if (!channel || !channel.isActive) return;
 
-    if (!channel.chatId) {
-      showNotice("Padrao detectado no site. Telegram nao enviado: canal sem Chat ID.");
-      return;
-    }
+    const botToken = decodeToken(channel.botTokenEncoded);
+    if (!botToken || !channel.chatId) return;
 
     const sendKey = `${patternItem.id}:${channel.id}:${hit.detectedRoundId}`;
     if (telegramSendKeysRef.current.has(sendKey) || wasTelegramNotificationSent(sendKey)) return;
@@ -542,35 +472,16 @@ function NeuralValidatorPage() {
     telegramSendKeysRef.current.add(sendKey);
     markTelegramNotificationSent(sendKey);
     try {
-      await postValidatorLiveHitTelegram({
-        patternId: patternItem.id,
-        detectedRoundId: hit.detectedRoundId,
+      await postValidatorTelegramMessage({
+        botToken,
+        chatId: channel.chatId,
+        buttonLink: channel.buttonLink || `${window.location.origin}/app/validador`,
+        message: buildLiveHitTelegramMessage(hit, channel),
+        buttonLabel: "Abrir Sniper Bo IA",
       });
-      showNotice(`Sinal enviado no Telegram: ${channel.name}.`);
     } catch (error) {
       telegramSendKeysRef.current.delete(sendKey);
       forgetTelegramNotificationSent(sendKey);
-      const botToken = decodeToken(channel.botTokenEncoded);
-      if (botToken) {
-        try {
-          await postValidatorTelegramMessage({
-            botToken,
-            chatId: channel.chatId,
-            buttonLink: channel.buttonLink || `${window.location.origin}/app/validador`,
-            message: buildLiveHitTelegramMessage(hit, channel),
-            buttonLabel: "Abrir Sniper Bo IA",
-          });
-          markTelegramNotificationSent(sendKey);
-          showNotice(`Sinal enviado no Telegram: ${channel.name}.`);
-          return;
-        } catch {
-          telegramSendKeysRef.current.delete(sendKey);
-          forgetTelegramNotificationSent(sendKey);
-        }
-      } else {
-        showNotice("Padrao detectado no site. Telegram nao enviado: token do canal nao esta disponivel.");
-        return;
-      }
       showNotice(error instanceof Error ? error.message : "Falha ao enviar sinal no Telegram.");
     }
   }
@@ -595,12 +506,9 @@ function NeuralValidatorPage() {
       chatId: channelForm.chatId.trim(),
       buttonLink: channelForm.buttonLink.trim(),
       isActive: channelForm.isActive,
-      analyzingEnabled: channelForm.analyzingEnabled,
-      analyzingCooldownRounds: Math.max(1, Number(channelForm.analyzingCooldownRounds) || 3),
       templates: {
         ...DEFAULT_MESSAGE_TEMPLATES,
         entry: channelForm.entryTemplate || DEFAULT_MESSAGE_TEMPLATES.entry,
-        analyzing: channelForm.analyzingTemplate || DEFAULT_MESSAGE_TEMPLATES.analyzing,
       },
       createdAt: now,
       updatedAt: now,
@@ -608,32 +516,11 @@ function NeuralValidatorPage() {
     const next = upsertNotificationChannel(channel);
     setChannels(next);
     void saveServerValidatorChannel(channel).then((serverChannel) => {
-      if (!serverChannel) {
-        showNotice("Canal salvo no navegador, mas o servidor nao confirmou. Telegram precisa do canal no servidor.");
-        return;
-      }
+      if (!serverChannel) return;
       setChannels(upsertNotificationChannel(serverChannel));
     });
     setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
     showNotice("Canal salvo para este usuario. Token fica mascarado depois de salvo.");
-  }
-
-  function updateNotificationChannel(
-    channel: ValidatorNotificationChannel,
-    patch: Partial<ValidatorNotificationChannel>,
-  ) {
-    const updated = {
-      ...channel,
-      ...patch,
-      templates: {
-        ...DEFAULT_MESSAGE_TEMPLATES,
-        ...channel.templates,
-        ...patch.templates,
-      },
-      updatedAt: new Date().toISOString(),
-    };
-    setChannels(upsertNotificationChannel(updated));
-    void saveServerValidatorChannel(updated);
   }
 
   async function testChannelFromForm() {
@@ -751,12 +638,6 @@ function NeuralValidatorPage() {
         </div>
       )}
 
-      <SitePatternAlerts
-        alerts={siteAlerts}
-        onDismiss={(id) => setSiteAlerts((current) => current.filter((hit) => hit.id !== id))}
-        onClear={() => setSiteAlerts([])}
-      />
-
       {!hasHistory && (
         <GlassCard className="border-warning/40">
           <div className="flex items-start gap-3">
@@ -836,10 +717,8 @@ function NeuralValidatorPage() {
             onToggle={(patternItem) => {
               const updated = { ...patternItem, isActive: !patternItem.isActive, updatedAt: new Date().toISOString() };
               setSavedPatterns(upsertSavedPattern(updated));
-              void saveServerValidatorPattern(updated);
             }}
             onUpdate={updateSavedPattern}
-            onBulkDeliveryUpdate={updateAllSavedPatternDelivery}
           />
         </TabsContent>
 
@@ -852,65 +731,11 @@ function NeuralValidatorPage() {
             onRemove={removeChannel}
             onTestForm={testChannelFromForm}
             onTestChannel={testSavedChannel}
-            onUpdateChannel={updateNotificationChannel}
             telegramEnabled={planLimits.telegram}
             testingTelegramId={testingTelegramId}
           />
         </TabsContent>
       </Tabs>
-    </div>
-  );
-}
-
-function SitePatternAlerts({
-  alerts,
-  onDismiss,
-  onClear,
-}: {
-  alerts: LiveValidatorHit[];
-  onDismiss: (id: string) => void;
-  onClear: () => void;
-}) {
-  if (!alerts.length) return null;
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-black uppercase tracking-wide text-neon-cyan">Sinais do site</div>
-        {alerts.length > 1 && (
-          <Button type="button" size="sm" variant="secondary" onClick={onClear}>
-            Limpar sinais
-          </Button>
-        )}
-      </div>
-      {alerts.map((hit) => (
-        <GlassCard key={hit.id} className="border-neon-cyan/50 bg-neon-cyan/10 p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-sm font-black text-neon-cyan">
-                <BellRing className="size-4" /> PADRAO SALVO DETECTADO
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground">
-                Mesa: <span className="font-bold text-foreground">{hit.pattern.tableId || "Bac Bo"}</span>
-                <span className="mx-2">|</span>
-                Rodada: <span className="font-bold text-foreground">{hit.detectedRoundId}</span>
-              </div>
-              <div className="mt-2">
-                <PatternLine pattern={hit.pattern.pattern} pulledSide={hit.entry} />
-              </div>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-xs">
-                Entrada: <SideLabel side={hit.entry} />
-                <span className="mx-2 text-muted-foreground">|</span>
-                Gale: ate G{hit.pattern.galeLimit}
-              </div>
-              <Button type="button" size="sm" variant="secondary" onClick={() => onDismiss(hit.id)}>
-                Fechar
-              </Button>
-            </div>
-          </div>
-        </GlassCard>
-      ))}
     </div>
   );
 }
@@ -1335,7 +1160,6 @@ function SavedPatternsTab({
   onReset,
   onToggle,
   onUpdate,
-  onBulkDeliveryUpdate,
 }: {
   patterns: SavedValidatorPattern[];
   channels: ValidatorNotificationChannel[];
@@ -1344,73 +1168,14 @@ function SavedPatternsTab({
   onReset: (pattern: SavedValidatorPattern) => void;
   onToggle: (pattern: SavedValidatorPattern) => void;
   onUpdate: (pattern: SavedValidatorPattern, patch: Partial<SavedValidatorPattern>) => void;
-  onBulkDeliveryUpdate: (destination: ValidatorDestination, telegramChannelId: string) => void;
 }) {
-  const [bulkDestination, setBulkDestination] = useState<ValidatorDestination>("site_telegram");
-  const [bulkChannelId, setBulkChannelId] = useState("");
-  const activeChannels = channels.filter((channel) => channel.isActive);
-  const selectedBulkChannelId = bulkChannelId || activeChannels[0]?.id || channels[0]?.id || "";
-  const bulkNeedsTelegram = bulkDestination === "telegram" || bulkDestination === "site_telegram";
-
   return (
     <div className="space-y-3">
       <GlassCard className="rounded-xl p-4">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.95fr)] lg:items-start">
-          <SectionTitle
-            title="Padroes salvos"
-            subtitle="Configure destino, canal e mensagem somente depois que o padrao estiver salvo."
-          />
-          <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 p-3">
-            <div className="text-xs font-black uppercase tracking-wider text-neon-cyan">
-              Envio em massa
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <Select
-                value={bulkDestination}
-                onValueChange={(value) => setBulkDestination(value as ValidatorDestination)}
-              >
-                <SelectTrigger className="bg-secondary/30">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="site">Todos no site</SelectItem>
-                  <SelectItem value="telegram">Todos no Telegram</SelectItem>
-                  <SelectItem value="site_telegram">Site + Telegram</SelectItem>
-                  <SelectItem value="monitor">Apenas monitorar</SelectItem>
-                  <SelectItem value="disabled">Desativar envio</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={selectedBulkChannelId || "none"}
-                onValueChange={(value) => setBulkChannelId(value === "none" ? "" : value)}
-                disabled={!bulkNeedsTelegram}
-              >
-                <SelectTrigger className="bg-secondary/30">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Nenhum canal</SelectItem>
-                  {channels.map((channel) => (
-                    <SelectItem key={channel.id} value={channel.id}>
-                      {channel.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button
-              type="button"
-              className="btn-primary-grad mt-3 w-full"
-              onClick={() => onBulkDeliveryUpdate(bulkDestination, bulkNeedsTelegram ? selectedBulkChannelId : "")}
-              disabled={!patterns.length || (bulkNeedsTelegram && !selectedBulkChannelId)}
-            >
-              Aplicar em todos os padroes
-            </Button>
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Atualiza todos os padroes salvos de uma vez. O canal individual pode ser ajustado depois.
-            </p>
-          </div>
-        </div>
+        <SectionTitle
+          title="Padroes salvos"
+          subtitle="Configure destino, canal e mensagem somente depois que o padrao estiver salvo."
+        />
       </GlassCard>
       {patterns.map((pattern) => {
         const channel = channels.find((item) => item.id === pattern.telegramChannelId);
@@ -1525,7 +1290,6 @@ function ChannelsTab({
   onRemove,
   onTestForm,
   onTestChannel,
-  onUpdateChannel,
   telegramEnabled,
   testingTelegramId,
 }: {
@@ -1537,9 +1301,6 @@ function ChannelsTab({
     buttonLink: string;
     isActive: boolean;
     entryTemplate: string;
-    analyzingEnabled: boolean;
-    analyzingCooldownRounds: number;
-    analyzingTemplate: string;
   };
   setChannelForm: (form: {
     name: string;
@@ -1548,15 +1309,11 @@ function ChannelsTab({
     buttonLink: string;
     isActive: boolean;
     entryTemplate: string;
-    analyzingEnabled: boolean;
-    analyzingCooldownRounds: number;
-    analyzingTemplate: string;
   }) => void;
   onSave: () => void;
   onRemove: (id: string) => void;
   onTestForm: () => void;
   onTestChannel: (channel: ValidatorNotificationChannel) => void;
-  onUpdateChannel: (channel: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>) => void;
   telegramEnabled: boolean;
   testingTelegramId: string;
 }) {
@@ -1591,37 +1348,6 @@ function ChannelsTab({
           <Field label="Modelo entrada">
             <Textarea value={channelForm.entryTemplate} onChange={(event) => setChannelForm({ ...channelForm, entryTemplate: event.target.value })} className="min-h-36" />
           </Field>
-          <div className="rounded-xl border border-border/70 bg-secondary/15 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-black">Mensagem sem entrada</div>
-                <div className="mt-1 text-xs text-muted-foreground">Envia quando nao tiver entrada validada.</div>
-              </div>
-              <Switch
-                checked={channelForm.analyzingEnabled}
-                onCheckedChange={(checked) => setChannelForm({ ...channelForm, analyzingEnabled: checked })}
-              />
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
-              <Textarea
-                value={channelForm.analyzingTemplate}
-                onChange={(event) => setChannelForm({ ...channelForm, analyzingTemplate: event.target.value })}
-                className="min-h-24"
-                placeholder={DEFAULT_MESSAGE_TEMPLATES.analyzing}
-              />
-              <Field label="Intervalo">
-                <Input
-                  value={channelForm.analyzingCooldownRounds}
-                  onChange={(event) => setChannelForm({
-                    ...channelForm,
-                    analyzingCooldownRounds: Math.max(1, Number(event.target.value) || 1),
-                  })}
-                  type="number"
-                  min={1}
-                />
-              </Field>
-            </div>
-          </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <Button type="button" className="w-full btn-primary-grad" onClick={onSave} disabled={!telegramEnabled}>
               <Save className="size-4" /> Salvar configuracao
@@ -1649,9 +1375,6 @@ function ChannelsTab({
                   <div className="font-bold">{channel.name}</div>
                   <div className="mt-1 text-xs text-muted-foreground">Token: {channel.botTokenMasked || "sem token"} | Chat: {channel.chatId || "sem chat"}</div>
                   <div className="mt-1 text-xs text-muted-foreground">Status: {channel.isActive ? "ativo" : "inativo"}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Sem entrada: {channel.analyzingEnabled ? `ativo a cada ${channel.analyzingCooldownRounds || 3} rodadas` : "inativo"}
-                  </div>
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <Button
@@ -1669,40 +1392,6 @@ function ChannelsTab({
                   </Button>
                 </div>
               </div>
-              <details className="mt-3 rounded-xl border border-border/60 bg-background/25 p-3 text-xs">
-                <summary className="cursor-pointer font-bold text-muted-foreground">Configurar analisando padrao</summary>
-                <div className="mt-3 space-y-3">
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/15 px-3 py-2">
-                    <span className="font-bold">Enviar quando nao tiver entrada</span>
-                    <Switch
-                      checked={Boolean(channel.analyzingEnabled)}
-                      onCheckedChange={(checked) => onUpdateChannel(channel, { analyzingEnabled: checked })}
-                    />
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
-                    <Textarea
-                      value={channel.templates.analyzing || DEFAULT_MESSAGE_TEMPLATES.analyzing}
-                      onChange={(event) => onUpdateChannel(channel, {
-                        templates: {
-                          ...channel.templates,
-                          analyzing: event.target.value,
-                        },
-                      })}
-                      className="min-h-24"
-                    />
-                    <Field label="Intervalo">
-                      <Input
-                        value={channel.analyzingCooldownRounds || 3}
-                        onChange={(event) => onUpdateChannel(channel, {
-                          analyzingCooldownRounds: Math.max(1, Number(event.target.value) || 1),
-                        })}
-                        type="number"
-                        min={1}
-                      />
-                    </Field>
-                  </div>
-                </div>
-              </details>
             </div>
           ))}
           {!channels.length && (
@@ -2123,8 +1812,7 @@ async function fetchValidatorRoundHistory(limit: number) {
   const url = new URL("/validator/round-history", window.location.origin);
   url.searchParams.set("limit", String(limit));
   const session = readUserSession();
-  const adminSession = readAdminSession();
-  const tokens = [adminSession?.token, session.clientToken, localDevDashboardToken()].filter(
+  const tokens = [session.clientToken, localDevDashboardToken()].filter(
     (token, index, values): token is string => Boolean(token) && values.indexOf(token) === index,
   );
   const requestTokens = tokens.length ? tokens : [""];
@@ -2219,24 +1907,9 @@ async function testServerValidatorChannel(channelId: string) {
   if (!response.ok) throw new Error(data?.error || "Falha ao testar canal salvo.");
 }
 
-async function postValidatorLiveHitTelegram(payload: {
-  patternId: string;
-  detectedRoundId: number;
-}) {
-  const response = await fetch("/validator/live-hit/send", {
-    method: "POST",
-    cache: "no-store",
-    headers: validatorApiHeaders(true),
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json().catch(() => null) as { error?: string } | null;
-  if (!response.ok) throw new Error(data?.error || "Falha ao enviar sinal salvo no Telegram.");
-}
-
 function validatorApiHeaders(withJson = false) {
   const session = readUserSession();
-  const adminSession = readAdminSession();
-  const token = localDevDashboardToken() || adminSession?.token || session.clientToken;
+  const token = localDevDashboardToken() || session.clientToken;
   return {
     Accept: "application/json",
     "X-Validator-User-Id": currentUserId(),
@@ -2256,32 +1929,6 @@ function mergeValidatorItems<T extends { id: string; updatedAt: string }>(primar
   return [...byId.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
-function autoPrepareAdminTelegramDelivery(
-  patterns: SavedValidatorPattern[],
-  channels: ValidatorNotificationChannel[],
-  enabled: boolean,
-) {
-  if (!enabled || !patterns.length) return patterns;
-  const channel = channels.find((item) => item.isActive) || channels[0];
-  if (!channel) return patterns;
-  const now = new Date().toISOString();
-  return patterns.map((pattern) => {
-    if (!pattern.isActive || pattern.destination === "disabled") return pattern;
-    if (
-      (pattern.destination === "telegram" || pattern.destination === "site_telegram") &&
-      pattern.telegramChannelId
-    ) {
-      return pattern;
-    }
-    return {
-      ...pattern,
-      destination: "site_telegram" as ValidatorDestination,
-      telegramChannelId: channel.id,
-      updatedAt: now,
-    };
-  });
-}
-
 async function postValidatorTelegramMessage(payload: {
   botToken: string;
   chatId: string;
@@ -2292,8 +1939,7 @@ async function postValidatorTelegramMessage(payload: {
   if (typeof window === "undefined") return;
 
   const session = readUserSession();
-  const adminSession = readAdminSession();
-  const token = localDevDashboardToken() || adminSession?.token || session.clientToken;
+  const token = localDevDashboardToken() || session.clientToken;
   const response = await fetch("/validator/telegram/send", {
     method: "POST",
     cache: "no-store",

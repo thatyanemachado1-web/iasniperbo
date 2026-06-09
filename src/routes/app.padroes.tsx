@@ -26,17 +26,6 @@ import type { PatternMinerHistoryLimit, PatternMinerSnapshot } from "@/types/pat
 
 export const Route = createFileRoute("/app/padroes")({
   component: PatternMinerPage,
-  head: () => ({
-    meta: [
-      { title: "Minerador de Padrões — SNIPER BO IA" },
-      { name: "description", content: "Descubra padrões recorrentes da mesa BAC BO com o minerador estatístico do SNIPER BO IA: ocorrências, força e direção." },
-      { property: "og:title", content: "Minerador de Padrões — SNIPER BO IA" },
-      { property: "og:description", content: "Padrões recorrentes da mesa BAC BO detectados por IA." },
-      { property: "og:url", content: "https://sniperbo.com/app/padroes" },
-      { name: "robots", content: "noindex,nofollow" },
-    ],
-    links: [{ rel: "canonical", href: "https://sniperbo.com/app/padroes" }],
-  }),
 });
 
 function PatternMinerPage() {

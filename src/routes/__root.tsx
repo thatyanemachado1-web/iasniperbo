@@ -76,7 +76,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { name: "theme-color", content: "#030712" },
-      { name: "google-site-verification", content: "VQcjEgrWzwoOSX4LId8QqxG53B9cHzjk_GZ-VCdid3Q" },
       { title: "SNIPER BO IA - Painel operacional com IA" },
       {
         name: "description",
@@ -88,15 +87,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:image", content: "https://sniperbo.com/favicon.png" },
-      { property: "og:site_name", content: "SNIPER BO IA" },
+      { property: "og:image", content: "/favicon.png" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:title", content: "SNIPER BO IA - Painel operacional com IA" },
       {
         name: "twitter:description",
         content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
       },
-      { name: "twitter:image", content: "https://sniperbo.com/favicon.png" },
+      { name: "twitter:image", content: "/favicon.png" },
     ],
     links: [
       {

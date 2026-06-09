@@ -15,17 +15,6 @@ import { CalendarClock, CheckCircle2, CreditCard, Loader2, ReceiptText } from "l
 
 export const Route = createFileRoute("/app/assinatura")({
   component: MinhaAssinaturaPage,
-  head: () => ({
-    meta: [
-      { title: "Minha assinatura — SNIPER BO IA" },
-      { name: "description", content: "Gerencie sua assinatura SNIPER BO IA: plano ativo, próximo vencimento, faturas e renovação." },
-      { property: "og:title", content: "Minha assinatura — SNIPER BO IA" },
-      { property: "og:description", content: "Detalhes do plano, vencimento e renovação da sua conta SNIPER BO IA." },
-      { property: "og:url", content: "https://sniperbo.com/app/assinatura" },
-      { name: "robots", content: "noindex,nofollow" },
-    ],
-    links: [{ rel: "canonical", href: "https://sniperbo.com/app/assinatura" }],
-  }),
 });
 
 function MinhaAssinaturaPage() {

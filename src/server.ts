@@ -173,7 +173,6 @@ const DEFAULT_VALIDATOR_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
   scoreboard: "{{wins}} GREEN / {{loss}} RED / {{percentage}}",
   greenStreak: "{{wins}} GREENS SEGUIDOS",
   preAlert: "Padrao quase formado\nMesa: {{table}}\nCondicao: {{pattern}}\nPossivel entrada: {{entry}}",
-  analyzing: "ANALISANDO PADRAO\nMesa: {{table}}\nAguardando entrada validada",
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
@@ -2649,7 +2648,6 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       url.pathname === "/validator/channels" ||
       url.pathname.startsWith("/validator/channels/") ||
       url.pathname === "/validator/channels/test" ||
-      url.pathname === "/validator/live-hit/send" ||
       url.pathname === "/validator/telegram/test" ||
       url.pathname === "/validator/telegram/send"
     )
@@ -2742,15 +2740,10 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     }
 
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
-    let changed = false;
     if (cycle.changed) {
       liveDashboardData = cycle.dashboard;
-      changed = true;
+      await saveLiveState(env);
     }
-    changed = await processValidatorLiveMonitoring(env, {
-      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-    }) || changed;
-    if (changed) await saveLiveState(env);
     return json(publicDashboardSnapshot(liveDashboardData));
   }
 
@@ -2781,70 +2774,10 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     url.pathname === "/validator/channels" ||
     url.pathname.startsWith("/validator/channels/") ||
     url.pathname === "/validator/channels/test";
-  const isLiveHitRoute = url.pathname === "/validator/live-hit/send";
-  if (!isPatternsRoute && !isChannelsRoute && !isLiveHitRoute) return null;
+  if (!isPatternsRoute && !isChannelsRoute) return null;
 
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
-
-  if (request.method === "POST" && isLiveHitRoute) {
-    const body = readRecord(await request.json().catch(() => ({})));
-    const patternId = readString(body, "patternId");
-    const detectedRoundId = Math.floor(Number(body.detectedRoundId) || 0);
-    const pattern = liveValidatorPatterns.find((item) => item.userId === userId && item.id === patternId);
-    if (!pattern) return json({ error: "Padrao nao encontrado." }, 404);
-    if (!pattern.isActive) return json({ error: "Padrao inativo." }, 400);
-    if (!validatorPatternAllowsTelegramForward(pattern)) {
-      return json({ error: "Padrao esta em monitorar/desativado." }, 400);
-    }
-
-    const channel = findValidatorTelegramChannelForPattern(pattern);
-    if (!channel) return json({ error: "Nenhum canal Telegram ativo com token e Chat ID." }, 400);
-
-    const roundId = detectedRoundId || Date.now();
-    const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${roundId}`;
-    if (validatorNotificationAlreadySent(notificationKey)) {
-      return json({ ok: true, skipped: true });
-    }
-
-    const sentAt = new Date().toISOString();
-    const result = await sendTelegramMessage({
-      botToken: decodeServerToken(channel.botTokenEncoded),
-      chatId: channel.chatId,
-      message: buildServerValidatorTelegramMessage(pattern, channel),
-      buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
-    });
-
-    liveValidatorNotifications = [
-      {
-        id: notificationKey,
-        userId: pattern.userId,
-        patternId: pattern.id,
-        channelId: channel.id,
-        roundId,
-        status: result.ok ? "sent" : "error",
-        error: result.ok ? "" : result.error,
-        sentAt,
-        updatedAt: sentAt,
-      },
-      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== notificationKey),
-    ].slice(0, 1000);
-
-    if (result.ok) {
-      liveValidatorPatterns = liveValidatorPatterns.map((item) =>
-        item.userId === pattern.userId && item.id === pattern.id
-          ? { ...item, lastDetectedAt: sentAt, lastDetectedRoundId: roundId, updatedAt: sentAt }
-          : item,
-      );
-      await saveLiveState(env);
-      return json({ ok: true, skipped: false, messageId: result.messageId });
-    }
-
-    await saveLiveState(env);
-    return json({ error: result.error }, result.status);
-  }
 
   if (url.pathname === "/validator/patterns") {
     if (request.method === "GET") {
@@ -3278,8 +3211,6 @@ function normalizeServerNotificationChannel(
     chatId: readString(record, "chatId"),
     buttonLink: readString(record, "buttonLink"),
     isActive: record.isActive !== false,
-    analyzingEnabled: readBooleanField(record, "analyzingEnabled"),
-    analyzingCooldownRounds: Math.max(1, Math.floor(Number(record.analyzingCooldownRounds) || 3)),
     templates: {
       ...DEFAULT_VALIDATOR_MESSAGE_TEMPLATES,
       ...readRecord(record.templates),
@@ -3398,14 +3329,10 @@ async function processValidatorLiveMonitoring(
   env: unknown,
   options: { allowInsecureTelegramFallback?: boolean } = {},
 ) {
-  if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
-    liveValidatorRoundHistory = mergeRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
-  }
   const latestRound = liveValidatorRoundHistory.at(-1);
   if (!latestRound || !liveValidatorPatterns.length) return false;
 
   let changed = false;
-  const entryChannelKeys = new Set<string>();
   for (const pattern of liveValidatorPatterns) {
     if (!shouldMonitorValidatorPattern(pattern, latestRound)) continue;
     const matchedRounds = liveValidatorRoundHistory.slice(-pattern.pattern.length);
@@ -3417,10 +3344,11 @@ async function processValidatorLiveMonitoring(
     pattern.updatedAt = detectedAt;
     changed = true;
 
-    if (!validatorPatternAllowsTelegramForward(pattern)) continue;
-    const channel = findValidatorTelegramChannelForPattern(pattern);
-    if (!channel) continue;
-    entryChannelKeys.add(validatorChannelKey(channel));
+    if (pattern.destination !== "telegram" && pattern.destination !== "site_telegram") continue;
+    const channel = liveValidatorChannels.find(
+      (item) => item.userId === pattern.userId && item.id === pattern.telegramChannelId,
+    );
+    if (!channel || !channel.isActive) continue;
     const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${latestRound.id}`;
     if (validatorNotificationAlreadySent(notificationKey)) continue;
 
@@ -3449,9 +3377,6 @@ async function processValidatorLiveMonitoring(
     changed = true;
   }
 
-  const analysisChanged = await sendValidatorAnalyzingMessages(latestRound, entryChannelKeys, options);
-  changed = changed || analysisChanged;
-
   return changed;
 }
 
@@ -3465,101 +3390,6 @@ function shouldMonitorValidatorPattern(pattern: SavedValidatorPattern, latestRou
 
 function validatorNotificationAlreadySent(key: string) {
   return liveValidatorNotifications.some((item) => readString(item, "id") === key && readString(item, "status") === "sent");
-}
-
-function validatorPatternAllowsTelegramForward(pattern: SavedValidatorPattern) {
-  return pattern.destination !== "disabled" && pattern.destination !== "monitor";
-}
-
-function findValidatorTelegramChannelForPattern(pattern: SavedValidatorPattern) {
-  const userChannels = liveValidatorChannels.filter((channel) => channel.userId === pattern.userId);
-  const preferred = userChannels.find((channel) => channel.id === pattern.telegramChannelId);
-  if (isUsableValidatorTelegramChannel(preferred)) return preferred;
-  return userChannels.find(isUsableValidatorTelegramChannel) || null;
-}
-
-function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel) {
-  return Boolean(channel?.isActive && channel.chatId && decodeServerToken(channel.botTokenEncoded));
-}
-
-async function sendValidatorAnalyzingMessages(
-  latestRound: Round,
-  entryChannelKeys: Set<string>,
-  options: { allowInsecureTelegramFallback?: boolean },
-) {
-  let changed = false;
-  for (const channel of liveValidatorChannels) {
-    if (!shouldSendValidatorAnalyzingMessage(channel, latestRound, entryChannelKeys)) continue;
-    const notificationKey = `analysis:${channel.userId}:${channel.id}:${latestRound.id}`;
-    const sentAt = new Date().toISOString();
-    const result = await sendTelegramMessage({
-      botToken: decodeServerToken(channel.botTokenEncoded),
-      chatId: channel.chatId,
-      message: buildServerValidatorAnalyzingMessage(channel),
-      buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-      allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-    });
-    liveValidatorNotifications = [
-      {
-        id: notificationKey,
-        type: "analysis",
-        userId: channel.userId,
-        channelId: channel.id,
-        roundId: latestRound.id,
-        status: result.ok ? "sent" : "error",
-        error: result.ok ? "" : result.error,
-        sentAt,
-        updatedAt: sentAt,
-      },
-      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== notificationKey),
-    ].slice(0, 1000);
-    changed = true;
-  }
-  return changed;
-}
-
-function shouldSendValidatorAnalyzingMessage(
-  channel: ValidatorNotificationChannel,
-  latestRound: Round,
-  entryChannelKeys: Set<string>,
-) {
-  if (!channel.isActive || !channel.analyzingEnabled) return false;
-  if (!channel.chatId || !decodeServerToken(channel.botTokenEncoded)) return false;
-  if (entryChannelKeys.has(validatorChannelKey(channel))) return false;
-  if (!validatorChannelHasActivePattern(channel)) return false;
-  const notificationKey = `analysis:${channel.userId}:${channel.id}:${latestRound.id}`;
-  if (validatorNotificationAlreadySent(notificationKey)) return false;
-  const cooldown = Math.max(1, Math.floor(Number(channel.analyzingCooldownRounds) || 3));
-  const lastRoundId = lastValidatorAnalysisRoundId(channel);
-  return !lastRoundId || latestRound.id - lastRoundId >= cooldown;
-}
-
-function validatorChannelHasActivePattern(channel: ValidatorNotificationChannel) {
-  return liveValidatorPatterns.some((pattern) => (
-    pattern.userId === channel.userId &&
-    pattern.isActive &&
-    validatorPatternAllowsTelegramForward(pattern) &&
-    pattern.pattern.length > 0 &&
-    findValidatorTelegramChannelForPattern(pattern)?.id === channel.id
-  ));
-}
-
-function lastValidatorAnalysisRoundId(channel: ValidatorNotificationChannel) {
-  let latest = 0;
-  for (const item of liveValidatorNotifications) {
-    if (readString(item, "type") !== "analysis") continue;
-    if (readString(item, "status") !== "sent") continue;
-    if (readString(item, "userId") !== channel.userId) continue;
-    if (readString(item, "channelId") !== channel.id) continue;
-    const roundId = Number(item.roundId);
-    if (Number.isFinite(roundId) && roundId > latest) latest = roundId;
-  }
-  return latest;
-}
-
-function validatorChannelKey(channel: ValidatorNotificationChannel) {
-  return `${channel.userId}:${channel.id}`;
 }
 
 function matchesServerValidatorPattern(rounds: Round[], pattern: ValidatorPatternToken[]) {
@@ -3602,27 +3432,6 @@ function buildServerValidatorTelegramMessage(
     mode: "Validador Neural",
   };
   const template = pattern.messageOverride?.trim() || channel.templates.entry || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry;
-  return template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
-}
-
-function buildServerValidatorAnalyzingMessage(channel: ValidatorNotificationChannel) {
-  const variables: Record<string, string> = {
-    pattern: "Aguardando",
-    entry: "Aguardando",
-    gale: "",
-    wins: "",
-    loss: "",
-    losses: "",
-    percentage: "",
-    table: "Bac Bo",
-    confidence: "",
-    sequence: "",
-    tieProtection: "",
-    result: "",
-    risk: "",
-    mode: "Validador Neural",
-  };
-  const template = channel.templates.analyzing || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.analyzing;
   return template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
 }
 

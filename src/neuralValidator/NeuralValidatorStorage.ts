@@ -1,6 +1,5 @@
 import { readUserSession } from "@/lib/userSession";
 import type { Round } from "@/types/dashboard";
-import { readAdminSession } from "@/lib/adminApi";
 import type {
   SavedValidatorPattern,
   ValidatorMessageTemplates,
@@ -22,7 +21,6 @@ export const DEFAULT_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
   scoreboard: "{{wins}} GREEN / {{loss}} RED / {{percentage}}",
   greenStreak: "{{wins}} GREENS SEGUIDOS",
   preAlert: "Padrao quase formado\nMesa: {{table}}\nCondicao: {{pattern}}\nPossivel entrada: {{entry}}",
-  analyzing: "ANALISANDO PADRAO\nMesa: {{table}}\nAguardando entrada validada",
 };
 
 interface StoredHistory {
@@ -106,7 +104,7 @@ export function writePatternDraft(pattern: ValidatorPatternToken[]) {
 }
 
 export function currentUserId() {
-  return readUserSession().email.trim().toLowerCase() || readAdminSession()?.email.trim().toLowerCase() || "local-user";
+  return readUserSession().email.trim().toLowerCase() || "local-user";
 }
 
 export function createStorageId(prefix: string) {

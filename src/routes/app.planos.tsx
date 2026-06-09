@@ -14,17 +14,6 @@ import { Check, Crown, Loader2, ReceiptText, Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/app/planos")({
   component: PlanosPage,
-  head: () => ({
-    meta: [
-      { title: "Planos VIP e Premium — SNIPER BO IA" },
-      { name: "description", content: "Conheça os planos VIP e Premium do SNIPER BO IA: leitura neural, narração IA, validador de estratégias e suporte operacional." },
-      { property: "og:title", content: "Planos VIP e Premium — SNIPER BO IA" },
-      { property: "og:description", content: "Escolha o plano de acesso ao painel operacional SNIPER BO IA." },
-      { property: "og:url", content: "https://sniperbo.com/app/planos" },
-      { name: "robots", content: "noindex,nofollow" },
-    ],
-    links: [{ rel: "canonical", href: "https://sniperbo.com/app/planos" }],
-  }),
 });
 
 const fallbackPlans: BillingPlan[] = [

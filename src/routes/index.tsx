@@ -52,43 +52,16 @@ export const Route = createFileRoute("/")({
   component: LoginPage,
   head: () => ({
     meta: [
-      { title: "SNIPER BO IA — Painel operacional com leitura neural" },
+      { title: "SNIPER BO IA - Acesso operacional" },
       {
         name: "description",
         content:
-          "Painel operacional do SNIPER BO IA: leitura neural, surf, tendência e narração IA da mesa BAC BO em tempo real, com acesso VIP liberado pelo administrador.",
+          "Painel operacional com cadastro controlado, leitura estatística em tempo real e acesso VIP liberado pelo administrador.",
       },
-      { property: "og:title", content: "SNIPER BO IA — Painel operacional com leitura neural" },
+      { property: "og:title", content: "SNIPER BO IA" },
       {
         property: "og:description",
-        content: "Cadastro controlado, leitura estatística ao vivo e acesso VIP liberado pelo administrador.",
-      },
-      { property: "og:url", content: "https://sniperbo.com/" },
-      { property: "og:type", content: "website" },
-    ],
-    links: [{ rel: "canonical", href: "https://sniperbo.com/" }],
-    scripts: [
-      {
-        type: "application/ld+json",
-        children: JSON.stringify({
-          "@context": "https://schema.org",
-          "@graph": [
-            {
-              "@type": "Organization",
-              name: "SNIPER BO IA",
-              url: "https://sniperbo.com/",
-              logo: "https://sniperbo.com/favicon.png",
-              description:
-                "Plataforma de leitura neural e narração IA para a mesa BAC BO em tempo real.",
-            },
-            {
-              "@type": "WebSite",
-              name: "SNIPER BO IA",
-              url: "https://sniperbo.com/",
-              inLanguage: "pt-BR",
-            },
-          ],
-        }),
+        content: "Acesso operacional com cadastro, checkout, demo limitado e liberação VIP.",
       },
     ],
   }),
