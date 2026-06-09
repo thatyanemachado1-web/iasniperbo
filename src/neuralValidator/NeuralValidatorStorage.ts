@@ -1,5 +1,6 @@
 import { readUserSession } from "@/lib/userSession";
 import type { Round } from "@/types/dashboard";
+import { readAdminSession } from "@/lib/adminApi";
 import type {
   SavedValidatorPattern,
   ValidatorMessageTemplates,
@@ -105,7 +106,7 @@ export function writePatternDraft(pattern: ValidatorPatternToken[]) {
 }
 
 export function currentUserId() {
-  return readUserSession().email.trim().toLowerCase() || "local-user";
+  return readUserSession().email.trim().toLowerCase() || readAdminSession()?.email.trim().toLowerCase() || "local-user";
 }
 
 export function createStorageId(prefix: string) {

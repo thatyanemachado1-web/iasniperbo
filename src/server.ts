@@ -2742,10 +2742,15 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     }
 
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
+    let changed = false;
     if (cycle.changed) {
       liveDashboardData = cycle.dashboard;
-      await saveLiveState(env);
+      changed = true;
     }
+    changed = await processValidatorLiveMonitoring(env, {
+      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
+    }) || changed;
+    if (changed) await saveLiveState(env);
     return json(publicDashboardSnapshot(liveDashboardData));
   }
 
@@ -3398,6 +3403,9 @@ async function processValidatorLiveMonitoring(
   env: unknown,
   options: { allowInsecureTelegramFallback?: boolean } = {},
 ) {
+  if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
+    liveValidatorRoundHistory = mergeRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
+  }
   const latestRound = liveValidatorRoundHistory.at(-1);
   if (!latestRound || !liveValidatorPatterns.length) return false;
 

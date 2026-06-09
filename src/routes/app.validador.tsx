@@ -35,6 +35,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useDashboardData } from "@/hooks/useDashboardData";
+import { readAdminSession } from "@/lib/adminApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import { PatternMinerStorage } from "@/patternMiner/PatternMinerStorage";
 import {
@@ -109,11 +110,13 @@ const DESTINATION_OPTIONS: Array<{ value: ValidatorDestination; label: string }>
 function NeuralValidatorPage() {
   const { data, mode } = useDashboardData();
   const session = readUserSession();
-  const fullAccess = hasFullAccess(session);
+  const adminSession = readAdminSession();
+  const adminAccess = Boolean(adminSession?.token);
+  const fullAccess = adminAccess || hasFullAccess(session);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [storageVersion, setStorageVersion] = useState(0);
   const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
-  const planLimits = planLimitForSession(session.plan, fullAccess);
+  const planLimits = adminAccess ? planLimitForSession("vip", true) : planLimitForSession(session.plan, fullAccess);
   const [serverHistory, setServerHistory] = useState<Round[]>([]);
   const [serverHistoryStatus, setServerHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [validationSnapshot, setValidationSnapshot] = useState<{
@@ -290,7 +293,7 @@ function NeuralValidatorPage() {
     return () => {
       cancelled = true;
     };
-  }, [session.email, session.clientToken]);
+  }, [session.email, session.clientToken, adminSession?.email, adminSession?.token]);
 
   useEffect(() => {
     if (!hasValidationHistory || pattern.length < 1) {
@@ -389,7 +392,11 @@ function NeuralValidatorPage() {
     };
     const next = upsertSavedPattern(saved);
     setSavedPatterns(next);
-    void saveServerValidatorPattern(saved);
+    void saveServerValidatorPattern(saved).then((serverPattern) => {
+      if (!serverPattern) {
+        showNotice("Padrao salvo no navegador, mas o servidor nao confirmou. Telegram precisa do padrao no servidor.");
+      }
+    });
     showNotice(sourceHistory.length ? "Padrao salvo em Padroes Salvos." : "Padrao salvo sem amostra historica.");
     return true;
   }
@@ -561,7 +568,10 @@ function NeuralValidatorPage() {
     const next = upsertNotificationChannel(channel);
     setChannels(next);
     void saveServerValidatorChannel(channel).then((serverChannel) => {
-      if (!serverChannel) return;
+      if (!serverChannel) {
+        showNotice("Canal salvo no navegador, mas o servidor nao confirmou. Telegram precisa do canal no servidor.");
+        return;
+      }
       setChannels(upsertNotificationChannel(serverChannel));
     });
     setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
@@ -2014,7 +2024,8 @@ async function fetchValidatorRoundHistory(limit: number) {
   const url = new URL("/validator/round-history", window.location.origin);
   url.searchParams.set("limit", String(limit));
   const session = readUserSession();
-  const tokens = [session.clientToken, localDevDashboardToken()].filter(
+  const adminSession = readAdminSession();
+  const tokens = [adminSession?.token, session.clientToken, localDevDashboardToken()].filter(
     (token, index, values): token is string => Boolean(token) && values.indexOf(token) === index,
   );
   const requestTokens = tokens.length ? tokens : [""];
@@ -2125,7 +2136,8 @@ async function postValidatorLiveHitTelegram(payload: {
 
 function validatorApiHeaders(withJson = false) {
   const session = readUserSession();
-  const token = localDevDashboardToken() || session.clientToken;
+  const adminSession = readAdminSession();
+  const token = localDevDashboardToken() || adminSession?.token || session.clientToken;
   return {
     Accept: "application/json",
     "X-Validator-User-Id": currentUserId(),
@@ -2155,7 +2167,8 @@ async function postValidatorTelegramMessage(payload: {
   if (typeof window === "undefined") return;
 
   const session = readUserSession();
-  const token = localDevDashboardToken() || session.clientToken;
+  const adminSession = readAdminSession();
+  const token = localDevDashboardToken() || adminSession?.token || session.clientToken;
   const response = await fetch("/validator/telegram/send", {
     method: "POST",
     cache: "no-store",
