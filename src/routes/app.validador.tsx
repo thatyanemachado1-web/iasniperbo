@@ -508,13 +508,22 @@ function NeuralValidatorPage() {
 
   async function sendLiveHitToTelegram(hit: LiveValidatorHit) {
     const patternItem = hit.pattern;
-    if (patternItem.destination === "disabled" || patternItem.destination === "monitor") return;
+    if (patternItem.destination === "disabled" || patternItem.destination === "monitor") {
+      showNotice("Padrao detectado no site. Telegram nao enviado porque o destino esta monitorar/desativado.");
+      return;
+    }
     const channel = channels.find((item) => item.id === patternItem.telegramChannelId) ||
       channels.find((item) => item.isActive && item.chatId) ||
       channels[0];
-    if (!channel || !channel.isActive) return;
+    if (!channel || !channel.isActive) {
+      showNotice("Padrao detectado no site. Telegram nao enviado: nenhum canal ativo.");
+      return;
+    }
 
-    if (!channel.chatId) return;
+    if (!channel.chatId) {
+      showNotice("Padrao detectado no site. Telegram nao enviado: canal sem Chat ID.");
+      return;
+    }
 
     const sendKey = `${patternItem.id}:${channel.id}:${hit.detectedRoundId}`;
     if (telegramSendKeysRef.current.has(sendKey) || wasTelegramNotificationSent(sendKey)) return;
@@ -526,6 +535,7 @@ function NeuralValidatorPage() {
         patternId: patternItem.id,
         detectedRoundId: hit.detectedRoundId,
       });
+      showNotice(`Sinal enviado no Telegram: ${channel.name}.`);
     } catch (error) {
       telegramSendKeysRef.current.delete(sendKey);
       forgetTelegramNotificationSent(sendKey);
@@ -540,11 +550,15 @@ function NeuralValidatorPage() {
             buttonLabel: "Abrir Sniper Bo IA",
           });
           markTelegramNotificationSent(sendKey);
+          showNotice(`Sinal enviado no Telegram: ${channel.name}.`);
           return;
         } catch {
           telegramSendKeysRef.current.delete(sendKey);
           forgetTelegramNotificationSent(sendKey);
         }
+      } else {
+        showNotice("Padrao detectado no site. Telegram nao enviado: token do canal nao esta disponivel.");
+        return;
       }
       showNotice(error instanceof Error ? error.message : "Falha ao enviar sinal no Telegram.");
     }
