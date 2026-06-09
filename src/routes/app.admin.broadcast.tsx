@@ -176,7 +176,7 @@ function AdminBroadcastPage() {
               </div>
               <img
                 src={settings.shareImageUrl || "/sniper-icon.svg"}
-                alt="Preview"
+                alt="Pré-visualização da imagem do broadcast"
                 className="size-24 shrink-0 rounded-lg border border-black/10 object-cover"
               />
             </div>
