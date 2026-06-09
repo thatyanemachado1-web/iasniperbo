@@ -2082,7 +2082,7 @@ async function fetchValidatorRoundHistory(limit: number) {
   url.searchParams.set("limit", String(limit));
   const session = readUserSession();
   const adminSession = readAdminSession();
-  const tokens = [adminSession?.token, session.clientToken, localDevDashboardToken()].filter(
+  const tokens = [adminSession?.token, session.clientToken].filter(
     (token, index, values): token is string => Boolean(token) && values.indexOf(token) === index,
   );
   const requestTokens = tokens.length ? tokens : [""];
@@ -2262,7 +2262,7 @@ async function postValidatorTelegramMessage(payload: {
 
   const session = readUserSession();
   const adminSession = readAdminSession();
-  const token = localDevDashboardToken() || adminSession?.token || session.clientToken;
+  const token = adminSession?.token || session.clientToken;
   const response = await fetch("/validator/telegram/send", {
     method: "POST",
     cache: "no-store",
