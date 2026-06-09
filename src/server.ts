@@ -2683,6 +2683,7 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       message,
       buttonLabel,
       buttonUrl,
+      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
     });
 
     if (!result.ok) return json({ error: result.error }, result.status);
@@ -2720,7 +2721,9 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     const incomingRounds = normalizeRounds(sourceRounds, MAX_SERVER_ROUND_HISTORY);
     if (incomingRounds.length) {
       liveValidatorRoundHistory = mergeRoundHistory(liveValidatorRoundHistory, incomingRounds);
-      await processValidatorLiveMonitoring(env);
+      await processValidatorLiveMonitoring(env, {
+        allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
+      });
       await saveLiveState(env);
     }
 
@@ -2754,7 +2757,9 @@ async function handleDashboardRequest(request: Request, env: unknown) {
 
     const body = await request.json().catch(() => ({}));
     liveDashboardData = updateDashboardData(liveDashboardData, body);
-    await processValidatorLiveMonitoring(env);
+    await processValidatorLiveMonitoring(env, {
+      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
+    });
     await saveLiveState(env);
     return json({ ok: true, dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
@@ -2784,12 +2789,23 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     }
 
     if (request.method === "POST") {
-      const body = readRecord(await request.json().catch(() => ({})));
-      const pattern = normalizeServerSavedPattern(body.pattern || body, userId);
-      if (!pattern) return json({ error: "Padrao invalido." }, 400);
-      liveValidatorPatterns = upsertValidatorPattern(pattern);
-      await saveLiveState(env);
-      return json({ pattern }, 201);
+      try {
+        const body = readRecord(await request.json().catch(() => ({})));
+        const pattern = normalizeServerSavedPattern(body.pattern || body, userId);
+        if (!pattern) return json({ error: "Padrao invalido." }, 400);
+        liveValidatorPatterns = upsertValidatorPattern(pattern);
+        await saveLiveState(env);
+        return json({ pattern }, 201);
+      } catch (error) {
+        console.warn("Falha ao salvar padrao do Validador.", error);
+        return json(
+          {
+            error: "Falha ao salvar padrao no servidor.",
+            detail: isLocalDevelopmentRequest(request) ? errorMessage(error) : "",
+          },
+          500,
+        );
+      }
     }
   }
 
@@ -2863,6 +2879,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
         `Canal: ${channel.name}`,
       buttonLabel: "Abrir Sniper Bo IA",
       buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
     });
     if (!result.ok) return json({ error: result.error }, result.status);
     return json({ ok: true, messageId: result.messageId });
@@ -2908,12 +2925,14 @@ async function sendTelegramMessage({
   message,
   buttonLabel,
   buttonUrl,
+  allowInsecureNodeFallback = false,
 }: {
   botToken: string;
   chatId: string;
   message: string;
   buttonLabel: string;
   buttonUrl: string;
+  allowInsecureNodeFallback?: boolean;
 }): Promise<{ ok: true; messageId: number | null } | { ok: false; status: number; error: string }> {
   const payload: Record<string, unknown> = {
     chat_id: chatId,
@@ -2935,6 +2954,13 @@ async function sendTelegramMessage({
       body: JSON.stringify(payload),
     });
   } catch {
+    if (allowInsecureNodeFallback) {
+      const fallback = await sendTelegramMessageWithNodeHttpsFallback({
+        botToken,
+        payload,
+      });
+      if (fallback) return fallback;
+    }
     return {
       ok: false,
       status: 502,
@@ -2957,6 +2983,113 @@ async function sendTelegramMessage({
     ok: true,
     messageId: Number.isFinite(messageId) ? messageId : null,
   };
+}
+
+async function sendTelegramMessageWithNodeHttpsFallback({
+  botToken,
+  payload,
+}: {
+  botToken: string;
+  payload: Record<string, unknown>;
+}): Promise<{ ok: true; messageId: number | null } | { ok: false; status: number; error: string } | null> {
+  if (!isNodeRuntime()) return null;
+
+  try {
+    const nodeHttps = await importNodeHttps();
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(payload)) {
+      if (value === undefined || value === null || value === "") continue;
+      form.set(key, typeof value === "string" ? value : JSON.stringify(value));
+    }
+    const body = form.toString();
+
+    return await new Promise((resolve) => {
+      const request = nodeHttps.request(
+        {
+          hostname: "api.telegram.org",
+          path: `/bot${botToken}/sendMessage`,
+          method: "POST",
+          rejectUnauthorized: false,
+          timeout: 15000,
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+          },
+        },
+        (response: {
+          statusCode?: number;
+          setEncoding: (encoding: string) => void;
+          on: (event: string, callback: (chunk?: string) => void) => void;
+        }) => {
+          let responseBody = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk = "") => {
+            responseBody += chunk;
+          });
+          response.on("end", () => {
+            const data = readRecord(parseJsonSafe(responseBody));
+            if (response.statusCode === 200 && data.ok === true) {
+              const result = readRecord(data.result);
+              const messageId = Number(result.message_id);
+              resolve({
+                ok: true,
+                messageId: Number.isFinite(messageId) ? messageId : null,
+              });
+              return;
+            }
+            resolve({
+              ok: false,
+              status: telegramHttpStatus(response.statusCode || 502),
+              error: friendlyTelegramError(response.statusCode || 502, readString(data, "description")),
+            });
+          });
+        },
+      );
+      request.on("error", () => {
+        resolve({
+          ok: false,
+          status: 502,
+          error: "Nao foi possivel conectar ao Telegram agora.",
+        });
+      });
+      request.on("timeout", () => {
+        request.destroy();
+        resolve({
+          ok: false,
+          status: 502,
+          error: "Tempo esgotado ao conectar no Telegram.",
+        });
+      });
+      request.end(body);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function isNodeRuntime() {
+  const runtime = globalThis as typeof globalThis & {
+    process?: { versions?: { node?: string } };
+  };
+  return Boolean(runtime.process?.versions?.node);
+}
+
+async function importNodeHttps(): Promise<{
+  request: (...args: unknown[]) => {
+    on: (event: string, callback: (...args: unknown[]) => void) => void;
+    end: (body?: string) => void;
+    destroy: () => void;
+  };
+}> {
+  const dynamicImport = new Function("specifier", "return import(specifier)") as (
+    specifier: string,
+  ) => Promise<unknown>;
+  return dynamicImport("node:https") as Promise<{
+    request: (...args: unknown[]) => {
+      on: (event: string, callback: (...args: unknown[]) => void) => void;
+      end: (body?: string) => void;
+      destroy: () => void;
+    };
+  }>;
 }
 
 function normalizeTelegramMessage(value: string) {
@@ -3028,7 +3161,7 @@ function normalizeServerSavedPattern(value: unknown, userId: string): SavedValid
   const pattern = normalizeServerPatternTokens(record.pattern);
   if (!normalizedUserId || !pattern.length) return null;
   const now = new Date().toISOString();
-  const validation = normalizeServerValidatorResult(record.validation);
+  const validation = normalizeValidatorResult(record.validation);
   const entryType = normalizeValidatorEntryType(record.entryType);
   return {
     id: readString(record, "id") || crypto.randomUUID(),
@@ -3192,7 +3325,10 @@ function maskServerBotToken(token: string) {
   return `${clean.slice(0, 6)}...${clean.slice(-4)}`;
 }
 
-async function processValidatorLiveMonitoring(env: unknown) {
+async function processValidatorLiveMonitoring(
+  env: unknown,
+  options: { allowInsecureTelegramFallback?: boolean } = {},
+) {
   const latestRound = liveValidatorRoundHistory.at(-1);
   if (!latestRound || !liveValidatorPatterns.length) return false;
 
@@ -3222,6 +3358,7 @@ async function processValidatorLiveMonitoring(env: unknown) {
       message: buildServerValidatorTelegramMessage(pattern, channel),
       buttonLabel: "Abrir Sniper Bo IA",
       buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+      allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
     });
     liveValidatorNotifications = [
       {
@@ -7299,6 +7436,10 @@ function isExpiredIso(value: string) {
 
 function readString(record: Record<string, unknown>, key: string) {
   return String(record[key] || "").trim();
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error || "");
 }
 
 function readBooleanField(record: Record<string, unknown>, key: string) {
