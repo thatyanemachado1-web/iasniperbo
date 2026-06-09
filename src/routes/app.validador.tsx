@@ -457,6 +457,33 @@ function NeuralValidatorPage() {
     void saveServerValidatorPattern(updated);
   }
 
+  function updateAllSavedPatternDelivery(
+    destination: ValidatorDestination,
+    telegramChannelId: string,
+  ) {
+    if (!savedPatterns.length) {
+      showNotice("Nenhum padrao salvo para configurar.");
+      return;
+    }
+    const needsTelegram = destination === "telegram" || destination === "site_telegram";
+    if (needsTelegram && !telegramChannelId) {
+      showNotice("Escolha um canal Telegram antes de aplicar em todos.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const next = savedPatterns.map((patternItem) => ({
+      ...patternItem,
+      destination,
+      telegramChannelId: needsTelegram ? telegramChannelId : patternItem.telegramChannelId,
+      updatedAt: now,
+    }));
+    writeSavedPatterns(next);
+    setSavedPatterns(next);
+    void Promise.all(next.map((patternItem) => saveServerValidatorPattern(patternItem)));
+    showNotice(`${next.length} padroes atualizados para ${destinationLabel(destination)}.`);
+  }
+
   async function sendLiveHitToTelegram(hit: LiveValidatorHit) {
     const patternItem = hit.pattern;
     if (patternItem.destination !== "telegram" && patternItem.destination !== "site_telegram") return;
@@ -717,8 +744,10 @@ function NeuralValidatorPage() {
             onToggle={(patternItem) => {
               const updated = { ...patternItem, isActive: !patternItem.isActive, updatedAt: new Date().toISOString() };
               setSavedPatterns(upsertSavedPattern(updated));
+              void saveServerValidatorPattern(updated);
             }}
             onUpdate={updateSavedPattern}
+            onBulkDeliveryUpdate={updateAllSavedPatternDelivery}
           />
         </TabsContent>
 
@@ -1160,6 +1189,7 @@ function SavedPatternsTab({
   onReset,
   onToggle,
   onUpdate,
+  onBulkDeliveryUpdate,
 }: {
   patterns: SavedValidatorPattern[];
   channels: ValidatorNotificationChannel[];
@@ -1168,14 +1198,73 @@ function SavedPatternsTab({
   onReset: (pattern: SavedValidatorPattern) => void;
   onToggle: (pattern: SavedValidatorPattern) => void;
   onUpdate: (pattern: SavedValidatorPattern, patch: Partial<SavedValidatorPattern>) => void;
+  onBulkDeliveryUpdate: (destination: ValidatorDestination, telegramChannelId: string) => void;
 }) {
+  const [bulkDestination, setBulkDestination] = useState<ValidatorDestination>("site_telegram");
+  const [bulkChannelId, setBulkChannelId] = useState("");
+  const activeChannels = channels.filter((channel) => channel.isActive);
+  const selectedBulkChannelId = bulkChannelId || activeChannels[0]?.id || channels[0]?.id || "";
+  const bulkNeedsTelegram = bulkDestination === "telegram" || bulkDestination === "site_telegram";
+
   return (
     <div className="space-y-3">
       <GlassCard className="rounded-xl p-4">
-        <SectionTitle
-          title="Padroes salvos"
-          subtitle="Configure destino, canal e mensagem somente depois que o padrao estiver salvo."
-        />
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.95fr)] lg:items-start">
+          <SectionTitle
+            title="Padroes salvos"
+            subtitle="Configure destino, canal e mensagem somente depois que o padrao estiver salvo."
+          />
+          <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 p-3">
+            <div className="text-xs font-black uppercase tracking-wider text-neon-cyan">
+              Envio em massa
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <Select
+                value={bulkDestination}
+                onValueChange={(value) => setBulkDestination(value as ValidatorDestination)}
+              >
+                <SelectTrigger className="bg-secondary/30">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="site">Todos no site</SelectItem>
+                  <SelectItem value="telegram">Todos no Telegram</SelectItem>
+                  <SelectItem value="site_telegram">Site + Telegram</SelectItem>
+                  <SelectItem value="monitor">Apenas monitorar</SelectItem>
+                  <SelectItem value="disabled">Desativar envio</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={selectedBulkChannelId || "none"}
+                onValueChange={(value) => setBulkChannelId(value === "none" ? "" : value)}
+                disabled={!bulkNeedsTelegram}
+              >
+                <SelectTrigger className="bg-secondary/30">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nenhum canal</SelectItem>
+                  {channels.map((channel) => (
+                    <SelectItem key={channel.id} value={channel.id}>
+                      {channel.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              type="button"
+              className="btn-primary-grad mt-3 w-full"
+              onClick={() => onBulkDeliveryUpdate(bulkDestination, bulkNeedsTelegram ? selectedBulkChannelId : "")}
+              disabled={!patterns.length || (bulkNeedsTelegram && !selectedBulkChannelId)}
+            >
+              Aplicar em todos os padroes
+            </Button>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Atualiza todos os padroes salvos de uma vez. O canal individual pode ser ajustado depois.
+            </p>
+          </div>
+        </div>
       </GlassCard>
       {patterns.map((pattern) => {
         const channel = channels.find((item) => item.id === pattern.telegramChannelId);
