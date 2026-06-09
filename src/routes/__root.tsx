@@ -88,14 +88,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:image", content: "/favicon.png" },
+      { property: "og:image", content: "https://sniperbo.com/favicon.png" },
+      { property: "og:site_name", content: "SNIPER BO IA" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:title", content: "SNIPER BO IA - Painel operacional com IA" },
       {
         name: "twitter:description",
         content: "Painel operacional BAC BO com leitura estatística e assistente IA em tempo real.",
       },
-      { name: "twitter:image", content: "/favicon.png" },
+      { name: "twitter:image", content: "https://sniperbo.com/favicon.png" },
     ],
     links: [
       {
