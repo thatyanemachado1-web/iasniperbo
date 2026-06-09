@@ -2649,6 +2649,7 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       url.pathname === "/validator/channels" ||
       url.pathname.startsWith("/validator/channels/") ||
       url.pathname === "/validator/channels/test" ||
+      url.pathname === "/validator/live-hit/send" ||
       url.pathname === "/validator/telegram/test" ||
       url.pathname === "/validator/telegram/send"
     )
@@ -2775,10 +2776,75 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     url.pathname === "/validator/channels" ||
     url.pathname.startsWith("/validator/channels/") ||
     url.pathname === "/validator/channels/test";
-  if (!isPatternsRoute && !isChannelsRoute) return null;
+  const isLiveHitRoute = url.pathname === "/validator/live-hit/send";
+  if (!isPatternsRoute && !isChannelsRoute && !isLiveHitRoute) return null;
 
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
+
+  if (request.method === "POST" && isLiveHitRoute) {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const patternId = readString(body, "patternId");
+    const detectedRoundId = Math.floor(Number(body.detectedRoundId) || 0);
+    const pattern = liveValidatorPatterns.find((item) => item.userId === userId && item.id === patternId);
+    if (!pattern) return json({ error: "Padrao nao encontrado." }, 404);
+    if (!pattern.isActive) return json({ error: "Padrao inativo." }, 400);
+    if (pattern.destination !== "telegram" && pattern.destination !== "site_telegram") {
+      return json({ error: "Padrao nao esta configurado para Telegram." }, 400);
+    }
+
+    const channel = liveValidatorChannels.find(
+      (item) => item.userId === userId && item.id === pattern.telegramChannelId,
+    );
+    if (!channel || !channel.isActive) return json({ error: "Canal Telegram inativo ou nao encontrado." }, 400);
+    if (!channel.chatId || !decodeServerToken(channel.botTokenEncoded)) {
+      return json({ error: "Canal Telegram sem token ou Chat ID." }, 400);
+    }
+
+    const roundId = detectedRoundId || Date.now();
+    const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${roundId}`;
+    if (validatorNotificationAlreadySent(notificationKey)) {
+      return json({ ok: true, skipped: true });
+    }
+
+    const sentAt = new Date().toISOString();
+    const result = await sendTelegramMessage({
+      botToken: decodeServerToken(channel.botTokenEncoded),
+      chatId: channel.chatId,
+      message: buildServerValidatorTelegramMessage(pattern, channel),
+      buttonLabel: "Abrir Sniper Bo IA",
+      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
+    });
+
+    liveValidatorNotifications = [
+      {
+        id: notificationKey,
+        userId: pattern.userId,
+        patternId: pattern.id,
+        channelId: channel.id,
+        roundId,
+        status: result.ok ? "sent" : "error",
+        error: result.ok ? "" : result.error,
+        sentAt,
+        updatedAt: sentAt,
+      },
+      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== notificationKey),
+    ].slice(0, 1000);
+
+    if (result.ok) {
+      liveValidatorPatterns = liveValidatorPatterns.map((item) =>
+        item.userId === pattern.userId && item.id === pattern.id
+          ? { ...item, lastDetectedAt: sentAt, lastDetectedRoundId: roundId, updatedAt: sentAt }
+          : item,
+      );
+      await saveLiveState(env);
+      return json({ ok: true, skipped: false, messageId: result.messageId });
+    }
+
+    await saveLiveState(env);
+    return json({ error: result.error }, result.status);
+  }
 
   if (url.pathname === "/validator/patterns") {
     if (request.method === "GET") {
