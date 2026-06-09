@@ -2132,8 +2132,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         await saveLiveState(env);
       }
     } else if (legacyPassword) {
-      delete (client as Record<string, unknown>).password;
-      await saveLiveState(env);
+      ok = constantTimeStringEqual(password, legacyPassword);
+      if (ok) {
+        client.password_hash = await hashPassword(password);
+        delete (client as Record<string, unknown>).password;
+        await saveLiveState(env);
+      }
     } else if (clientHasLiveAccess(client)) {
       return json(
         { error: "Compra localizada. Abra a aba Cadastro e crie sua senha para ativar o login." },
@@ -2151,13 +2155,6 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "POST" && url.pathname === "/auth/register") {
-    if (liveSalesSettings.salesClosed) {
-      return json(
-        { error: "Vagas encerradas no momento. Entre na fila de espera para a próxima abertura." },
-        403,
-      );
-    }
-
     const body = readRecord(await request.json().catch(() => ({})));
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
@@ -2175,6 +2172,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       await hydrateClientFromBilling(env, email);
       existingIndex = liveClients.findIndex(
         (item) => readString(item, "email").toLowerCase() === email,
+      );
+    }
+    if (liveSalesSettings.salesClosed && existingIndex < 0) {
+      return json(
+        { error: "Vagas encerradas no momento. Entre na fila de espera para a proxima abertura." },
+        403,
       );
     }
     const now = new Date().toISOString();
