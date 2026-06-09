@@ -301,7 +301,11 @@ function NeuralValidatorPage() {
     setTokenScore("");
   }
 
-  function saveCurrentPattern(sourceResult = manualResult, sourcePattern = pattern, name = config.name) {
+  function saveCurrentPattern(
+    sourceResult: ValidatorResult | null = manualResult,
+    sourcePattern = pattern,
+    name = config.name,
+  ) {
     if (!sourcePattern.length) {
       showNotice("Monte pelo menos uma bolinha antes de salvar.");
       return false;
@@ -703,7 +707,7 @@ function ValidatorTab(props: {
   config: ValidatorConfig;
   setConfig: (config: ValidatorConfig) => void;
   manualResult: ValidatorResult | null;
-  saveCurrentPattern: () => void;
+  saveCurrentPattern: () => boolean;
   saveAndClearPattern: () => void;
   hasHistory: boolean;
   savedPatternName: string;
@@ -831,7 +835,7 @@ function ValidatorTab(props: {
                 </div>
               )}
               <div className="grid gap-2 sm:grid-cols-2">
-                <Button type="button" className="btn-primary-grad w-full" onClick={saveCurrentPattern} disabled={!canSave}>
+                <Button type="button" className="btn-primary-grad w-full" onClick={() => saveCurrentPattern()} disabled={!canSave}>
                   {isPatternSaved ? "Padrao ja salvo" : "Salvar Padrao"}
                 </Button>
                 <Button type="button" variant="secondary" className="w-full" onClick={saveAndClearPattern} disabled={!canSave}>
