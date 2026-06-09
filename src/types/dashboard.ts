@@ -244,6 +244,8 @@ export interface NeuralResult {
   assertiveness: number;
   sequencePositive: number;
   sequenceNegative: number;
+  maxSequencePositive: number;
+  maxSequenceNegative: number;
   breakdown: string;
 }
 
