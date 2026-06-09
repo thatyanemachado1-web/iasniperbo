@@ -14,6 +14,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
+import { ValidatorLivePopupBridge } from "@/components/validator/ValidatorLivePopupBridge";
 import { canSeeAdminUi } from "@/lib/adminSession";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import { useEffect, useState, type ReactNode } from "react";
@@ -168,6 +169,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-28 lg:pb-8">{children}</main>
       </div>
+
+      <ValidatorLivePopupBridge />
 
       {/* Bottom nav mobile */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 glass-strong lg:hidden">
