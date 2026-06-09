@@ -5494,7 +5494,9 @@ function getAdminRoleForEmail(env: unknown, email: string): AdminRole | null {
 }
 
 function getAdminPasswordHash(env: unknown) {
-  return readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD_HASH", "");
+  return readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD_HASH", "")
+    .replace(/\\\$/g, "$")
+    .replace(/\s+/g, "");
 }
 
 function getMercadoPagoAccessToken(env: unknown) {
