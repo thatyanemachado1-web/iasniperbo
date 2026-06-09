@@ -158,6 +158,9 @@ function NeuralValidatorPage() {
     buttonLink: "",
     isActive: true,
     entryTemplate: DEFAULT_MESSAGE_TEMPLATES.entry,
+    analyzingEnabled: false,
+    analyzingCooldownRounds: 3,
+    analyzingTemplate: DEFAULT_MESSAGE_TEMPLATES.analyzing,
   });
   const [filters, setFilters] = useState<PatternMiningFilters>({
     historySize: Math.min(5000, planLimits.history),
@@ -533,9 +536,12 @@ function NeuralValidatorPage() {
       chatId: channelForm.chatId.trim(),
       buttonLink: channelForm.buttonLink.trim(),
       isActive: channelForm.isActive,
+      analyzingEnabled: channelForm.analyzingEnabled,
+      analyzingCooldownRounds: Math.max(1, Number(channelForm.analyzingCooldownRounds) || 3),
       templates: {
         ...DEFAULT_MESSAGE_TEMPLATES,
         entry: channelForm.entryTemplate || DEFAULT_MESSAGE_TEMPLATES.entry,
+        analyzing: channelForm.analyzingTemplate || DEFAULT_MESSAGE_TEMPLATES.analyzing,
       },
       createdAt: now,
       updatedAt: now,
@@ -548,6 +554,24 @@ function NeuralValidatorPage() {
     });
     setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
     showNotice("Canal salvo para este usuario. Token fica mascarado depois de salvo.");
+  }
+
+  function updateNotificationChannel(
+    channel: ValidatorNotificationChannel,
+    patch: Partial<ValidatorNotificationChannel>,
+  ) {
+    const updated = {
+      ...channel,
+      ...patch,
+      templates: {
+        ...DEFAULT_MESSAGE_TEMPLATES,
+        ...channel.templates,
+        ...patch.templates,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    setChannels(upsertNotificationChannel(updated));
+    void saveServerValidatorChannel(updated);
   }
 
   async function testChannelFromForm() {
@@ -760,6 +784,7 @@ function NeuralValidatorPage() {
             onRemove={removeChannel}
             onTestForm={testChannelFromForm}
             onTestChannel={testSavedChannel}
+            onUpdateChannel={updateNotificationChannel}
             telegramEnabled={planLimits.telegram}
             testingTelegramId={testingTelegramId}
           />
@@ -1379,6 +1404,7 @@ function ChannelsTab({
   onRemove,
   onTestForm,
   onTestChannel,
+  onUpdateChannel,
   telegramEnabled,
   testingTelegramId,
 }: {
@@ -1390,6 +1416,9 @@ function ChannelsTab({
     buttonLink: string;
     isActive: boolean;
     entryTemplate: string;
+    analyzingEnabled: boolean;
+    analyzingCooldownRounds: number;
+    analyzingTemplate: string;
   };
   setChannelForm: (form: {
     name: string;
@@ -1398,11 +1427,15 @@ function ChannelsTab({
     buttonLink: string;
     isActive: boolean;
     entryTemplate: string;
+    analyzingEnabled: boolean;
+    analyzingCooldownRounds: number;
+    analyzingTemplate: string;
   }) => void;
   onSave: () => void;
   onRemove: (id: string) => void;
   onTestForm: () => void;
   onTestChannel: (channel: ValidatorNotificationChannel) => void;
+  onUpdateChannel: (channel: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>) => void;
   telegramEnabled: boolean;
   testingTelegramId: string;
 }) {
@@ -1437,6 +1470,37 @@ function ChannelsTab({
           <Field label="Modelo entrada">
             <Textarea value={channelForm.entryTemplate} onChange={(event) => setChannelForm({ ...channelForm, entryTemplate: event.target.value })} className="min-h-36" />
           </Field>
+          <div className="rounded-xl border border-border/70 bg-secondary/15 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-black">Mensagem sem entrada</div>
+                <div className="mt-1 text-xs text-muted-foreground">Envia quando nao tiver entrada validada.</div>
+              </div>
+              <Switch
+                checked={channelForm.analyzingEnabled}
+                onCheckedChange={(checked) => setChannelForm({ ...channelForm, analyzingEnabled: checked })}
+              />
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
+              <Textarea
+                value={channelForm.analyzingTemplate}
+                onChange={(event) => setChannelForm({ ...channelForm, analyzingTemplate: event.target.value })}
+                className="min-h-24"
+                placeholder={DEFAULT_MESSAGE_TEMPLATES.analyzing}
+              />
+              <Field label="Intervalo">
+                <Input
+                  value={channelForm.analyzingCooldownRounds}
+                  onChange={(event) => setChannelForm({
+                    ...channelForm,
+                    analyzingCooldownRounds: Math.max(1, Number(event.target.value) || 1),
+                  })}
+                  type="number"
+                  min={1}
+                />
+              </Field>
+            </div>
+          </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <Button type="button" className="w-full btn-primary-grad" onClick={onSave} disabled={!telegramEnabled}>
               <Save className="size-4" /> Salvar configuracao
@@ -1464,6 +1528,9 @@ function ChannelsTab({
                   <div className="font-bold">{channel.name}</div>
                   <div className="mt-1 text-xs text-muted-foreground">Token: {channel.botTokenMasked || "sem token"} | Chat: {channel.chatId || "sem chat"}</div>
                   <div className="mt-1 text-xs text-muted-foreground">Status: {channel.isActive ? "ativo" : "inativo"}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Sem entrada: {channel.analyzingEnabled ? `ativo a cada ${channel.analyzingCooldownRounds || 3} rodadas` : "inativo"}
+                  </div>
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <Button
@@ -1481,6 +1548,40 @@ function ChannelsTab({
                   </Button>
                 </div>
               </div>
+              <details className="mt-3 rounded-xl border border-border/60 bg-background/25 p-3 text-xs">
+                <summary className="cursor-pointer font-bold text-muted-foreground">Configurar analisando padrao</summary>
+                <div className="mt-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/15 px-3 py-2">
+                    <span className="font-bold">Enviar quando nao tiver entrada</span>
+                    <Switch
+                      checked={Boolean(channel.analyzingEnabled)}
+                      onCheckedChange={(checked) => onUpdateChannel(channel, { analyzingEnabled: checked })}
+                    />
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
+                    <Textarea
+                      value={channel.templates.analyzing || DEFAULT_MESSAGE_TEMPLATES.analyzing}
+                      onChange={(event) => onUpdateChannel(channel, {
+                        templates: {
+                          ...channel.templates,
+                          analyzing: event.target.value,
+                        },
+                      })}
+                      className="min-h-24"
+                    />
+                    <Field label="Intervalo">
+                      <Input
+                        value={channel.analyzingCooldownRounds || 3}
+                        onChange={(event) => onUpdateChannel(channel, {
+                          analyzingCooldownRounds: Math.max(1, Number(event.target.value) || 1),
+                        })}
+                        type="number"
+                        min={1}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </details>
             </div>
           ))}
           {!channels.length && (
