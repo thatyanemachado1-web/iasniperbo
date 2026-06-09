@@ -107,11 +107,17 @@ function NeuralValidatorPage() {
   const { data, mode } = useDashboardData();
   const session = readUserSession();
   const fullAccess = hasFullAccess(session);
+  const [activeTab, setActiveTab] = useState("dashboard");
   const [storageVersion, setStorageVersion] = useState(0);
   const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
   const planLimits = planLimitForSession(session.plan, fullAccess);
   const [serverHistory, setServerHistory] = useState<Round[]>([]);
   const [serverHistoryStatus, setServerHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [validationSnapshot, setValidationSnapshot] = useState<{
+    inputKey: string;
+    historyKey: string;
+    rounds: Round[];
+  }>({ inputKey: "", historyKey: "", rounds: [] });
   const historyRounds = useMemo(
     () => {
       const validatorHistory = readValidatorHistory(realTimeRounds);
@@ -167,8 +173,26 @@ function NeuralValidatorPage() {
     return engine.minePatterns(historyRounds, filters);
   }, [filters, hasHistory, historyRounds, planLimits.ai]);
 
-  const historySignature = `${historyRounds.length}:${historyRounds.at(-1)?.id ?? 0}:${historyRounds.at(-1)?.result ?? ""}`;
+  const historySignature = roundsSignature(historyRounds);
+  const serverHistorySignature = serverHistory.length
+    ? `server:${serverHistory.length}:${serverHistory[0]?.id ?? 0}:${serverHistory.at(-1)?.id ?? 0}`
+    : "";
   const patternSignature = pattern.map(formatToken).join(">");
+  const validationInputSignature = [
+    patternSignature,
+    config.entryType,
+    config.galeLimit,
+    config.historySize,
+    config.tableId,
+    config.tieProtection ? "tie-on" : "tie-off",
+  ].join("|");
+  const validationHistoryRounds = validationSnapshot.rounds.length ? validationSnapshot.rounds : historyRounds;
+  const validationHistorySignature = roundsSignature(validationHistoryRounds);
+  const hasValidationHistory = validationHistoryRounds.length > 0;
+  const currentSavedPattern = useMemo(
+    () => findSavedPattern(savedPatterns, pattern, config),
+    [savedPatterns, pattern, config.entryType, config.galeLimit, config.tableId, config.tieProtection],
+  );
 
   const liveHits = useMemo(
     () => detectLiveHits(savedPatterns, historyRounds),
@@ -179,6 +203,29 @@ function NeuralValidatorPage() {
     if (!realTimeRounds.length) return;
     patternMinerStorage.ingest(realTimeRounds);
   }, [realTimeRounds]);
+
+  useEffect(() => {
+    setValidationSnapshot((current) => {
+      if (!hasHistory) {
+        return current.rounds.length || current.inputKey || current.historyKey
+          ? { inputKey: "", historyKey: "", rounds: [] }
+          : current;
+      }
+
+      const preferredHistoryKey = serverHistorySignature || `live:${historySignature}`;
+      const inputChanged = current.inputKey !== validationInputSignature;
+      const serverHistoryLoaded = Boolean(serverHistorySignature) && !current.historyKey.startsWith("server:");
+      const missingSnapshot = current.rounds.length === 0;
+
+      if (!inputChanged && !serverHistoryLoaded && !missingSnapshot) return current;
+
+      return {
+        inputKey: validationInputSignature,
+        historyKey: preferredHistoryKey,
+        rounds: historyRounds,
+      };
+    });
+  }, [hasHistory, historyRounds, historySignature, serverHistorySignature, validationInputSignature]);
 
   useEffect(() => {
     let cancelled = false;
@@ -204,20 +251,20 @@ function NeuralValidatorPage() {
   }, [data.updatedAt, planLimits.history]);
 
   useEffect(() => {
-    if (!hasHistory || pattern.length < 1) {
+    if (!hasValidationHistory || pattern.length < 1) {
       setManualResult(null);
       return;
     }
 
-    setManualResult(engine.validatePattern(historyRounds, pattern, config));
+    setManualResult(engine.validatePattern(validationHistoryRounds, pattern, config));
   }, [
     config.entryType,
     config.galeLimit,
     config.historySize,
     config.tableId,
     config.tieProtection,
-    hasHistory,
-    historySignature,
+    hasValidationHistory,
+    validationHistorySignature,
     patternSignature,
   ]);
 
@@ -255,13 +302,22 @@ function NeuralValidatorPage() {
   }
 
   function saveCurrentPattern(sourceResult = manualResult, sourcePattern = pattern, name = config.name) {
-    if (!sourcePattern.length) return;
+    if (!sourcePattern.length) {
+      showNotice("Monte pelo menos uma bolinha antes de salvar.");
+      return false;
+    }
+    const duplicate = findSavedPattern(savedPatterns, sourcePattern, config);
+    if (duplicate) {
+      showNotice("Padrao ja salvo em Padroes Salvos.");
+      return false;
+    }
     if (savedPatterns.length >= planLimits.patterns) {
       showNotice(`Seu plano permite ate ${planLimits.patterns} padroes salvos.`);
-      return;
+      return false;
     }
+    const sourceHistory = validationHistoryRounds.length ? validationHistoryRounds : historyRounds;
     const validation =
-      sourceResult ?? engine.validatePattern(historyRounds, sourcePattern, config);
+      sourceResult ?? engine.validatePattern(sourceHistory, sourcePattern, config);
     const now = new Date().toISOString();
     const saved: SavedValidatorPattern = {
       id: createStorageId("pattern"),
@@ -288,7 +344,13 @@ function NeuralValidatorPage() {
     };
     const next = upsertSavedPattern(saved);
     setSavedPatterns(next);
-    showNotice("Padrao salvo para monitoramento ao vivo.");
+    showNotice(sourceHistory.length ? "Padrao salvo em Padroes Salvos." : "Padrao salvo sem amostra historica.");
+    return true;
+  }
+
+  function saveAndClearPattern() {
+    if (!saveCurrentPattern()) return;
+    setPattern([]);
   }
 
   function saveSuggestion(suggestion: PatternSuggestion) {
@@ -434,7 +496,7 @@ function NeuralValidatorPage() {
         </GlassCard>
       )}
 
-      <Tabs defaultValue="dashboard" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-5">
           <TabsTrigger value="dashboard" className="gap-1.5"><Activity className="size-3.5" /> Dashboard</TabsTrigger>
           <TabsTrigger value="validator" className="gap-1.5"><ShieldCheck className="size-3.5" /> Validador</TabsTrigger>
@@ -465,7 +527,10 @@ function NeuralValidatorPage() {
             setConfig={setConfig}
             manualResult={manualResult}
             saveCurrentPattern={saveCurrentPattern}
-            hasHistory={hasHistory}
+            saveAndClearPattern={saveAndClearPattern}
+            hasHistory={hasValidationHistory}
+            savedPatternName={currentSavedPattern?.name ?? ""}
+            recentSavedPatterns={savedPatterns.slice(0, 4)}
           />
         </TabsContent>
 
@@ -639,7 +704,10 @@ function ValidatorTab(props: {
   setConfig: (config: ValidatorConfig) => void;
   manualResult: ValidatorResult | null;
   saveCurrentPattern: () => void;
+  saveAndClearPattern: () => void;
   hasHistory: boolean;
+  savedPatternName: string;
+  recentSavedPatterns: SavedValidatorPattern[];
 }) {
   const {
     pattern,
@@ -651,11 +719,16 @@ function ValidatorTab(props: {
     setConfig,
     manualResult,
     saveCurrentPattern,
+    saveAndClearPattern,
     hasHistory,
+    savedPatternName,
+    recentSavedPatterns,
   } = props;
 
   const [showDetails, setShowDetails] = useState(false);
-  const canSave = pattern.length >= 1 && hasHistory;
+  const isPatternSaved = Boolean(savedPatternName);
+  const canSave = pattern.length >= 1 && !isPatternSaved;
+  const totalSignals = manualResult?.totalSignals ?? 0;
   const setGaleLimit = (value: number) => {
     setConfig({ ...config, galeLimit: Math.min(2, Math.max(0, value)) as ValidatorGaleLimit });
   };
@@ -668,7 +741,10 @@ function ValidatorTab(props: {
             <div className="rounded-xl border border-border/60 bg-background/30 p-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Padrao</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Padrao</div>
+                    {isPatternSaved && <AppBadge tone="blue">Padrao ja salvo</AppBadge>}
+                  </div>
                   <CompactPatternLine
                     pattern={pattern}
                     className="mt-2"
@@ -698,6 +774,17 @@ function ValidatorTab(props: {
                   placeholder="Numero"
                   className="h-8 w-20 bg-secondary/30 text-center text-xs"
                 />
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                <Input
+                  value={config.name}
+                  onChange={(event) => setConfig({ ...config, name: event.target.value })}
+                  placeholder="Nome do padrao"
+                  className="h-9 bg-secondary/30 text-sm"
+                />
+                <div className="rounded-lg border border-border/60 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
+                  Apareceu <span className="font-black text-neon-cyan">{totalSignals}</span> vezes
+                </div>
               </div>
             </div>
 
@@ -738,23 +825,69 @@ function ValidatorTab(props: {
             </div>
 
             <div>
-              <Button type="button" className="btn-primary-grad w-full" onClick={saveCurrentPattern} disabled={!canSave}>
-                Salvar Padrao
-              </Button>
+              {isPatternSaved && (
+                <div className="mb-2 rounded-lg border border-neon-cyan/25 bg-neon-cyan/10 px-3 py-2 text-xs font-bold text-neon-cyan">
+                  Padrao ja salvo{savedPatternName ? `: ${savedPatternName}` : ""}.
+                </div>
+              )}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button type="button" className="btn-primary-grad w-full" onClick={saveCurrentPattern} disabled={!canSave}>
+                  {isPatternSaved ? "Padrao ja salvo" : "Salvar Padrao"}
+                </Button>
+                <Button type="button" variant="secondary" className="w-full" onClick={saveAndClearPattern} disabled={!canSave}>
+                  Salvar e limpar
+                </Button>
+              </div>
             </div>
           </div>
 
-          <ValidationSummaryPanel
-            result={manualResult}
-            hasHistory={hasHistory}
-            config={config}
-            onToggleDetails={() => setShowDetails((value) => !value)}
-            showDetails={showDetails}
-          />
+          <div className="space-y-3">
+            <ValidationSummaryPanel
+              result={manualResult}
+              hasHistory={hasHistory}
+              config={config}
+              onToggleDetails={() => setShowDetails((value) => !value)}
+              showDetails={showDetails}
+            />
+            <RecentSavedPatternsPanel patterns={recentSavedPatterns} />
+          </div>
         </div>
       </GlassCard>
 
       {showDetails && <ValidationDetailsPanel result={manualResult} config={config} />}
+    </div>
+  );
+}
+
+function RecentSavedPatternsPanel({ patterns }: { patterns: SavedValidatorPattern[] }) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-background/30 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Salvos recentes</div>
+        <span className="text-[10px] font-bold text-muted-foreground">{patterns.length}</span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {patterns.map((pattern) => (
+          <div key={pattern.id} className="rounded-lg border border-border/50 bg-secondary/15 px-3 py-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-xs font-black">{pattern.name}</div>
+                <div className="mt-1">
+                  <PatternLine pattern={pattern.pattern} pulledSide={pattern.pulledSide} compact />
+                </div>
+              </div>
+              <span className="shrink-0 text-xs font-black text-neon-cyan">
+                {formatPercent(pattern.validation?.accuracy)}
+              </span>
+            </div>
+          </div>
+        ))}
+        {!patterns.length && (
+          <div className="rounded-lg border border-border/50 bg-secondary/15 px-3 py-2 text-xs text-muted-foreground">
+            Nenhum padrao salvo ainda.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1521,6 +1654,52 @@ function mergeRoundSources(sources: Round[][]) {
     for (const round of source) byKey.set(roundSourceKey(round), round);
   }
   return [...byKey.values()].sort(compareValidatorRounds);
+}
+
+function roundsSignature(rounds: Round[]) {
+  const first = rounds[0];
+  const last = rounds.at(-1);
+  return `${rounds.length}:${first?.id ?? 0}:${last?.id ?? 0}:${last?.result ?? ""}`;
+}
+
+function findSavedPattern(
+  patterns: SavedValidatorPattern[],
+  pattern: ValidatorPatternToken[],
+  config: Pick<ValidatorConfig, "entryType" | "galeLimit" | "tableId" | "tieProtection">,
+) {
+  if (!pattern.length) return null;
+  const currentKey = validatorPatternSaveKey(
+    pattern,
+    config.entryType,
+    config.galeLimit,
+    config.tieProtection,
+    config.tableId,
+  );
+  return patterns.find((savedPattern) =>
+    validatorPatternSaveKey(
+      savedPattern.pattern,
+      savedPattern.entryType,
+      savedPattern.galeLimit,
+      savedPattern.tieProtection,
+      savedPattern.tableId,
+    ) === currentKey
+  ) ?? null;
+}
+
+function validatorPatternSaveKey(
+  pattern: ValidatorPatternToken[],
+  entryType: ValidatorEntryType,
+  galeLimit: ValidatorGaleLimit,
+  tieProtection: boolean,
+  tableId: string,
+) {
+  return [
+    pattern.map(formatToken).join(">"),
+    entryType,
+    Number(galeLimit),
+    tieProtection ? "tie-on" : "tie-off",
+    tableId.trim().toLowerCase(),
+  ].join("|");
 }
 
 function localDevDashboardToken() {
