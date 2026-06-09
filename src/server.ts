@@ -392,6 +392,7 @@ function rateLimitForRequest(method: string, pathname: string) {
   if (pathname === "/dashboard/round-history") return 120;
   if (pathname === "/dashboard/signal") return 240;
   if (pathname === "/validator/round-history") return method === "GET" ? 120 : 240;
+  if (pathname === "/validator/telegram/test" || pathname === "/validator/telegram/send") return 30;
   if (pathname === "/adaptive-strategy/sync") return 240;
   if (
     pathname === "/billing/plans" ||
@@ -2611,10 +2612,43 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       url.pathname === "/dashboard" ||
       url.pathname === "/dashboard/signal" ||
       url.pathname === "/dashboard/round-history" ||
-      url.pathname === "/validator/round-history"
+      url.pathname === "/validator/round-history" ||
+      url.pathname === "/validator/telegram/test" ||
+      url.pathname === "/validator/telegram/send"
     )
   ) {
     return json(null, 204);
+  }
+
+  if (
+    request.method === "POST" &&
+    (url.pathname === "/validator/telegram/test" || url.pathname === "/validator/telegram/send")
+  ) {
+    if (!(await isDashboardReadAuthorized(request, url, env))) {
+      return json({ error: "NÃƒÂ£o autorizado." }, 401);
+    }
+
+    const body = readRecord(await request.json().catch(() => ({})));
+    const botToken = normalizeSecretValue(readString(body, "botToken"));
+    const chatId = readString(body, "chatId");
+    const message = normalizeTelegramMessage(readString(body, "message"));
+    const buttonLabel = readString(body, "buttonLabel") || "Abrir Sniper Bo IA";
+    const buttonUrl = normalizeTelegramButtonUrl(readString(body, "buttonLink"));
+
+    if (!botToken) return json({ error: "Bot Token obrigatorio." }, 400);
+    if (!chatId) return json({ error: "Chat ID obrigatorio." }, 400);
+    if (!message) return json({ error: "Mensagem obrigatoria." }, 400);
+
+    const result = await sendTelegramMessage({
+      botToken,
+      chatId,
+      message,
+      buttonLabel,
+      buttonUrl,
+    });
+
+    if (!result.ok) return json({ error: result.error }, result.status);
+    return json({ ok: true, messageId: result.messageId });
   }
 
   if (
@@ -2686,6 +2720,101 @@ async function handleDashboardRequest(request: Request, env: unknown) {
   }
 
   return null;
+}
+
+async function sendTelegramMessage({
+  botToken,
+  chatId,
+  message,
+  buttonLabel,
+  buttonUrl,
+}: {
+  botToken: string;
+  chatId: string;
+  message: string;
+  buttonLabel: string;
+  buttonUrl: string;
+}): Promise<{ ok: true; messageId: number | null } | { ok: false; status: number; error: string }> {
+  const payload: Record<string, unknown> = {
+    chat_id: chatId,
+    text: message,
+    disable_web_page_preview: true,
+  };
+
+  if (buttonUrl) {
+    payload.reply_markup = {
+      inline_keyboard: [[{ text: buttonLabel.slice(0, 64) || "Abrir", url: buttonUrl }]],
+    };
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    return {
+      ok: false,
+      status: 502,
+      error: "Nao foi possivel conectar ao Telegram agora.",
+    };
+  }
+
+  const data = readRecord(await response.json().catch(() => ({})));
+  if (!response.ok || data.ok !== true) {
+    return {
+      ok: false,
+      status: telegramHttpStatus(response.status),
+      error: friendlyTelegramError(response.status, readString(data, "description")),
+    };
+  }
+
+  const result = readRecord(data.result);
+  const messageId = Number(result.message_id);
+  return {
+    ok: true,
+    messageId: Number.isFinite(messageId) ? messageId : null,
+  };
+}
+
+function normalizeTelegramMessage(value: string) {
+  return value.replace(/\r\n/g, "\n").trim().slice(0, 4096);
+}
+
+function normalizeTelegramButtonUrl(value: string) {
+  const clean = value.trim();
+  if (!clean) return "";
+  try {
+    const url = new URL(clean);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function telegramHttpStatus(status: number) {
+  if (status === 400 || status === 401 || status === 403 || status === 429) return status;
+  return 502;
+}
+
+function friendlyTelegramError(status: number, description: string) {
+  const text = description.toLowerCase();
+  if (status === 401) return "Bot Token invalido.";
+  if (status === 403) return "O bot nao tem permissao para enviar nesse canal ou grupo.";
+  if (status === 429) return "Telegram limitou os envios. Aguarde e tente novamente.";
+  if (text.includes("chat not found")) {
+    return "Chat ID nao encontrado. Adicione o bot no canal/grupo e confira o Chat ID.";
+  }
+  if (text.includes("not enough rights")) {
+    return "O bot precisa ser administrador ou ter permissao de publicar mensagens.";
+  }
+  if (text.includes("can't parse reply keyboard") || text.includes("wrong http url")) {
+    return "Link do botao invalido. Use um link com http ou https.";
+  }
+  return description || "Falha ao enviar mensagem no Telegram.";
 }
 
 function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {

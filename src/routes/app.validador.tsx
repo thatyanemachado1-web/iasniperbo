@@ -16,7 +16,7 @@ import {
   Trophy,
   Wand2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
@@ -52,6 +52,7 @@ import {
   DEFAULT_MESSAGE_TEMPLATES,
   createStorageId,
   currentUserId,
+  decodeToken,
   encodeToken,
   maskBotToken,
   readNotificationChannels,
@@ -85,6 +86,7 @@ export const Route = createFileRoute("/app/validador")({
 const engine = new NeuralValidatorEngine();
 const patternMinerStorage = new PatternMinerStorage();
 const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
+const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
 
 const ENTRY_OPTIONS: Array<{ value: ValidatorEntryType; label: string }> = [
   { value: "AI", label: "Entrada sugerida pela IA" },
@@ -146,6 +148,8 @@ function NeuralValidatorPage() {
   const [manualResult, setManualResult] = useState<ValidatorResult | null>(null);
   const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
+  const [testingTelegramId, setTestingTelegramId] = useState("");
+  const telegramSendKeysRef = useRef(new Set<string>());
   const [channelForm, setChannelForm] = useState({
     name: "Sala Premium",
     botToken: "",
@@ -291,6 +295,16 @@ function NeuralValidatorPage() {
     setStorageVersion((value) => value + 1);
   }, [liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|")]);
 
+  useEffect(() => {
+    if (!liveHits.length) return;
+    for (const hit of liveHits) {
+      void sendLiveHitToTelegram(hit);
+    }
+  }, [
+    channels.map((channel) => `${channel.id}:${channel.isActive}:${channel.chatId}:${channel.buttonLink}`).join("|"),
+    liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}:${hit.pattern.destination}:${hit.pattern.telegramChannelId}`).join("|"),
+  ]);
+
   function addToken(side: RoundResult, scoreText = tokenScore) {
     const score = Number(scoreText);
     const token: ValidatorPatternToken = {
@@ -413,6 +427,35 @@ function NeuralValidatorPage() {
     setSavedPatterns(upsertSavedPattern(updated));
   }
 
+  async function sendLiveHitToTelegram(hit: LiveValidatorHit) {
+    const patternItem = hit.pattern;
+    if (patternItem.destination !== "telegram" && patternItem.destination !== "site_telegram") return;
+    const channel = channels.find((item) => item.id === patternItem.telegramChannelId);
+    if (!channel || !channel.isActive) return;
+
+    const botToken = decodeToken(channel.botTokenEncoded);
+    if (!botToken || !channel.chatId) return;
+
+    const sendKey = `${patternItem.id}:${channel.id}:${hit.detectedRoundId}`;
+    if (telegramSendKeysRef.current.has(sendKey) || wasTelegramNotificationSent(sendKey)) return;
+
+    telegramSendKeysRef.current.add(sendKey);
+    markTelegramNotificationSent(sendKey);
+    try {
+      await postValidatorTelegramMessage({
+        botToken,
+        chatId: channel.chatId,
+        buttonLink: channel.buttonLink || `${window.location.origin}/app/validador`,
+        message: buildLiveHitTelegramMessage(hit, channel),
+        buttonLabel: "Abrir Sniper Bo IA",
+      });
+    } catch (error) {
+      telegramSendKeysRef.current.delete(sendKey);
+      forgetTelegramNotificationSent(sendKey);
+      showNotice(error instanceof Error ? error.message : "Falha ao enviar sinal no Telegram.");
+    }
+  }
+
   function saveChannel() {
     if (!planLimits.telegram) {
       showNotice("Telegram fica bloqueado para o plano Free.");
@@ -444,6 +487,72 @@ function NeuralValidatorPage() {
     setChannels(next);
     setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
     showNotice("Canal salvo para este usuario. Token fica mascarado depois de salvo.");
+  }
+
+  async function testChannelFromForm() {
+    if (!planLimits.telegram) {
+      showNotice("Telegram fica bloqueado para o plano Free.");
+      return;
+    }
+    const botToken = channelForm.botToken.trim();
+    const chatId = channelForm.chatId.trim();
+    if (!botToken || !chatId) {
+      showNotice("Informe Bot Token e Chat ID para testar.");
+      return;
+    }
+    await testTelegramChannel({
+      id: "form",
+      name: channelForm.name || "Canal Telegram",
+      botToken,
+      chatId,
+      buttonLink: channelForm.buttonLink,
+    });
+  }
+
+  async function testSavedChannel(channel: ValidatorNotificationChannel) {
+    const botToken = decodeToken(channel.botTokenEncoded);
+    if (!botToken || !channel.chatId) {
+      showNotice("Canal sem token ou Chat ID para testar.");
+      return;
+    }
+    await testTelegramChannel({
+      id: channel.id,
+      name: channel.name,
+      botToken,
+      chatId: channel.chatId,
+      buttonLink: channel.buttonLink,
+    });
+  }
+
+  async function testTelegramChannel(channel: {
+    id: string;
+    name: string;
+    botToken: string;
+    chatId: string;
+    buttonLink: string;
+  }) {
+    setTestingTelegramId(channel.id);
+    try {
+      await postValidatorTelegramMessage({
+        botToken: channel.botToken,
+        chatId: channel.chatId,
+        buttonLink: channel.buttonLink || `${window.location.origin}/app/validador`,
+        message:
+          "ENTRADA CONFIRMADA\n" +
+          "Mesa: Bac Bo\n" +
+          "Padrao: 🔴10 → 🔵7 → 🟡6\n" +
+          "Entrada: 🔴 Banker\n" +
+          "Gale: Ate G1\n" +
+          "Protecao Tie: Ativa\n" +
+          `Canal: ${channel.name}`,
+        buttonLabel: "Abrir Sniper Bo IA",
+      });
+      showNotice("Teste enviado no Telegram.");
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Falha ao enviar teste no Telegram.");
+    } finally {
+      setTestingTelegramId("");
+    }
   }
 
   function removeChannel(id: string) {
@@ -577,7 +686,10 @@ function NeuralValidatorPage() {
             setChannelForm={setChannelForm}
             onSave={saveChannel}
             onRemove={removeChannel}
+            onTestForm={testChannelFromForm}
+            onTestChannel={testSavedChannel}
             telegramEnabled={planLimits.telegram}
+            testingTelegramId={testingTelegramId}
           />
         </TabsContent>
       </Tabs>
@@ -1133,7 +1245,10 @@ function ChannelsTab({
   setChannelForm,
   onSave,
   onRemove,
+  onTestForm,
+  onTestChannel,
   telegramEnabled,
+  testingTelegramId,
 }: {
   channels: ValidatorNotificationChannel[];
   channelForm: {
@@ -1154,7 +1269,10 @@ function ChannelsTab({
   }) => void;
   onSave: () => void;
   onRemove: (id: string) => void;
+  onTestForm: () => void;
+  onTestChannel: (channel: ValidatorNotificationChannel) => void;
   telegramEnabled: boolean;
+  testingTelegramId: string;
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
@@ -1187,9 +1305,20 @@ function ChannelsTab({
           <Field label="Modelo entrada">
             <Textarea value={channelForm.entryTemplate} onChange={(event) => setChannelForm({ ...channelForm, entryTemplate: event.target.value })} className="min-h-36" />
           </Field>
-          <Button type="button" className="w-full btn-primary-grad" onClick={onSave} disabled={!telegramEnabled}>
-            <Save className="size-4" /> Salvar configuracao
-          </Button>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button type="button" className="w-full btn-primary-grad" onClick={onSave} disabled={!telegramEnabled}>
+              <Save className="size-4" /> Salvar configuracao
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              onClick={onTestForm}
+              disabled={!telegramEnabled || testingTelegramId === "form"}
+            >
+              <Send className="size-4" /> {testingTelegramId === "form" ? "Enviando..." : "Testar envio"}
+            </Button>
+          </div>
         </div>
       </GlassCard>
 
@@ -1204,9 +1333,21 @@ function ChannelsTab({
                   <div className="mt-1 text-xs text-muted-foreground">Token: {channel.botTokenMasked || "sem token"} | Chat: {channel.chatId || "sem chat"}</div>
                   <div className="mt-1 text-xs text-muted-foreground">Status: {channel.isActive ? "ativo" : "inativo"}</div>
                 </div>
-                <Button type="button" variant="destructive" size="sm" onClick={() => onRemove(channel.id)}>
-                  <Trash2 className="size-4" />
-                </Button>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onTestChannel(channel)}
+                    disabled={!telegramEnabled || testingTelegramId === channel.id}
+                  >
+                    <Send className="size-4" />
+                    <span className="hidden sm:inline">{testingTelegramId === channel.id ? "Enviando" : "Testar"}</span>
+                  </Button>
+                  <Button type="button" variant="destructive" size="sm" onClick={() => onRemove(channel.id)}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
               </div>
             </div>
           ))}
@@ -1652,6 +1793,34 @@ async function fetchValidatorRoundHistory(limit: number) {
   throw new Error(`Validator history returned ${lastStatus || "unknown"}`);
 }
 
+async function postValidatorTelegramMessage(payload: {
+  botToken: string;
+  chatId: string;
+  buttonLink: string;
+  message: string;
+  buttonLabel: string;
+}) {
+  if (typeof window === "undefined") return;
+
+  const session = readUserSession();
+  const token = session.clientToken || localDevDashboardToken();
+  const response = await fetch("/validator/telegram/send", {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => null) as { error?: string } | null;
+  if (!response.ok) {
+    throw new Error(data?.error || `Telegram retornou ${response.status}.`);
+  }
+}
+
 function mergeRoundSources(sources: Round[][]) {
   const byKey = new Map<string, Round>();
   for (const source of sources) {
@@ -1757,6 +1926,78 @@ function detectLiveHits(patterns: SavedValidatorPattern[], rounds: Round[]): Liv
       detectedRoundId: latestRound.id,
       detectedAt: new Date().toISOString(),
     }));
+}
+
+function buildLiveHitTelegramMessage(hit: LiveValidatorHit, channel: ValidatorNotificationChannel) {
+  const pattern = hit.pattern;
+  const variables: Record<string, string> = {
+    pattern: formatTelegramPattern(pattern.pattern),
+    entry: hit.entry ? formatTelegramSide(hit.entry) : "Aguardando",
+    gale: `G${Number(pattern.galeLimit)}`,
+    wins: String(pattern.wins),
+    loss: String(pattern.losses),
+    losses: String(pattern.losses),
+    percentage: formatPercent(pattern.validation?.accuracy),
+    table: pattern.tableId || "Bac Bo",
+    confidence: formatPercent(pattern.validation?.accuracy),
+    sequence: String(pattern.currentGreenStreak),
+    tieProtection: pattern.tieProtection ? "Ativa" : "Inativa",
+    result: "",
+    risk: pattern.validation?.risk ?? "",
+    mode: "Validador Neural",
+  };
+  const template = pattern.messageOverride?.trim() || channel.templates.entry || DEFAULT_MESSAGE_TEMPLATES.entry;
+  return renderTelegramTemplate(template, variables);
+}
+
+function renderTelegramTemplate(template: string, variables: Record<string, string>) {
+  return template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
+}
+
+function formatTelegramPattern(pattern: ValidatorPatternToken[]) {
+  return pattern.map((token) => `${telegramSideCircle(token.side)}${token.score ?? ""}`).join(" → ");
+}
+
+function formatTelegramSide(side: RoundResult) {
+  if (side === "B") return "🔴 Banker";
+  if (side === "P") return "🔵 Player";
+  return "🟡 Tie";
+}
+
+function telegramSideCircle(side: RoundResult) {
+  if (side === "B") return "🔴";
+  if (side === "P") return "🔵";
+  return "🟡";
+}
+
+function telegramSentStorageKey() {
+  return `${TELEGRAM_SENT_KEY}:${currentUserId()}`;
+}
+
+function readTelegramSentKeys() {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(telegramSentStorageKey()) || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function wasTelegramNotificationSent(key: string) {
+  return readTelegramSentKeys().includes(key);
+}
+
+function markTelegramNotificationSent(key: string) {
+  if (typeof window === "undefined") return;
+  const next = Array.from(new Set([key, ...readTelegramSentKeys()])).slice(0, 400);
+  window.localStorage.setItem(telegramSentStorageKey(), JSON.stringify(next));
+}
+
+function forgetTelegramNotificationSent(key: string) {
+  if (typeof window === "undefined") return;
+  const next = readTelegramSentKeys().filter((item) => item !== key);
+  window.localStorage.setItem(telegramSentStorageKey(), JSON.stringify(next));
 }
 
 function invertToken(token: ValidatorPatternToken): ValidatorPatternToken {
