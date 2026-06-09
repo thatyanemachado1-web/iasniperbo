@@ -36,6 +36,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { PatternMinerStorage } from "@/patternMiner/PatternMinerStorage";
 import {
   DEFAULT_VALIDATOR_CONFIG,
   NeuralValidatorEngine,
@@ -83,6 +84,8 @@ export const Route = createFileRoute("/app/validador")({
 });
 
 const engine = new NeuralValidatorEngine();
+const patternMinerStorage = new PatternMinerStorage();
+const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
 
 const ENTRY_OPTIONS: Array<{ value: ValidatorEntryType; label: string }> = [
   { value: "AI", label: "Entrada sugerida pela IA" },
@@ -107,12 +110,21 @@ function NeuralValidatorPage() {
   const fullAccess = hasFullAccess(session);
   const [storageVersion, setStorageVersion] = useState(0);
   const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
+  const planLimits = planLimitForSession(session.plan, fullAccess);
+  const [serverHistory, setServerHistory] = useState<Round[]>([]);
+  const [serverHistoryStatus, setServerHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const historyRounds = useMemo(
-    () => readValidatorHistory(realTimeRounds),
-    [realTimeRounds, storageVersion],
+    () => {
+      const validatorHistory = readValidatorHistory(realTimeRounds);
+      return mergeRoundSources([
+        serverHistory,
+        validatorHistory,
+        patternMinerStorage.read().rounds,
+      ]);
+    },
+    [realTimeRounds, serverHistory, storageVersion],
   );
   const hasHistory = historyRounds.length > 0;
-  const planLimits = planLimitForSession(session.plan, fullAccess);
   const [notice, setNotice] = useState("");
 
   const [pattern, setPattern] = useState<ValidatorPatternToken[]>(() => {
@@ -169,7 +181,35 @@ function NeuralValidatorPage() {
   );
 
   useEffect(() => {
-    if (!hasHistory || pattern.length < 2) {
+    if (!realTimeRounds.length) return;
+    patternMinerStorage.ingest(realTimeRounds);
+  }, [realTimeRounds]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadValidatorHistory() {
+      setServerHistoryStatus("loading");
+      try {
+        const rounds = await fetchValidatorRoundHistory(planLimits.history);
+        if (cancelled) return;
+        setServerHistory(rounds);
+        setServerHistoryStatus("ready");
+      } catch {
+        if (cancelled) return;
+        setServerHistoryStatus("error");
+      }
+    }
+
+    void loadValidatorHistory();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [data.updatedAt, planLimits.history]);
+
+  useEffect(() => {
+    if (!hasHistory || pattern.length < 1) {
       setManualResult(null);
       return;
     }
@@ -257,7 +297,7 @@ function NeuralValidatorPage() {
   }
 
   function validateCurrentPattern() {
-    if (!hasHistory || pattern.length < 2) {
+    if (!hasHistory || pattern.length < 1) {
       setManualResult(null);
       showNotice("Sem historico suficiente para validar este padrao.");
       return;
@@ -374,6 +414,9 @@ function NeuralValidatorPage() {
           <AppBadge tone={hasHistory ? "green" : "amber"}>
             {hasHistory ? `${historyRounds.length.toLocaleString("pt-BR")} rodadas reais` : "Sem historico real"}
           </AppBadge>
+          <AppBadge tone={serverHistory.length ? "green" : serverHistoryStatus === "loading" ? "blue" : "amber"}>
+            Banco Validador: {serverHistory.length.toLocaleString("pt-BR")}
+          </AppBadge>
           <AppBadge tone={fullAccess ? "green" : "amber"}>{planLimits.label}</AppBadge>
         </div>
       </div>
@@ -391,7 +434,7 @@ function NeuralValidatorPage() {
             <div>
               <div className="text-sm font-black text-warning">Aguardando historico real da mesa</div>
               <p className="mt-1 text-xs text-muted-foreground">
-                O validador nao calcula green, red ou assertividade com dados ficticios. Assim que o dashboard coletar rodadas reais, a validacao fica ativa.
+                O validador nao calcula green, red ou assertividade com dados ficticios. Assim que a mesa enviar rodadas reais para o banco do Validador, a validacao fica ativa.
               </p>
             </div>
           </div>
@@ -651,8 +694,7 @@ function ValidatorTab(props: {
   } = props;
 
   const [showDetails, setShowDetails] = useState(false);
-  const canSave = pattern.length >= 2 && hasHistory;
-  const selectedEntrySide = entryTypeToSide(config.entryType) ?? "B";
+  const canSave = pattern.length >= 1 && hasHistory;
   const historyOptions = availableHistoryOptions(historyLimit);
   const setGaleLimit = (value: number) => {
     setConfig({ ...config, galeLimit: Math.min(2, Math.max(0, value)) as ValidatorGaleLimit });
@@ -662,15 +704,19 @@ function ValidatorTab(props: {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-3">
+    <div className="mx-auto max-w-6xl space-y-2.5">
       <GlassCard>
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.48fr)]">
-          <div className="space-y-4">
-            <div className="rounded-xl border border-border/60 bg-background/30 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.44fr)]">
+          <div className="space-y-3">
+            <div className="rounded-xl border border-border/60 bg-background/30 p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Padrao</div>
-                  <CompactPatternLine pattern={pattern} className="mt-2" />
+                  <CompactPatternLine
+                    pattern={pattern}
+                    className="mt-2"
+                    onRemove={(index) => setPattern(pattern.filter((_, tokenIndex) => tokenIndex !== index))}
+                  />
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-1.5">
                   <IconToolButton label="Inverter" onClick={() => setPattern(pattern.map(invertToken))}>
@@ -684,7 +730,7 @@ function ValidatorTab(props: {
                   </IconToolButton>
                 </div>
               </div>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
                 <QuickToken side="B" score={tokenScore} label="Banker" onClick={addToken} />
                 <QuickToken side="P" score={tokenScore} label="Player" onClick={addToken} />
                 <QuickToken side="T" score={tokenScore} label="Tie" onClick={addToken} />
@@ -693,14 +739,14 @@ function ValidatorTab(props: {
                   onChange={(event) => setTokenScore(event.target.value)}
                   inputMode="numeric"
                   placeholder="Numero"
-                  className="h-10 w-24 bg-secondary/30 text-center"
+                  className="h-8 w-20 bg-secondary/30 text-center text-xs"
                 />
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-3">
               <SimpleInfoCard label="Entrada">
-                <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
                   <EntrySideButton
                     side="B"
                     selected={config.entryType === "BANKER"}
@@ -712,21 +758,18 @@ function ValidatorTab(props: {
                     onClick={() => setConfig({ ...config, entryType: "PLAYER" })}
                   />
                 </div>
-                <div className="mt-3 text-sm font-black">
-                  <SideLabel side={selectedEntrySide} />
-                </div>
               </SimpleInfoCard>
 
               <SimpleInfoCard label="Gale">
-                <div className="mt-3 flex h-10 items-center justify-between rounded-md border border-border/60 bg-secondary/20 px-2">
+                <div className="mt-2 flex h-8 items-center justify-between rounded-md border border-border/60 bg-secondary/20 px-2">
                   <button type="button" className="px-2 text-muted-foreground hover:text-neon-cyan" onClick={() => setGaleLimit(Number(config.galeLimit) - 1)}>-</button>
-                  <span className="text-sm font-black">Ate G{Number(config.galeLimit)}</span>
+                  <span className="text-xs font-black">Ate G{Number(config.galeLimit)}</span>
                   <button type="button" className="px-2 text-muted-foreground hover:text-neon-cyan" onClick={() => setGaleLimit(Number(config.galeLimit) + 1)}>+</button>
                 </div>
               </SimpleInfoCard>
 
               <SimpleInfoCard label="Protecao no empate">
-                <label className="mt-3 flex h-10 cursor-pointer items-center justify-between rounded-md border border-border/60 bg-secondary/20 px-3 text-sm">
+                <label className="mt-2 flex h-8 cursor-pointer items-center justify-between rounded-md border border-border/60 bg-secondary/20 px-3 text-xs">
                   <span className="font-black">{config.tieProtection ? "Ativa" : "Inativa"}</span>
                   <Checkbox
                     checked={config.tieProtection}
@@ -791,7 +834,7 @@ function ValidatorTab(props: {
             </details>
 
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button type="button" className="btn-primary-grad flex-1" onClick={validateCurrentPattern} disabled={pattern.length < 2 || !hasHistory}>
+              <Button type="button" className="btn-primary-grad flex-1" onClick={validateCurrentPattern} disabled={pattern.length < 1 || !hasHistory}>
                 Validar Estrategia
               </Button>
               <Button type="button" variant="secondary" className="flex-1" onClick={saveCurrentPattern} disabled={!canSave}>
@@ -1092,7 +1135,13 @@ function ValidationSummaryPanel({
   onToggleDetails: () => void;
   showDetails: boolean;
 }) {
-  const noSampleText = !hasHistory ? "Sem historico suficiente" : !result || !result.totalValidated ? "Aguardando validacao" : "";
+  const noSampleText = !hasHistory
+    ? "Banco do Validador sem rodadas"
+    : !result
+      ? "Aguardando validacao"
+      : !result.totalValidated
+        ? "Padrao sem ocorrencia validada"
+        : "";
 
   if (noSampleText) {
     return (
@@ -1100,7 +1149,9 @@ function ValidationSummaryPanel({
         <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Resultado</div>
         <div className="mt-3 text-sm font-black text-warning">{noSampleText}</div>
         <div className="mt-3 text-xs text-muted-foreground">
-          O resumo aparece quando o padrao tiver amostra validada no historico real.
+          {!hasHistory
+            ? "Envie rodadas reais para o banco do Validador para liberar o calculo."
+            : "Esse padrao ainda nao teve amostra finalizada no historico real disponivel."}
         </div>
       </div>
     );
@@ -1280,7 +1331,15 @@ function TokenPill({ token }: { token: ValidatorPatternToken }) {
   );
 }
 
-function CompactPatternLine({ pattern, className = "" }: { pattern: ValidatorPatternToken[]; className?: string }) {
+function CompactPatternLine({
+  pattern,
+  className = "",
+  onRemove,
+}: {
+  pattern: ValidatorPatternToken[];
+  className?: string;
+  onRemove?: (index: number) => void;
+}) {
   if (!pattern.length) {
     return (
       <div className={`text-sm font-bold text-muted-foreground ${className}`}>
@@ -1290,10 +1349,23 @@ function CompactPatternLine({ pattern, className = "" }: { pattern: ValidatorPat
   }
 
   return (
-    <div className={`flex min-w-0 flex-wrap items-center gap-1.5 text-lg font-black ${className}`}>
+    <div className={`flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 pt-1 text-base font-black ${className}`}>
       {pattern.map((token, index) => (
         <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1.5">
-          <span className={sideTone(token.side)}>{sideEmoji(token.side)}{token.score ?? ""}</span>
+          <span className="relative inline-flex items-center">
+            <span className={sideTone(token.side)}>{sideEmoji(token.side)}{token.score ?? ""}</span>
+            {onRemove ? (
+              <button
+                type="button"
+                aria-label={`Remover ${formatToken(token)}`}
+                title="Remover bolinha"
+                onClick={() => onRemove(index)}
+                className="absolute -right-2 -top-2 inline-flex size-4 items-center justify-center rounded-full border border-border/70 bg-background text-[10px] font-black leading-none text-muted-foreground shadow-sm transition hover:border-destructive/70 hover:text-destructive"
+              >
+                x
+              </button>
+            ) : null}
+          </span>
           {index < pattern.length - 1 && <span className="text-muted-foreground">→</span>}
         </span>
       ))}
@@ -1303,7 +1375,7 @@ function CompactPatternLine({ pattern, className = "" }: { pattern: ValidatorPat
 
 function SimpleInfoCard({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-background/30 p-4">
+    <div className="rounded-xl border border-border/60 bg-background/30 p-3">
       <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</div>
       {children}
     </div>
@@ -1336,9 +1408,9 @@ function QuickToken({
     <button
       type="button"
       onClick={() => onClick(side, score)}
-      className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border px-3 py-2 text-sm font-black transition hover:-translate-y-0.5 ${tokenClass(side)}`}
+      className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-full border px-2.5 text-xs font-black transition hover:-translate-y-0.5 ${tokenClass(side)}`}
     >
-      <span className="text-xl leading-none">{sideEmoji(side)}</span>
+      <span className="text-base leading-none">{sideEmoji(side)}</span>
       {scoreText ? <span>{scoreText}</span> : null}
       <span>{label}</span>
     </button>
@@ -1363,7 +1435,7 @@ function IconToolButton({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex size-11 items-center justify-center rounded-lg border border-border/70 bg-secondary/20 text-muted-foreground transition hover:bg-secondary/40 disabled:cursor-not-allowed disabled:opacity-45"
+      className="inline-flex size-9 items-center justify-center rounded-lg border border-border/70 bg-secondary/20 text-muted-foreground transition hover:bg-secondary/40 disabled:cursor-not-allowed disabled:opacity-45"
     >
       {children}
     </button>
@@ -1375,11 +1447,11 @@ function EntrySideButton({ side, selected, onClick }: { side: RoundResult; selec
     <button
       type="button"
       onClick={onClick}
-      className={`flex min-h-12 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-black transition ${
+      className={`flex h-8 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-black transition ${
         selected ? `${tokenClass(side)} ring-1 ring-current` : "border-border/70 bg-secondary/20 text-muted-foreground hover:bg-secondary/40"
       }`}
     >
-      <span className="text-xl leading-none">{sideEmoji(side)}</span>
+      <span className="text-base leading-none">{sideEmoji(side)}</span>
       {sideName(side)}
     </button>
   );
@@ -1448,6 +1520,76 @@ function FilterSwitch({ label, checked, onCheckedChange }: { label: string; chec
       <span>{label}</span>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </label>
+  );
+}
+
+async function fetchValidatorRoundHistory(limit: number) {
+  if (typeof window === "undefined") return [];
+
+  const url = new URL("/validator/round-history", window.location.origin);
+  url.searchParams.set("limit", String(limit));
+  const session = readUserSession();
+  const tokens = [session.clientToken, localDevDashboardToken()].filter(
+    (token, index, values): token is string => Boolean(token) && values.indexOf(token) === index,
+  );
+  const requestTokens = tokens.length ? tokens : [""];
+  let lastStatus = 0;
+
+  for (const token of requestTokens) {
+    const response = await fetch(url.toString(), {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    lastStatus = response.status;
+    if (!response.ok) continue;
+
+    const payload = await response.json().catch(() => null) as { rounds?: unknown[] } | null;
+    return Array.isArray(payload?.rounds) ? payload.rounds.filter(isValidatorRound) : [];
+  }
+
+  throw new Error(`Validator history returned ${lastStatus || "unknown"}`);
+}
+
+function mergeRoundSources(sources: Round[][]) {
+  const byKey = new Map<string, Round>();
+  for (const source of sources) {
+    for (const round of source) byKey.set(roundSourceKey(round), round);
+  }
+  return [...byKey.values()].sort(compareValidatorRounds);
+}
+
+function localDevDashboardToken() {
+  if (typeof window === "undefined") return "";
+  return ["127.0.0.1", "localhost"].includes(window.location.hostname)
+    ? LOCAL_DEV_DASHBOARD_TOKEN
+    : "";
+}
+
+function isValidatorRound(value: unknown): value is Round {
+  const round = value as Partial<Round>;
+  return (
+    typeof round.id === "number" &&
+    (round.result === "B" || round.result === "P" || round.result === "T") &&
+    typeof round.bankerScore === "number" &&
+    typeof round.playerScore === "number" &&
+    typeof round.time === "string"
+  );
+}
+
+function roundSourceKey(round: Round) {
+  return `${round.time}:${round.id}:${round.result}:${round.bankerScore}:${round.playerScore}`;
+}
+
+function compareValidatorRounds(a: Round, b: Round) {
+  const idCompare = a.id - b.id;
+  if (idCompare) return idCompare;
+  const timeCompare = a.time.localeCompare(b.time);
+  if (timeCompare) return timeCompare;
+  return `${a.result}:${a.bankerScore}:${a.playerScore}`.localeCompare(
+    `${b.result}:${b.bankerScore}:${b.playerScore}`,
   );
 }
 
