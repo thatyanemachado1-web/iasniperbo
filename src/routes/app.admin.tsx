@@ -67,6 +67,15 @@ import {
 
 export const Route = createFileRoute("/app/admin")({
   component: AdminPage,
+  head: () => ({
+    meta: [
+      { title: "Administração — SNIPER BO IA" },
+      { name: "description", content: "Painel administrativo do SNIPER BO IA: usuários, módulos, logs, broadcast e configurações operacionais." },
+      { property: "og:url", content: "https://sniperbo.com/app/admin" },
+      { name: "robots", content: "noindex,nofollow" },
+    ],
+    links: [{ rel: "canonical", href: "https://sniperbo.com/app/admin" }],
+  }),
 });
 
 const kindLabels: Record<RecipientKind, string> = {
