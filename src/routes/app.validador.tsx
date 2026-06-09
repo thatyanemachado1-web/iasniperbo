@@ -312,7 +312,6 @@ function NeuralValidatorPage() {
 
   useEffect(() => {
     if (!liveHits.length) return;
-    for (const hit of liveHits) void sendLiveHitToTelegram(hit);
     setSavedPatterns((current) => {
       let changed = false;
       const now = new Date().toISOString();
