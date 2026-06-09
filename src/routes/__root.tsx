@@ -76,6 +76,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { name: "theme-color", content: "#030712" },
+      { name: "google-site-verification", content: "VQcjEgrWzwoOSX4LId8QqxG53B9cHzjk_GZ-VCdid3Q" },
       { title: "SNIPER BO IA - Painel operacional com IA" },
       {
         name: "description",
