@@ -417,7 +417,6 @@ function rateLimitForRequest(method: string, pathname: string) {
   if (pathname === "/dashboard/signal") return 240;
   if (pathname === "/validator/round-history") return method === "GET" ? 120 : 240;
   if (
-    pathname === "/validator/status" ||
     pathname === "/validator/patterns" ||
     pathname.startsWith("/validator/patterns/") ||
     pathname === "/validator/channels" ||
@@ -2645,7 +2644,6 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       url.pathname === "/dashboard/signal" ||
       url.pathname === "/dashboard/round-history" ||
       url.pathname === "/validator/round-history" ||
-      url.pathname === "/validator/status" ||
       url.pathname === "/validator/patterns" ||
       url.pathname.startsWith("/validator/patterns/") ||
       url.pathname === "/validator/channels" ||
@@ -2777,7 +2775,6 @@ async function handleDashboardRequest(request: Request, env: unknown) {
 }
 
 async function handleValidatorStorageRequest(request: Request, url: URL, env: unknown) {
-  const isStatusRoute = url.pathname === "/validator/status";
   const isPatternsRoute =
     url.pathname === "/validator/patterns" || url.pathname.startsWith("/validator/patterns/");
   const isChannelsRoute =
@@ -2785,46 +2782,10 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     url.pathname.startsWith("/validator/channels/") ||
     url.pathname === "/validator/channels/test";
   const isLiveHitRoute = url.pathname === "/validator/live-hit/send";
-  if (!isStatusRoute && !isPatternsRoute && !isChannelsRoute && !isLiveHitRoute) return null;
+  if (!isPatternsRoute && !isChannelsRoute && !isLiveHitRoute) return null;
 
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
-
-  if (request.method === "GET" && isStatusRoute) {
-    const userPatterns = liveValidatorPatterns.filter((pattern) => pattern.userId === userId);
-    const userChannels = liveValidatorChannels.filter((channel) => channel.userId === userId);
-    const telegramReadyPatterns = userPatterns.filter((pattern) => (
-      pattern.isActive &&
-      (pattern.destination === "telegram" || pattern.destination === "site_telegram") &&
-      Boolean(pattern.telegramChannelId)
-    ));
-    const activeChannels = userChannels.filter((channel) => channel.isActive && Boolean(channel.chatId));
-    return json({
-      userId,
-      roundHistoryTotal: liveValidatorRoundHistory.length,
-      latestRoundId: liveValidatorRoundHistory.at(-1)?.id ?? null,
-      latestRoundResult: liveValidatorRoundHistory.at(-1)?.result ?? null,
-      patternsTotal: userPatterns.length,
-      activePatterns: userPatterns.filter((pattern) => pattern.isActive).length,
-      telegramReadyPatterns: telegramReadyPatterns.length,
-      channelsTotal: userChannels.length,
-      activeChannels: activeChannels.length,
-      recentNotifications: liveValidatorNotifications
-        .filter((item) => readString(item, "userId") === userId)
-        .slice(0, 10)
-        .map((item) => ({
-          id: readString(item, "id"),
-          type: readString(item, "type") || "entry",
-          patternId: readString(item, "patternId"),
-          channelId: readString(item, "channelId"),
-          roundId: Number(item.roundId) || null,
-          status: readString(item, "status"),
-          error: readString(item, "error"),
-          sentAt: readString(item, "sentAt"),
-        })),
-      updatedAt: new Date().toISOString(),
-    });
-  }
 
   if (request.method === "POST" && isLiveHitRoute) {
     const body = readRecord(await request.json().catch(() => ({})));

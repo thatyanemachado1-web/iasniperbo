@@ -153,7 +153,6 @@ function NeuralValidatorPage() {
   const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
   const [testingTelegramId, setTestingTelegramId] = useState("");
-  const [syncingValidator, setSyncingValidator] = useState(false);
   const telegramSendKeysRef = useRef(new Set<string>());
   const [channelForm, setChannelForm] = useState({
     name: "Sala Premium",
@@ -205,7 +204,6 @@ function NeuralValidatorPage() {
     () => findSavedPattern(savedPatterns, pattern, config),
     [savedPatterns, pattern, config.entryType, config.galeLimit, config.tableId, config.tieProtection],
   );
-  const activeTelegramChannel = useMemo(() => preferredValidatorChannel(channels), [channels]);
 
   const liveHits = useMemo(
     () => detectLiveHits(savedPatterns, historyRounds),
@@ -275,10 +273,10 @@ function NeuralValidatorPage() {
         if (cancelled) return;
 
         const mergedChannels = mergeValidatorItems(serverChannels, readNotificationChannels());
-        const mergedPatterns = autoPrepareTelegramDelivery(
+        const mergedPatterns = autoPrepareAdminTelegramDelivery(
           mergeValidatorItems(serverPatterns, readSavedPatterns()),
           mergedChannels,
-          adminAccess || planLimits.telegram,
+          adminAccess,
         );
         writeSavedPatterns(mergedPatterns);
         writeNotificationChannels(mergedChannels);
@@ -373,7 +371,6 @@ function NeuralValidatorPage() {
     const validation =
       sourceResult ?? engine.validatePattern(sourceHistory, sourcePattern, config);
     const now = new Date().toISOString();
-    const defaultTelegramChannel = planLimits.telegram ? activeTelegramChannel : null;
     const saved: SavedValidatorPattern = {
       id: createStorageId("pattern"),
       userId: currentUserId(),
@@ -384,8 +381,8 @@ function NeuralValidatorPage() {
       pulledSide: validation.pulledSide,
       galeLimit: config.galeLimit,
       tieProtection: config.tieProtection,
-      destination: defaultTelegramChannel ? "site_telegram" : "site",
-      telegramChannelId: defaultTelegramChannel?.id ?? "",
+      destination: "site",
+      telegramChannelId: "",
       messageOverride: "",
       cooldownRounds: 2,
       isActive: true,
@@ -471,38 +468,6 @@ function NeuralValidatorPage() {
     };
     setSavedPatterns(upsertSavedPattern(updated));
     void saveServerValidatorPattern(updated);
-  }
-
-  async function syncSavedValidatorData(showResult = true) {
-    setSyncingValidator(true);
-    try {
-      const preparedPatterns = autoPrepareTelegramDelivery(
-        savedPatterns,
-        channels,
-        adminAccess || planLimits.telegram,
-      );
-      const patternsChanged = preparedPatterns.some((item, index) => item !== savedPatterns[index]);
-      if (patternsChanged) {
-        writeSavedPatterns(preparedPatterns);
-        setSavedPatterns(preparedPatterns);
-      }
-      const syncResults = await Promise.all([
-        ...preparedPatterns.map((patternItem) => saveServerValidatorPattern(patternItem)),
-        ...channels.map((channel) => saveServerValidatorChannel(channel)),
-      ]);
-      if (showResult) {
-        const failed = syncResults.filter((item) => !item).length;
-        showNotice(failed
-          ? "Sincronizacao parcial: algum item nao foi confirmado pelo servidor."
-          : "Sincronizacao enviada para o servidor do Validador.");
-      }
-    } catch {
-      if (showResult) {
-        showNotice("Nao consegui confirmar a sincronizacao no servidor agora.");
-      }
-    } finally {
-      setSyncingValidator(false);
-    }
   }
 
   function updateAllSavedPatternDelivery(
@@ -606,13 +571,6 @@ function NeuralValidatorPage() {
     };
     const next = upsertNotificationChannel(channel);
     setChannels(next);
-    const preparedPatterns = autoPrepareTelegramDelivery(savedPatterns, [channel, ...channels], true);
-    const patternsChanged = preparedPatterns.some((item, index) => item !== savedPatterns[index]);
-    if (patternsChanged) {
-      writeSavedPatterns(preparedPatterns);
-      setSavedPatterns(preparedPatterns);
-      void Promise.all(preparedPatterns.map((patternItem) => saveServerValidatorPattern(patternItem)));
-    }
     void saveServerValidatorChannel(channel).then((serverChannel) => {
       if (!serverChannel) {
         showNotice("Canal salvo no navegador, mas o servidor nao confirmou. Telegram precisa do canal no servidor.");
@@ -621,9 +579,7 @@ function NeuralValidatorPage() {
       setChannels(upsertNotificationChannel(serverChannel));
     });
     setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
-    showNotice(patternsChanged
-      ? "Canal salvo e padroes ativos preparados para Site + Telegram."
-      : "Canal salvo para este usuario. Token fica mascarado depois de salvo.");
+    showNotice("Canal salvo para este usuario. Token fica mascarado depois de salvo.");
   }
 
   function updateNotificationChannel(
@@ -759,15 +715,6 @@ function NeuralValidatorPage() {
         </div>
       )}
 
-      <ValidatorTelegramStatusCard
-        historyCount={historyRounds.length}
-        serverHistoryStatus={serverHistoryStatus}
-        patterns={savedPatterns}
-        channels={channels}
-        syncing={syncingValidator}
-        onSync={() => void syncSavedValidatorData()}
-      />
-
       {!hasHistory && (
         <GlassCard className="border-warning/40">
           <div className="flex items-start gap-3">
@@ -869,74 +816,6 @@ function NeuralValidatorPage() {
           />
         </TabsContent>
       </Tabs>
-    </div>
-  );
-}
-
-function ValidatorTelegramStatusCard({
-  historyCount,
-  serverHistoryStatus,
-  patterns,
-  channels,
-  syncing,
-  onSync,
-}: {
-  historyCount: number;
-  serverHistoryStatus: "idle" | "loading" | "ready" | "error";
-  patterns: SavedValidatorPattern[];
-  channels: ValidatorNotificationChannel[];
-  syncing: boolean;
-  onSync: () => void;
-}) {
-  const activeChannels = channels.filter((channel) => channel.isActive && channel.chatId);
-  const telegramPatterns = patterns.filter((pattern) => (
-    pattern.isActive &&
-    (pattern.destination === "telegram" || pattern.destination === "site_telegram") &&
-    Boolean(pattern.telegramChannelId)
-  ));
-  const siteOnlyPatterns = patterns.filter((pattern) => (
-    pattern.isActive &&
-    pattern.destination === "site"
-  ));
-  const ready = historyCount > 0 && activeChannels.length > 0 && telegramPatterns.length > 0;
-  const statusText = ready
-    ? "Pronto para enviar quando um padrao salvo aparecer."
-    : historyCount <= 0
-      ? "Sem historico real chegando neste servidor."
-      : activeChannels.length <= 0
-        ? "Nenhum canal Telegram ativo com Chat ID."
-        : telegramPatterns.length <= 0
-          ? "Nenhum padrao ativo configurado para Telegram."
-          : "Aguardando padrao aparecer.";
-
-  return (
-    <GlassCard className="p-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">Status Telegram</div>
-          <div className={ready ? "mt-1 text-sm font-black text-neon-cyan" : "mt-1 text-sm font-black text-warning"}>
-            {statusText}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-          <StatusMini label="Historico" value={historyCount ? historyCount.toLocaleString("pt-BR") : serverHistoryStatus === "loading" ? "carregando" : "0"} ok={historyCount > 0} />
-          <StatusMini label="Canais" value={String(activeChannels.length)} ok={activeChannels.length > 0} />
-          <StatusMini label="Padroes TG" value={String(telegramPatterns.length)} ok={telegramPatterns.length > 0} />
-          <StatusMini label="So no site" value={String(siteOnlyPatterns.length)} ok={siteOnlyPatterns.length === 0} />
-        </div>
-        <Button type="button" variant="secondary" size="sm" onClick={onSync} disabled={syncing}>
-          {syncing ? "Sincronizando..." : "Sincronizar agora"}
-        </Button>
-      </div>
-    </GlassCard>
-  );
-}
-
-function StatusMini({ label, value, ok }: { label: string; value: string; ok: boolean }) {
-  return (
-    <div className="rounded-lg border border-border/60 bg-secondary/20 px-3 py-2">
-      <div className="text-[10px] font-bold uppercase text-muted-foreground">{label}</div>
-      <div className={ok ? "text-sm font-black text-neon-cyan" : "text-sm font-black text-warning"}>{value}</div>
     </div>
   );
 }
@@ -2282,21 +2161,17 @@ function mergeValidatorItems<T extends { id: string; updatedAt: string }>(primar
   return [...byId.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
-function preferredValidatorChannel(channels: ValidatorNotificationChannel[]) {
-  return channels.find((item) => item.isActive && item.chatId) || channels.find((item) => item.isActive) || channels[0] || null;
-}
-
-function autoPrepareTelegramDelivery(
+function autoPrepareAdminTelegramDelivery(
   patterns: SavedValidatorPattern[],
   channels: ValidatorNotificationChannel[],
   enabled: boolean,
 ) {
   if (!enabled || !patterns.length) return patterns;
-  const channel = preferredValidatorChannel(channels);
+  const channel = channels.find((item) => item.isActive) || channels[0];
   if (!channel) return patterns;
   const now = new Date().toISOString();
   return patterns.map((pattern) => {
-    if (!pattern.isActive || pattern.destination === "disabled" || pattern.destination === "monitor") return pattern;
+    if (!pattern.isActive || pattern.destination === "disabled") return pattern;
     if (
       (pattern.destination === "telegram" || pattern.destination === "site_telegram") &&
       pattern.telegramChannelId
