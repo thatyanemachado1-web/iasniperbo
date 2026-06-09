@@ -62,7 +62,6 @@ import {
   removeSavedPattern,
   upsertNotificationChannel,
   upsertSavedPattern,
-  writePatternDraft,
   writeSavedPatterns,
 } from "@/neuralValidator/NeuralValidatorStorage";
 import type { Round, RoundResult } from "@/types/dashboard";
@@ -141,10 +140,6 @@ function NeuralValidatorPage() {
   const [manualResult, setManualResult] = useState<ValidatorResult | null>(null);
   const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
-  const [selectedChannelId, setSelectedChannelId] = useState("");
-  const [destination, setDestination] = useState<ValidatorDestination>("site");
-  const [cooldownRounds, setCooldownRounds] = useState(2);
-  const [messageOverride, setMessageOverride] = useState("");
   const [channelForm, setChannelForm] = useState({
     name: "Sala Premium",
     botToken: "",
@@ -278,10 +273,10 @@ function NeuralValidatorPage() {
       pulledSide: validation.pulledSide,
       galeLimit: config.galeLimit,
       tieProtection: config.tieProtection,
-      destination,
-      telegramChannelId: selectedChannelId,
-      messageOverride,
-      cooldownRounds,
+      destination: "site",
+      telegramChannelId: "",
+      messageOverride: "",
+      cooldownRounds: 2,
       isActive: true,
       validation,
       currentGreenStreak: validation.currentGreenStreak,
@@ -294,17 +289,6 @@ function NeuralValidatorPage() {
     const next = upsertSavedPattern(saved);
     setSavedPatterns(next);
     showNotice("Padrao salvo para monitoramento ao vivo.");
-  }
-
-  function validateCurrentPattern() {
-    if (!hasHistory || pattern.length < 1) {
-      setManualResult(null);
-      showNotice("Sem historico suficiente para validar este padrao.");
-      return;
-    }
-
-    setManualResult(engine.validatePattern(historyRounds, pattern, config));
-    showNotice("Validacao atualizada com historico real.");
   }
 
   function saveSuggestion(suggestion: PatternSuggestion) {
@@ -352,6 +336,15 @@ function NeuralValidatorPage() {
     };
     setSavedPatterns(upsertSavedPattern(nextItem));
     showNotice("Placar do padrao zerado.");
+  }
+
+  function updateSavedPattern(patternItem: SavedValidatorPattern, patch: Partial<SavedValidatorPattern>) {
+    const updated = {
+      ...patternItem,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+    setSavedPatterns(upsertSavedPattern(updated));
   }
 
   function saveChannel() {
@@ -470,20 +463,9 @@ function NeuralValidatorPage() {
             addToken={addToken}
             config={config}
             setConfig={setConfig}
-            destination={destination}
-            setDestination={setDestination}
-            channels={channels}
-            selectedChannelId={selectedChannelId}
-            setSelectedChannelId={setSelectedChannelId}
-            cooldownRounds={cooldownRounds}
-            setCooldownRounds={setCooldownRounds}
-            messageOverride={messageOverride}
-            setMessageOverride={setMessageOverride}
             manualResult={manualResult}
-            validateCurrentPattern={validateCurrentPattern}
             saveCurrentPattern={saveCurrentPattern}
             hasHistory={hasHistory}
-            historyLimit={planLimits.history}
           />
         </TabsContent>
 
@@ -515,6 +497,7 @@ function NeuralValidatorPage() {
               const updated = { ...patternItem, isActive: !patternItem.isActive, updatedAt: new Date().toISOString() };
               setSavedPatterns(upsertSavedPattern(updated));
             }}
+            onUpdate={updateSavedPattern}
           />
         </TabsContent>
 
@@ -654,20 +637,9 @@ function ValidatorTab(props: {
   addToken: (side: RoundResult, score?: string) => void;
   config: ValidatorConfig;
   setConfig: (config: ValidatorConfig) => void;
-  destination: ValidatorDestination;
-  setDestination: (destination: ValidatorDestination) => void;
-  channels: ValidatorNotificationChannel[];
-  selectedChannelId: string;
-  setSelectedChannelId: (id: string) => void;
-  cooldownRounds: number;
-  setCooldownRounds: (value: number) => void;
-  messageOverride: string;
-  setMessageOverride: (value: string) => void;
   manualResult: ValidatorResult | null;
-  validateCurrentPattern: () => void;
   saveCurrentPattern: () => void;
   hasHistory: boolean;
-  historyLimit: number;
 }) {
   const {
     pattern,
@@ -677,30 +649,15 @@ function ValidatorTab(props: {
     addToken,
     config,
     setConfig,
-    destination,
-    setDestination,
-    channels,
-    selectedChannelId,
-    setSelectedChannelId,
-    cooldownRounds,
-    setCooldownRounds,
-    messageOverride,
-    setMessageOverride,
     manualResult,
-    validateCurrentPattern,
     saveCurrentPattern,
     hasHistory,
-    historyLimit,
   } = props;
 
   const [showDetails, setShowDetails] = useState(false);
   const canSave = pattern.length >= 1 && hasHistory;
-  const historyOptions = availableHistoryOptions(historyLimit);
   const setGaleLimit = (value: number) => {
     setConfig({ ...config, galeLimit: Math.min(2, Math.max(0, value)) as ValidatorGaleLimit });
-  };
-  const setHistorySize = (value: number) => {
-    setConfig({ ...config, historySize: Math.min(historyLimit, Math.max(1, value || 1)) });
   };
 
   return (
@@ -780,64 +737,8 @@ function ValidatorTab(props: {
               </SimpleInfoCard>
             </div>
 
-            <details className="rounded-xl border border-border/60 bg-background/30 p-3 text-xs">
-              <summary className="cursor-pointer font-bold text-muted-foreground">Opcoes de salvamento e envio</summary>
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                <Input value={config.name} onChange={(event) => setConfig({ ...config, name: event.target.value })} placeholder="Nome da estrategia" />
-                <Input value={config.tableId} onChange={(event) => setConfig({ ...config, tableId: event.target.value })} placeholder="Mesa" />
-                <Select value={destination} onValueChange={(value) => setDestination(value as ValidatorDestination)}>
-                  <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {DESTINATION_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Select value={selectedChannelId || "none"} onValueChange={(value) => setSelectedChannelId(value === "none" ? "" : value)}>
-                  <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum canal</SelectItem>
-                    {channels.map((channel) => <SelectItem key={channel.id} value={channel.id}>{channel.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Input
-                  value={cooldownRounds}
-                  onChange={(event) => setCooldownRounds(Math.max(0, Number(event.target.value) || 0))}
-                  type="number"
-                  placeholder="Cooldown"
-                />
-                <Input
-                  value={config.historySize}
-                  onChange={(event) => setHistorySize(Number(event.target.value))}
-                  type="number"
-                  placeholder="Historico"
-                />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {historyOptions.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => setHistorySize(option)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-black ${
-                      config.historySize === option ? "border-neon-cyan/60 bg-neon-cyan/10 text-neon-cyan" : "border-border/70 bg-secondary/20 text-muted-foreground"
-                    }`}
-                  >
-                    {formatHistoryOption(option)}
-                  </button>
-                ))}
-              </div>
-              <Textarea
-                value={messageOverride}
-                onChange={(event) => setMessageOverride(event.target.value)}
-                placeholder="Mensagem personalizada opcional. Use {{pattern}}, {{entry}}, {{percentage}}, {{table}}"
-                className="mt-3 min-h-20"
-              />
-            </details>
-
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button type="button" className="btn-primary-grad flex-1" onClick={validateCurrentPattern} disabled={pattern.length < 1 || !hasHistory}>
-                Validar Estrategia
-              </Button>
-              <Button type="button" variant="secondary" className="flex-1" onClick={saveCurrentPattern} disabled={!canSave}>
+            <div>
+              <Button type="button" className="btn-primary-grad w-full" onClick={saveCurrentPattern} disabled={!canSave}>
                 Salvar Padrao
               </Button>
             </div>
@@ -966,6 +867,7 @@ function SavedPatternsTab({
   onRefresh,
   onReset,
   onToggle,
+  onUpdate,
 }: {
   patterns: SavedValidatorPattern[];
   channels: ValidatorNotificationChannel[];
@@ -973,9 +875,16 @@ function SavedPatternsTab({
   onRefresh: (pattern: SavedValidatorPattern) => void;
   onReset: (pattern: SavedValidatorPattern) => void;
   onToggle: (pattern: SavedValidatorPattern) => void;
+  onUpdate: (pattern: SavedValidatorPattern, patch: Partial<SavedValidatorPattern>) => void;
 }) {
   return (
     <div className="space-y-3">
+      <GlassCard className="rounded-xl p-4">
+        <SectionTitle
+          title="Padroes salvos"
+          subtitle="Configure destino, canal e mensagem somente depois que o padrao estiver salvo."
+        />
+      </GlassCard>
       {patterns.map((pattern) => {
         const channel = channels.find((item) => item.id === pattern.telegramChannelId);
         return (
@@ -1000,6 +909,59 @@ function SavedPatternsTab({
                 <div className="text-[11px] text-muted-foreground">
                   Canal: {channel?.name || "nenhum"} | Ultima deteccao: {pattern.lastDetectedAt ? new Date(pattern.lastDetectedAt).toLocaleString("pt-BR") : "ainda nao detectado"}
                 </div>
+                <details className="rounded-xl border border-border/60 bg-background/30 p-3 text-xs">
+                  <summary className="cursor-pointer font-bold text-muted-foreground">Configurar envio</summary>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <Input
+                      value={pattern.name}
+                      onChange={(event) => onUpdate(pattern, { name: event.target.value })}
+                      placeholder="Nome da estrategia"
+                    />
+                    <Input
+                      value={pattern.tableId}
+                      onChange={(event) => onUpdate(pattern, { tableId: event.target.value })}
+                      placeholder="Mesa"
+                    />
+                    <Select
+                      value={pattern.destination}
+                      onValueChange={(value) => onUpdate(pattern, { destination: value as ValidatorDestination })}
+                    >
+                      <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {DESTINATION_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={pattern.telegramChannelId || "none"}
+                      onValueChange={(value) => onUpdate(pattern, { telegramChannelId: value === "none" ? "" : value })}
+                    >
+                      <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhum canal</SelectItem>
+                        {channels.map((channelItem) => (
+                          <SelectItem key={channelItem.id} value={channelItem.id}>{channelItem.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={pattern.cooldownRounds}
+                      onChange={(event) => onUpdate(pattern, { cooldownRounds: Math.max(0, Number(event.target.value) || 0) })}
+                      type="number"
+                      placeholder="Cooldown"
+                    />
+                    <div className="flex min-h-9 items-center rounded-md border border-border/60 bg-secondary/20 px-3 text-xs text-muted-foreground">
+                      Destino atual: {destinationLabel(pattern.destination)}
+                    </div>
+                  </div>
+                  <Textarea
+                    value={pattern.messageOverride ?? ""}
+                    onChange={(event) => onUpdate(pattern, { messageOverride: event.target.value })}
+                    placeholder="Mensagem personalizada opcional. Use {{pattern}}, {{entry}}, {{percentage}}, {{table}}"
+                    className="mt-3 min-h-20"
+                  />
+                </details>
               </div>
               <div className="flex flex-wrap gap-2 lg:justify-end">
                 <Button type="button" variant="secondary" size="sm" onClick={() => onToggle(pattern)}>
@@ -1637,10 +1599,6 @@ function tokenClass(side: RoundResult) {
   if (side === "B") return "border-banker/40 bg-banker/10 text-banker";
   if (side === "P") return "border-player/40 bg-player/10 text-player";
   return "border-warning/50 bg-warning/10 text-warning";
-}
-
-function formatHistoryOption(value: number) {
-  return value >= 1000 ? `${value / 1000}k` : String(value);
 }
 
 function formatCountPercent(count: number, total: number) {
