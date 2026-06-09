@@ -41,7 +41,7 @@ export async function requestLocalAiCommentary(payload: LocalAiCommentaryRequest
     headers: {
       "Content-Type": "application/json",
       ...authHeaders(),
-    } as Record<string, string>,
+    },
     body: JSON.stringify(payload),
   });
   const data = (await response.json().catch(() => ({}))) as Partial<LocalAiCommentaryResponse>;

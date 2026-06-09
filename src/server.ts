@@ -21,16 +21,6 @@ import type {
   SignalSide,
   SignalStatus,
 } from "./types/dashboard";
-import type {
-  SavedValidatorPattern,
-  ValidatorDestination,
-  ValidatorEntryType,
-  ValidatorGaleLimit,
-  ValidatorMessageTemplates,
-  ValidatorNotificationChannel,
-  ValidatorPatternToken,
-  ValidatorResult,
-} from "./types/neuralValidator";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -164,23 +154,10 @@ const ACTIVE_ENTRY_MODES = [
   "aggressive",
 ] as const satisfies readonly ActiveEntryMode[];
 const SNIPER_NEURAL_ASSERTIVENESS_MIN = 99;
-const DEFAULT_VALIDATOR_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
-  entry:
-    "ENTRADA CONFIRMADA\nMesa: {{table}}\nPadrao: {{pattern}}\nEntrada: {{entry}}\nGale: {{gale}}\nProtecao Tie: {{tieProtection}}\nAssertividade: {{percentage}}",
-  gale: "FAZ O {{gale}}\nEntrada: {{entry}}",
-  green: "GREEN\nPadrao: {{pattern}}\nResultado: {{result}}",
-  red: "RED\nPadrao: {{pattern}}",
-  scoreboard: "{{wins}} GREEN / {{loss}} RED / {{percentage}}",
-  greenStreak: "{{wins}} GREENS SEGUIDOS",
-  preAlert: "Padrao quase formado\nMesa: {{table}}\nCondicao: {{pattern}}\nPossivel entrada: {{entry}}",
-};
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 let liveDashboardData: LiveDashboardData = resetDashboardDailyCycle(mockDashboardData);
 let liveValidatorRoundHistory: Round[] = [];
-let liveValidatorPatterns: SavedValidatorPattern[] = [];
-let liveValidatorChannels: ValidatorNotificationChannel[] = [];
-let liveValidatorNotifications: Array<Record<string, unknown>> = [];
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
 let liveAccessEvents: Array<Record<string, unknown>> = [];
@@ -415,13 +392,6 @@ function rateLimitForRequest(method: string, pathname: string) {
   if (pathname === "/dashboard/round-history") return 120;
   if (pathname === "/dashboard/signal") return 240;
   if (pathname === "/validator/round-history") return method === "GET" ? 120 : 240;
-  if (
-    pathname === "/validator/patterns" ||
-    pathname.startsWith("/validator/patterns/") ||
-    pathname === "/validator/channels" ||
-    pathname.startsWith("/validator/channels/") ||
-    pathname === "/validator/channels/test"
-  ) return 120;
   if (pathname === "/validator/telegram/test" || pathname === "/validator/telegram/send") return 30;
   if (pathname === "/adaptive-strategy/sync") return 240;
   if (
@@ -1271,7 +1241,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
           error:
             "Sessão expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
         },
-        (auth as { status?: number }).status ?? 401,
+        auth.status,
       );
     }
     return createMercadoPagoCheckout(request, env, client, plan);
@@ -2312,8 +2282,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         targetUserId: "site-content",
         targetEmail: "global",
         action: "UPDATE_USER",
-        beforeJson: before as unknown as Record<string, unknown>,
-        afterJson: liveSiteContentSettings as unknown as Record<string, unknown>,
+        beforeJson: before,
+        afterJson: liveSiteContentSettings,
         reason: "Conteudo visual do site atualizado.",
       });
       const saveStatus = await saveLiveState(env);
@@ -2643,20 +2613,12 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       url.pathname === "/dashboard/signal" ||
       url.pathname === "/dashboard/round-history" ||
       url.pathname === "/validator/round-history" ||
-      url.pathname === "/validator/patterns" ||
-      url.pathname.startsWith("/validator/patterns/") ||
-      url.pathname === "/validator/channels" ||
-      url.pathname.startsWith("/validator/channels/") ||
-      url.pathname === "/validator/channels/test" ||
       url.pathname === "/validator/telegram/test" ||
       url.pathname === "/validator/telegram/send"
     )
   ) {
     return json(null, 204);
   }
-
-  const validatorStorageResponse = await handleValidatorStorageRequest(request, url, env);
-  if (validatorStorageResponse) return validatorStorageResponse;
 
   if (
     request.method === "POST" &&
@@ -2683,7 +2645,6 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       message,
       buttonLabel,
       buttonUrl,
-      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
     });
 
     if (!result.ok) return json({ error: result.error }, result.status);
@@ -2713,18 +2674,14 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
-    const dashboardRounds = readRecord(body.dashboard).rounds;
-    const sourceRounds: unknown[] = Array.isArray(body.rounds)
+    const sourceRounds = Array.isArray(body.rounds)
       ? body.rounds
-      : Array.isArray(dashboardRounds)
-        ? dashboardRounds
+      : Array.isArray(readRecord(body.dashboard).rounds)
+        ? readRecord(body.dashboard).rounds
         : [];
     const incomingRounds = normalizeRounds(sourceRounds, MAX_SERVER_ROUND_HISTORY);
     if (incomingRounds.length) {
       liveValidatorRoundHistory = mergeRoundHistory(liveValidatorRoundHistory, incomingRounds);
-      await processValidatorLiveMonitoring(env, {
-        allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-      });
       await saveLiveState(env);
     }
 
@@ -2758,166 +2715,11 @@ async function handleDashboardRequest(request: Request, env: unknown) {
 
     const body = await request.json().catch(() => ({}));
     liveDashboardData = updateDashboardData(liveDashboardData, body);
-    await processValidatorLiveMonitoring(env, {
-      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-    });
     await saveLiveState(env);
     return json({ ok: true, dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
 
   return null;
-}
-
-async function handleValidatorStorageRequest(request: Request, url: URL, env: unknown) {
-  const isPatternsRoute =
-    url.pathname === "/validator/patterns" || url.pathname.startsWith("/validator/patterns/");
-  const isChannelsRoute =
-    url.pathname === "/validator/channels" ||
-    url.pathname.startsWith("/validator/channels/") ||
-    url.pathname === "/validator/channels/test";
-  if (!isPatternsRoute && !isChannelsRoute) return null;
-
-  const userId = await validatorRequestUserId(request, url, env);
-  if (!userId) return json({ error: "Nao autorizado." }, 401);
-
-  if (url.pathname === "/validator/patterns") {
-    if (request.method === "GET") {
-      return json({
-        patterns: liveValidatorPatterns
-          .filter((pattern) => pattern.userId === userId)
-          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-      });
-    }
-
-    if (request.method === "POST") {
-      try {
-        const body = readRecord(await request.json().catch(() => ({})));
-        const pattern = normalizeServerSavedPattern(body.pattern || body, userId);
-        if (!pattern) return json({ error: "Padrao invalido." }, 400);
-        liveValidatorPatterns = upsertValidatorPattern(pattern);
-        await saveLiveState(env);
-        return json({ pattern }, 201);
-      } catch (error) {
-        console.warn("Falha ao salvar padrao do Validador.", error);
-        return json(
-          {
-            error: "Falha ao salvar padrao no servidor.",
-            detail: isLocalDevelopmentRequest(request) ? errorMessage(error) : "",
-          },
-          500,
-        );
-      }
-    }
-  }
-
-  const patternMatch = url.pathname.match(/^\/validator\/patterns\/([^/]+)$/);
-  if (patternMatch) {
-    const patternId = decodeURIComponent(patternMatch[1] || "");
-    const current = liveValidatorPatterns.find(
-      (pattern) => pattern.userId === userId && pattern.id === patternId,
-    );
-    if (!current) return json({ error: "Padrao nao encontrado." }, 404);
-
-    if (request.method === "PATCH") {
-      const body = readRecord(await request.json().catch(() => ({})));
-      const next = normalizeServerSavedPattern({ ...current, ...body, id: current.id }, userId);
-      if (!next) return json({ error: "Padrao invalido." }, 400);
-      liveValidatorPatterns = upsertValidatorPattern(next);
-      await saveLiveState(env);
-      return json({ pattern: next });
-    }
-
-    if (request.method === "DELETE") {
-      liveValidatorPatterns = liveValidatorPatterns.filter(
-        (pattern) => !(pattern.userId === userId && pattern.id === patternId),
-      );
-      await saveLiveState(env);
-      return json({ ok: true });
-    }
-  }
-
-  if (url.pathname === "/validator/channels") {
-    if (request.method === "GET") {
-      return json({
-        channels: liveValidatorChannels
-          .filter((channel) => channel.userId === userId)
-          .map(publicValidatorChannel)
-          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-      });
-    }
-
-    if (request.method === "POST") {
-      const body = readRecord(await request.json().catch(() => ({})));
-      const incoming = readRecord(body.channel || body);
-      const existing = liveValidatorChannels.find(
-        (channel) => channel.userId === userId && channel.id === readString(incoming, "id"),
-      );
-      const channel = normalizeServerNotificationChannel(incoming, userId, existing);
-      if (!channel) return json({ error: "Canal invalido." }, 400);
-      liveValidatorChannels = upsertValidatorChannel(channel);
-      await saveLiveState(env);
-      return json({ channel: publicValidatorChannel(channel) }, 201);
-    }
-  }
-
-  if (request.method === "POST" && url.pathname === "/validator/channels/test") {
-    const body = readRecord(await request.json().catch(() => ({})));
-    const channelId = readString(body, "channelId");
-    const channel = liveValidatorChannels.find(
-      (item) => item.userId === userId && item.id === channelId,
-    );
-    if (!channel) return json({ error: "Canal nao encontrado." }, 404);
-    const result = await sendTelegramMessage({
-      botToken: decodeServerToken(channel.botTokenEncoded),
-      chatId: channel.chatId,
-      message:
-        "ENTRADA CONFIRMADA\n" +
-        "Mesa: Bac Bo\n" +
-        "Padrao: 🔴10 → 🔵7 → 🟡6\n" +
-        "Entrada: 🔴 Banker\n" +
-        "Gale: Ate G1\n" +
-        "Protecao Tie: Ativa\n" +
-        `Canal: ${channel.name}`,
-      buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
-    });
-    if (!result.ok) return json({ error: result.error }, result.status);
-    return json({ ok: true, messageId: result.messageId });
-  }
-
-  const channelMatch = url.pathname.match(/^\/validator\/channels\/([^/]+)$/);
-  if (channelMatch) {
-    const channelId = decodeURIComponent(channelMatch[1] || "");
-    const current = liveValidatorChannels.find(
-      (channel) => channel.userId === userId && channel.id === channelId,
-    );
-    if (!current) return json({ error: "Canal nao encontrado." }, 404);
-
-    if (request.method === "PATCH") {
-      const body = readRecord(await request.json().catch(() => ({})));
-      const next = normalizeServerNotificationChannel({ ...current, ...body, id: current.id }, userId, current);
-      if (!next) return json({ error: "Canal invalido." }, 400);
-      liveValidatorChannels = upsertValidatorChannel(next);
-      await saveLiveState(env);
-      return json({ channel: publicValidatorChannel(next) });
-    }
-
-    if (request.method === "DELETE") {
-      liveValidatorChannels = liveValidatorChannels.filter(
-        (channel) => !(channel.userId === userId && channel.id === channelId),
-      );
-      liveValidatorPatterns = liveValidatorPatterns.map((pattern) =>
-        pattern.userId === userId && pattern.telegramChannelId === channelId
-          ? { ...pattern, telegramChannelId: "", updatedAt: new Date().toISOString() }
-          : pattern,
-      );
-      await saveLiveState(env);
-      return json({ ok: true });
-    }
-  }
-
-  return json({ error: "Rota do Validador nao encontrada." }, 404);
 }
 
 async function sendTelegramMessage({
@@ -2926,14 +2728,12 @@ async function sendTelegramMessage({
   message,
   buttonLabel,
   buttonUrl,
-  allowInsecureNodeFallback = false,
 }: {
   botToken: string;
   chatId: string;
   message: string;
   buttonLabel: string;
   buttonUrl: string;
-  allowInsecureNodeFallback?: boolean;
 }): Promise<{ ok: true; messageId: number | null } | { ok: false; status: number; error: string }> {
   const payload: Record<string, unknown> = {
     chat_id: chatId,
@@ -2955,13 +2755,6 @@ async function sendTelegramMessage({
       body: JSON.stringify(payload),
     });
   } catch {
-    if (allowInsecureNodeFallback) {
-      const fallback = await sendTelegramMessageWithNodeHttpsFallback({
-        botToken,
-        payload,
-      });
-      if (fallback) return fallback;
-    }
     return {
       ok: false,
       status: 502,
@@ -2984,113 +2777,6 @@ async function sendTelegramMessage({
     ok: true,
     messageId: Number.isFinite(messageId) ? messageId : null,
   };
-}
-
-async function sendTelegramMessageWithNodeHttpsFallback({
-  botToken,
-  payload,
-}: {
-  botToken: string;
-  payload: Record<string, unknown>;
-}): Promise<{ ok: true; messageId: number | null } | { ok: false; status: number; error: string } | null> {
-  if (!isNodeRuntime()) return null;
-
-  try {
-    const nodeHttps = await importNodeHttps();
-    const form = new URLSearchParams();
-    for (const [key, value] of Object.entries(payload)) {
-      if (value === undefined || value === null || value === "") continue;
-      form.set(key, typeof value === "string" ? value : JSON.stringify(value));
-    }
-    const body = form.toString();
-
-    return await new Promise((resolve) => {
-      const request = nodeHttps.request(
-        {
-          hostname: "api.telegram.org",
-          path: `/bot${botToken}/sendMessage`,
-          method: "POST",
-          rejectUnauthorized: false,
-          timeout: 15000,
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-          },
-        },
-        (response: {
-          statusCode?: number;
-          setEncoding: (encoding: string) => void;
-          on: (event: string, callback: (chunk?: string) => void) => void;
-        }) => {
-          let responseBody = "";
-          response.setEncoding("utf8");
-          response.on("data", (chunk = "") => {
-            responseBody += chunk;
-          });
-          response.on("end", () => {
-            const data = readRecord(parseJsonSafe(responseBody));
-            if (response.statusCode === 200 && data.ok === true) {
-              const result = readRecord(data.result);
-              const messageId = Number(result.message_id);
-              resolve({
-                ok: true,
-                messageId: Number.isFinite(messageId) ? messageId : null,
-              });
-              return;
-            }
-            resolve({
-              ok: false,
-              status: telegramHttpStatus(response.statusCode || 502),
-              error: friendlyTelegramError(response.statusCode || 502, readString(data, "description")),
-            });
-          });
-        },
-      );
-      request.on("error", () => {
-        resolve({
-          ok: false,
-          status: 502,
-          error: "Nao foi possivel conectar ao Telegram agora.",
-        });
-      });
-      request.on("timeout", () => {
-        request.destroy();
-        resolve({
-          ok: false,
-          status: 502,
-          error: "Tempo esgotado ao conectar no Telegram.",
-        });
-      });
-      request.end(body);
-    });
-  } catch {
-    return null;
-  }
-}
-
-function isNodeRuntime() {
-  const runtime = globalThis as typeof globalThis & {
-    process?: { versions?: { node?: string } };
-  };
-  return Boolean(runtime.process?.versions?.node);
-}
-
-async function importNodeHttps(): Promise<{
-  request: (...args: unknown[]) => {
-    on: (event: string, callback: (...args: unknown[]) => void) => void;
-    end: (body?: string) => void;
-    destroy: () => void;
-  };
-}> {
-  const dynamicImport = new Function("specifier", "return import(specifier)") as (
-    specifier: string,
-  ) => Promise<unknown>;
-  return dynamicImport("node:https") as Promise<{
-    request: (...args: unknown[]) => {
-      on: (event: string, callback: (...args: unknown[]) => void) => void;
-      end: (body?: string) => void;
-      destroy: () => void;
-    };
-  }>;
 }
 
 function normalizeTelegramMessage(value: string) {
@@ -3129,339 +2815,6 @@ function friendlyTelegramError(status: number, description: string) {
     return "Link do botao invalido. Use um link com http ou https.";
   }
   return description || "Falha ao enviar mensagem no Telegram.";
-}
-
-async function validatorRequestUserId(request: Request, url: URL, env: unknown) {
-  const token = getBearerToken(request);
-  const session = token ? await verifySessionToken(env, token) : null;
-  if (session) {
-    const bindingOk = await sessionMatchesRequestBinding(env, request, session);
-    if (bindingOk && (session.scope === "client" || session.scope === "owner" || session.scope === "admin_approver")) {
-      if (session.scope === "client") {
-        const client = findClientByEmail(session.email);
-        if (!client || !clientHasLiveAccess(client)) return "";
-      }
-      return normalizeValidatorUserId(session.email);
-    }
-  }
-
-  if (isDashboardAuthorized(request, url, env) && isLocalDevelopmentRequest(request)) {
-    return normalizeValidatorUserId(request.headers.get("x-validator-user-id") || "local-user");
-  }
-
-  return "";
-}
-
-function normalizeValidatorUserId(value: unknown) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function normalizeServerSavedPattern(value: unknown, userId: string): SavedValidatorPattern | null {
-  const record = readRecord(value);
-  const normalizedUserId = normalizeValidatorUserId(userId || readString(record, "userId"));
-  const pattern = normalizeServerPatternTokens(record.pattern);
-  if (!normalizedUserId || !pattern.length) return null;
-  const now = new Date().toISOString();
-  const validation = normalizeValidatorResult(record.validation);
-  const entryType = normalizeValidatorEntryType(record.entryType);
-  return {
-    id: readString(record, "id") || crypto.randomUUID(),
-    userId: normalizedUserId,
-    name: readString(record, "name") || "Estrategia Neural",
-    tableId: readString(record, "tableId") || "bac-bo",
-    pattern,
-    entryType,
-    pulledSide: normalizeRoundResult(record.pulledSide) || validatorEntrySide(entryType),
-    galeLimit: normalizeValidatorGaleLimit(record.galeLimit),
-    tieProtection: readBooleanField(record, "tieProtection"),
-    destination: normalizeValidatorDestination(record.destination),
-    telegramChannelId: readString(record, "telegramChannelId"),
-    messageOverride: readString(record, "messageOverride"),
-    cooldownRounds: Math.max(0, Math.floor(Number(record.cooldownRounds) || 0)),
-    isActive: record.isActive !== false,
-    validation,
-    currentGreenStreak: Math.max(0, Math.floor(Number(record.currentGreenStreak) || 0)),
-    wins: Math.max(0, Math.floor(Number(record.wins) || 0)),
-    losses: Math.max(0, Math.floor(Number(record.losses) || 0)),
-    lastDetectedAt: readString(record, "lastDetectedAt"),
-    lastDetectedRoundId: Number.isFinite(Number(record.lastDetectedRoundId))
-      ? Number(record.lastDetectedRoundId)
-      : undefined,
-    createdAt: readString(record, "createdAt") || now,
-    updatedAt: readString(record, "updatedAt") || now,
-  };
-}
-
-function normalizeServerNotificationChannel(
-  value: unknown,
-  userId: string,
-  existing?: ValidatorNotificationChannel,
-): ValidatorNotificationChannel | null {
-  const record = readRecord(value);
-  const normalizedUserId = normalizeValidatorUserId(userId || readString(record, "userId"));
-  if (!normalizedUserId) return null;
-  const now = new Date().toISOString();
-  const tokenEncoded = readString(record, "botTokenEncoded") || existing?.botTokenEncoded || "";
-  const decodedToken = decodeServerToken(tokenEncoded);
-  return {
-    id: readString(record, "id") || crypto.randomUUID(),
-    userId: normalizedUserId,
-    name: readString(record, "name") || "Canal Telegram",
-    botTokenMasked: readString(record, "botTokenMasked") || maskServerBotToken(decodedToken),
-    botTokenEncoded: tokenEncoded,
-    chatId: readString(record, "chatId"),
-    buttonLink: readString(record, "buttonLink"),
-    isActive: record.isActive !== false,
-    templates: {
-      ...DEFAULT_VALIDATOR_MESSAGE_TEMPLATES,
-      ...readRecord(record.templates),
-    },
-    createdAt: readString(record, "createdAt") || now,
-    updatedAt: readString(record, "updatedAt") || now,
-  };
-}
-
-function normalizeServerPatternTokens(value: unknown): ValidatorPatternToken[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      const record = readRecord(item);
-      const side = normalizeRoundResult(record.side);
-      if (!side) return null;
-      const score = Number(record.score);
-      return {
-        side,
-        ...(Number.isFinite(score) && score > 0 ? { score } : {}),
-      };
-    })
-    .filter((token): token is ValidatorPatternToken => Boolean(token));
-}
-
-function normalizeValidatorResult(value: unknown): ValidatorResult | null {
-  const record = readRecord(value);
-  if (!Object.keys(record).length) return null;
-  return {
-    totalSignals: Math.max(0, Math.floor(Number(record.totalSignals) || 0)),
-    totalValidated: Math.max(0, Math.floor(Number(record.totalValidated) || 0)),
-    sgWins: Math.max(0, Math.floor(Number(record.sgWins) || 0)),
-    g1Wins: Math.max(0, Math.floor(Number(record.g1Wins) || 0)),
-    g2Wins: Math.max(0, Math.floor(Number(record.g2Wins) || 0)),
-    losses: Math.max(0, Math.floor(Number(record.losses) || 0)),
-    ties: Math.max(0, Math.floor(Number(record.ties) || 0)),
-    tieWins: Math.max(0, Math.floor(Number(record.tieWins) || 0)),
-    accuracy: readNullableNumber(record.accuracy) ?? undefined,
-    sgAccuracy: readNullableNumber(record.sgAccuracy) ?? undefined,
-    galeAccuracy: readNullableNumber(record.galeAccuracy) ?? undefined,
-    currentGreenStreak: Math.max(0, Math.floor(Number(record.currentGreenStreak) || 0)),
-    bestGreenStreak: Math.max(0, Math.floor(Number(record.bestGreenStreak) || 0)),
-    bestLossStreak: Math.max(0, Math.floor(Number(record.bestLossStreak) || 0)),
-    lastPatternResult: readString(record, "lastPatternResult") || "Sem validacao",
-    details: Array.isArray(record.details) ? record.details.map(readRecord) as unknown as ValidatorResult["details"] : [],
-    entry: normalizeRoundResult(record.entry),
-    pulledSide: normalizeRoundResult(record.pulledSide),
-    risk: ["baixo", "medio", "alto"].includes(readString(record, "risk"))
-      ? readString(record, "risk") as ValidatorResult["risk"]
-      : "alto",
-    status: ["quente", "estavel", "observacao", "fraco", "sem_amostra"].includes(readString(record, "status"))
-      ? readString(record, "status") as ValidatorResult["status"]
-      : "sem_amostra",
-    analyzedRounds: Math.max(0, Math.floor(Number(record.analyzedRounds) || 0)),
-  };
-}
-
-function normalizeValidatorEntryType(value: unknown): ValidatorEntryType {
-  const text = String(value || "").trim().toUpperCase();
-  if (text === "BANKER" || text === "PLAYER" || text === "TIE" || text === "OPPOSITE" || text === "SAME_LAST" || text === "AI") {
-    return text as ValidatorEntryType;
-  }
-  return "BANKER";
-}
-
-function normalizeValidatorDestination(value: unknown): ValidatorDestination {
-  const text = String(value || "").trim().toLowerCase();
-  if (text === "site" || text === "telegram" || text === "site_telegram" || text === "monitor" || text === "disabled") {
-    return text as ValidatorDestination;
-  }
-  return "site";
-}
-
-function normalizeValidatorGaleLimit(value: unknown): ValidatorGaleLimit {
-  const number = Math.floor(Number(value) || 0);
-  return Math.max(0, Math.min(2, number)) as ValidatorGaleLimit;
-}
-
-function publicValidatorChannel(channel: ValidatorNotificationChannel): ValidatorNotificationChannel {
-  return {
-    ...channel,
-    botTokenEncoded: "",
-    botTokenMasked: channel.botTokenMasked || maskServerBotToken(decodeServerToken(channel.botTokenEncoded)),
-  };
-}
-
-function upsertValidatorPattern(pattern: SavedValidatorPattern) {
-  const current = liveValidatorPatterns.filter((item) => !(item.userId === pattern.userId && item.id === pattern.id));
-  return [pattern, ...current].slice(0, 5000);
-}
-
-function upsertValidatorChannel(channel: ValidatorNotificationChannel) {
-  const current = liveValidatorChannels.filter((item) => !(item.userId === channel.userId && item.id === channel.id));
-  return [channel, ...current].slice(0, 1000);
-}
-
-function decodeServerToken(encoded: string) {
-  if (!encoded) return "";
-  try {
-    const binary = atob(encoded);
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    return new TextDecoder().decode(bytes).trim();
-  } catch {
-    return "";
-  }
-}
-
-function maskServerBotToken(token: string) {
-  const clean = token.trim();
-  if (!clean) return "";
-  if (clean.length <= 10) return `${clean.slice(0, 3)}...`;
-  return `${clean.slice(0, 6)}...${clean.slice(-4)}`;
-}
-
-async function processValidatorLiveMonitoring(
-  env: unknown,
-  options: { allowInsecureTelegramFallback?: boolean } = {},
-) {
-  const latestRound = liveValidatorRoundHistory.at(-1);
-  if (!latestRound || !liveValidatorPatterns.length) return false;
-
-  let changed = false;
-  for (const pattern of liveValidatorPatterns) {
-    if (!shouldMonitorValidatorPattern(pattern, latestRound)) continue;
-    const matchedRounds = liveValidatorRoundHistory.slice(-pattern.pattern.length);
-    if (!matchesServerValidatorPattern(matchedRounds, pattern.pattern)) continue;
-
-    const detectedAt = new Date().toISOString();
-    pattern.lastDetectedAt = detectedAt;
-    pattern.lastDetectedRoundId = latestRound.id;
-    pattern.updatedAt = detectedAt;
-    changed = true;
-
-    if (pattern.destination !== "telegram" && pattern.destination !== "site_telegram") continue;
-    const channel = liveValidatorChannels.find(
-      (item) => item.userId === pattern.userId && item.id === pattern.telegramChannelId,
-    );
-    if (!channel || !channel.isActive) continue;
-    const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${latestRound.id}`;
-    if (validatorNotificationAlreadySent(notificationKey)) continue;
-
-    const result = await sendTelegramMessage({
-      botToken: decodeServerToken(channel.botTokenEncoded),
-      chatId: channel.chatId,
-      message: buildServerValidatorTelegramMessage(pattern, channel),
-      buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-      allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-    });
-    liveValidatorNotifications = [
-      {
-        id: notificationKey,
-        userId: pattern.userId,
-        patternId: pattern.id,
-        channelId: channel.id,
-        roundId: latestRound.id,
-        status: result.ok ? "sent" : "error",
-        error: result.ok ? "" : result.error,
-        sentAt: detectedAt,
-        updatedAt: detectedAt,
-      },
-      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== notificationKey),
-    ].slice(0, 1000);
-    changed = true;
-  }
-
-  return changed;
-}
-
-function shouldMonitorValidatorPattern(pattern: SavedValidatorPattern, latestRound: Round) {
-  if (!pattern.isActive || pattern.destination === "disabled") return false;
-  if (!pattern.pattern.length || liveValidatorRoundHistory.length < pattern.pattern.length) return false;
-  const cooldown = Math.max(0, Number(pattern.cooldownRounds) || 0);
-  if (pattern.lastDetectedRoundId && latestRound.id - pattern.lastDetectedRoundId <= cooldown) return false;
-  return true;
-}
-
-function validatorNotificationAlreadySent(key: string) {
-  return liveValidatorNotifications.some((item) => readString(item, "id") === key && readString(item, "status") === "sent");
-}
-
-function matchesServerValidatorPattern(rounds: Round[], pattern: ValidatorPatternToken[]) {
-  if (rounds.length !== pattern.length) return false;
-  return rounds.every((round, index) => {
-    const token = pattern[index];
-    if (!token || round.result !== token.side) return false;
-    if (!token.score) return true;
-    return serverScoreForRound(round, token.side) === token.score;
-  });
-}
-
-function serverScoreForRound(round: Round, side: Round["result"]) {
-  if (side === "B") return round.bankerScore;
-  if (side === "P") return round.playerScore;
-  return round.bankerScore === round.playerScore
-    ? round.bankerScore
-    : Math.max(round.bankerScore, round.playerScore);
-}
-
-function buildServerValidatorTelegramMessage(
-  pattern: SavedValidatorPattern,
-  channel: ValidatorNotificationChannel,
-) {
-  const entry = pattern.pulledSide || validatorEntrySide(pattern.entryType);
-  const variables: Record<string, string> = {
-    pattern: formatServerTelegramPattern(pattern.pattern),
-    entry: entry ? formatServerTelegramSide(entry) : "Aguardando",
-    gale: `G${Number(pattern.galeLimit)}`,
-    wins: String(pattern.wins),
-    loss: String(pattern.losses),
-    losses: String(pattern.losses),
-    percentage: formatServerPercent(pattern.validation?.accuracy),
-    table: pattern.tableId || "Bac Bo",
-    confidence: formatServerPercent(pattern.validation?.accuracy),
-    sequence: String(pattern.currentGreenStreak),
-    tieProtection: pattern.tieProtection ? "Ativa" : "Inativa",
-    result: "",
-    risk: pattern.validation?.risk ?? "",
-    mode: "Validador Neural",
-  };
-  const template = pattern.messageOverride?.trim() || channel.templates.entry || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry;
-  return template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
-}
-
-function validatorEntrySide(entryType: ValidatorEntryType): Round["result"] | null {
-  if (entryType === "BANKER") return "B";
-  if (entryType === "PLAYER") return "P";
-  if (entryType === "TIE") return "T";
-  return null;
-}
-
-function formatServerTelegramPattern(pattern: ValidatorPatternToken[]) {
-  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join(" → ");
-}
-
-function formatServerTelegramSide(side: Round["result"]) {
-  if (side === "B") return "🔴 Banker";
-  if (side === "P") return "🔵 Player";
-  return "🟡 Tie";
-}
-
-function serverSideCircle(side: Round["result"]) {
-  if (side === "B") return "🔴";
-  if (side === "P") return "🔵";
-  return "🟡";
-}
-
-function formatServerPercent(value?: number) {
-  if (value === undefined || Number.isNaN(value)) return "sem amostra";
-  return `${value.toFixed(2).replace(".", ",")}%`;
 }
 
 function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
@@ -3525,8 +2878,8 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
   const decision = normalizeAdaptiveDecisionRow(payload.decision, payload.logs);
 
   const [roundsSaved, patternsSaved, decisionSaved] = await Promise.all([
-    saveSupabaseRows(config, "adaptive_strategy_rounds", records as unknown as Record<string, unknown>[], "round_key"),
-    saveSupabaseRows(config, "adaptive_strategy_patterns", patterns as unknown as Record<string, unknown>[], "pattern_id"),
+    saveSupabaseRows(config, "adaptive_strategy_rounds", records, "round_key"),
+    saveSupabaseRows(config, "adaptive_strategy_patterns", patterns, "pattern_id"),
     saveSupabaseRows(config, "adaptive_strategy_decision_logs", decision ? [decision] : [], "decision_key"),
   ]);
 
@@ -3579,7 +2932,7 @@ function normalizeAdaptiveRoundRows(value: unknown[] | undefined) {
         captured_at: capturedAt,
       };
     })
-    .filter((row): row is NonNullable<typeof row> => row !== null);
+    .filter((row): row is Record<string, unknown> => Boolean(row));
 }
 
 function normalizeAdaptivePatternRows(value: unknown[] | undefined) {
@@ -3621,7 +2974,7 @@ function normalizeAdaptivePatternRows(value: unknown[] | undefined) {
         updated_at: new Date().toISOString(),
       };
     })
-    .filter((row): row is NonNullable<typeof row> => row !== null);
+    .filter((row): row is Record<string, unknown> => Boolean(row));
 }
 
 function normalizeAdaptiveDecisionRow(
@@ -4530,13 +3883,13 @@ function normalizeServerModeList(value: unknown) {
   return ACTIVE_ENTRY_MODES.filter((mode) => selected.has(mode));
 }
 
-function normalizeServerCountedResults(value: unknown): Record<string, true> {
+function normalizeServerCountedResults(value: unknown) {
   const record = readRecord(value);
   return Object.fromEntries(
     Object.keys(record)
       .filter(Boolean)
-      .map((key) => [key, true as const]),
-  ) as Record<string, true>;
+      .map((key) => [key, true]),
+  );
 }
 
 function sameServerModeList(left: ActiveEntryMode[] | undefined, right: ActiveEntryMode[]) {
@@ -4551,10 +3904,10 @@ function pruneServerSignalModes(signalModes: Record<string, ActiveEntryMode[]>) 
   return Object.fromEntries(keys.slice(-220).map((key) => [key, signalModes[key]]));
 }
 
-function pruneServerCountedResults(countedResults: Record<string, true>): Record<string, true> {
+function pruneServerCountedResults(countedResults: Record<string, true>) {
   const keys = Object.keys(countedResults);
   if (keys.length <= 300) return countedResults;
-  return Object.fromEntries(keys.slice(-220).map((key) => [key, true as const])) as Record<string, true>;
+  return Object.fromEntries(keys.slice(-220).map((key) => [key, true]));
 }
 
 function serverFirstDefined(...values: unknown[]) {
@@ -6444,12 +5797,11 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
     (user) =>
       readString(user, "plan") === "trial" || readString(user, "subscriptionStatus") === "trial",
   );
-  const liveDashboardRecord = liveDashboardData as unknown as Record<string, unknown>;
-  const currentSignal = readRecord(liveDashboardRecord.currentSignal);
+  const currentSignal = readRecord((liveDashboardData as Record<string, unknown>).currentSignal);
   const side =
     readString(currentSignal, "side") ||
-    readString(liveDashboardRecord, "entrySide") ||
-    readString(liveDashboardRecord, "recommendedSide") ||
+    readString((liveDashboardData as Record<string, unknown>).entrySide) ||
+    readString((liveDashboardData as Record<string, unknown>).recommendedSide) ||
     "BANKER";
 
   return {
@@ -6462,7 +5814,7 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
     onlineNow: countOnlineClientUsers(now),
     lastSignal: side.toUpperCase(),
     lastSignalAt: relativeTimeFromIso(
-      readString(liveDashboardRecord, "updatedAt"),
+      readString(liveDashboardData as Record<string, unknown>, "updatedAt"),
     ),
   };
 }
@@ -7440,10 +6792,6 @@ function readString(record: Record<string, unknown>, key: string) {
   return String(record[key] || "").trim();
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error || "");
-}
-
 function readBooleanField(record: Record<string, unknown>, key: string) {
   const value = record[key];
   if (typeof value === "boolean") return value;
@@ -7559,25 +6907,6 @@ function applyLiveState(state: Record<string, unknown>) {
     liveValidatorRoundHistory = normalizeStoredRoundHistory(state.validatorRoundHistory);
   }
 
-  if (Array.isArray(state.validatorPatterns)) {
-    liveValidatorPatterns = state.validatorPatterns
-      .map((pattern) => normalizeServerSavedPattern(pattern, readString(readRecord(pattern), "userId")))
-      .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
-  }
-
-  if (Array.isArray(state.validatorChannels)) {
-    liveValidatorChannels = state.validatorChannels
-      .map((channel) => normalizeServerNotificationChannel(channel, readString(readRecord(channel), "userId")))
-      .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  }
-
-  if (Array.isArray(state.validatorNotifications)) {
-    liveValidatorNotifications = state.validatorNotifications
-      .map(readRecord)
-      .filter((entry) => Object.keys(entry).length > 0)
-      .slice(0, 1000);
-  }
-
   if (Array.isArray(state.recipients)) {
     liveRecipients = state.recipients
       .map(readRecord)
@@ -7681,22 +7010,6 @@ function mergeLiveStates(
       normalizeStoredRoundHistory(cache.validatorRoundHistory),
       normalizeStoredRoundHistory(durable.validatorRoundHistory),
     ),
-    validatorPatterns: mergeEntityStateArrays(
-      durable.validatorPatterns,
-      cache.validatorPatterns,
-      durableSavedAt,
-      cacheSavedAt,
-    ),
-    validatorChannels: mergeEntityStateArrays(
-      durable.validatorChannels,
-      cache.validatorChannels,
-      durableSavedAt,
-      cacheSavedAt,
-    ),
-    validatorNotifications: mergeStateArrays(
-      durable.validatorNotifications,
-      cache.validatorNotifications,
-    ).slice(0, 1000),
     recipients: filterDeletedEntityRows(
       mergeEntityStateArrays(
         durable.recipients,
@@ -8066,9 +7379,6 @@ function buildLiveStateSnapshot() {
   return {
     dashboard: liveDashboardData,
     validatorRoundHistory: liveValidatorRoundHistory,
-    validatorPatterns: liveValidatorPatterns,
-    validatorChannels: liveValidatorChannels,
-    validatorNotifications: liveValidatorNotifications.slice(0, 1000),
     recipients: liveRecipients,
     clients: liveClients,
     accessEvents: liveAccessEvents,
