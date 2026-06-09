@@ -153,6 +153,7 @@ function NeuralValidatorPage() {
   const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
   const [testingTelegramId, setTestingTelegramId] = useState("");
+  const [siteAlerts, setSiteAlerts] = useState<LiveValidatorHit[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
   const [channelForm, setChannelForm] = useState({
     name: "Sala Premium",
@@ -319,6 +320,14 @@ function NeuralValidatorPage() {
 
   useEffect(() => {
     if (!liveHits.length) return;
+    setSiteAlerts((current) => {
+      const byId = new Map(current.map((hit) => [hit.id, hit]));
+      for (const hit of liveHits) byId.set(hit.id, hit);
+      return [...byId.values()]
+        .sort((a, b) => b.detectedRoundId - a.detectedRoundId)
+        .slice(0, 5);
+    });
+    void Promise.all(liveHits.map((hit) => sendLiveHitToTelegram(hit)));
     setSavedPatterns((current) => {
       let changed = false;
       const now = new Date().toISOString();
@@ -499,8 +508,10 @@ function NeuralValidatorPage() {
 
   async function sendLiveHitToTelegram(hit: LiveValidatorHit) {
     const patternItem = hit.pattern;
-    if (patternItem.destination !== "telegram" && patternItem.destination !== "site_telegram") return;
-    const channel = channels.find((item) => item.id === patternItem.telegramChannelId);
+    if (patternItem.destination === "disabled" || patternItem.destination === "monitor") return;
+    const channel = channels.find((item) => item.id === patternItem.telegramChannelId) ||
+      channels.find((item) => item.isActive && item.chatId) ||
+      channels[0];
     if (!channel || !channel.isActive) return;
 
     if (!channel.chatId) return;
@@ -715,6 +726,12 @@ function NeuralValidatorPage() {
         </div>
       )}
 
+      <SitePatternAlerts
+        alerts={siteAlerts}
+        onDismiss={(id) => setSiteAlerts((current) => current.filter((hit) => hit.id !== id))}
+        onClear={() => setSiteAlerts([])}
+      />
+
       {!hasHistory && (
         <GlassCard className="border-warning/40">
           <div className="flex items-start gap-3">
@@ -816,6 +833,59 @@ function NeuralValidatorPage() {
           />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function SitePatternAlerts({
+  alerts,
+  onDismiss,
+  onClear,
+}: {
+  alerts: LiveValidatorHit[];
+  onDismiss: (id: string) => void;
+  onClear: () => void;
+}) {
+  if (!alerts.length) return null;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-black uppercase tracking-wide text-neon-cyan">Sinais do site</div>
+        {alerts.length > 1 && (
+          <Button type="button" size="sm" variant="secondary" onClick={onClear}>
+            Limpar sinais
+          </Button>
+        )}
+      </div>
+      {alerts.map((hit) => (
+        <GlassCard key={hit.id} className="border-neon-cyan/50 bg-neon-cyan/10 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-sm font-black text-neon-cyan">
+                <BellRing className="size-4" /> PADRAO SALVO DETECTADO
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                Mesa: <span className="font-bold text-foreground">{hit.pattern.tableId || "Bac Bo"}</span>
+                <span className="mx-2">|</span>
+                Rodada: <span className="font-bold text-foreground">{hit.detectedRoundId}</span>
+              </div>
+              <div className="mt-2">
+                <PatternLine pattern={hit.pattern.pattern} pulledSide={hit.entry} />
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-xs">
+                Entrada: <SideLabel side={hit.entry} />
+                <span className="mx-2 text-muted-foreground">|</span>
+                Gale: ate G{hit.pattern.galeLimit}
+              </div>
+              <Button type="button" size="sm" variant="secondary" onClick={() => onDismiss(hit.id)}>
+                Fechar
+              </Button>
+            </div>
+          </div>
+        </GlassCard>
+      ))}
     </div>
   );
 }
