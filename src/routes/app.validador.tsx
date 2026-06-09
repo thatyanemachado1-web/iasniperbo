@@ -272,8 +272,12 @@ function NeuralValidatorPage() {
         ]);
         if (cancelled) return;
 
-        const mergedPatterns = mergeValidatorItems(serverPatterns, readSavedPatterns());
         const mergedChannels = mergeValidatorItems(serverChannels, readNotificationChannels());
+        const mergedPatterns = autoPrepareAdminTelegramDelivery(
+          mergeValidatorItems(serverPatterns, readSavedPatterns()),
+          mergedChannels,
+          adminAccess,
+        );
         writeSavedPatterns(mergedPatterns);
         writeNotificationChannels(mergedChannels);
         setSavedPatterns(mergedPatterns);
@@ -2155,6 +2159,32 @@ function mergeValidatorItems<T extends { id: string; updatedAt: string }>(primar
     }
   }
   return [...byId.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+}
+
+function autoPrepareAdminTelegramDelivery(
+  patterns: SavedValidatorPattern[],
+  channels: ValidatorNotificationChannel[],
+  enabled: boolean,
+) {
+  if (!enabled || !patterns.length) return patterns;
+  const channel = channels.find((item) => item.isActive) || channels[0];
+  if (!channel) return patterns;
+  const now = new Date().toISOString();
+  return patterns.map((pattern) => {
+    if (!pattern.isActive || pattern.destination === "disabled") return pattern;
+    if (
+      (pattern.destination === "telegram" || pattern.destination === "site_telegram") &&
+      pattern.telegramChannelId
+    ) {
+      return pattern;
+    }
+    return {
+      ...pattern,
+      destination: "site_telegram" as ValidatorDestination,
+      telegramChannelId: channel.id,
+      updatedAt: now,
+    };
+  });
 }
 
 async function postValidatorTelegramMessage(payload: {
