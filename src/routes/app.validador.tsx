@@ -1909,7 +1909,7 @@ async function testServerValidatorChannel(channelId: string) {
 
 function validatorApiHeaders(withJson = false) {
   const session = readUserSession();
-  const token = session.clientToken || localDevDashboardToken();
+  const token = localDevDashboardToken() || session.clientToken;
   return {
     Accept: "application/json",
     "X-Validator-User-Id": currentUserId(),
@@ -1939,7 +1939,7 @@ async function postValidatorTelegramMessage(payload: {
   if (typeof window === "undefined") return;
 
   const session = readUserSession();
-  const token = session.clientToken || localDevDashboardToken();
+  const token = localDevDashboardToken() || session.clientToken;
   const response = await fetch("/validator/telegram/send", {
     method: "POST",
     cache: "no-store",
