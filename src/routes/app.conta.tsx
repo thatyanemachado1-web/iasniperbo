@@ -14,6 +14,17 @@ import type { AdminManagedUser, AdminPanelOverview } from "@/types/adminPanel";
 
 export const Route = createFileRoute("/app/conta")({
   component: ContaPage,
+  head: () => ({
+    meta: [
+      { title: "Minha conta — SNIPER BO IA" },
+      { name: "description", content: "Dados de cadastro, contato e segurança da sua conta SNIPER BO IA." },
+      { property: "og:title", content: "Minha conta — SNIPER BO IA" },
+      { property: "og:description", content: "Gerencie seu cadastro e segurança no SNIPER BO IA." },
+      { property: "og:url", content: "https://sniperbo.com/app/conta" },
+      { name: "robots", content: "noindex,nofollow" },
+    ],
+    links: [{ rel: "canonical", href: "https://sniperbo.com/app/conta" }],
+  }),
 });
 
 function ContaPage() {

@@ -11,6 +11,17 @@ import { Radio, ShieldCheck, TimerReset, Volume2 } from "lucide-react";
 
 export const Route = createFileRoute("/app/voz")({
   component: VozPage,
+  head: () => ({
+    meta: [
+      { title: "Assistente de Voz IA — SNIPER BO IA" },
+      { name: "description", content: "Narração automática IA do SNIPER BO IA com leitura ao vivo da mesa BAC BO: entradas, Tie, Green, Red e contexto operacional." },
+      { property: "og:title", content: "Assistente de Voz IA — SNIPER BO IA" },
+      { property: "og:description", content: "Narração IA da mesa BAC BO em tempo real." },
+      { property: "og:url", content: "https://sniperbo.com/app/voz" },
+      { name: "robots", content: "noindex,nofollow" },
+    ],
+    links: [{ rel: "canonical", href: "https://sniperbo.com/app/voz" }],
+  }),
 });
 
 function VozPage() {
@@ -24,6 +35,7 @@ function VozPage() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
+      <h1 className="sr-only">Assistente de Voz IA SNIPER BO</h1>
       <div className="relative overflow-hidden rounded-2xl">
         <BrainAssistantCard
           data={data}

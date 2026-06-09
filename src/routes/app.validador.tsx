@@ -83,6 +83,17 @@ import type {
 
 export const Route = createFileRoute("/app/validador")({
   component: NeuralValidatorPage,
+  head: () => ({
+    meta: [
+      { title: "Validador Neural de Estratégias — SNIPER BO IA" },
+      { name: "description", content: "Valide estratégias da mesa BAC BO com o motor neural do SNIPER BO IA: padrões, histórico e disparo automático em tempo real." },
+      { property: "og:title", content: "Validador Neural — SNIPER BO IA" },
+      { property: "og:description", content: "Validação automática de estratégias da mesa BAC BO com IA." },
+      { property: "og:url", content: "https://sniperbo.com/app/validador" },
+      { name: "robots", content: "noindex,nofollow" },
+    ],
+    links: [{ rel: "canonical", href: "https://sniperbo.com/app/validador" }],
+  }),
 });
 
 const engine = new NeuralValidatorEngine();
