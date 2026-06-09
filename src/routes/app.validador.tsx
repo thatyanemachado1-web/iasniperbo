@@ -63,6 +63,7 @@ import {
   removeSavedPattern,
   upsertNotificationChannel,
   upsertSavedPattern,
+  writeNotificationChannels,
   writeSavedPatterns,
 } from "@/neuralValidator/NeuralValidatorStorage";
 import type { Round, RoundResult } from "@/types/dashboard";
@@ -255,6 +256,40 @@ function NeuralValidatorPage() {
   }, [data.updatedAt, planLimits.history]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadBackendValidatorData() {
+      try {
+        const [serverPatterns, serverChannels] = await Promise.all([
+          fetchServerValidatorPatterns(),
+          fetchServerValidatorChannels(),
+        ]);
+        if (cancelled) return;
+
+        const mergedPatterns = mergeValidatorItems(serverPatterns, readSavedPatterns());
+        const mergedChannels = mergeValidatorItems(serverChannels, readNotificationChannels());
+        writeSavedPatterns(mergedPatterns);
+        writeNotificationChannels(mergedChannels);
+        setSavedPatterns(mergedPatterns);
+        setChannels(mergedChannels);
+
+        await Promise.all([
+          ...mergedPatterns.map((item) => saveServerValidatorPattern(item).catch(() => null)),
+          ...mergedChannels.map((item) => saveServerValidatorChannel(item).catch(() => null)),
+        ]);
+      } catch {
+        // Local storage remains the fallback when backend sync is unavailable.
+      }
+    }
+
+    void loadBackendValidatorData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session.email, session.clientToken]);
+
+  useEffect(() => {
     if (!hasValidationHistory || pattern.length < 1) {
       setManualResult(null);
       return;
@@ -294,16 +329,6 @@ function NeuralValidatorPage() {
     });
     setStorageVersion((value) => value + 1);
   }, [liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|")]);
-
-  useEffect(() => {
-    if (!liveHits.length) return;
-    for (const hit of liveHits) {
-      void sendLiveHitToTelegram(hit);
-    }
-  }, [
-    channels.map((channel) => `${channel.id}:${channel.isActive}:${channel.chatId}:${channel.buttonLink}`).join("|"),
-    liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}:${hit.pattern.destination}:${hit.pattern.telegramChannelId}`).join("|"),
-  ]);
 
   function addToken(side: RoundResult, scoreText = tokenScore) {
     const score = Number(scoreText);
@@ -362,6 +387,7 @@ function NeuralValidatorPage() {
     };
     const next = upsertSavedPattern(saved);
     setSavedPatterns(next);
+    void saveServerValidatorPattern(saved);
     showNotice(sourceHistory.length ? "Padrao salvo em Padroes Salvos." : "Padrao salvo sem amostra historica.");
     return true;
   }
@@ -381,6 +407,7 @@ function NeuralValidatorPage() {
 
   function removePattern(id: string) {
     setSavedPatterns(removeSavedPattern(id));
+    void deleteServerValidatorPattern(id);
     showNotice("Padrao removido.");
   }
 
@@ -401,6 +428,7 @@ function NeuralValidatorPage() {
       updatedAt: new Date().toISOString(),
     };
     setSavedPatterns(upsertSavedPattern(nextItem));
+    void saveServerValidatorPattern(nextItem);
     showNotice("Padrao atualizado com o historico real disponivel.");
   }
 
@@ -415,6 +443,7 @@ function NeuralValidatorPage() {
       updatedAt: new Date().toISOString(),
     };
     setSavedPatterns(upsertSavedPattern(nextItem));
+    void saveServerValidatorPattern(nextItem);
     showNotice("Placar do padrao zerado.");
   }
 
@@ -425,6 +454,7 @@ function NeuralValidatorPage() {
       updatedAt: new Date().toISOString(),
     };
     setSavedPatterns(upsertSavedPattern(updated));
+    void saveServerValidatorPattern(updated);
   }
 
   async function sendLiveHitToTelegram(hit: LiveValidatorHit) {
@@ -485,6 +515,10 @@ function NeuralValidatorPage() {
     };
     const next = upsertNotificationChannel(channel);
     setChannels(next);
+    void saveServerValidatorChannel(channel).then((serverChannel) => {
+      if (!serverChannel) return;
+      setChannels(upsertNotificationChannel(serverChannel));
+    });
     setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
     showNotice("Canal salvo para este usuario. Token fica mascarado depois de salvo.");
   }
@@ -510,18 +544,26 @@ function NeuralValidatorPage() {
   }
 
   async function testSavedChannel(channel: ValidatorNotificationChannel) {
-    const botToken = decodeToken(channel.botTokenEncoded);
-    if (!botToken || !channel.chatId) {
-      showNotice("Canal sem token ou Chat ID para testar.");
-      return;
+    setTestingTelegramId(channel.id);
+    try {
+      await testServerValidatorChannel(channel.id);
+      showNotice("Teste enviado no Telegram.");
+    } catch (error) {
+      const botToken = decodeToken(channel.botTokenEncoded);
+      if (!botToken || !channel.chatId) {
+        showNotice(error instanceof Error ? error.message : "Canal sem token ou Chat ID para testar.");
+        return;
+      }
+      await testTelegramChannel({
+        id: channel.id,
+        name: channel.name,
+        botToken,
+        chatId: channel.chatId,
+        buttonLink: channel.buttonLink,
+      });
+    } finally {
+      setTestingTelegramId("");
     }
-    await testTelegramChannel({
-      id: channel.id,
-      name: channel.name,
-      botToken,
-      chatId: channel.chatId,
-      buttonLink: channel.buttonLink,
-    });
   }
 
   async function testTelegramChannel(channel: {
@@ -557,6 +599,7 @@ function NeuralValidatorPage() {
 
   function removeChannel(id: string) {
     setChannels(removeNotificationChannel(id));
+    void deleteServerValidatorChannel(id);
     showNotice("Canal removido.");
   }
 
@@ -1791,6 +1834,99 @@ async function fetchValidatorRoundHistory(limit: number) {
   }
 
   throw new Error(`Validator history returned ${lastStatus || "unknown"}`);
+}
+
+async function fetchServerValidatorPatterns() {
+  const response = await fetch("/validator/patterns", {
+    cache: "no-store",
+    headers: validatorApiHeaders(),
+  });
+  if (!response.ok) throw new Error("Backend do Validador indisponivel.");
+  const data = await response.json().catch(() => null) as { patterns?: SavedValidatorPattern[] } | null;
+  return Array.isArray(data?.patterns) ? data.patterns : [];
+}
+
+async function saveServerValidatorPattern(pattern: SavedValidatorPattern) {
+  const response = await fetch("/validator/patterns", {
+    method: "POST",
+    cache: "no-store",
+    headers: validatorApiHeaders(true),
+    body: JSON.stringify({ pattern }),
+  });
+  if (!response.ok) return null;
+  const data = await response.json().catch(() => null) as { pattern?: SavedValidatorPattern } | null;
+  return data?.pattern ?? null;
+}
+
+async function deleteServerValidatorPattern(patternId: string) {
+  await fetch(`/validator/patterns/${encodeURIComponent(patternId)}`, {
+    method: "DELETE",
+    cache: "no-store",
+    headers: validatorApiHeaders(),
+  }).catch(() => null);
+}
+
+async function fetchServerValidatorChannels() {
+  const response = await fetch("/validator/channels", {
+    cache: "no-store",
+    headers: validatorApiHeaders(),
+  });
+  if (!response.ok) throw new Error("Backend do Validador indisponivel.");
+  const data = await response.json().catch(() => null) as { channels?: ValidatorNotificationChannel[] } | null;
+  return Array.isArray(data?.channels) ? data.channels : [];
+}
+
+async function saveServerValidatorChannel(channel: ValidatorNotificationChannel) {
+  const response = await fetch("/validator/channels", {
+    method: "POST",
+    cache: "no-store",
+    headers: validatorApiHeaders(true),
+    body: JSON.stringify({ channel }),
+  });
+  if (!response.ok) return null;
+  const data = await response.json().catch(() => null) as { channel?: ValidatorNotificationChannel } | null;
+  return data?.channel ?? null;
+}
+
+async function deleteServerValidatorChannel(channelId: string) {
+  await fetch(`/validator/channels/${encodeURIComponent(channelId)}`, {
+    method: "DELETE",
+    cache: "no-store",
+    headers: validatorApiHeaders(),
+  }).catch(() => null);
+}
+
+async function testServerValidatorChannel(channelId: string) {
+  const response = await fetch("/validator/channels/test", {
+    method: "POST",
+    cache: "no-store",
+    headers: validatorApiHeaders(true),
+    body: JSON.stringify({ channelId }),
+  });
+  const data = await response.json().catch(() => null) as { error?: string } | null;
+  if (!response.ok) throw new Error(data?.error || "Falha ao testar canal salvo.");
+}
+
+function validatorApiHeaders(withJson = false) {
+  const session = readUserSession();
+  const token = session.clientToken || localDevDashboardToken();
+  return {
+    Accept: "application/json",
+    "X-Validator-User-Id": currentUserId(),
+    ...(withJson ? { "Content-Type": "application/json" } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+function mergeValidatorItems<T extends { id: string; updatedAt: string }>(primary: T[], secondary: T[]) {
+  const byId = new Map<string, T>();
+  for (const item of [...secondary, ...primary]) {
+    const existing = byId.get(item.id);
+    if (!existing || Date.parse(item.updatedAt || "") >= Date.parse(existing.updatedAt || "")) {
+      byId.set(item.id, item);
+    }
+  }
+  return [...byId.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
 async function postValidatorTelegramMessage(payload: {
