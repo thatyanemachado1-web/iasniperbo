@@ -12,7 +12,6 @@ import {
 
 const STORAGE_KEY = "sniper_adaptive_strategy_learning_v1";
 const MAX_RECORDS = 50000;
-const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
 
 interface AdaptiveStore {
   collectionStartedAt: string;
@@ -193,7 +192,6 @@ function authToken() {
   const user = readUserSession();
   if (admin?.token) return admin.token;
   if (user.clientToken) return user.clientToken;
-  if (["localhost", "127.0.0.1"].includes(window.location.hostname)) return LOCAL_DEV_DASHBOARD_TOKEN;
   return "";
 }
 

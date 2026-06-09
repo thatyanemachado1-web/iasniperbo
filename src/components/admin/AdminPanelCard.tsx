@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Bell, Cpu, Logs, Megaphone, Settings2, ShieldCheck, Users } from "lucide-react";
+import { Bell, BriefcaseBusiness, Cpu, Logs, Megaphone, Settings2, ShieldCheck, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
@@ -67,8 +67,9 @@ export function AdminPanelCard({
           <Metric icon={<Cpu className="size-4" />} label="Online agora" value={metricValue(stats.onlineNow)} />
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
           <AdminLink to="/app/admin/users" icon={<Users className="size-4" />} label="Gerenciar usuários" />
+          <AdminLink to="/app/admin/crm" icon={<BriefcaseBusiness className="size-4" />} label="CRM clientes" />
           <AdminLink to="/app/admin/logs" icon={<Logs className="size-4" />} label="Ver logs" />
           <AdminLink to="/app/admin/modules" icon={<Settings2 className="size-4" />} label="Configurar módulos" />
           <AdminLink to="/app/admin/broadcast" icon={<Megaphone className="size-4" />} label="Conteudo e avisos" />
@@ -94,6 +95,7 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
 
 type AdminPanelLink =
   | "/app/admin/users"
+  | "/app/admin/crm"
   | "/app/admin/logs"
   | "/app/admin/modules"
   | "/app/admin/broadcast";

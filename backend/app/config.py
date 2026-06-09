@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PlanId = Literal["free", "mensal", "trimestral", "anual"]
@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = Field(default="sqlite:///./sniperbo.db", alias="DATABASE_URL")
-    app_jwt_secret: str = Field(default="change-me", alias="APP_JWT_SECRET")
+    app_jwt_secret: str = Field(alias="APP_JWT_SECRET")
     app_jwt_minutes: int = Field(default=720, alias="APP_JWT_MINUTES")
     frontend_login_url: str = Field(default="https://sniperbo.com/login", alias="FRONTEND_LOGIN_URL")
 
@@ -39,6 +39,28 @@ class Settings(BaseSettings):
     smtp_password: str = Field(default="", alias="SMTP_PASSWORD")
     smtp_from: str = Field(default="", alias="SMTP_FROM")
     smtp_tls: bool = Field(default=True, alias="SMTP_TLS")
+
+    @field_validator("app_jwt_secret")
+    @classmethod
+    def validate_app_jwt_secret(cls, value: str) -> str:
+        secret = value.strip().strip("\"'")
+        weak_values = {
+            "change" + "-me",
+            "changeme",
+            "secret",
+            "jwt-secret",
+            "app-jwt-secret",
+            "sniperbo",
+            "sniper-bo",
+            "replace-with-at-least-32-random-characters",
+        }
+        if not secret:
+            raise ValueError("APP_JWT_SECRET is required")
+        if secret.lower() in weak_values:
+            raise ValueError("APP_JWT_SECRET cannot use a default or example value")
+        if len(secret) < 32:
+            raise ValueError("APP_JWT_SECRET must be at least 32 characters")
+        return secret
 
     @property
     def effective_hubla_webhook_token(self) -> str:

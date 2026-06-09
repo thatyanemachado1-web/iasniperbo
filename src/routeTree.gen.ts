@@ -25,6 +25,7 @@ import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
 import { Route as AppAdminModulesRouteImport } from './routes/app.admin.modules'
 import { Route as AppAdminLogsRouteImport } from './routes/app.admin.logs'
+import { Route as AppAdminCrmRouteImport } from './routes/app.admin.crm'
 import { Route as AppAdminBroadcastRouteImport } from './routes/app.admin.broadcast'
 
 const AppRoute = AppRouteImport.update({
@@ -107,6 +108,11 @@ const AppAdminLogsRoute = AppAdminLogsRouteImport.update({
   path: '/logs',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminCrmRoute = AppAdminCrmRouteImport.update({
+  id: '/crm',
+  path: '/crm',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppAdminBroadcastRoute = AppAdminBroadcastRouteImport.update({
   id: '/broadcast',
   path: '/broadcast',
@@ -128,6 +134,7 @@ export interface FileRoutesByFullPath {
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/broadcast': typeof AppAdminBroadcastRoute
+  '/app/admin/crm': typeof AppAdminCrmRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/modules': typeof AppAdminModulesRoute
   '/app/admin/users': typeof AppAdminUsersRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/app/voz': typeof AppVozRoute
   '/app': typeof AppIndexRoute
   '/app/admin/broadcast': typeof AppAdminBroadcastRoute
+  '/app/admin/crm': typeof AppAdminCrmRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/modules': typeof AppAdminModulesRoute
   '/app/admin/users': typeof AppAdminUsersRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/broadcast': typeof AppAdminBroadcastRoute
+  '/app/admin/crm': typeof AppAdminCrmRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/modules': typeof AppAdminModulesRoute
   '/app/admin/users': typeof AppAdminUsersRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/app/voz'
     | '/app/'
     | '/app/admin/broadcast'
+    | '/app/admin/crm'
     | '/app/admin/logs'
     | '/app/admin/modules'
     | '/app/admin/users'
@@ -205,6 +215,7 @@ export interface FileRouteTypes {
     | '/app/voz'
     | '/app'
     | '/app/admin/broadcast'
+    | '/app/admin/crm'
     | '/app/admin/logs'
     | '/app/admin/modules'
     | '/app/admin/users'
@@ -224,6 +235,7 @@ export interface FileRouteTypes {
     | '/app/voz'
     | '/app/'
     | '/app/admin/broadcast'
+    | '/app/admin/crm'
     | '/app/admin/logs'
     | '/app/admin/modules'
     | '/app/admin/users'
@@ -348,6 +360,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminLogsRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/crm': {
+      id: '/app/admin/crm'
+      path: '/crm'
+      fullPath: '/app/admin/crm'
+      preLoaderRoute: typeof AppAdminCrmRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/broadcast': {
       id: '/app/admin/broadcast'
       path: '/broadcast'
@@ -360,6 +379,7 @@ declare module '@tanstack/react-router' {
 
 interface AppAdminRouteChildren {
   AppAdminBroadcastRoute: typeof AppAdminBroadcastRoute
+  AppAdminCrmRoute: typeof AppAdminCrmRoute
   AppAdminLogsRoute: typeof AppAdminLogsRoute
   AppAdminModulesRoute: typeof AppAdminModulesRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
@@ -367,6 +387,7 @@ interface AppAdminRouteChildren {
 
 const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminBroadcastRoute: AppAdminBroadcastRoute,
+  AppAdminCrmRoute: AppAdminCrmRoute,
   AppAdminLogsRoute: AppAdminLogsRoute,
   AppAdminModulesRoute: AppAdminModulesRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,

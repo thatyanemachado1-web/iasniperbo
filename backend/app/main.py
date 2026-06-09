@@ -8,7 +8,14 @@ from .config import Settings, get_settings
 from .database import get_db, init_db
 from .models import Payment, Subscription, User
 from .schemas import LoginRequest, LoginResponse, PaymentResponse, SubscriptionResponse
-from .security import get_current_email, issue_access_token, require_active_subscription, verify_password
+from .security import (
+    get_current_email,
+    hash_password,
+    issue_access_token,
+    password_hash_needs_upgrade,
+    require_active_subscription,
+    verify_password,
+)
 from .services import process_hubla_webhook, subscription_is_active
 
 app = FastAPI(title="Sniper BO IA API", version="1.0.0")
@@ -44,6 +51,10 @@ def login(
     user = db.scalar(select(User).where(User.email == email))
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email ou senha invalidos")
+    if password_hash_needs_upgrade(user.password_hash):
+        user.password_hash = hash_password(body.password)
+        db.add(user)
+        db.commit()
 
     subscription = db.scalar(
         select(Subscription)

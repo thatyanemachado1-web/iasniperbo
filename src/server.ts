@@ -1,5 +1,6 @@
 import "./lib/error-capture";
 
+import bcrypt from "bcryptjs";
 import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
@@ -21,6 +22,25 @@ import type {
   SignalSide,
   SignalStatus,
 } from "./types/dashboard";
+import type {
+  SavedValidatorPattern,
+  ValidatorDestination,
+  ValidatorEntryType,
+  ValidatorGaleLimit,
+  ValidatorMessageTemplates,
+  ValidatorNotificationChannel,
+  ValidatorPatternToken,
+  ValidatorResult,
+} from "./types/neuralValidator";
+import type {
+  CrmClient,
+  CrmDeal,
+  CrmDealStage,
+  CrmInvoice,
+  CrmInvoiceStatus,
+  CrmResponse,
+  CrmSummary,
+} from "./types/crm";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -113,6 +133,13 @@ type AdminActionType =
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
 const LIVE_STATE_TABLE = "sniper_live_state";
+const CRM_CLIENTS_TABLE = "crm_clients";
+const CRM_DEALS_TABLE = "crm_deals";
+const CRM_INVOICES_TABLE = "crm_invoices";
+const VALIDATOR_ROUNDS_TABLE = "validator_rounds";
+const VALIDATOR_PATTERNS_TABLE = "validator_saved_patterns";
+const VALIDATOR_CHANNELS_TABLE = "validator_channels";
+const VALIDATOR_NOTIFICATIONS_TABLE = "validator_notifications";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const MERCADOPAGO_PREFERENCE_URL = "https://api.mercadopago.com/checkout/preferences";
 const MERCADOPAGO_PAYMENT_URL = "https://api.mercadopago.com/v1/payments";
@@ -123,13 +150,17 @@ const DEFAULT_ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
 const DEFAULT_OLLAMA_MODEL = "qwen2.5:7b";
 const DEFAULT_EDGE_TTS_VOICE = "pt-BR-AntonioNeural";
-const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
-const LOCAL_DEVELOPMENT_EXPIRES_AT = "2099-12-31T23:59:59.000Z";
 const MAX_SERVER_ROUND_HISTORY = 50_000;
+const MAX_MONITOR_ROUND_HISTORY = 300;
+const MAX_VALIDATOR_ROUND_WRITE_BATCH = 500;
+const VALIDATOR_ROUND_PRUNE_MIN_INTERVAL_MS = 10 * 60_000;
+const VALIDATOR_MONITOR_CACHE_TTL_MS = 5_000;
 const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
+const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
+const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
 const FREE_TRIAL_MINUTES = 10;
 const ELEVENLABS_API_KEY_SECRET_NAMES = [
   "ELEVENLABS_TTS_API_KEY",
@@ -154,10 +185,24 @@ const ACTIVE_ENTRY_MODES = [
   "aggressive",
 ] as const satisfies readonly ActiveEntryMode[];
 const SNIPER_NEURAL_ASSERTIVENESS_MIN = 99;
+const DEFAULT_VALIDATOR_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
+  entry:
+    "ENTRADA CONFIRMADA\nMesa: {{table}}\nPadrao: {{pattern}}\nEntrada: {{entry}}\nGale: {{gale}}\nProtecao Tie: {{tieProtection}}\nAssertividade: {{percentage}}",
+  gale: "FAZ O {{gale}}\nEntrada: {{entry}}",
+  green: "GREEN\nPadrao: {{pattern}}\nResultado: {{result}}",
+  red: "RED\nPadrao: {{pattern}}",
+  scoreboard: "{{wins}} GREEN / {{loss}} RED / {{percentage}}",
+  greenStreak: "{{wins}} GREENS SEGUIDOS",
+  preAlert: "Padrao quase formado\nMesa: {{table}}\nCondicao: {{pattern}}\nPossivel entrada: {{entry}}",
+  analyzing: "ANALISANDO PADRAO\nMesa: {{table}}\nAguardando entrada validada",
+};
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 let liveDashboardData: LiveDashboardData = resetDashboardDailyCycle(mockDashboardData);
 let liveValidatorRoundHistory: Round[] = [];
+let liveValidatorPatterns: SavedValidatorPattern[] = [];
+let liveValidatorChannels: ValidatorNotificationChannel[] = [];
+let liveValidatorNotifications: Array<Record<string, unknown>> = [];
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
 let liveAccessEvents: Array<Record<string, unknown>> = [];
@@ -184,6 +229,12 @@ let liveStateSaveStatus: LiveStateSaveStatus = {
   durableConfigured: false,
   saved_at: "",
 };
+let liveStateLoadedAt = 0;
+let liveStateLoadPromise: Promise<void> | null = null;
+let liveStateSavePromise: Promise<LiveStateSaveStatus> | null = null;
+const validatorRoundPrunedAt = new Map<string, number>();
+let validatorMonitorCacheLoadedAt = 0;
+let validatorMonitorCachePromise: Promise<void> | null = null;
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 const localAiRateBuckets = new Map<string, { count: number; resetAt: number }>();
 const localAiCache = new Map<string, { response: string; createdAt: number }>();
@@ -273,7 +324,9 @@ export default {
       const rateLimitResponse = handleRateLimit(request);
       if (rateLimitResponse) return withSecurityHeaders(rateLimitResponse);
 
-      await loadLiveState(env);
+      if (shouldLoadLiveStateForRequest(request)) {
+        await loadLiveState(env);
+      }
 
       const voiceResponse = await handleVoiceNarrationRequest(request, env);
       if (voiceResponse) return withSecurityHeaders(voiceResponse);
@@ -318,7 +371,7 @@ export default {
 
 function redirectLegacyAdminRoute(request: Request) {
   if (request.method !== "GET" && request.method !== "HEAD") return null;
-  if (request.headers.get("authorization") || request.headers.get("x-sniper-token")) return null;
+  if (request.headers.get("authorization")) return null;
   const url = new URL(request.url);
   const adminPageMap: Record<string, string> = {
     "/admin": "/app/admin",
@@ -334,6 +387,17 @@ function redirectLegacyAdminRoute(request: Request) {
   url.pathname = nextPath;
   url.search = "";
   return Response.redirect(url.toString(), 302);
+}
+
+function shouldLoadLiveStateForRequest(request: Request) {
+  if (request.method === "OPTIONS") return false;
+  const url = new URL(request.url);
+  if (url.pathname.startsWith("/assets/")) return false;
+  if (url.pathname.startsWith("/favicon")) return false;
+  if (url.pathname === "/robots.txt" || url.pathname === "/sitemap.xml" || url.pathname === "/manifest.webmanifest") {
+    return false;
+  }
+  return !/\.(?:avif|css|gif|ico|jpeg|jpg|js|json|map|mp3|png|svg|txt|webm|webp|woff2?)$/i.test(url.pathname);
 }
 
 function handleRateLimit(request: Request) {
@@ -392,6 +456,13 @@ function rateLimitForRequest(method: string, pathname: string) {
   if (pathname === "/dashboard/round-history") return 120;
   if (pathname === "/dashboard/signal") return 240;
   if (pathname === "/validator/round-history") return method === "GET" ? 120 : 240;
+  if (
+    pathname === "/validator/patterns" ||
+    pathname.startsWith("/validator/patterns/") ||
+    pathname === "/validator/channels" ||
+    pathname.startsWith("/validator/channels/") ||
+    pathname === "/validator/channels/test"
+  ) return 120;
   if (pathname === "/validator/telegram/test" || pathname === "/validator/telegram/send") return 30;
   if (pathname === "/adaptive-strategy/sync") return 240;
   if (
@@ -517,7 +588,7 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "POST,OPTIONS",
       "access-control-allow-headers":
-        "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
+        "Content-Type,Authorization,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
     },
   });
 }
@@ -630,7 +701,7 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
         "access-control-allow-origin": "*",
         "access-control-allow-methods": "POST,OPTIONS",
         "access-control-allow-headers":
-          "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
+          "Content-Type,Authorization,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
       },
     });
   } catch (error) {
@@ -698,7 +769,7 @@ async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "POST,OPTIONS",
       "access-control-allow-headers":
-        "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
+        "Content-Type,Authorization,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
     },
   });
 }
@@ -1924,6 +1995,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     url.pathname === "/admin/summary" ||
     url.pathname === "/admin/sales-settings" ||
     url.pathname === "/admin/site-content" ||
+    url.pathname === "/admin/crm" ||
+    url.pathname.startsWith("/admin/crm/") ||
     url.pathname === "/admin/users" ||
     url.pathname.startsWith("/admin/users/") ||
     url.pathname === "/admin/logs" ||
@@ -1946,8 +2019,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     return json({
       hasAdminEmail: getAdminEmails(env).length > 0,
       hasAdminApproverEmail: getAdminApproverEmails(env).length > 0,
-      hasAdminPassword: Boolean(getAdminPassword(env)),
-      hasAdminToken: Boolean(getAdminToken(env)),
+      hasAdminPasswordHash: Boolean(getAdminPasswordHash(env)),
       hasSessionSecret: Boolean(getSessionSecret(env)),
       hasDurableClientStorage: Boolean(getSupabasePersistenceConfig(env)),
       durableClientStorageTable: LIVE_STATE_TABLE,
@@ -1958,13 +2030,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = await request.json().catch(() => ({}));
     const loginEmail = readString(body, "email").toLowerCase();
     const adminRole = getAdminRoleForEmail(env, loginEmail);
-    const adminPassword = getAdminPassword(env);
+    const adminPasswordHash = getAdminPasswordHash(env);
 
-    if (!adminPassword || !getSessionSecret(env)) {
+    if (!adminPasswordHash || !getSessionSecret(env)) {
       return json({ error: "Credenciais admin não configuradas no servidor." }, 503);
     }
 
-    if (adminRole && readString(body, "password") === adminPassword) {
+    if (adminRole && await verifyPassword(readString(body, "password"), adminPasswordHash)) {
       const binding = await requestSessionBinding(env, request);
       recordAccessEvent("admin_login", {
         email: loginEmail,
@@ -1978,6 +2050,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         {
           email: loginEmail,
           scope: adminRole === "owner" ? "owner" : "admin_approver",
+          role: "admin",
           plan: adminRole === "owner" ? "vip" : "free",
           approved: adminRole === "owner",
           sid: crypto.randomUUID(),
@@ -1996,17 +2069,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = readRecord(await request.json().catch(() => ({})));
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
-    const adminPassword = getAdminPassword(env);
+    const adminPasswordHash = getAdminPasswordHash(env);
     const adminRole = getAdminRoleForEmail(env, email);
 
     if (!getSessionSecret(env)) {
-      if (isLocalDevelopmentRequest(request)) {
-        return json({ access: buildLocalDevelopmentAccess(email) });
-      }
       return json({ error: "Sessão não configurada no servidor." }, 503);
     }
 
-    if (adminRole === "owner" && adminPassword && password === adminPassword) {
+    if (adminRole === "owner" && adminPasswordHash && await verifyPassword(password, adminPasswordHash)) {
       recordAccessEvent("owner_login", {
         email,
         full_name: nameFromEmail(email),
@@ -2017,7 +2087,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ access: await ownerAccess(env, email, request) });
     }
 
-    if (adminRole === "admin" && adminPassword && password === adminPassword) {
+    if (adminRole === "admin" && adminPasswordHash && await verifyPassword(password, adminPasswordHash)) {
       recordAccessEvent("admin_login", {
         email,
         full_name: nameFromEmail(email),
@@ -2053,13 +2123,17 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     let ok = false;
     if (storedHash) {
       ok = await verifyPassword(password, storedHash);
-    } else if (legacyPassword) {
-      ok = legacyPassword === password;
-      if (ok) {
+      if (ok && passwordHashNeedsUpgrade(storedHash)) {
         client.password_hash = await hashPassword(password);
+        await saveLiveState(env);
+      }
+      if (ok && "password" in client) {
         delete (client as Record<string, unknown>).password;
         await saveLiveState(env);
       }
+    } else if (legacyPassword) {
+      delete (client as Record<string, unknown>).password;
+      await saveLiveState(env);
     } else if (clientHasLiveAccess(client)) {
       return json(
         { error: "Compra localizada. Abra a aba Cadastro e crie sua senha para ativar o login." },
@@ -2091,9 +2165,6 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ error: "E-mail e senha são obrigatórios." }, 400);
     }
     if (!getSessionSecret(env)) {
-      if (isLocalDevelopmentRequest(request)) {
-        return json({ access: buildLocalDevelopmentAccess(email) }, 201);
-      }
       return json({ error: "Sessão não configurada no servidor." }, 503);
     }
 
@@ -2152,15 +2223,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "POST" && url.pathname === "/auth/verify") {
-    const body = readRecord(await request.json().catch(() => ({})));
-    const token = readString(body, "token");
-    if (
-      !getSessionSecret(env) &&
-      isLocalDevelopmentRequest(request) &&
-      token === LOCAL_DEV_DASHBOARD_TOKEN
-    ) {
-      return json({ valid: true, access: buildLocalDevelopmentAccess(readString(body, "email")) });
-    }
+    const token = getBearerToken(request);
     const session = await verifySessionToken(env, token);
     if (!session) {
       return json({ valid: false }, 401);
@@ -2301,6 +2364,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   if (request.method === "GET" && url.pathname === "/admin/overview") {
     await hydrateClientsFromBillingUsers(env);
     return json({ overview: buildAdminPanelOverview(syncAdminManagedUsers(env)) });
+  }
+
+  if (url.pathname === "/admin/crm" || url.pathname.startsWith("/admin/crm/")) {
+    return handleAdminCrmRequest(request, url, env, adminRole);
   }
 
   if (request.method === "GET" && url.pathname === "/admin/users") {
@@ -2613,12 +2680,21 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       url.pathname === "/dashboard/signal" ||
       url.pathname === "/dashboard/round-history" ||
       url.pathname === "/validator/round-history" ||
+      url.pathname === "/validator/patterns" ||
+      url.pathname.startsWith("/validator/patterns/") ||
+      url.pathname === "/validator/channels" ||
+      url.pathname.startsWith("/validator/channels/") ||
+      url.pathname === "/validator/channels/test" ||
+      url.pathname === "/validator/live-hit/send" ||
       url.pathname === "/validator/telegram/test" ||
       url.pathname === "/validator/telegram/send"
     )
   ) {
     return json(null, 204);
   }
+
+  const validatorStorageResponse = await handleValidatorStorageRequest(request, url, env);
+  if (validatorStorageResponse) return validatorStorageResponse;
 
   if (
     request.method === "POST" &&
@@ -2645,6 +2721,7 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       message,
       buttonLabel,
       buttonUrl,
+      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
     });
 
     if (!result.ok) return json({ error: result.error }, result.status);
@@ -2660,9 +2737,20 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     }
 
     const limit = clampRoundHistoryLimit(url.searchParams.get("limit"));
+    const storedRounds = await withTimeout(
+      fetchStoredValidatorRounds(
+        env,
+        limit,
+        validatorTableId(url.searchParams.get("tableId") || url.searchParams.get("table")),
+      ),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "carregar historico do Validador",
+      [] as Round[],
+    );
+    const rounds = storedRounds.length ? storedRounds : liveValidatorRoundHistory.slice(-limit);
     return json({
-      rounds: liveValidatorRoundHistory.slice(-limit),
-      total: liveValidatorRoundHistory.length,
+      rounds,
+      total: rounds.length,
       limit,
       updatedAt: liveDashboardData.updatedAt ?? "",
     });
@@ -2681,7 +2769,16 @@ async function handleDashboardRequest(request: Request, env: unknown) {
         : [];
     const incomingRounds = normalizeRounds(sourceRounds, MAX_SERVER_ROUND_HISTORY);
     if (incomingRounds.length) {
-      liveValidatorRoundHistory = mergeRoundHistory(liveValidatorRoundHistory, incomingRounds);
+      liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
+      await withTimeout(
+        persistValidatorRounds(env, incomingRounds),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "salvar rodadas do Validador",
+        false,
+      );
+      await processValidatorLiveMonitoring(env, {
+        allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
+      });
       await saveLiveState(env);
     }
 
@@ -2698,10 +2795,15 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     }
 
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
+    let changed = false;
     if (cycle.changed) {
       liveDashboardData = cycle.dashboard;
-      await saveLiveState(env);
+      changed = true;
     }
+    changed = await processValidatorLiveMonitoring(env, {
+      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
+    }) || changed;
+    if (changed) await saveLiveState(env);
     return json(publicDashboardSnapshot(liveDashboardData));
   }
 
@@ -2714,12 +2816,257 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     }
 
     const body = await request.json().catch(() => ({}));
+    const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
     liveDashboardData = updateDashboardData(liveDashboardData, body);
+    if (incomingRounds.length) {
+      await withTimeout(
+        persistValidatorRounds(env, incomingRounds),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "salvar rodadas do Validador",
+        false,
+      );
+    }
+    await processValidatorLiveMonitoring(env, {
+      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
+    });
     await saveLiveState(env);
     return json({ ok: true, dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
 
   return null;
+}
+
+async function handleValidatorStorageRequest(request: Request, url: URL, env: unknown) {
+  const isPatternsRoute =
+    url.pathname === "/validator/patterns" || url.pathname.startsWith("/validator/patterns/");
+  const isChannelsRoute =
+    url.pathname === "/validator/channels" ||
+    url.pathname.startsWith("/validator/channels/") ||
+    url.pathname === "/validator/channels/test";
+  const isLiveHitRoute = url.pathname === "/validator/live-hit/send";
+  if (!isPatternsRoute && !isChannelsRoute && !isLiveHitRoute) return null;
+
+  const userId = await validatorRequestUserId(request, url, env);
+  if (!userId) return json({ error: "Nao autorizado." }, 401);
+  await withTimeout(
+    hydrateValidatorUserCache(env, userId),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar dados do Validador",
+    undefined,
+  );
+
+  if (request.method === "POST" && isLiveHitRoute) {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const patternId = readString(body, "patternId");
+    const detectedRoundId = Math.floor(Number(body.detectedRoundId) || 0);
+    const pattern = liveValidatorPatterns.find((item) => item.userId === userId && item.id === patternId);
+    if (!pattern) return json({ error: "Padrao nao encontrado." }, 404);
+    if (!pattern.isActive) return json({ error: "Padrao inativo." }, 400);
+    if (!validatorPatternAllowsTelegramForward(pattern)) {
+      return json({ error: "Padrao esta em monitorar/desativado." }, 400);
+    }
+
+    const channel = findValidatorTelegramChannelForPattern(pattern);
+    if (!channel) return json({ error: "Nenhum canal Telegram ativo com token e Chat ID." }, 400);
+
+    const roundId = detectedRoundId || Date.now();
+    const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${roundId}`;
+    if (validatorNotificationAlreadySent(notificationKey)) {
+      return json({ ok: true, skipped: true });
+    }
+
+    const sentAt = new Date().toISOString();
+    const result = await sendTelegramMessage({
+      botToken: decodeServerToken(channel.botTokenEncoded),
+      chatId: channel.chatId,
+      message: buildServerValidatorTelegramMessage(pattern, channel),
+      buttonLabel: "Abrir Sniper Bo IA",
+      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
+    });
+
+    const notification = {
+      id: notificationKey,
+      userId: pattern.userId,
+      patternId: pattern.id,
+      channelId: channel.id,
+      roundId,
+      status: result.ok ? "sent" : "error",
+      error: result.ok ? "" : result.error,
+      sentAt,
+      updatedAt: sentAt,
+    };
+    liveValidatorNotifications = [
+      notification,
+      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== notificationKey),
+    ].slice(0, 1000);
+    void persistValidatorNotification(env, notification);
+
+    if (result.ok) {
+      let updatedPattern: SavedValidatorPattern | null = null;
+      liveValidatorPatterns = liveValidatorPatterns.map((item) =>
+        item.userId === pattern.userId && item.id === pattern.id
+          ? (updatedPattern = { ...item, lastDetectedAt: sentAt, lastDetectedRoundId: roundId, updatedAt: sentAt })
+          : item,
+      );
+      if (updatedPattern) void persistValidatorPattern(env, updatedPattern);
+      await saveLiveState(env);
+      return json({ ok: true, skipped: false, messageId: result.messageId });
+    }
+
+    await saveLiveState(env);
+    return json({ error: result.error }, result.status);
+  }
+
+  if (url.pathname === "/validator/patterns") {
+    if (request.method === "GET") {
+      return json({
+        patterns: liveValidatorPatterns
+          .filter((pattern) => pattern.userId === userId)
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      });
+    }
+
+    if (request.method === "POST") {
+      try {
+        const body = readRecord(await request.json().catch(() => ({})));
+        const pattern = normalizeServerSavedPattern(body.pattern || body, userId);
+        if (!pattern) return json({ error: "Padrao invalido." }, 400);
+        liveValidatorPatterns = upsertValidatorPattern(pattern);
+        await persistValidatorPattern(env, pattern);
+        await saveLiveState(env);
+        return json({ pattern }, 201);
+      } catch (error) {
+        console.warn("Falha ao salvar padrao do Validador.", error);
+        return json(
+          {
+            error: "Falha ao salvar padrao no servidor.",
+            detail: isLocalDevelopmentRequest(request) ? errorMessage(error) : "",
+          },
+          500,
+        );
+      }
+    }
+  }
+
+  const patternMatch = url.pathname.match(/^\/validator\/patterns\/([^/]+)$/);
+  if (patternMatch) {
+    const patternId = decodeURIComponent(patternMatch[1] || "");
+    const current = liveValidatorPatterns.find(
+      (pattern) => pattern.userId === userId && pattern.id === patternId,
+    );
+    if (!current) return json({ error: "Padrao nao encontrado." }, 404);
+
+    if (request.method === "PATCH") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const next = normalizeServerSavedPattern({ ...current, ...body, id: current.id }, userId);
+      if (!next) return json({ error: "Padrao invalido." }, 400);
+      liveValidatorPatterns = upsertValidatorPattern(next);
+      await persistValidatorPattern(env, next);
+      await saveLiveState(env);
+      return json({ pattern: next });
+    }
+
+    if (request.method === "DELETE") {
+      liveValidatorPatterns = liveValidatorPatterns.filter(
+        (pattern) => !(pattern.userId === userId && pattern.id === patternId),
+      );
+      await deleteValidatorPatternRow(env, userId, patternId);
+      await saveLiveState(env);
+      return json({ ok: true });
+    }
+  }
+
+  if (url.pathname === "/validator/channels") {
+    if (request.method === "GET") {
+      return json({
+        channels: liveValidatorChannels
+          .filter((channel) => channel.userId === userId)
+          .map(publicValidatorChannel)
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      });
+    }
+
+    if (request.method === "POST") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const incoming = readRecord(body.channel || body);
+      const existing = liveValidatorChannels.find(
+        (channel) => channel.userId === userId && channel.id === readString(incoming, "id"),
+      );
+      const channel = normalizeServerNotificationChannel(incoming, userId, existing);
+      if (!channel) return json({ error: "Canal invalido." }, 400);
+      liveValidatorChannels = upsertValidatorChannel(channel);
+      await persistValidatorChannel(env, channel);
+      await saveLiveState(env);
+      return json({ channel: publicValidatorChannel(channel) }, 201);
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/validator/channels/test") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const channelId = readString(body, "channelId");
+    const channel = liveValidatorChannels.find(
+      (item) => item.userId === userId && item.id === channelId,
+    );
+    if (!channel) return json({ error: "Canal nao encontrado." }, 404);
+    const result = await sendTelegramMessage({
+      botToken: decodeServerToken(channel.botTokenEncoded),
+      chatId: channel.chatId,
+      message:
+        "ENTRADA CONFIRMADA\n" +
+        "Mesa: Bac Bo\n" +
+        "Padrao: 🔴10 → 🔵7 → 🟡6\n" +
+        "Entrada: 🔴 Banker\n" +
+        "Gale: Ate G1\n" +
+        "Protecao Tie: Ativa\n" +
+        `Canal: ${channel.name}`,
+      buttonLabel: "Abrir Sniper Bo IA",
+      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
+    });
+    if (!result.ok) return json({ error: result.error }, result.status);
+    return json({ ok: true, messageId: result.messageId });
+  }
+
+  const channelMatch = url.pathname.match(/^\/validator\/channels\/([^/]+)$/);
+  if (channelMatch) {
+    const channelId = decodeURIComponent(channelMatch[1] || "");
+    const current = liveValidatorChannels.find(
+      (channel) => channel.userId === userId && channel.id === channelId,
+    );
+    if (!current) return json({ error: "Canal nao encontrado." }, 404);
+
+    if (request.method === "PATCH") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const next = normalizeServerNotificationChannel({ ...current, ...body, id: current.id }, userId, current);
+      if (!next) return json({ error: "Canal invalido." }, 400);
+      liveValidatorChannels = upsertValidatorChannel(next);
+      await persistValidatorChannel(env, next);
+      await saveLiveState(env);
+      return json({ channel: publicValidatorChannel(next) });
+    }
+
+    if (request.method === "DELETE") {
+      liveValidatorChannels = liveValidatorChannels.filter(
+        (channel) => !(channel.userId === userId && channel.id === channelId),
+      );
+      liveValidatorPatterns = liveValidatorPatterns.map((pattern) =>
+        pattern.userId === userId && pattern.telegramChannelId === channelId
+          ? { ...pattern, telegramChannelId: "", updatedAt: new Date().toISOString() }
+          : pattern,
+      );
+      await deleteValidatorChannelRow(env, userId, channelId);
+      await Promise.all(
+        liveValidatorPatterns
+          .filter((pattern) => pattern.userId === userId && pattern.telegramChannelId === "")
+          .map((pattern) => persistValidatorPattern(env, pattern)),
+      );
+      await saveLiveState(env);
+      return json({ ok: true });
+    }
+  }
+
+  return json({ error: "Rota do Validador nao encontrada." }, 404);
 }
 
 async function sendTelegramMessage({
@@ -2728,12 +3075,14 @@ async function sendTelegramMessage({
   message,
   buttonLabel,
   buttonUrl,
+  allowInsecureNodeFallback = false,
 }: {
   botToken: string;
   chatId: string;
   message: string;
   buttonLabel: string;
   buttonUrl: string;
+  allowInsecureNodeFallback?: boolean;
 }): Promise<{ ok: true; messageId: number | null } | { ok: false; status: number; error: string }> {
   const payload: Record<string, unknown> = {
     chat_id: chatId,
@@ -2755,6 +3104,13 @@ async function sendTelegramMessage({
       body: JSON.stringify(payload),
     });
   } catch {
+    if (allowInsecureNodeFallback) {
+      const fallback = await sendTelegramMessageWithNodeHttpsFallback({
+        botToken,
+        payload,
+      });
+      if (fallback) return fallback;
+    }
     return {
       ok: false,
       status: 502,
@@ -2777,6 +3133,113 @@ async function sendTelegramMessage({
     ok: true,
     messageId: Number.isFinite(messageId) ? messageId : null,
   };
+}
+
+async function sendTelegramMessageWithNodeHttpsFallback({
+  botToken,
+  payload,
+}: {
+  botToken: string;
+  payload: Record<string, unknown>;
+}): Promise<{ ok: true; messageId: number | null } | { ok: false; status: number; error: string } | null> {
+  if (!isNodeRuntime()) return null;
+
+  try {
+    const nodeHttps = await importNodeHttps();
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(payload)) {
+      if (value === undefined || value === null || value === "") continue;
+      form.set(key, typeof value === "string" ? value : JSON.stringify(value));
+    }
+    const body = form.toString();
+
+    return await new Promise((resolve) => {
+      const request = nodeHttps.request(
+        {
+          hostname: "api.telegram.org",
+          path: `/bot${botToken}/sendMessage`,
+          method: "POST",
+          rejectUnauthorized: false,
+          timeout: 15000,
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+          },
+        },
+        (response: {
+          statusCode?: number;
+          setEncoding: (encoding: string) => void;
+          on: (event: string, callback: (chunk?: string) => void) => void;
+        }) => {
+          let responseBody = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk = "") => {
+            responseBody += chunk;
+          });
+          response.on("end", () => {
+            const data = readRecord(parseJsonSafe(responseBody));
+            if (response.statusCode === 200 && data.ok === true) {
+              const result = readRecord(data.result);
+              const messageId = Number(result.message_id);
+              resolve({
+                ok: true,
+                messageId: Number.isFinite(messageId) ? messageId : null,
+              });
+              return;
+            }
+            resolve({
+              ok: false,
+              status: telegramHttpStatus(response.statusCode || 502),
+              error: friendlyTelegramError(response.statusCode || 502, readString(data, "description")),
+            });
+          });
+        },
+      );
+      request.on("error", () => {
+        resolve({
+          ok: false,
+          status: 502,
+          error: "Nao foi possivel conectar ao Telegram agora.",
+        });
+      });
+      request.on("timeout", () => {
+        request.destroy();
+        resolve({
+          ok: false,
+          status: 502,
+          error: "Tempo esgotado ao conectar no Telegram.",
+        });
+      });
+      request.end(body);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function isNodeRuntime() {
+  const runtime = globalThis as typeof globalThis & {
+    process?: { versions?: { node?: string } };
+  };
+  return Boolean(runtime.process?.versions?.node);
+}
+
+async function importNodeHttps(): Promise<{
+  request: (...args: unknown[]) => {
+    on: (event: string, callback: (...args: unknown[]) => void) => void;
+    end: (body?: string) => void;
+    destroy: () => void;
+  };
+}> {
+  const dynamicImport = new Function("specifier", "return import(specifier)") as (
+    specifier: string,
+  ) => Promise<unknown>;
+  return dynamicImport("node:https") as Promise<{
+    request: (...args: unknown[]) => {
+      on: (event: string, callback: (...args: unknown[]) => void) => void;
+      end: (body?: string) => void;
+      destroy: () => void;
+    };
+  }>;
 }
 
 function normalizeTelegramMessage(value: string) {
@@ -2815,6 +3278,765 @@ function friendlyTelegramError(status: number, description: string) {
     return "Link do botao invalido. Use um link com http ou https.";
   }
   return description || "Falha ao enviar mensagem no Telegram.";
+}
+
+async function validatorRequestUserId(request: Request, url: URL, env: unknown) {
+  const token = getBearerToken(request);
+  const session = token ? await verifySessionToken(env, token) : null;
+  if (session) {
+    const bindingOk = await sessionMatchesRequestBinding(env, request, session);
+    if (bindingOk && (session.scope === "client" || session.scope === "owner" || session.scope === "admin_approver")) {
+      if (session.scope === "client") {
+        const client = findClientByEmail(session.email);
+        if (!client || !clientHasLiveAccess(client)) return "";
+      }
+      return normalizeValidatorUserId(session.email);
+    }
+  }
+
+  if (isDashboardAuthorized(request, url, env) && isLocalDevelopmentRequest(request)) {
+    return normalizeValidatorUserId(request.headers.get("x-validator-user-id") || "local-user");
+  }
+
+  return "";
+}
+
+function normalizeValidatorUserId(value: unknown) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeServerSavedPattern(value: unknown, userId: string): SavedValidatorPattern | null {
+  const record = readRecord(value);
+  const normalizedUserId = normalizeValidatorUserId(userId || readString(record, "userId"));
+  const pattern = normalizeServerPatternTokens(record.pattern);
+  if (!normalizedUserId || !pattern.length) return null;
+  const now = new Date().toISOString();
+  const validation = normalizeValidatorResult(record.validation);
+  const entryType = normalizeValidatorEntryType(record.entryType);
+  return {
+    id: readString(record, "id") || crypto.randomUUID(),
+    userId: normalizedUserId,
+    name: readString(record, "name") || "Estrategia Neural",
+    tableId: readString(record, "tableId") || "bac-bo",
+    pattern,
+    entryType,
+    pulledSide: normalizeRoundResult(record.pulledSide) || validatorEntrySide(entryType),
+    galeLimit: normalizeValidatorGaleLimit(record.galeLimit),
+    tieProtection: readBooleanField(record, "tieProtection"),
+    destination: normalizeValidatorDestination(record.destination),
+    telegramChannelId: readString(record, "telegramChannelId"),
+    messageOverride: readString(record, "messageOverride"),
+    cooldownRounds: Math.max(0, Math.floor(Number(record.cooldownRounds) || 0)),
+    isActive: record.isActive !== false,
+    validation,
+    currentGreenStreak: Math.max(0, Math.floor(Number(record.currentGreenStreak) || 0)),
+    wins: Math.max(0, Math.floor(Number(record.wins) || 0)),
+    losses: Math.max(0, Math.floor(Number(record.losses) || 0)),
+    lastDetectedAt: readString(record, "lastDetectedAt"),
+    lastDetectedRoundId: Number.isFinite(Number(record.lastDetectedRoundId))
+      ? Number(record.lastDetectedRoundId)
+      : undefined,
+    createdAt: readString(record, "createdAt") || now,
+    updatedAt: readString(record, "updatedAt") || now,
+  };
+}
+
+function normalizeServerNotificationChannel(
+  value: unknown,
+  userId: string,
+  existing?: ValidatorNotificationChannel,
+): ValidatorNotificationChannel | null {
+  const record = readRecord(value);
+  const normalizedUserId = normalizeValidatorUserId(userId || readString(record, "userId"));
+  if (!normalizedUserId) return null;
+  const now = new Date().toISOString();
+  const incomingToken = normalizeSecretValue(readString(record, "botToken"));
+  const tokenEncoded =
+    incomingToken ? encodeServerToken(incomingToken) : readString(record, "botTokenEncoded") || existing?.botTokenEncoded || "";
+  const decodedToken = decodeServerToken(tokenEncoded);
+  return {
+    id: readString(record, "id") || crypto.randomUUID(),
+    userId: normalizedUserId,
+    name: readString(record, "name") || "Canal Telegram",
+    botTokenMasked: readString(record, "botTokenMasked") || maskServerBotToken(decodedToken),
+    botTokenEncoded: tokenEncoded,
+    chatId: readString(record, "chatId"),
+    buttonLink: readString(record, "buttonLink"),
+    isActive: record.isActive !== false,
+    analyzingEnabled: readBooleanField(record, "analyzingEnabled"),
+    analyzingCooldownRounds: Math.max(1, Math.floor(Number(record.analyzingCooldownRounds) || 3)),
+    templates: {
+      ...DEFAULT_VALIDATOR_MESSAGE_TEMPLATES,
+      ...readRecord(record.templates),
+    },
+    createdAt: readString(record, "createdAt") || now,
+    updatedAt: readString(record, "updatedAt") || now,
+  };
+}
+
+function normalizeServerPatternTokens(value: unknown): ValidatorPatternToken[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const record = readRecord(item);
+      const side = normalizeRoundResult(record.side);
+      if (!side) return null;
+      const score = Number(record.score);
+      return {
+        side,
+        ...(Number.isFinite(score) && score > 0 ? { score } : {}),
+      };
+    })
+    .filter((token): token is ValidatorPatternToken => Boolean(token));
+}
+
+function normalizeValidatorResult(value: unknown): ValidatorResult | null {
+  const record = readRecord(value);
+  if (!Object.keys(record).length) return null;
+  return {
+    totalSignals: Math.max(0, Math.floor(Number(record.totalSignals) || 0)),
+    totalValidated: Math.max(0, Math.floor(Number(record.totalValidated) || 0)),
+    sgWins: Math.max(0, Math.floor(Number(record.sgWins) || 0)),
+    g1Wins: Math.max(0, Math.floor(Number(record.g1Wins) || 0)),
+    g2Wins: Math.max(0, Math.floor(Number(record.g2Wins) || 0)),
+    losses: Math.max(0, Math.floor(Number(record.losses) || 0)),
+    ties: Math.max(0, Math.floor(Number(record.ties) || 0)),
+    tieWins: Math.max(0, Math.floor(Number(record.tieWins) || 0)),
+    accuracy: readNullableNumber(record.accuracy) ?? undefined,
+    sgAccuracy: readNullableNumber(record.sgAccuracy) ?? undefined,
+    galeAccuracy: readNullableNumber(record.galeAccuracy) ?? undefined,
+    currentGreenStreak: Math.max(0, Math.floor(Number(record.currentGreenStreak) || 0)),
+    bestGreenStreak: Math.max(0, Math.floor(Number(record.bestGreenStreak) || 0)),
+    bestLossStreak: Math.max(0, Math.floor(Number(record.bestLossStreak) || 0)),
+    lastPatternResult: readString(record, "lastPatternResult") || "Sem validacao",
+    details: Array.isArray(record.details) ? record.details.map(readRecord) as ValidatorResult["details"] : [],
+    entry: normalizeRoundResult(record.entry),
+    pulledSide: normalizeRoundResult(record.pulledSide),
+    risk: ["baixo", "medio", "alto"].includes(readString(record, "risk"))
+      ? readString(record, "risk") as ValidatorResult["risk"]
+      : "alto",
+    status: ["quente", "estavel", "observacao", "fraco", "sem_amostra"].includes(readString(record, "status"))
+      ? readString(record, "status") as ValidatorResult["status"]
+      : "sem_amostra",
+    analyzedRounds: Math.max(0, Math.floor(Number(record.analyzedRounds) || 0)),
+  };
+}
+
+function normalizeValidatorEntryType(value: unknown): ValidatorEntryType {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "BANKER" || text === "PLAYER" || text === "TIE" || text === "OPPOSITE" || text === "SAME_LAST" || text === "AI") {
+    return text as ValidatorEntryType;
+  }
+  return "BANKER";
+}
+
+function normalizeValidatorDestination(value: unknown): ValidatorDestination {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "site" || text === "telegram" || text === "site_telegram" || text === "monitor" || text === "disabled") {
+    return text as ValidatorDestination;
+  }
+  return "site";
+}
+
+function normalizeValidatorGaleLimit(value: unknown): ValidatorGaleLimit {
+  const number = Math.floor(Number(value) || 0);
+  return Math.max(0, Math.min(2, number)) as ValidatorGaleLimit;
+}
+
+function publicValidatorChannel(channel: ValidatorNotificationChannel): ValidatorNotificationChannel {
+  return {
+    ...channel,
+    botTokenEncoded: "",
+    botTokenMasked: channel.botTokenMasked || maskServerBotToken(decodeServerToken(channel.botTokenEncoded)),
+  };
+}
+
+async function hydrateValidatorUserCache(env: unknown, userId: string) {
+  if (!getSupabasePersistenceConfig(env)) return;
+  const legacyPatterns = liveValidatorPatterns.filter((pattern) => pattern.userId === userId);
+  const legacyChannels = liveValidatorChannels.filter((channel) => channel.userId === userId);
+  const [storedPatterns, storedChannels] = await Promise.all([
+    fetchStoredValidatorPatterns(env, userId),
+    fetchStoredValidatorChannels(env, userId),
+  ]);
+  const patterns = storedPatterns.length ? storedPatterns : legacyPatterns;
+  const channels = storedChannels.length ? storedChannels : legacyChannels;
+
+  if (!storedPatterns.length && legacyPatterns.length) {
+    void Promise.all(legacyPatterns.map((pattern) => persistValidatorPattern(env, pattern)));
+  }
+  if (!storedChannels.length && legacyChannels.length) {
+    void Promise.all(legacyChannels.map((channel) => persistValidatorChannel(env, channel)));
+  }
+
+  liveValidatorPatterns = [
+    ...patterns,
+    ...liveValidatorPatterns.filter((pattern) => pattern.userId !== userId),
+  ].slice(0, 5000);
+  liveValidatorChannels = [
+    ...channels,
+    ...liveValidatorChannels.filter((channel) => channel.userId !== userId),
+  ].slice(0, 1000);
+}
+
+async function refreshValidatorMonitorCache(env: unknown) {
+  if (!getSupabasePersistenceConfig(env)) return;
+  const now = Date.now();
+  if (validatorMonitorCacheLoadedAt && now - validatorMonitorCacheLoadedAt < VALIDATOR_MONITOR_CACHE_TTL_MS) return;
+  if (validatorMonitorCachePromise) {
+    await validatorMonitorCachePromise;
+    return;
+  }
+
+  validatorMonitorCachePromise = (async () => {
+    const [patterns, channels, notifications] = await Promise.all([
+      fetchStoredActiveValidatorPatterns(env),
+      fetchStoredActiveValidatorChannels(env),
+      fetchStoredRecentValidatorNotifications(env),
+    ]);
+    liveValidatorPatterns = patterns;
+    liveValidatorChannels = channels;
+    liveValidatorNotifications = notifications;
+    validatorMonitorCacheLoadedAt = Date.now();
+  })().finally(() => {
+    validatorMonitorCachePromise = null;
+  });
+  await validatorMonitorCachePromise;
+}
+
+async function fetchStoredValidatorPatterns(env: unknown, userId: string) {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const rows = await fetchSupabaseRows(
+    env,
+    VALIDATOR_PATTERNS_TABLE,
+    `select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc&limit=1000`,
+  );
+  return rows
+    .map(validatorPatternFromRow)
+    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
+}
+
+async function fetchStoredActiveValidatorPatterns(env: unknown) {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const rows = await fetchSupabaseRows(
+    env,
+    VALIDATOR_PATTERNS_TABLE,
+    "select=*&is_active=eq.true&destination=not.eq.disabled&order=updated_at.desc&limit=5000",
+  );
+  return rows
+    .map(validatorPatternFromRow)
+    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
+}
+
+async function fetchStoredValidatorChannels(env: unknown, userId: string) {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const rows = await fetchSupabaseRows(
+    env,
+    VALIDATOR_CHANNELS_TABLE,
+    `select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc&limit=1000`,
+  );
+  return rows
+    .map(validatorChannelFromRow)
+    .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
+}
+
+async function fetchStoredActiveValidatorChannels(env: unknown) {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const rows = await fetchSupabaseRows(
+    env,
+    VALIDATOR_CHANNELS_TABLE,
+    "select=*&is_active=eq.true&order=updated_at.desc&limit=1000",
+  );
+  return rows
+    .map(validatorChannelFromRow)
+    .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
+}
+
+async function fetchStoredRecentValidatorNotifications(env: unknown) {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const rows = await fetchSupabaseRows(
+    env,
+    VALIDATOR_NOTIFICATIONS_TABLE,
+    "select=*&order=sent_at.desc.nullslast&limit=1000",
+  );
+  return rows.map(validatorNotificationFromRow).filter(hasRecordFields);
+}
+
+async function persistValidatorPattern(env: unknown, pattern: SavedValidatorPattern) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  return persistSupabaseRow(env, VALIDATOR_PATTERNS_TABLE, validatorPatternToRow(pattern), "id");
+}
+
+async function deleteValidatorPatternRow(env: unknown, userId: string, patternId: string) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  await deleteSupabaseRows(
+    env,
+    VALIDATOR_PATTERNS_TABLE,
+    `user_id=eq.${encodeURIComponent(userId)}&id=eq.${encodeURIComponent(patternId)}`,
+  );
+  return true;
+}
+
+async function persistValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  return persistSupabaseRow(env, VALIDATOR_CHANNELS_TABLE, validatorChannelToRow(channel), "id");
+}
+
+async function deleteValidatorChannelRow(env: unknown, userId: string, channelId: string) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  await deleteSupabaseRows(
+    env,
+    VALIDATOR_CHANNELS_TABLE,
+    `user_id=eq.${encodeURIComponent(userId)}&id=eq.${encodeURIComponent(channelId)}`,
+  );
+  return true;
+}
+
+async function persistValidatorNotification(env: unknown, notification: Record<string, unknown>) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  return persistSupabaseRow(env, VALIDATOR_NOTIFICATIONS_TABLE, validatorNotificationToRow(notification), "id");
+}
+
+function validatorPatternToRow(pattern: SavedValidatorPattern) {
+  return {
+    id: pattern.id,
+    user_id: pattern.userId,
+    name: pattern.name,
+    table_id: pattern.tableId,
+    pattern_json: pattern.pattern,
+    entry_type: pattern.entryType,
+    pulled_side: pattern.pulledSide,
+    gale_limit: Number(pattern.galeLimit) || 0,
+    tie_protection: Boolean(pattern.tieProtection),
+    destination: pattern.destination,
+    telegram_channel_id: pattern.telegramChannelId,
+    message_override: pattern.messageOverride || "",
+    cooldown_rounds: Math.max(0, Math.floor(Number(pattern.cooldownRounds) || 0)),
+    is_active: Boolean(pattern.isActive),
+    validation_json: pattern.validation || null,
+    current_green_streak: Math.max(0, Math.floor(Number(pattern.currentGreenStreak) || 0)),
+    wins: Math.max(0, Math.floor(Number(pattern.wins) || 0)),
+    losses: Math.max(0, Math.floor(Number(pattern.losses) || 0)),
+    last_detected_at: pattern.lastDetectedAt || null,
+    last_detected_round_id: pattern.lastDetectedRoundId ?? null,
+    created_at: pattern.createdAt || new Date().toISOString(),
+    updated_at: pattern.updatedAt || new Date().toISOString(),
+  };
+}
+
+function validatorPatternFromRow(row: Record<string, unknown>) {
+  const id = readString(row, "id");
+  const userId = readString(row, "user_id") || readString(row, "userId");
+  if (!id || !userId) return null;
+  return normalizeServerSavedPattern(
+    {
+      id,
+      userId,
+      name: readString(row, "name"),
+      tableId: readString(row, "table_id"),
+      pattern: row.pattern_json,
+      entryType: readString(row, "entry_type"),
+      pulledSide: readString(row, "pulled_side"),
+      galeLimit: row.gale_limit,
+      tieProtection: row.tie_protection,
+      destination: readString(row, "destination"),
+      telegramChannelId: readString(row, "telegram_channel_id"),
+      messageOverride: readString(row, "message_override"),
+      cooldownRounds: row.cooldown_rounds,
+      isActive: row.is_active,
+      validation: row.validation_json,
+      currentGreenStreak: row.current_green_streak,
+      wins: row.wins,
+      losses: row.losses,
+      lastDetectedAt: readString(row, "last_detected_at"),
+      lastDetectedRoundId: row.last_detected_round_id,
+      createdAt: readString(row, "created_at"),
+      updatedAt: readString(row, "updated_at"),
+    },
+    userId,
+  );
+}
+
+function validatorChannelToRow(channel: ValidatorNotificationChannel) {
+  return {
+    id: channel.id,
+    user_id: channel.userId,
+    name: channel.name,
+    bot_token_masked: channel.botTokenMasked,
+    bot_token_encoded: channel.botTokenEncoded,
+    chat_id: channel.chatId,
+    button_link: channel.buttonLink,
+    is_active: Boolean(channel.isActive),
+    analyzing_enabled: Boolean(channel.analyzingEnabled),
+    analyzing_cooldown_rounds: Math.max(1, Math.floor(Number(channel.analyzingCooldownRounds) || 3)),
+    templates_json: channel.templates,
+    created_at: channel.createdAt || new Date().toISOString(),
+    updated_at: channel.updatedAt || new Date().toISOString(),
+  };
+}
+
+function validatorChannelFromRow(row: Record<string, unknown>) {
+  const id = readString(row, "id");
+  const userId = readString(row, "user_id") || readString(row, "userId");
+  if (!id || !userId) return null;
+  return normalizeServerNotificationChannel(
+    {
+      id,
+      userId,
+      name: readString(row, "name"),
+      botTokenMasked: readString(row, "bot_token_masked"),
+      botTokenEncoded: readString(row, "bot_token_encoded"),
+      chatId: readString(row, "chat_id"),
+      buttonLink: readString(row, "button_link"),
+      isActive: row.is_active,
+      analyzingEnabled: row.analyzing_enabled,
+      analyzingCooldownRounds: row.analyzing_cooldown_rounds,
+      templates: row.templates_json,
+      createdAt: readString(row, "created_at"),
+      updatedAt: readString(row, "updated_at"),
+    },
+    userId,
+  );
+}
+
+function validatorNotificationToRow(notification: Record<string, unknown>) {
+  const sentAt = readString(notification, "sentAt") || readString(notification, "sent_at") || new Date().toISOString();
+  return {
+    id: readString(notification, "id") || crypto.randomUUID(),
+    type: readString(notification, "type") || "entry",
+    user_id: readString(notification, "userId") || readString(notification, "user_id"),
+    pattern_id: readString(notification, "patternId") || readString(notification, "pattern_id"),
+    channel_id: readString(notification, "channelId") || readString(notification, "channel_id"),
+    round_id: Math.floor(Number(notification.roundId ?? notification.round_id) || 0),
+    status: readString(notification, "status") || "sent",
+    error: readString(notification, "error"),
+    payload_json: readRecord(notification.payload_json || notification.payloadJson),
+    sent_at: sentAt,
+    updated_at: readString(notification, "updatedAt") || readString(notification, "updated_at") || sentAt,
+  };
+}
+
+function validatorNotificationFromRow(row: Record<string, unknown>) {
+  return {
+    id: readString(row, "id"),
+    type: readString(row, "type") || "entry",
+    userId: readString(row, "user_id"),
+    patternId: readString(row, "pattern_id"),
+    channelId: readString(row, "channel_id"),
+    roundId: Math.floor(Number(row.round_id) || 0),
+    status: readString(row, "status"),
+    error: readString(row, "error"),
+    sentAt: readString(row, "sent_at"),
+    updatedAt: readString(row, "updated_at"),
+  };
+}
+
+function upsertValidatorPattern(pattern: SavedValidatorPattern) {
+  const current = liveValidatorPatterns.filter((item) => !(item.userId === pattern.userId && item.id === pattern.id));
+  return [pattern, ...current].slice(0, 5000);
+}
+
+function upsertValidatorChannel(channel: ValidatorNotificationChannel) {
+  const current = liveValidatorChannels.filter((item) => !(item.userId === channel.userId && item.id === channel.id));
+  return [channel, ...current].slice(0, 1000);
+}
+
+function encodeServerToken(token: string) {
+  const clean = token.trim();
+  if (!clean) return "";
+  const bytes = new TextEncoder().encode(clean);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function decodeServerToken(encoded: string) {
+  if (!encoded) return "";
+  try {
+    const binary = atob(encoded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes).trim();
+  } catch {
+    return "";
+  }
+}
+
+function maskServerBotToken(token: string) {
+  const clean = token.trim();
+  if (!clean) return "";
+  if (clean.length <= 10) return `${clean.slice(0, 3)}...`;
+  return `${clean.slice(0, 6)}...${clean.slice(-4)}`;
+}
+
+async function processValidatorLiveMonitoring(
+  env: unknown,
+  options: { allowInsecureTelegramFallback?: boolean } = {},
+) {
+  await withTimeout(
+    refreshValidatorMonitorCache(env),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar monitor do Validador",
+    undefined,
+  );
+  if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
+    liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
+  }
+  const latestRound = liveValidatorRoundHistory.at(-1);
+  if (!latestRound || !liveValidatorPatterns.length) return false;
+
+  let changed = false;
+  const entryChannelKeys = new Set<string>();
+  for (const pattern of liveValidatorPatterns) {
+    if (!shouldMonitorValidatorPattern(pattern, latestRound)) continue;
+    const matchedRounds = liveValidatorRoundHistory.slice(-pattern.pattern.length);
+    if (!matchesServerValidatorPattern(matchedRounds, pattern.pattern)) continue;
+
+    const detectedAt = new Date().toISOString();
+    pattern.lastDetectedAt = detectedAt;
+    pattern.lastDetectedRoundId = latestRound.id;
+    pattern.updatedAt = detectedAt;
+    void persistValidatorPattern(env, pattern);
+    changed = true;
+
+    if (!validatorPatternAllowsTelegramForward(pattern)) continue;
+    const channel = findValidatorTelegramChannelForPattern(pattern);
+    if (!channel) continue;
+    entryChannelKeys.add(validatorChannelKey(channel));
+    const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${latestRound.id}`;
+    if (validatorNotificationAlreadySent(notificationKey)) continue;
+
+    const result = await sendTelegramMessage({
+      botToken: decodeServerToken(channel.botTokenEncoded),
+      chatId: channel.chatId,
+      message: buildServerValidatorTelegramMessage(pattern, channel),
+      buttonLabel: "Abrir Sniper Bo IA",
+      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+      allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+    });
+    const notification = {
+      id: notificationKey,
+      userId: pattern.userId,
+      patternId: pattern.id,
+      channelId: channel.id,
+      roundId: latestRound.id,
+      status: result.ok ? "sent" : "error",
+      error: result.ok ? "" : result.error,
+      sentAt: detectedAt,
+      updatedAt: detectedAt,
+    };
+    liveValidatorNotifications = [
+      notification,
+      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== notificationKey),
+    ].slice(0, 1000);
+    void persistValidatorNotification(env, notification);
+    changed = true;
+  }
+
+  const analysisChanged = await sendValidatorAnalyzingMessages(latestRound, entryChannelKeys, options);
+  changed = changed || analysisChanged;
+
+  return changed;
+}
+
+function shouldMonitorValidatorPattern(pattern: SavedValidatorPattern, latestRound: Round) {
+  if (!pattern.isActive || pattern.destination === "disabled") return false;
+  if (!pattern.pattern.length || liveValidatorRoundHistory.length < pattern.pattern.length) return false;
+  const cooldown = Math.max(0, Number(pattern.cooldownRounds) || 0);
+  if (pattern.lastDetectedRoundId && latestRound.id - pattern.lastDetectedRoundId <= cooldown) return false;
+  return true;
+}
+
+function validatorNotificationAlreadySent(key: string) {
+  return liveValidatorNotifications.some((item) => readString(item, "id") === key && readString(item, "status") === "sent");
+}
+
+function validatorPatternAllowsTelegramForward(pattern: SavedValidatorPattern) {
+  return pattern.destination !== "disabled" && pattern.destination !== "monitor";
+}
+
+function findValidatorTelegramChannelForPattern(pattern: SavedValidatorPattern) {
+  const userChannels = liveValidatorChannels.filter((channel) => channel.userId === pattern.userId);
+  const preferred = userChannels.find((channel) => channel.id === pattern.telegramChannelId);
+  if (isUsableValidatorTelegramChannel(preferred)) return preferred;
+  return userChannels.find(isUsableValidatorTelegramChannel) || null;
+}
+
+function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel) {
+  return Boolean(channel?.isActive && channel.chatId && decodeServerToken(channel.botTokenEncoded));
+}
+
+async function sendValidatorAnalyzingMessages(
+  latestRound: Round,
+  entryChannelKeys: Set<string>,
+  options: { allowInsecureTelegramFallback?: boolean },
+) {
+  let changed = false;
+  for (const channel of liveValidatorChannels) {
+    if (!shouldSendValidatorAnalyzingMessage(channel, latestRound, entryChannelKeys)) continue;
+    const notificationKey = `analysis:${channel.userId}:${channel.id}:${latestRound.id}`;
+    const sentAt = new Date().toISOString();
+    const result = await sendTelegramMessage({
+      botToken: decodeServerToken(channel.botTokenEncoded),
+      chatId: channel.chatId,
+      message: buildServerValidatorAnalyzingMessage(channel),
+      buttonLabel: "Abrir Sniper Bo IA",
+      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+      allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+    });
+    const notification = {
+      id: notificationKey,
+      type: "analysis",
+      userId: channel.userId,
+      channelId: channel.id,
+      roundId: latestRound.id,
+      status: result.ok ? "sent" : "error",
+      error: result.ok ? "" : result.error,
+      sentAt,
+      updatedAt: sentAt,
+    };
+    liveValidatorNotifications = [
+      notification,
+      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== notificationKey),
+    ].slice(0, 1000);
+    void persistValidatorNotification(env, notification);
+    changed = true;
+  }
+  return changed;
+}
+
+function shouldSendValidatorAnalyzingMessage(
+  channel: ValidatorNotificationChannel,
+  latestRound: Round,
+  entryChannelKeys: Set<string>,
+) {
+  if (!channel.isActive || !channel.analyzingEnabled) return false;
+  if (!channel.chatId || !decodeServerToken(channel.botTokenEncoded)) return false;
+  if (entryChannelKeys.has(validatorChannelKey(channel))) return false;
+  if (!validatorChannelHasActivePattern(channel)) return false;
+  const notificationKey = `analysis:${channel.userId}:${channel.id}:${latestRound.id}`;
+  if (validatorNotificationAlreadySent(notificationKey)) return false;
+  const cooldown = Math.max(1, Math.floor(Number(channel.analyzingCooldownRounds) || 3));
+  const lastRoundId = lastValidatorAnalysisRoundId(channel);
+  return !lastRoundId || latestRound.id - lastRoundId >= cooldown;
+}
+
+function validatorChannelHasActivePattern(channel: ValidatorNotificationChannel) {
+  return liveValidatorPatterns.some((pattern) => (
+    pattern.userId === channel.userId &&
+    pattern.isActive &&
+    validatorPatternAllowsTelegramForward(pattern) &&
+    pattern.pattern.length > 0 &&
+    findValidatorTelegramChannelForPattern(pattern)?.id === channel.id
+  ));
+}
+
+function lastValidatorAnalysisRoundId(channel: ValidatorNotificationChannel) {
+  let latest = 0;
+  for (const item of liveValidatorNotifications) {
+    if (readString(item, "type") !== "analysis") continue;
+    if (readString(item, "status") !== "sent") continue;
+    if (readString(item, "userId") !== channel.userId) continue;
+    if (readString(item, "channelId") !== channel.id) continue;
+    const roundId = Number(item.roundId);
+    if (Number.isFinite(roundId) && roundId > latest) latest = roundId;
+  }
+  return latest;
+}
+
+function validatorChannelKey(channel: ValidatorNotificationChannel) {
+  return `${channel.userId}:${channel.id}`;
+}
+
+function matchesServerValidatorPattern(rounds: Round[], pattern: ValidatorPatternToken[]) {
+  if (rounds.length !== pattern.length) return false;
+  return rounds.every((round, index) => {
+    const token = pattern[index];
+    if (!token || round.result !== token.side) return false;
+    if (!token.score) return true;
+    return serverScoreForRound(round, token.side) === token.score;
+  });
+}
+
+function serverScoreForRound(round: Round, side: Round["result"]) {
+  if (side === "B") return round.bankerScore;
+  if (side === "P") return round.playerScore;
+  return round.bankerScore === round.playerScore
+    ? round.bankerScore
+    : Math.max(round.bankerScore, round.playerScore);
+}
+
+function buildServerValidatorTelegramMessage(
+  pattern: SavedValidatorPattern,
+  channel: ValidatorNotificationChannel,
+) {
+  const entry = pattern.pulledSide || validatorEntrySide(pattern.entryType);
+  const variables: Record<string, string> = {
+    pattern: formatServerTelegramPattern(pattern.pattern),
+    entry: entry ? formatServerTelegramSide(entry) : "Aguardando",
+    gale: `G${Number(pattern.galeLimit)}`,
+    wins: String(pattern.wins),
+    loss: String(pattern.losses),
+    losses: String(pattern.losses),
+    percentage: formatServerPercent(pattern.validation?.accuracy),
+    table: pattern.tableId || "Bac Bo",
+    confidence: formatServerPercent(pattern.validation?.accuracy),
+    sequence: String(pattern.currentGreenStreak),
+    tieProtection: pattern.tieProtection ? "Ativa" : "Inativa",
+    result: "",
+    risk: pattern.validation?.risk ?? "",
+    mode: "Validador Neural",
+  };
+  const template = pattern.messageOverride?.trim() || channel.templates.entry || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry;
+  return template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
+}
+
+function buildServerValidatorAnalyzingMessage(channel: ValidatorNotificationChannel) {
+  const variables: Record<string, string> = {
+    pattern: "Aguardando",
+    entry: "Aguardando",
+    gale: "",
+    wins: "",
+    loss: "",
+    losses: "",
+    percentage: "",
+    table: "Bac Bo",
+    confidence: "",
+    sequence: "",
+    tieProtection: "",
+    result: "",
+    risk: "",
+    mode: "Validador Neural",
+  };
+  const template = channel.templates.analyzing || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.analyzing;
+  return template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
+}
+
+function validatorEntrySide(entryType: ValidatorEntryType): Round["result"] | null {
+  if (entryType === "BANKER") return "B";
+  if (entryType === "PLAYER") return "P";
+  if (entryType === "TIE") return "T";
+  return null;
+}
+
+function formatServerTelegramPattern(pattern: ValidatorPatternToken[]) {
+  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join(" → ");
+}
+
+function formatServerTelegramSide(side: Round["result"]) {
+  if (side === "B") return "🔴 Banker";
+  if (side === "P") return "🔵 Player";
+  return "🟡 Tie";
+}
+
+function serverSideCircle(side: Round["result"]) {
+  if (side === "B") return "🔴";
+  if (side === "P") return "🔵";
+  return "🟡";
+}
+
+function formatServerPercent(value?: number) {
+  if (value === undefined || Number.isNaN(value)) return "sem amostra";
+  return `${value.toFixed(2).replace(".", ",")}%`;
 }
 
 function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
@@ -3096,7 +4318,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       ? normalizeRounds(incoming.rounds, MAX_SERVER_ROUND_HISTORY)
       : [];
   if (incomingRounds.length) {
-    liveValidatorRoundHistory = mergeRoundHistory(liveValidatorRoundHistory, incomingRounds);
+    liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;
@@ -3974,13 +5196,32 @@ function normalizeRounds(rounds: unknown[], limit = 30) {
     .slice(-Math.max(1, limit));
 }
 
+function normalizeRoundsFromPayload(body: unknown, limit = MAX_SERVER_ROUND_HISTORY) {
+  const record = readRecord(body);
+  const dashboard = readRecord(record.dashboard);
+  const sourceRounds = Array.isArray(record.rounds)
+    ? record.rounds
+    : Array.isArray(dashboard.rounds)
+      ? dashboard.rounds
+      : [];
+  return normalizeRounds(sourceRounds, limit);
+}
+
 function mergeRoundHistory(current: Round[], incoming: Round[]) {
+  return mergeRoundHistoryWithLimit(current, incoming, MAX_SERVER_ROUND_HISTORY);
+}
+
+function mergeMonitorRoundHistory(current: Round[], incoming: Round[]) {
+  return mergeRoundHistoryWithLimit(current, incoming, MAX_MONITOR_ROUND_HISTORY);
+}
+
+function mergeRoundHistoryWithLimit(current: Round[], incoming: Round[], limit: number) {
   const byKey = new Map<string, Round>();
   for (const round of current) byKey.set(roundHistoryKey(round), round);
   for (const round of incoming) byKey.set(roundHistoryKey(round), round);
   return [...byKey.values()]
     .sort(compareRoundHistory)
-    .slice(-MAX_SERVER_ROUND_HISTORY);
+    .slice(-Math.max(1, limit));
 }
 
 function normalizeStoredRoundHistory(value: unknown) {
@@ -4005,6 +5246,114 @@ function compareRoundHistory(a: Round, b: Round) {
 function clampRoundHistoryLimit(value: string | null) {
   const limit = Math.floor(Number(value) || 15_000);
   return Math.min(MAX_SERVER_ROUND_HISTORY, Math.max(1, limit));
+}
+
+function validatorTableId(value: string | null) {
+  const clean = String(value || "bac-bo")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return clean || "bac-bo";
+}
+
+async function fetchStoredValidatorRounds(env: unknown, limit: number, tableId = "bac-bo") {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const rows = await fetchSupabaseRows(
+    env,
+    VALIDATOR_ROUNDS_TABLE,
+    [
+      "select=id,table_id,round_id,result,banker_score,player_score,round_time,created_at",
+      `table_id=eq.${encodeURIComponent(tableId)}`,
+      "order=round_id.desc",
+      `limit=${Math.max(1, Math.min(MAX_SERVER_ROUND_HISTORY, limit))}`,
+    ].join("&"),
+  );
+  return rows
+    .map(storedValidatorRoundFromRow)
+    .filter((round): round is Round => Boolean(round))
+    .sort(compareRoundHistory);
+}
+
+async function persistValidatorRounds(env: unknown, rounds: Round[], tableId = "bac-bo") {
+  if (!rounds.length || !getSupabasePersistenceConfig(env)) return false;
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const round of rounds.slice(-MAX_VALIDATOR_ROUND_WRITE_BATCH)) {
+    const row = storedValidatorRoundToRow(round, tableId);
+    byId.set(readString(row, "id"), row);
+  }
+  const saved = await persistSupabaseRows(env, VALIDATOR_ROUNDS_TABLE, [...byId.values()], "id");
+  if (saved) {
+    void withTimeout(
+      pruneStoredValidatorRounds(env, tableId),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "limpar rodadas antigas do Validador",
+      false,
+    );
+  }
+  return saved;
+}
+
+async function pruneStoredValidatorRounds(env: unknown, tableId = "bac-bo") {
+  const cleanTableId = validatorTableId(tableId);
+  const now = Date.now();
+  const lastPrunedAt = validatorRoundPrunedAt.get(cleanTableId) || 0;
+  if (now - lastPrunedAt < VALIDATOR_ROUND_PRUNE_MIN_INTERVAL_MS) return false;
+  validatorRoundPrunedAt.set(cleanTableId, now);
+
+  const boundaryRows = await fetchSupabaseRowsRange(
+    env,
+    VALIDATOR_ROUNDS_TABLE,
+    [
+      "select=round_id",
+      `table_id=eq.${encodeURIComponent(cleanTableId)}`,
+      "order=round_id.desc",
+    ].join("&"),
+    MAX_SERVER_ROUND_HISTORY - 1,
+    1,
+  );
+  const boundaryRoundId = Math.floor(Number(boundaryRows[0]?.round_id) || 0);
+  if (!boundaryRoundId) return false;
+
+  await deleteSupabaseRows(
+    env,
+    VALIDATOR_ROUNDS_TABLE,
+    `table_id=eq.${encodeURIComponent(cleanTableId)}&round_id=lt.${boundaryRoundId}`,
+  );
+  return true;
+}
+
+function storedValidatorRoundToRow(round: Round, tableId: string) {
+  return {
+    id: validatorRoundStorageId(round, tableId),
+    table_id: tableId,
+    round_id: round.id,
+    result: round.result,
+    banker_score: round.bankerScore,
+    player_score: round.playerScore,
+    round_time: round.time,
+    created_at: new Date().toISOString(),
+  };
+}
+
+function storedValidatorRoundFromRow(row: Record<string, unknown>): Round | null {
+  const result = normalizeRoundResult(row.result);
+  if (!result) return null;
+  const id = Number(row.round_id ?? row.roundId ?? row.id);
+  if (!Number.isFinite(id)) return null;
+  return {
+    id,
+    result,
+    bankerScore: Number(row.banker_score ?? row.bankerScore ?? 0),
+    playerScore: Number(row.player_score ?? row.playerScore ?? 0),
+    time: readString(row, "round_time") || readString(row, "time") || readString(row, "created_at") || "--:--",
+  };
+}
+
+function validatorRoundStorageId(round: Round, tableId: string) {
+  return `${validatorTableId(tableId)}:${round.id}:${round.time}:${round.result}:${round.bankerScore}:${round.playerScore}`
+    .replace(/\s+/g, "_")
+    .slice(0, 260);
 }
 
 function normalizeSignalSide(value: unknown): CurrentSignalSide {
@@ -4062,39 +5411,15 @@ function clampPercent(value: unknown) {
 }
 
 function isDashboardAuthorized(request: Request, _url: URL, env: unknown) {
-  const token =
-    readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", "") ||
-    readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "");
-  const headerToken =
-    request.headers.get("x-sniper-token")?.trim() ||
-    request.headers
-      .get("authorization")
-      ?.replace(/^Bearer\s+/i, "")
-      .trim();
+  const token = readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", "");
+  const headerToken = getBearerToken(request);
   if (token) return headerToken === token;
-  return isLocalDevelopmentRequest(request) && headerToken === LOCAL_DEV_DASHBOARD_TOKEN;
+  return false;
 }
 
 function isLocalDevelopmentRequest(request: Request) {
   const host = new URL(request.url).hostname;
   return host === "localhost" || host === "127.0.0.1" || host === "::1";
-}
-
-function buildLocalDevelopmentAccess(email: string) {
-  const cleanEmail = email.trim().toLowerCase();
-  return {
-    registered: true,
-    approved: true,
-    access_mode: "full",
-    access_status: "local_full",
-    plan: "vip",
-    email: cleanEmail,
-    full_name: cleanEmail ? nameFromEmail(cleanEmail) : "Local Admin",
-    expires_at: LOCAL_DEVELOPMENT_EXPIRES_AT,
-    reason: "Sessao local completa para teste.",
-    client_token: LOCAL_DEV_DASHBOARD_TOKEN,
-    role: "admin",
-  };
 }
 
 async function isDashboardReadAuthorized(request: Request, url: URL, env: unknown) {
@@ -4117,10 +5442,8 @@ async function isDashboardReadAuthorized(request: Request, url: URL, env: unknow
 }
 
 async function getAdminRequestRole(request: Request, env: unknown): Promise<AdminRole | null> {
-  const headerToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const headerToken = getBearerToken(request);
   if (!headerToken) return null;
-  if (headerToken === getAdminToken(env)) return "owner";
-
   const session = await verifySessionToken(env, headerToken);
   if (session?.scope === "owner" && (await sessionMatchesRequestBinding(env, request, session))) {
     return "owner";
@@ -4135,18 +5458,9 @@ async function getAdminRequestRole(request: Request, env: unknown): Promise<Admi
 }
 
 function getBearerToken(request: Request) {
-  return (
-    request.headers
-      .get("authorization")
-      ?.replace(/^Bearer\s+/i, "")
-      .trim() ||
-    request.headers.get("x-sniper-token")?.trim() ||
-    ""
-  );
-}
-
-function getAdminToken(env: unknown) {
-  return readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "");
+  const authorization = request.headers.get("authorization") || "";
+  if (!authorization.trim().toLowerCase().startsWith("bearer ")) return "";
+  return authorization.replace(/^Bearer\s+/i, "").trim();
 }
 
 function getAdminEmails(env: unknown) {
@@ -4176,8 +5490,8 @@ function getAdminRoleForEmail(env: unknown, email: string): AdminRole | null {
   return null;
 }
 
-function getAdminPassword(env: unknown) {
-  return readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD", "");
+function getAdminPasswordHash(env: unknown) {
+  return readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD_HASH", "");
 }
 
 function getMercadoPagoAccessToken(env: unknown) {
@@ -4674,6 +5988,386 @@ function buildPaymentPublic(payment: Record<string, unknown>) {
   };
 }
 
+async function handleAdminCrmRequest(
+  request: Request,
+  url: URL,
+  env: unknown,
+  adminRole: AdminRole,
+) {
+  if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
+
+  if (request.method === "GET" && url.pathname === "/admin/crm") {
+    return json(await loadCrmResponse(env));
+  }
+
+  const match = url.pathname.match(/^\/admin\/crm\/(clients|deals|invoices)(?:\/([^/]+))?$/);
+  if (!match) return json({ error: "Rota CRM nao encontrada." }, 404);
+  if (!getSupabasePersistenceConfig(env)) {
+    return json(
+      {
+        error:
+          "Persistencia CRM nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY antes de salvar.",
+      },
+      503,
+    );
+  }
+
+  const resource = match[1];
+  const resourceId = match[2] ? decodeURIComponent(match[2]) : "";
+  const body = readRecord(await request.json().catch(() => ({})));
+  const actor = adminActorEmailFromRequest(request, env, adminRole);
+
+  if (resource === "clients") {
+    if (request.method === "POST" && !resourceId) {
+      const client = normalizeCrmClientRow(body, actor);
+      if (!client.name || !client.email) {
+        return json({ error: "Nome e e-mail sao obrigatorios." }, 400);
+      }
+      const duplicate = await findCrmClientByEmail(env, client.email);
+      if (duplicate) return json({ error: "Ja existe cliente CRM com esse e-mail." }, 409);
+      const saved = await persistSupabaseRow(env, CRM_CLIENTS_TABLE, crmClientToRow(client, actor));
+      if (!saved) return json({ error: "Nao foi possivel salvar o cliente CRM." }, 503);
+      return json({ client }, 201);
+    }
+
+    if (request.method === "PATCH" && resourceId) {
+      const existing = await loadCrmClientById(env, resourceId);
+      if (!existing) return json({ error: "Cliente CRM nao encontrado." }, 404);
+      const client = normalizeCrmClientRow({ ...existing, ...body, id: resourceId }, actor);
+      if (!client.name || !client.email) {
+        return json({ error: "Nome e e-mail sao obrigatorios." }, 400);
+      }
+      const duplicate = await findCrmClientByEmail(env, client.email);
+      if (duplicate && duplicate.id !== resourceId) {
+        return json({ error: "Ja existe cliente CRM com esse e-mail." }, 409);
+      }
+      const saved = await persistSupabaseRow(env, CRM_CLIENTS_TABLE, crmClientToRow(client, actor));
+      if (!saved) return json({ error: "Nao foi possivel atualizar o cliente CRM." }, 503);
+      return json({ client });
+    }
+
+    if (request.method === "DELETE" && resourceId) {
+      await deleteSupabaseRows(env, CRM_CLIENTS_TABLE, `id=eq.${encodeURIComponent(resourceId)}`);
+      return json({ ok: true });
+    }
+  }
+
+  if (resource === "deals") {
+    if (request.method === "POST" && !resourceId) {
+      const deal = normalizeCrmDealRow(body, actor);
+      if (!deal.clientId || !deal.title) {
+        return json({ error: "Cliente e titulo do negocio sao obrigatorios." }, 400);
+      }
+      const saved = await persistSupabaseRow(env, CRM_DEALS_TABLE, crmDealToRow(deal, actor));
+      if (!saved) return json({ error: "Nao foi possivel salvar o negocio." }, 503);
+      return json({ deal }, 201);
+    }
+
+    if (request.method === "PATCH" && resourceId) {
+      const existing = await loadCrmDealById(env, resourceId);
+      if (!existing) return json({ error: "Negocio nao encontrado." }, 404);
+      const deal = normalizeCrmDealRow({ ...existing, ...body, id: resourceId }, actor);
+      if (!deal.clientId || !deal.title) {
+        return json({ error: "Cliente e titulo do negocio sao obrigatorios." }, 400);
+      }
+      const saved = await persistSupabaseRow(env, CRM_DEALS_TABLE, crmDealToRow(deal, actor));
+      if (!saved) return json({ error: "Nao foi possivel atualizar o negocio." }, 503);
+      return json({ deal });
+    }
+
+    if (request.method === "DELETE" && resourceId) {
+      await deleteSupabaseRows(env, CRM_DEALS_TABLE, `id=eq.${encodeURIComponent(resourceId)}`);
+      return json({ ok: true });
+    }
+  }
+
+  if (resource === "invoices") {
+    if (request.method === "POST" && !resourceId) {
+      const invoice = normalizeCrmInvoiceRow(body, actor);
+      if (!invoice.clientId || !invoice.dueDate) {
+        return json({ error: "Cliente e vencimento da fatura sao obrigatorios." }, 400);
+      }
+      const saved = await persistSupabaseRow(env, CRM_INVOICES_TABLE, crmInvoiceToRow(invoice, actor));
+      if (!saved) return json({ error: "Nao foi possivel salvar a fatura." }, 503);
+      return json({ invoice }, 201);
+    }
+
+    if (request.method === "PATCH" && resourceId) {
+      const existing = await loadCrmInvoiceById(env, resourceId);
+      if (!existing) return json({ error: "Fatura nao encontrada." }, 404);
+      const invoice = normalizeCrmInvoiceRow({ ...existing, ...body, id: resourceId }, actor);
+      if (!invoice.clientId || !invoice.dueDate) {
+        return json({ error: "Cliente e vencimento da fatura sao obrigatorios." }, 400);
+      }
+      const saved = await persistSupabaseRow(
+        env,
+        CRM_INVOICES_TABLE,
+        crmInvoiceToRow(invoice, actor),
+      );
+      if (!saved) return json({ error: "Nao foi possivel atualizar a fatura." }, 503);
+      return json({ invoice });
+    }
+
+    if (request.method === "DELETE" && resourceId) {
+      await deleteSupabaseRows(env, CRM_INVOICES_TABLE, `id=eq.${encodeURIComponent(resourceId)}`);
+      return json({ ok: true });
+    }
+  }
+
+  return json({ error: "Metodo nao permitido." }, 405);
+}
+
+async function loadCrmResponse(env: unknown): Promise<CrmResponse> {
+  const storageConfigured = Boolean(getSupabasePersistenceConfig(env));
+  const [clientRows, dealRows, invoiceRows] = storageConfigured
+    ? await Promise.all([
+        fetchSupabaseRowsPaged(env, CRM_CLIENTS_TABLE, "select=*&order=updated_at.desc.nullslast"),
+        fetchSupabaseRowsPaged(env, CRM_DEALS_TABLE, "select=*&order=updated_at.desc.nullslast"),
+        fetchSupabaseRowsPaged(env, CRM_INVOICES_TABLE, "select=*&order=updated_at.desc.nullslast"),
+      ])
+    : [[], [], []];
+
+  const clients = clientRows.map(crmClientFromRow).filter((client) => client.email);
+  const deals = dealRows.map(crmDealFromRow).filter((deal) => deal.clientId);
+  const invoices = invoiceRows.map(crmInvoiceFromRow).filter((invoice) => invoice.clientId);
+  return {
+    clients,
+    deals,
+    invoices,
+    summary: buildCrmSummary(clients, deals, invoices),
+    storageConfigured,
+  };
+}
+
+async function loadCrmClientById(env: unknown, id: string) {
+  const rows = await fetchSupabaseRows(
+    env,
+    CRM_CLIENTS_TABLE,
+    `select=*&id=eq.${encodeURIComponent(id)}&limit=1`,
+  );
+  return rows[0] ? crmClientFromRow(rows[0]) : null;
+}
+
+async function loadCrmDealById(env: unknown, id: string) {
+  const rows = await fetchSupabaseRows(
+    env,
+    CRM_DEALS_TABLE,
+    `select=*&id=eq.${encodeURIComponent(id)}&limit=1`,
+  );
+  return rows[0] ? crmDealFromRow(rows[0]) : null;
+}
+
+async function loadCrmInvoiceById(env: unknown, id: string) {
+  const rows = await fetchSupabaseRows(
+    env,
+    CRM_INVOICES_TABLE,
+    `select=*&id=eq.${encodeURIComponent(id)}&limit=1`,
+  );
+  return rows[0] ? crmInvoiceFromRow(rows[0]) : null;
+}
+
+async function findCrmClientByEmail(env: unknown, email: string) {
+  const rows = await fetchSupabaseRows(
+    env,
+    CRM_CLIENTS_TABLE,
+    `select=*&email=ilike.${encodeURIComponent(email.trim().toLowerCase())}&limit=1`,
+  );
+  return rows[0] ? crmClientFromRow(rows[0]) : null;
+}
+
+function normalizeCrmClientRow(value: Record<string, unknown>, _actor: string): CrmClient {
+  const now = new Date().toISOString();
+  return {
+    id: readString(value, "id") || crypto.randomUUID(),
+    name: readString(value, "name") || readString(value, "full_name"),
+    email: readString(value, "email").toLowerCase(),
+    phone: readString(value, "phone"),
+    notes: readString(value, "notes"),
+    createdAt: readString(value, "createdAt") || readString(value, "created_at") || now,
+    updatedAt: now,
+  };
+}
+
+function normalizeCrmDealRow(value: Record<string, unknown>, _actor: string): CrmDeal {
+  const now = new Date().toISOString();
+  return {
+    id: readString(value, "id") || crypto.randomUUID(),
+    clientId: readString(value, "clientId") || readString(value, "client_id"),
+    title: readString(value, "title") || "Novo negocio",
+    value: parseCrmMoney(value.value),
+    stage: normalizeCrmDealStage(value.stage),
+    notes: readString(value, "notes"),
+    expectedCloseDate:
+      normalizeCrmDate(readString(value, "expectedCloseDate") || readString(value, "expected_close_date")),
+    createdAt: readString(value, "createdAt") || readString(value, "created_at") || now,
+    updatedAt: now,
+  };
+}
+
+function normalizeCrmInvoiceRow(value: Record<string, unknown>, _actor: string): CrmInvoice {
+  const now = new Date().toISOString();
+  const status = normalizeCrmInvoiceStatus(value.status);
+  return {
+    id: readString(value, "id") || crypto.randomUUID(),
+    clientId: readString(value, "clientId") || readString(value, "client_id"),
+    dealId: readString(value, "dealId") || readString(value, "deal_id"),
+    amount: parseCrmMoney(value.amount),
+    status,
+    dueDate: normalizeCrmDate(readString(value, "dueDate") || readString(value, "due_date")),
+    paidAt: normalizeCrmDate(readString(value, "paidAt") || readString(value, "paid_at")),
+    notes: readString(value, "notes"),
+    createdAt: readString(value, "createdAt") || readString(value, "created_at") || now,
+    updatedAt: now,
+  };
+}
+
+function crmClientFromRow(row: Record<string, unknown>): CrmClient {
+  return {
+    id: readString(row, "id"),
+    name: readString(row, "name"),
+    email: readString(row, "email").toLowerCase(),
+    phone: readString(row, "phone"),
+    notes: readString(row, "notes"),
+    createdAt: readString(row, "created_at") || readString(row, "createdAt"),
+    updatedAt: readString(row, "updated_at") || readString(row, "updatedAt"),
+  };
+}
+
+function crmDealFromRow(row: Record<string, unknown>): CrmDeal {
+  return {
+    id: readString(row, "id"),
+    clientId: readString(row, "client_id") || readString(row, "clientId"),
+    title: readString(row, "title"),
+    value: parseCrmMoney(row.value),
+    stage: normalizeCrmDealStage(row.stage),
+    notes: readString(row, "notes"),
+    expectedCloseDate: normalizeCrmDate(
+      readString(row, "expected_close_date") || readString(row, "expectedCloseDate"),
+    ),
+    createdAt: readString(row, "created_at") || readString(row, "createdAt"),
+    updatedAt: readString(row, "updated_at") || readString(row, "updatedAt"),
+  };
+}
+
+function crmInvoiceFromRow(row: Record<string, unknown>): CrmInvoice {
+  return {
+    id: readString(row, "id"),
+    clientId: readString(row, "client_id") || readString(row, "clientId"),
+    dealId: readString(row, "deal_id") || readString(row, "dealId"),
+    amount: parseCrmMoney(row.amount),
+    status: normalizeCrmInvoiceStatus(row.status),
+    dueDate: normalizeCrmDate(readString(row, "due_date") || readString(row, "dueDate")),
+    paidAt: normalizeCrmDate(readString(row, "paid_at") || readString(row, "paidAt")),
+    notes: readString(row, "notes"),
+    createdAt: readString(row, "created_at") || readString(row, "createdAt"),
+    updatedAt: readString(row, "updated_at") || readString(row, "updatedAt"),
+  };
+}
+
+function crmClientToRow(client: CrmClient, actor: string) {
+  return {
+    id: client.id,
+    name: client.name,
+    email: client.email,
+    phone: client.phone,
+    notes: client.notes,
+    created_at: client.createdAt,
+    updated_at: client.updatedAt,
+    created_by: actor,
+    updated_by: actor,
+  };
+}
+
+function crmDealToRow(deal: CrmDeal, actor: string) {
+  return {
+    id: deal.id,
+    client_id: deal.clientId,
+    title: deal.title,
+    value: deal.value,
+    stage: deal.stage,
+    notes: deal.notes,
+    expected_close_date: deal.expectedCloseDate || null,
+    created_at: deal.createdAt,
+    updated_at: deal.updatedAt,
+    created_by: actor,
+    updated_by: actor,
+  };
+}
+
+function crmInvoiceToRow(invoice: CrmInvoice, actor: string) {
+  return {
+    id: invoice.id,
+    client_id: invoice.clientId,
+    deal_id: invoice.dealId || null,
+    amount: invoice.amount,
+    status: invoice.status,
+    due_date: invoice.dueDate || null,
+    paid_at: invoice.paidAt || null,
+    notes: invoice.notes,
+    created_at: invoice.createdAt,
+    updated_at: invoice.updatedAt,
+    created_by: actor,
+    updated_by: actor,
+  };
+}
+
+function buildCrmSummary(
+  clients: CrmClient[],
+  deals: CrmDeal[],
+  invoices: CrmInvoice[],
+): CrmSummary {
+  const openDeals = deals.filter((deal) => !["ganho", "perdido"].includes(deal.stage));
+  const openInvoices = invoices.filter((invoice) => invoice.status === "aberta");
+  const overdueInvoices = invoices.filter((invoice) => {
+    if (invoice.status === "vencida") return true;
+    if (invoice.status !== "aberta" || !invoice.dueDate) return false;
+    return new Date(`${invoice.dueDate}T23:59:59`).getTime() < Date.now();
+  });
+  const paidInvoices = invoices.filter((invoice) => invoice.status === "paga");
+  return {
+    clients: clients.length,
+    openDeals: openDeals.length,
+    openDealValue: sumCrmMoney(openDeals.map((deal) => deal.value)),
+    openInvoices: openInvoices.length,
+    overdueInvoices: overdueInvoices.length,
+    paidInvoiceValue: sumCrmMoney(paidInvoices.map((invoice) => invoice.amount)),
+    openInvoiceValue: sumCrmMoney(openInvoices.map((invoice) => invoice.amount)),
+  };
+}
+
+function normalizeCrmDealStage(value: unknown): CrmDealStage {
+  const text = String(value || "").toLowerCase();
+  if (["novo", "contato", "negociacao", "ganho", "perdido"].includes(text)) {
+    return text as CrmDealStage;
+  }
+  return "novo";
+}
+
+function normalizeCrmInvoiceStatus(value: unknown): CrmInvoiceStatus {
+  const text = String(value || "").toLowerCase();
+  if (["aberta", "paga", "vencida", "cancelada"].includes(text)) {
+    return text as CrmInvoiceStatus;
+  }
+  return "aberta";
+}
+
+function normalizeCrmDate(value: string) {
+  const text = value.trim();
+  if (!text) return "";
+  const date = new Date(text.includes("T") ? text : `${text}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function parseCrmMoney(value: unknown) {
+  const numeric = Number(String(value ?? "0").replace(/\./g, "").replace(",", ".").trim());
+  return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric * 100) / 100) : 0;
+}
+
+function sumCrmMoney(values: number[]) {
+  return Math.round(values.reduce((total, value) => total + value, 0) * 100) / 100;
+}
+
 async function hydrateClientFromBilling(env: unknown, email: string) {
   const client = await loadBillingClientByEmail(env, email);
   if (!client) return null;
@@ -5036,12 +6730,19 @@ async function fetchSupabaseRowsRange(
   }
 }
 
-async function persistSupabaseRow(env: unknown, table: string, row: Record<string, unknown>) {
+async function persistSupabaseRow(
+  env: unknown,
+  table: string,
+  row: Record<string, unknown>,
+  onConflict = "id",
+) {
   const config = getSupabasePersistenceConfig(env);
   if (!config || Object.keys(row).length === 0) return false;
 
   try {
-    const response = await fetch(`${config.url}/rest/v1/${table}`, {
+    const response = await fetch(
+      `${config.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,
+      {
       method: "POST",
       headers: {
         ...supabasePersistenceHeaders(config.key),
@@ -5049,7 +6750,8 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
         Prefer: "resolution=merge-duplicates,return=minimal",
       },
       body: JSON.stringify(row),
-    });
+      },
+    );
     if (!response.ok && response.status !== 404) {
       console.warn(`Não foi possível salvar ${table} (${response.status}).`);
       return false;
@@ -5057,6 +6759,40 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
     return response.ok;
   } catch (error) {
     console.warn(`Não foi possível salvar ${table}.`, error);
+    return false;
+  }
+}
+
+async function persistSupabaseRows(
+  env: unknown,
+  table: string,
+  rows: Record<string, unknown>[],
+  onConflict = "id",
+) {
+  const config = getSupabasePersistenceConfig(env);
+  const payload = rows.filter((row) => Object.keys(row).length > 0);
+  if (!config || !payload.length) return false;
+
+  try {
+    const response = await fetch(
+      `${config.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,
+      {
+        method: "POST",
+        headers: {
+          ...supabasePersistenceHeaders(config.key),
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (!response.ok && response.status !== 404) {
+      console.warn(`NÃ£o foi possÃ­vel salvar lote em ${table} (${response.status}).`);
+      return false;
+    }
+    return response.ok;
+  } catch (error) {
+    console.warn(`NÃ£o foi possÃ­vel salvar lote em ${table}.`, error);
     return false;
   }
 }
@@ -5556,6 +7292,7 @@ async function ownerAccess(env: unknown, email: string, request?: Request) {
     {
       email,
       scope: "owner",
+      role: "admin",
       plan: "vip",
       approved: true,
       sid: crypto.randomUUID(),
@@ -5588,6 +7325,7 @@ async function approverAccess(env: unknown, email: string, request?: Request) {
     {
       email,
       scope: "admin_approver",
+      role: "admin",
       plan: "free",
       approved: false,
       sid: crypto.randomUUID(),
@@ -5681,6 +7419,7 @@ async function clientAccess(
     {
       email,
       scope: "client",
+      role: "user",
       plan,
       approved,
       sid: sessionId,
@@ -6521,7 +8260,6 @@ function normalizeAdminAction(value: string): AdminActionType {
 
 function adminActorEmailFromRequest(request: Request, env: unknown, role: AdminRole) {
   const token = getBearerToken(request);
-  if (token === getAdminToken(env)) return role;
   const payload = decodeJwtPayload(token);
   return readString(payload, "email").toLowerCase() || role;
 }
@@ -6792,6 +8530,10 @@ function readString(record: Record<string, unknown>, key: string) {
   return String(record[key] || "").trim();
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error || "");
+}
+
 function readBooleanField(record: Record<string, unknown>, key: string) {
   const value = record[key];
   if (typeof value === "boolean") return value;
@@ -6863,22 +8605,43 @@ function liveStateCacheRequest() {
 }
 
 async function loadLiveState(env: unknown) {
+  const now = Date.now();
+  if (liveStateLoadedAt && now - liveStateLoadedAt < LIVE_STATE_LOAD_MIN_INTERVAL_MS) {
+    return;
+  }
+  if (liveStateLoadPromise) {
+    await liveStateLoadPromise;
+    return;
+  }
+
+  liveStateLoadPromise = loadLiveStateFresh(env).finally(() => {
+    liveStateLoadPromise = null;
+  });
+  await liveStateLoadPromise;
+}
+
+async function loadLiveStateFresh(env: unknown) {
   const currentSalesSettings = liveSalesSettings;
   const currentSiteContentSettings = liveSiteContentSettings;
-  const [durableState, cacheState] = await Promise.all([
-    loadDurableLiveState(env),
-    loadLiveStateCache(),
-  ]);
-  const state = mergeLiveStates(durableState, cacheState);
-  if (state) {
-    applyLiveState(state);
-    if (isSalesSettingsNewer(currentSalesSettings, liveSalesSettings)) {
-      liveSalesSettings = currentSalesSettings;
+  try {
+    const [durableState, cacheState] = await withTimeout(
+      Promise.all([loadDurableLiveState(env), loadLiveStateCache()]),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "carregar estado vivo",
+      [null, null] as [Record<string, unknown> | null, Record<string, unknown> | null],
+    );
+    const state = mergeLiveStates(durableState, cacheState);
+    if (state) {
+      applyLiveState(state);
+      if (isSalesSettingsNewer(currentSalesSettings, liveSalesSettings)) {
+        liveSalesSettings = currentSalesSettings;
+      }
+      if (isSiteContentSettingsNewer(currentSiteContentSettings, liveSiteContentSettings)) {
+        liveSiteContentSettings = currentSiteContentSettings;
+      }
     }
-    if (isSiteContentSettingsNewer(currentSiteContentSettings, liveSiteContentSettings)) {
-      liveSiteContentSettings = currentSiteContentSettings;
-    }
-    await saveLiveState(env);
+  } finally {
+    liveStateLoadedAt = Date.now();
   }
 }
 
@@ -6887,7 +8650,12 @@ async function loadLiveStateCache() {
   if (!cache) return null;
 
   try {
-    const response = await cache.match(liveStateCacheRequest());
+    const response = await withTimeout(
+      cache.match(liveStateCacheRequest()),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "carregar cache de estado vivo",
+      undefined,
+    );
     if (!response) return null;
 
     return readRecord(await response.json().catch(() => null));
@@ -6907,6 +8675,25 @@ function applyLiveState(state: Record<string, unknown>) {
     liveValidatorRoundHistory = normalizeStoredRoundHistory(state.validatorRoundHistory);
   }
 
+  if (Array.isArray(state.validatorPatterns)) {
+    liveValidatorPatterns = state.validatorPatterns
+      .map((pattern) => normalizeServerSavedPattern(pattern, readString(readRecord(pattern), "userId")))
+      .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
+  }
+
+  if (Array.isArray(state.validatorChannels)) {
+    liveValidatorChannels = state.validatorChannels
+      .map((channel) => normalizeServerNotificationChannel(channel, readString(readRecord(channel), "userId")))
+      .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
+  }
+
+  if (Array.isArray(state.validatorNotifications)) {
+    liveValidatorNotifications = state.validatorNotifications
+      .map(readRecord)
+      .filter((entry) => Object.keys(entry).length > 0)
+      .slice(0, 1000);
+  }
+
   if (Array.isArray(state.recipients)) {
     liveRecipients = state.recipients
       .map(readRecord)
@@ -6914,7 +8701,9 @@ function applyLiveState(state: Record<string, unknown>) {
   }
 
   if (Array.isArray(state.clients)) {
-    liveClients = state.clients.map(readRecord).filter((client) => Object.keys(client).length > 0);
+    liveClients = state.clients
+      .map((client) => removeLegacyPassword(readRecord(client)))
+      .filter((client) => Object.keys(client).length > 0);
   }
 
   if (Array.isArray(state.accessEvents)) {
@@ -7006,10 +8795,26 @@ function mergeLiveStates(
     ...cache,
     ...durable,
     dashboard: pickDashboardState(durable.dashboard, cache.dashboard),
-    validatorRoundHistory: mergeRoundHistory(
+    validatorRoundHistory: mergeMonitorRoundHistory(
       normalizeStoredRoundHistory(cache.validatorRoundHistory),
       normalizeStoredRoundHistory(durable.validatorRoundHistory),
     ),
+    validatorPatterns: mergeEntityStateArrays(
+      durable.validatorPatterns,
+      cache.validatorPatterns,
+      durableSavedAt,
+      cacheSavedAt,
+    ),
+    validatorChannels: mergeEntityStateArrays(
+      durable.validatorChannels,
+      cache.validatorChannels,
+      durableSavedAt,
+      cacheSavedAt,
+    ),
+    validatorNotifications: mergeStateArrays(
+      durable.validatorNotifications,
+      cache.validatorNotifications,
+    ).slice(0, 1000),
     recipients: filterDeletedEntityRows(
       mergeEntityStateArrays(
         durable.recipients,
@@ -7375,12 +9180,16 @@ function stateSavedAtMs(state: Record<string, unknown>) {
   return Number.isFinite(savedAt) ? savedAt : 0;
 }
 
-function buildLiveStateSnapshot() {
+function buildLiveStateSnapshot(env?: unknown) {
+  const validatorUsesDedicatedTables = Boolean(getSupabasePersistenceConfig(env));
   return {
     dashboard: liveDashboardData,
-    validatorRoundHistory: liveValidatorRoundHistory,
+    validatorRoundHistory: liveValidatorRoundHistory.slice(-MAX_MONITOR_ROUND_HISTORY),
+    validatorPatterns: validatorUsesDedicatedTables ? [] : liveValidatorPatterns,
+    validatorChannels: validatorUsesDedicatedTables ? [] : liveValidatorChannels,
+    validatorNotifications: validatorUsesDedicatedTables ? [] : liveValidatorNotifications.slice(0, 1000),
     recipients: liveRecipients,
-    clients: liveClients,
+    clients: liveClients.map(removeLegacyPassword),
     accessEvents: liveAccessEvents,
     subscriptions: liveSubscriptions,
     payments: livePayments,
@@ -7397,7 +9206,15 @@ function buildLiveStateSnapshot() {
 }
 
 async function saveLiveState(env: unknown): Promise<LiveStateSaveStatus> {
-  const state = buildLiveStateSnapshot();
+  if (liveStateSavePromise) return liveStateSavePromise;
+  liveStateSavePromise = saveLiveStateNow(env).finally(() => {
+    liveStateSavePromise = null;
+  });
+  return liveStateSavePromise;
+}
+
+async function saveLiveStateNow(env: unknown): Promise<LiveStateSaveStatus> {
+  const state = buildLiveStateSnapshot(env);
   const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
   const [durableResult, cacheResult] = await Promise.allSettled([
     saveDurableLiveState(env, state),
@@ -7409,6 +9226,7 @@ async function saveLiveState(env: unknown): Promise<LiveStateSaveStatus> {
     durableConfigured,
     saved_at: new Date().toISOString(),
   };
+  liveStateLoadedAt = Date.now();
   return liveStateSaveStatus;
 }
 
@@ -7422,7 +9240,8 @@ async function saveLiveStateCache(state: Record<string, unknown>) {
       new Response(JSON.stringify(state), {
         headers: {
           "content-type": "application/json; charset=utf-8",
-          "cache-control": "public, max-age=31536000",
+          "cache-control": "no-store, no-cache, must-revalidate",
+          pragma: "no-cache",
         },
       }),
     );
@@ -7436,12 +9255,15 @@ async function saveLiveStateCache(state: Record<string, unknown>) {
 async function loadDurableLiveState(env: unknown) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
 
   try {
     const response = await fetch(
       `${config.url}/rest/v1/${LIVE_STATE_TABLE}?id=eq.${encodeURIComponent(LIVE_STATE_ID)}&select=state`,
       {
         headers: supabasePersistenceHeaders(config.key),
+        signal: controller.signal,
       },
     );
     if (response.status === 404 || response.status === 406) return null;
@@ -7457,12 +9279,16 @@ async function loadDurableLiveState(env: unknown) {
   } catch (error) {
     console.warn("Não foi possível carregar estado durável.", error);
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
 async function saveDurableLiveState(env: unknown, state: Record<string, unknown>) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${config.url}/rest/v1/${LIVE_STATE_TABLE}?on_conflict=id`, {
@@ -7477,6 +9303,7 @@ async function saveDurableLiveState(env: unknown, state: Record<string, unknown>
         state,
         updated_at: new Date().toISOString(),
       }),
+      signal: controller.signal,
     });
     if (!response.ok) {
       console.warn(`Não foi possível salvar estado durável (${response.status}).`);
@@ -7486,6 +9313,32 @@ async function saveDurableLiveState(env: unknown, state: Record<string, unknown>
   } catch (error) {
     console.warn("Não foi possível salvar estado durável.", error);
     return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  fallback: T,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timeout = setTimeout(() => {
+      console.warn(`${label} excedeu ${timeoutMs}ms; seguindo com fallback.`);
+      resolve(fallback);
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } catch (error) {
+    console.warn(`${label} falhou.`, error);
+    return fallback;
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -7752,14 +9605,13 @@ function json(data: unknown, status = 200) {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
       "access-control-allow-headers":
-        "Content-Type,Authorization,x-sniper-token,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
+        "Content-Type,Authorization,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
     },
   });
 }
 
-// ===== Password hashing (PBKDF2 via Web Crypto) =====
-const PBKDF2_ITERATIONS = 100_000;
-const PBKDF2_KEYLEN = 32;
+// ===== Password hashing (bcrypt) =====
+const BCRYPT_ROUNDS = 12;
 
 function bytesToB64Url(bytes: Uint8Array) {
   let str = "";
@@ -7790,27 +9642,27 @@ function constantTimeStringEqual(left: string, right: string) {
 }
 
 export async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
-    key,
-    PBKDF2_KEYLEN * 8,
-  );
-  return `pbkdf2$${PBKDF2_ITERATIONS}$${bytesToB64Url(salt)}$${bytesToB64Url(new Uint8Array(bits))}`;
+  return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  if (!stored || !stored.startsWith("pbkdf2$")) return false;
+  if (!stored) return false;
+  if (stored.startsWith("$2a$") || stored.startsWith("$2b$") || stored.startsWith("$2y$")) {
+    return bcrypt.compare(password, stored);
+  }
+  return verifyLegacyPbkdf2Password(password, stored);
+}
+
+function passwordHashNeedsUpgrade(stored: string) {
+  return !stored.startsWith("$2a$") && !stored.startsWith("$2b$") && !stored.startsWith("$2y$");
+}
+
+async function verifyLegacyPbkdf2Password(password: string, stored: string): Promise<boolean> {
+  if (!stored.startsWith("pbkdf2$")) return false;
   const parts = stored.split("$");
   if (parts.length !== 4) return false;
-  const iterations = Number(parts[1]) || PBKDF2_ITERATIONS;
+  const iterations = Number(parts[1]);
+  if (!Number.isFinite(iterations) || iterations < 100_000) return false;
   const salt = b64UrlToBytes(parts[2]);
   const expected = b64UrlToBytes(parts[3]);
   const key = await crypto.subtle.importKey(
@@ -7832,6 +9684,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 type SessionPayload = {
   email: string;
   scope: "client" | "owner" | "admin_approver";
+  role: "admin" | "user";
   plan: string;
   approved: boolean;
   sid?: string;
@@ -7841,11 +9694,7 @@ type SessionPayload = {
 };
 
 function getSessionSecret(env: unknown): string {
-  // Prefer dedicated secret; fall back to admin token only as keying material.
-  return (
-    readNamedServerSecret(env, "SNIPER_SESSION_SECRET", "") ||
-    readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", "")
-  );
+  return readNamedServerSecret(env, "SNIPER_SESSION_SECRET", "");
 }
 
 async function hmacSign(secret: string, data: string): Promise<Uint8Array> {
@@ -7889,6 +9738,11 @@ export async function verifySessionToken(
   try {
     const decoded = JSON.parse(new TextDecoder().decode(b64UrlToBytes(body))) as SessionPayload;
     if (!decoded.exp || decoded.exp < Math.floor(Date.now() / 1000)) return null;
+    if (decoded.role !== "admin" && decoded.role !== "user") return null;
+    if (decoded.scope === "client" && decoded.role !== "user") return null;
+    if ((decoded.scope === "owner" || decoded.scope === "admin_approver") && decoded.role !== "admin") {
+      return null;
+    }
     return decoded;
   } catch {
     return null;

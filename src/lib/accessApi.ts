@@ -1,8 +1,6 @@
 import { getInitialApiUrl } from "@/lib/adminApi";
 import { readUserSession, saveUserSession, type UserSession } from "@/lib/userSession";
 
-const LOCAL_DEVELOPMENT_EXPIRES_AT = "2099-12-31T23:59:59.000Z";
-
 export interface ClientAccess {
   registered: boolean;
   approved: boolean;
@@ -110,9 +108,10 @@ export async function refreshAccessSession() {
   const session = readUserSession();
   if (!session.clientToken) return null;
 
-  const data = await publicRequest<{ valid: boolean; access?: ClientAccess }>("/auth/verify", {
-    token: session.clientToken,
-    email: session.email,
+  const data = await apiRequest<{ valid: boolean; access?: ClientAccess }>("/auth/verify", {
+    method: "POST",
+    authenticated: true,
+    body: { email: session.email },
   });
   if (!data.valid || !data.access) return null;
 
@@ -218,9 +217,6 @@ async function apiRequest<T>(
     } catch {
       message = text;
     }
-    if (shouldUseLocalAuthFallback(path, response.status, message)) {
-      return buildLocalAuthResponse<T>(path, init.body ?? {});
-    }
     throw new Error(message || "Não foi possível validar o acesso.");
   }
   return (await response.json()) as T;
@@ -231,49 +227,6 @@ function publicApiBaseUrl() {
     return window.location.origin;
   }
   return normalizeBaseUrl(getInitialApiUrl());
-}
-
-function shouldUseLocalAuthFallback(path: string, status: number, message: string) {
-  const normalizedMessage = normalizeMessage(message);
-  return (
-    isLocalFrontend() &&
-    path.startsWith("/auth/") &&
-    status === 503 &&
-    normalizedMessage.includes("sessao nao configurada")
-  );
-}
-
-function buildLocalAuthResponse<T>(path: string, body: Record<string, unknown>) {
-  const access = buildLocalAccess(body);
-  if (path === "/auth/verify") {
-    return { valid: true, access } as T;
-  }
-  return { access } as T;
-}
-
-function buildLocalAccess(body: Record<string, unknown>): ClientAccess {
-  const email = String(body.email || "").trim().toLowerCase();
-  const name = email.split("@")[0]?.replace(/[._-]+/g, " ") || "Cliente";
-  return {
-    registered: true,
-    approved: true,
-    access_mode: "full",
-    access_status: "local_full",
-    plan: "vip",
-    email,
-    full_name: name,
-    expires_at: LOCAL_DEVELOPMENT_EXPIRES_AT,
-    reason: "Sessao local completa para teste.",
-    client_token: "sniper-local-admin-token",
-    role: "admin",
-  };
-}
-
-function normalizeMessage(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
 }
 
 function isLocalFrontend() {

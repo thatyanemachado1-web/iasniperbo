@@ -196,6 +196,24 @@
     min-width: 0;
     max-width: 100%;
   }
+  .crm-input {
+    width: 100%;
+    border-radius: 0.75rem;
+    border: 1px solid color-mix(in oklch, var(--border) 76%, var(--neon-cyan) 24%);
+    background: color-mix(in oklch, var(--background) 82%, black 18%);
+    padding: 0.75rem 0.85rem;
+    color: var(--foreground);
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  }
+  .crm-input:focus {
+    border-color: color-mix(in oklch, var(--neon-cyan) 70%, white 30%);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--neon-cyan) 16%, transparent);
+  }
+  .crm-input::placeholder {
+    color: var(--muted-foreground);
+  }
   .bg-app {
     background:
       radial-gradient(ellipse 80% 60% at 50% -10%, color-mix(in oklab, var(--neon-purple) 18%, transparent), transparent 60%),

@@ -9,7 +9,6 @@ import { buildNumeroPaganteNeural } from "@/utils/numeroPaganteNeural";
 
 const LIVE_REFETCH_INTERVAL_MS = 1_500;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
-const LOCAL_DEV_DASHBOARD_TOKEN = "sniper-local-admin-token";
 const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
 const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v2";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
@@ -104,18 +103,11 @@ function defaultDashboardUrl() {
   return `${window.location.origin}/dashboard`;
 }
 
-function localDevDashboardToken() {
-  if (typeof window === "undefined") return "";
-  return ["127.0.0.1", "localhost"].includes(window.location.hostname)
-    ? LOCAL_DEV_DASHBOARD_TOKEN
-    : "";
-}
-
 async function fetchDashboardData(): Promise<DashboardData> {
   const url = configuredDashboardUrl();
   const userSession = readUserSession();
   const adminSession = readAdminSession();
-  const token = adminSession?.token || userSession.clientToken || localDevDashboardToken();
+  const token = adminSession?.token || userSession.clientToken;
   const response = await fetch(url, {
     cache: "no-store",
     headers: {

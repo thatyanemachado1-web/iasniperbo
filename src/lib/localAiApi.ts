@@ -1,5 +1,5 @@
 import { readAdminSession } from "@/lib/adminApi";
-import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { readUserSession } from "@/lib/userSession";
 import type { AdaptiveStrategySnapshot } from "@/types/adaptiveStrategy";
 
 export type LocalAiEvent =
@@ -65,15 +65,8 @@ function localAiUrl() {
 
 function authHeaders() {
   const admin = readAdminSession();
-  if (admin?.token) return { Authorization: `Bearer ${admin.token}`, "x-sniper-token": admin.token };
+  if (admin?.token) return { Authorization: `Bearer ${admin.token}` };
   const user = readUserSession();
   if (user.clientToken) return { Authorization: `Bearer ${user.clientToken}` };
-  if (hasFullAccess(user)) return { Authorization: "Bearer sniper-local-admin-token" };
-  if (
-    typeof window !== "undefined" &&
-    ["localhost", "127.0.0.1"].includes(window.location.hostname)
-  ) {
-    return { Authorization: "Bearer sniper-local-admin-token" };
-  }
   return {};
 }

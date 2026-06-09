@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readAdminSession } from "@/lib/adminApi";
 import { requestLocalAiCommentary } from "@/lib/localAiApi";
-import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { readUserSession } from "@/lib/userSession";
 import { readVoiceResponseError } from "@/lib/voiceApiError";
 import type { AdaptiveStrategySnapshot } from "@/types/adaptiveStrategy";
 import type { DashboardData } from "@/types/dashboard";
@@ -172,7 +172,7 @@ export function useVoiceAssistant(
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}`, "x-sniper-token": token } : {}),
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({
             text,
@@ -450,13 +450,6 @@ function readVoiceAuthToken() {
 
   const userSession = readUserSession();
   if (userSession.clientToken) return userSession.clientToken;
-  if (hasFullAccess(userSession)) return "sniper-local-admin-token";
-  if (
-    typeof window !== "undefined" &&
-    ["127.0.0.1", "localhost"].includes(window.location.hostname)
-  ) {
-    return "sniper-local-admin-token";
-  }
   return "";
 }
 

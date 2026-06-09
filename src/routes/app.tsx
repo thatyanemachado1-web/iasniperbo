@@ -2,7 +2,7 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
-import { hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
+import { clearUserSession, hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app")({
   component: ProtectedAppRoute,
@@ -20,14 +20,16 @@ function ProtectedAppRoute() {
     pathname.startsWith("/app/assinatura") ||
     pathname.startsWith("/app/pagamentos");
   const isOwner = isAdminOwnerEmail(session.email);
-  const isAdminUser = session.role === "admin" || session.role === "owner" || isOwner;
-  const fullAccess = hasFullAccess(session);
-  const canOpenApp = session.registered || isOwner;
+  const hasBackendSession = Boolean(session.clientToken);
+  const isAdminUser = hasBackendSession && (session.role === "admin" || session.role === "owner" || isOwner);
+  const fullAccess = hasBackendSession && hasFullAccess(session);
+  const canOpenApp = hasBackendSession && session.registered;
   const demoExpired = session.accessMode === "demo" && isExpiredAt(session.expiresAt);
   const canOpenDashboard =
-    fullAccess ||
-    (session.accessMode === "demo" && !demoExpired) ||
-    (session.registered && session.accessMode === "pending");
+    hasBackendSession &&
+    (fullAccess ||
+      (session.accessMode === "demo" && !demoExpired) ||
+      (session.registered && session.accessMode === "pending"));
 
   useEffect(() => {
     let active = true;
@@ -103,7 +105,8 @@ function ProtectedAppRoute() {
           window.location.reload();
         }
       } catch {
-        // Keep the current local session if the lightweight refresh fails.
+        clearUserSession();
+        if (!stopped) window.location.reload();
       } finally {
         refreshing = false;
       }

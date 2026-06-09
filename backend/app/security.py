@@ -1,8 +1,8 @@
 import hashlib
 import hmac
-import os
 from datetime import date, datetime, timedelta, timezone
 
+import bcrypt
 import jwt
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import desc, select
@@ -47,17 +47,31 @@ def clean_secret(value: str) -> str:
 
 
 def hash_password(password: str) -> str:
-    salt = os.urandom(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
-    return f"pbkdf2_sha256$120000${salt.hex()}${digest.hex()}"
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
+    if not stored_hash:
+        return False
+    if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+    return verify_legacy_pbkdf2_password(password, stored_hash)
+
+
+def password_hash_needs_upgrade(stored_hash: str) -> bool:
+    return not stored_hash.startswith(("$2a$", "$2b$", "$2y$"))
+
+
+def verify_legacy_pbkdf2_password(password: str, stored_hash: str) -> bool:
     try:
         algorithm, iterations_text, salt_hex, digest_hex = stored_hash.split("$", 3)
         if algorithm != "pbkdf2_sha256":
             return False
         iterations = int(iterations_text)
+        if iterations < 120_000:
+            return False
+        import hashlib
+
         salt = bytes.fromhex(salt_hex)
         expected = bytes.fromhex(digest_hex)
     except (ValueError, TypeError):

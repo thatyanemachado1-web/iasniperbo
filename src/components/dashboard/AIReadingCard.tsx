@@ -6,7 +6,7 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { BrainAI } from "@/components/brand/BrainAI";
 import { generateAIReading, type AIReadingSnapshot } from "@/lib/aiReader.functions";
 import { readAdminSession } from "@/lib/adminApi";
-import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { readUserSession } from "@/lib/userSession";
 import { readVoiceResponseError } from "@/lib/voiceApiError";
 import type { DashboardData } from "@/types/dashboard";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
@@ -206,7 +206,6 @@ export function AIReadingCard({ data, mode }: Props) {
         };
         if (token) {
           headers.Authorization = `Bearer ${token}`;
-          headers["x-sniper-token"] = token;
         }
 
         const controller = new AbortController();
@@ -419,15 +418,6 @@ function readVoiceAuthToken() {
 
   const userSession = readUserSession();
   if (userSession.clientToken) return userSession.clientToken;
-  if (hasFullAccess(userSession)) return "sniper-local-admin-token";
-
-  if (
-    typeof window !== "undefined" &&
-    ["127.0.0.1", "localhost"].includes(window.location.hostname)
-  ) {
-    return "sniper-local-admin-token";
-  }
-
   return "";
 }
 

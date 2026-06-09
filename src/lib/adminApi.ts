@@ -12,6 +12,7 @@ import type {
   AdminPanelOverview,
   AdminUsersResponse,
 } from "@/types/adminPanel";
+import type { CrmClient, CrmDeal, CrmInvoice, CrmResponse } from "@/types/crm";
 import type { ModuleToggles } from "@/types/dashboard";
 import type { SalesSettings } from "@/lib/accessApi";
 import type { AnnouncementTone, SiteContentSettings } from "@/lib/siteContent";
@@ -254,6 +255,100 @@ export async function getAdminSummary(session: AdminSession) {
 
 export async function listAdminUsers(session: AdminSession) {
   return request<AdminUsersResponse>(session, "/admin/users");
+}
+
+export async function getAdminCrm(session: AdminSession) {
+  return request<CrmResponse>(session, "/admin/crm");
+}
+
+export async function createCrmClient(session: AdminSession, payload: Partial<CrmClient>) {
+  const data = await request<{ client: CrmClient }>(session, "/admin/crm/clients", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.client;
+}
+
+export async function updateCrmClient(
+  session: AdminSession,
+  clientId: string,
+  payload: Partial<CrmClient>,
+) {
+  const data = await request<{ client: CrmClient }>(
+    session,
+    `/admin/crm/clients/${encodeURIComponent(clientId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+  return data.client;
+}
+
+export async function deleteCrmClient(session: AdminSession, clientId: string) {
+  await request<{ ok: boolean }>(session, `/admin/crm/clients/${encodeURIComponent(clientId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createCrmDeal(session: AdminSession, payload: Partial<CrmDeal>) {
+  const data = await request<{ deal: CrmDeal }>(session, "/admin/crm/deals", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.deal;
+}
+
+export async function updateCrmDeal(
+  session: AdminSession,
+  dealId: string,
+  payload: Partial<CrmDeal>,
+) {
+  const data = await request<{ deal: CrmDeal }>(
+    session,
+    `/admin/crm/deals/${encodeURIComponent(dealId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+  return data.deal;
+}
+
+export async function deleteCrmDeal(session: AdminSession, dealId: string) {
+  await request<{ ok: boolean }>(session, `/admin/crm/deals/${encodeURIComponent(dealId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function createCrmInvoice(session: AdminSession, payload: Partial<CrmInvoice>) {
+  const data = await request<{ invoice: CrmInvoice }>(session, "/admin/crm/invoices", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.invoice;
+}
+
+export async function updateCrmInvoice(
+  session: AdminSession,
+  invoiceId: string,
+  payload: Partial<CrmInvoice>,
+) {
+  const data = await request<{ invoice: CrmInvoice }>(
+    session,
+    `/admin/crm/invoices/${encodeURIComponent(invoiceId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+  return data.invoice;
+}
+
+export async function deleteCrmInvoice(session: AdminSession, invoiceId: string) {
+  await request<{ ok: boolean }>(session, `/admin/crm/invoices/${encodeURIComponent(invoiceId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function getAdminPanelOverview(session: AdminSession) {

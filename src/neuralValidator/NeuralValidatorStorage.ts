@@ -68,14 +68,16 @@ export function removeSavedPattern(patternId: string) {
 }
 
 export function readNotificationChannels() {
-  return readUserList<ValidatorNotificationChannel>(CHANNELS_KEY).map((channel) => ({
-    ...channel,
-    templates: { ...DEFAULT_MESSAGE_TEMPLATES, ...channel.templates },
-  }));
+  const channels = readUserList<ValidatorNotificationChannel>(CHANNELS_KEY);
+  const sanitized = channels.map(sanitizeNotificationChannel);
+  if (channels.some((channel, index) => channel.botTokenEncoded !== sanitized[index]?.botTokenEncoded)) {
+    writeNotificationChannels(sanitized);
+  }
+  return sanitized;
 }
 
 export function writeNotificationChannels(channels: ValidatorNotificationChannel[]) {
-  writeUserList(CHANNELS_KEY, channels);
+  writeUserList(CHANNELS_KEY, channels.map(sanitizeNotificationChannel));
 }
 
 export function upsertNotificationChannel(channel: ValidatorNotificationChannel) {
@@ -133,6 +135,14 @@ export function decodeToken(encoded: string) {
   } catch {
     return "";
   }
+}
+
+function sanitizeNotificationChannel(channel: ValidatorNotificationChannel): ValidatorNotificationChannel {
+  return {
+    ...channel,
+    botTokenEncoded: "",
+    templates: { ...DEFAULT_MESSAGE_TEMPLATES, ...channel.templates },
+  };
 }
 
 function readUserList<T>(key: string): T[] {
