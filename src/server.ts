@@ -2794,17 +2794,12 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     const pattern = liveValidatorPatterns.find((item) => item.userId === userId && item.id === patternId);
     if (!pattern) return json({ error: "Padrao nao encontrado." }, 404);
     if (!pattern.isActive) return json({ error: "Padrao inativo." }, 400);
-    if (pattern.destination !== "telegram" && pattern.destination !== "site_telegram") {
-      return json({ error: "Padrao nao esta configurado para Telegram." }, 400);
+    if (!validatorPatternAllowsTelegramForward(pattern)) {
+      return json({ error: "Padrao esta em monitorar/desativado." }, 400);
     }
 
-    const channel = liveValidatorChannels.find(
-      (item) => item.userId === userId && item.id === pattern.telegramChannelId,
-    );
-    if (!channel || !channel.isActive) return json({ error: "Canal Telegram inativo ou nao encontrado." }, 400);
-    if (!channel.chatId || !decodeServerToken(channel.botTokenEncoded)) {
-      return json({ error: "Canal Telegram sem token ou Chat ID." }, 400);
-    }
+    const channel = findValidatorTelegramChannelForPattern(pattern);
+    if (!channel) return json({ error: "Nenhum canal Telegram ativo com token e Chat ID." }, 400);
 
     const roundId = detectedRoundId || Date.now();
     const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${roundId}`;
@@ -3422,11 +3417,9 @@ async function processValidatorLiveMonitoring(
     pattern.updatedAt = detectedAt;
     changed = true;
 
-    if (pattern.destination !== "telegram" && pattern.destination !== "site_telegram") continue;
-    const channel = liveValidatorChannels.find(
-      (item) => item.userId === pattern.userId && item.id === pattern.telegramChannelId,
-    );
-    if (!channel || !channel.isActive) continue;
+    if (!validatorPatternAllowsTelegramForward(pattern)) continue;
+    const channel = findValidatorTelegramChannelForPattern(pattern);
+    if (!channel) continue;
     entryChannelKeys.add(validatorChannelKey(channel));
     const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${latestRound.id}`;
     if (validatorNotificationAlreadySent(notificationKey)) continue;
@@ -3472,6 +3465,21 @@ function shouldMonitorValidatorPattern(pattern: SavedValidatorPattern, latestRou
 
 function validatorNotificationAlreadySent(key: string) {
   return liveValidatorNotifications.some((item) => readString(item, "id") === key && readString(item, "status") === "sent");
+}
+
+function validatorPatternAllowsTelegramForward(pattern: SavedValidatorPattern) {
+  return pattern.destination !== "disabled" && pattern.destination !== "monitor";
+}
+
+function findValidatorTelegramChannelForPattern(pattern: SavedValidatorPattern) {
+  const userChannels = liveValidatorChannels.filter((channel) => channel.userId === pattern.userId);
+  const preferred = userChannels.find((channel) => channel.id === pattern.telegramChannelId);
+  if (isUsableValidatorTelegramChannel(preferred)) return preferred;
+  return userChannels.find(isUsableValidatorTelegramChannel) || null;
+}
+
+function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel) {
+  return Boolean(channel?.isActive && channel.chatId && decodeServerToken(channel.botTokenEncoded));
 }
 
 async function sendValidatorAnalyzingMessages(
@@ -3530,10 +3538,10 @@ function shouldSendValidatorAnalyzingMessage(
 function validatorChannelHasActivePattern(channel: ValidatorNotificationChannel) {
   return liveValidatorPatterns.some((pattern) => (
     pattern.userId === channel.userId &&
-    pattern.telegramChannelId === channel.id &&
     pattern.isActive &&
-    (pattern.destination === "telegram" || pattern.destination === "site_telegram") &&
-    pattern.pattern.length > 0
+    validatorPatternAllowsTelegramForward(pattern) &&
+    pattern.pattern.length > 0 &&
+    findValidatorTelegramChannelForPattern(pattern)?.id === channel.id
   ));
 }
 
