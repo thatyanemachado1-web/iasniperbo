@@ -1271,7 +1271,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
           error:
             "Sessão expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
         },
-        auth.status,
+        (auth as { status?: number }).status ?? 401,
       );
     }
     return createMercadoPagoCheckout(request, env, client, plan);
@@ -2312,8 +2312,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         targetUserId: "site-content",
         targetEmail: "global",
         action: "UPDATE_USER",
-        beforeJson: before,
-        afterJson: liveSiteContentSettings,
+        beforeJson: before as unknown as Record<string, unknown>,
+        afterJson: liveSiteContentSettings as unknown as Record<string, unknown>,
         reason: "Conteudo visual do site atualizado.",
       });
       const saveStatus = await saveLiveState(env);
@@ -2713,10 +2713,11 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
-    const sourceRounds = Array.isArray(body.rounds)
+    const dashboardRounds = readRecord(body.dashboard).rounds;
+    const sourceRounds: unknown[] = Array.isArray(body.rounds)
       ? body.rounds
-      : Array.isArray(readRecord(body.dashboard).rounds)
-        ? readRecord(body.dashboard).rounds
+      : Array.isArray(dashboardRounds)
+        ? dashboardRounds
         : [];
     const incomingRounds = normalizeRounds(sourceRounds, MAX_SERVER_ROUND_HISTORY);
     if (incomingRounds.length) {
@@ -3255,7 +3256,7 @@ function normalizeValidatorResult(value: unknown): ValidatorResult | null {
     bestGreenStreak: Math.max(0, Math.floor(Number(record.bestGreenStreak) || 0)),
     bestLossStreak: Math.max(0, Math.floor(Number(record.bestLossStreak) || 0)),
     lastPatternResult: readString(record, "lastPatternResult") || "Sem validacao",
-    details: Array.isArray(record.details) ? record.details.map(readRecord) as ValidatorResult["details"] : [],
+    details: Array.isArray(record.details) ? record.details.map(readRecord) as unknown as ValidatorResult["details"] : [],
     entry: normalizeRoundResult(record.entry),
     pulledSide: normalizeRoundResult(record.pulledSide),
     risk: ["baixo", "medio", "alto"].includes(readString(record, "risk"))
@@ -3524,8 +3525,8 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
   const decision = normalizeAdaptiveDecisionRow(payload.decision, payload.logs);
 
   const [roundsSaved, patternsSaved, decisionSaved] = await Promise.all([
-    saveSupabaseRows(config, "adaptive_strategy_rounds", records, "round_key"),
-    saveSupabaseRows(config, "adaptive_strategy_patterns", patterns, "pattern_id"),
+    saveSupabaseRows(config, "adaptive_strategy_rounds", records as unknown as Record<string, unknown>[], "round_key"),
+    saveSupabaseRows(config, "adaptive_strategy_patterns", patterns as unknown as Record<string, unknown>[], "pattern_id"),
     saveSupabaseRows(config, "adaptive_strategy_decision_logs", decision ? [decision] : [], "decision_key"),
   ]);
 
@@ -3578,7 +3579,7 @@ function normalizeAdaptiveRoundRows(value: unknown[] | undefined) {
         captured_at: capturedAt,
       };
     })
-    .filter((row): row is Record<string, unknown> => Boolean(row));
+    .filter((row): row is NonNullable<typeof row> => row !== null);
 }
 
 function normalizeAdaptivePatternRows(value: unknown[] | undefined) {
@@ -3620,7 +3621,7 @@ function normalizeAdaptivePatternRows(value: unknown[] | undefined) {
         updated_at: new Date().toISOString(),
       };
     })
-    .filter((row): row is Record<string, unknown> => Boolean(row));
+    .filter((row): row is NonNullable<typeof row> => row !== null);
 }
 
 function normalizeAdaptiveDecisionRow(
@@ -4529,13 +4530,13 @@ function normalizeServerModeList(value: unknown) {
   return ACTIVE_ENTRY_MODES.filter((mode) => selected.has(mode));
 }
 
-function normalizeServerCountedResults(value: unknown) {
+function normalizeServerCountedResults(value: unknown): Record<string, true> {
   const record = readRecord(value);
   return Object.fromEntries(
     Object.keys(record)
       .filter(Boolean)
-      .map((key) => [key, true]),
-  );
+      .map((key) => [key, true as const]),
+  ) as Record<string, true>;
 }
 
 function sameServerModeList(left: ActiveEntryMode[] | undefined, right: ActiveEntryMode[]) {
@@ -4550,10 +4551,10 @@ function pruneServerSignalModes(signalModes: Record<string, ActiveEntryMode[]>) 
   return Object.fromEntries(keys.slice(-220).map((key) => [key, signalModes[key]]));
 }
 
-function pruneServerCountedResults(countedResults: Record<string, true>) {
+function pruneServerCountedResults(countedResults: Record<string, true>): Record<string, true> {
   const keys = Object.keys(countedResults);
   if (keys.length <= 300) return countedResults;
-  return Object.fromEntries(keys.slice(-220).map((key) => [key, true]));
+  return Object.fromEntries(keys.slice(-220).map((key) => [key, true as const])) as Record<string, true>;
 }
 
 function serverFirstDefined(...values: unknown[]) {
@@ -6443,11 +6444,12 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
     (user) =>
       readString(user, "plan") === "trial" || readString(user, "subscriptionStatus") === "trial",
   );
-  const currentSignal = readRecord((liveDashboardData as Record<string, unknown>).currentSignal);
+  const liveDashboardRecord = liveDashboardData as unknown as Record<string, unknown>;
+  const currentSignal = readRecord(liveDashboardRecord.currentSignal);
   const side =
     readString(currentSignal, "side") ||
-    readString((liveDashboardData as Record<string, unknown>).entrySide) ||
-    readString((liveDashboardData as Record<string, unknown>).recommendedSide) ||
+    readString(liveDashboardRecord, "entrySide") ||
+    readString(liveDashboardRecord, "recommendedSide") ||
     "BANKER";
 
   return {
@@ -6460,7 +6462,7 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
     onlineNow: countOnlineClientUsers(now),
     lastSignal: side.toUpperCase(),
     lastSignalAt: relativeTimeFromIso(
-      readString(liveDashboardData as Record<string, unknown>, "updatedAt"),
+      readString(liveDashboardRecord, "updatedAt"),
     ),
   };
 }

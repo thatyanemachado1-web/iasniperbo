@@ -25,6 +25,8 @@ export function calculateMainResult(scoreboard: MainScoreboard): MainResult {
     assertiveness: calculateAssertiveness(greens, reds),
     sequencePositive: safeNumber(scoreboard.sequencePositive),
     sequenceNegative: safeNumber(scoreboard.sequenceNegative),
+    maxSequencePositive: 0,
+    maxSequenceNegative: 0,
     breakdown: `SG ${greenSemGale} / G1 ${greenG1} / RED ${reds}`,
   };
 }
