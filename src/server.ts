@@ -2102,7 +2102,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     let client =
       findClientByEmail(email) ||
       (await hydrateClientFromBilling(env, email)) ||
-      syncClientFromRecipientEmail(email);
+      syncClientFromRecipientEmail(email) ||
+      syncClientFromAdminUserEmail(env, email);
     if (!client && password) {
       client = await ensureBlockedTrialClientForLogin(env, request, email, password);
     }
@@ -2177,7 +2178,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     );
     if (existingIndex < 0) {
       await hydrateClientFromBilling(env, email);
-      syncClientFromRecipientEmail(email);
+      syncClientFromRecipientEmail(email) || syncClientFromAdminUserEmail(env, email);
       existingIndex = liveClients.findIndex(
         (item) => readString(item, "email").toLowerCase() === email,
       );
@@ -2281,7 +2282,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     let client =
       findClientByEmail(session.email) ||
       (await hydrateClientFromBilling(env, session.email)) ||
-      syncClientFromRecipientEmail(session.email);
+      syncClientFromRecipientEmail(session.email) ||
+      syncClientFromAdminUserEmail(env, session.email);
     if (!client && session.scope === "client") {
       client = await ensureSessionClientForExpiredTrial(env, request, session);
     }
@@ -7176,6 +7178,18 @@ function syncClientFromRecipientEmail(email: string) {
   if (!recipient) return null;
   upsertClientFromRecipient(recipient);
   return findClientByEmail(email);
+}
+
+function syncClientFromAdminUserEmail(env: unknown, email: string) {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return null;
+  const adminUser =
+    syncAdminManagedUsers(env).find(
+      (user) => readString(user, "email").toLowerCase() === cleanEmail,
+    ) || null;
+  if (!adminUser) return null;
+  applyAdminManagedUserToClient(adminUser);
+  return findClientByEmail(cleanEmail);
 }
 
 function clientHasLiveAccess(client: Record<string, unknown>) {
