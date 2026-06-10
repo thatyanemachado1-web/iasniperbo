@@ -154,7 +154,7 @@ const MAX_SERVER_ROUND_HISTORY = 50_000;
 const MAX_MONITOR_ROUND_HISTORY = 300;
 const MAX_VALIDATOR_ROUND_WRITE_BATCH = 500;
 const VALIDATOR_ROUND_PRUNE_MIN_INTERVAL_MS = 10 * 60_000;
-const VALIDATOR_MONITOR_CACHE_TTL_MS = 5_000;
+const VALIDATOR_MONITOR_CACHE_TTL_MS = 1_000;
 const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
@@ -2771,7 +2771,14 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       "carregar historico do Validador",
       [] as Round[],
     );
-    const rounds = storedRounds.length ? storedRounds : liveValidatorRoundHistory.slice(-limit);
+    if (storedRounds.length) {
+      liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, storedRounds);
+    }
+    const changed = await processValidatorLiveMonitoring(env, {
+      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
+    });
+    if (changed) await saveLiveState(env);
+    const rounds = mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, limit);
     return json({
       rounds,
       total: rounds.length,

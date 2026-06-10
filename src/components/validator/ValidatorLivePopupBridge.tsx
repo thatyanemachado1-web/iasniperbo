@@ -25,7 +25,7 @@ import type {
 
 const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
 const SAVED_PATTERN_REFRESH_MS = 3_000;
-const SERVER_TAIL_REFRESH_MS = 800;
+const SERVER_TAIL_REFRESH_MS = 600;
 
 type PopupStatus = "entry" | "green" | "red" | "tie";
 
@@ -120,9 +120,17 @@ export function ValidatorLivePopupBridge() {
 
     void refreshRoundTail();
     const interval = window.setInterval(refreshRoundTail, SERVER_TAIL_REFRESH_MS);
+    const onVisibilityChange = () => {
+      if (!document.hidden) void refreshRoundTail();
+    };
+    const onFocus = () => void refreshRoundTail();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onFocus);
     return () => {
       stopped = true;
       window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onFocus);
     };
   }, [patterns.map((pattern) => `${pattern.id}:${pattern.updatedAt}:${pattern.pattern.length}:${pattern.galeLimit}`).join("|")]);
 
