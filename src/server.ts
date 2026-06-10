@@ -58,6 +58,58 @@ type LiveDashboardData = DashboardData & {
   latestEntryModeSignalModes?: ActiveEntryMode[];
   neuralSequenceLastOutcome?: "GREEN" | "RED" | null;
 };
+type NeuralCalendarClassification =
+  | "muito_pagante"
+  | "operavel"
+  | "perigoso"
+  | "sem_amostra";
+type NeuralCalendarForce = "BANKER" | "PLAYER" | "TIE" | "NONE";
+type NeuralCalendarModule = "Neural Pagante" | "Surf Analyzer" | "Tendencia" | "Validador";
+type NeuralCalendarDailyStat = {
+  id: string;
+  date: string;
+  year: number;
+  month: number;
+  day: number;
+  weekday: string;
+  totalRounds: number;
+  greens: number;
+  reds: number;
+  ties: number;
+  bankerCount: number;
+  playerCount: number;
+  tieCount: number;
+  accuracy: number;
+  score: number;
+  classification: NeuralCalendarClassification;
+  bestHour: string;
+  worstHour: string;
+  bestModule: NeuralCalendarModule;
+  bestForce: NeuralCalendarForce;
+  observation: string;
+  createdAt: string;
+  updatedAt: string;
+};
+type NeuralCalendarHourlyStat = NeuralCalendarDailyStat & {
+  hour: number;
+  bankerPercent: number;
+  playerPercent: number;
+  tiePercent: number;
+  bestReading: string;
+};
+type NeuralCalendarChangeSet = {
+  changed: boolean;
+  dailyIds: Set<string>;
+  hourlyIds: Set<string>;
+};
+type NeuralCalendarDateParts = {
+  date: string;
+  year: number;
+  month: number;
+  day: number;
+  weekday: string;
+  hour: number;
+};
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
 type AdminRole = "owner" | "admin";
 type BillingPlanId = "free" | "premium" | "vip";
@@ -141,7 +193,13 @@ const VALIDATOR_ROUNDS_TABLE = "validator_rounds";
 const VALIDATOR_PATTERNS_TABLE = "validator_saved_patterns";
 const VALIDATOR_CHANNELS_TABLE = "validator_channels";
 const VALIDATOR_NOTIFICATIONS_TABLE = "validator_notifications";
+const CALENDAR_DAILY_STATS_TABLE = "calendar_daily_stats";
+const CALENDAR_HOURLY_STATS_TABLE = "calendar_hourly_stats";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
+const NEURAL_CALENDAR_START_DATE = "2026-06-10";
+const NEURAL_CALENDAR_MIN_DAILY_SAMPLE = 5;
+const NEURAL_CALENDAR_MIN_HOURLY_SAMPLE = 2;
+const MAX_NEURAL_CALENDAR_COUNTED_KEYS = 120_000;
 const MERCADOPAGO_PREFERENCE_URL = "https://api.mercadopago.com/checkout/preferences";
 const MERCADOPAGO_PAYMENT_URL = "https://api.mercadopago.com/v1/payments";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
@@ -204,6 +262,10 @@ let liveValidatorRoundHistory: Round[] = [];
 let liveValidatorPatterns: SavedValidatorPattern[] = [];
 let liveValidatorChannels: ValidatorNotificationChannel[] = [];
 let liveValidatorNotifications: Array<Record<string, unknown>> = [];
+let liveNeuralCalendarDailyStats: NeuralCalendarDailyStat[] = [];
+let liveNeuralCalendarHourlyStats: NeuralCalendarHourlyStat[] = [];
+let liveNeuralCalendarCountedRoundKeys: Record<string, true> = {};
+let neuralCalendarHydratedFromTables = false;
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
 let liveAccessEvents: Array<Record<string, unknown>> = [];
@@ -2712,6 +2774,7 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       url.pathname === "/dashboard" ||
       url.pathname === "/dashboard/signal" ||
       url.pathname === "/dashboard/round-history" ||
+      url.pathname === "/calendar/neural" ||
       url.pathname === "/validator/round-history" ||
       url.pathname === "/validator/patterns" ||
       url.pathname.startsWith("/validator/patterns/") ||
@@ -2725,6 +2788,9 @@ async function handleDashboardRequest(request: Request, env: unknown) {
   ) {
     return json(null, 204);
   }
+
+  const neuralCalendarResponse = await handleNeuralCalendarRequest(request, url, env);
+  if (neuralCalendarResponse) return neuralCalendarResponse;
 
   const validatorStorageResponse = await handleValidatorStorageRequest(request, url, env);
   if (validatorStorageResponse) return validatorStorageResponse;
@@ -2810,12 +2876,21 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     const incomingRounds = normalizeRounds(sourceRounds, MAX_SERVER_ROUND_HISTORY);
     if (incomingRounds.length) {
       liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
+      const calendarChange = trackNeuralCalendarRounds(incomingRounds);
       await withTimeout(
         persistValidatorRounds(env, incomingRounds),
         LIVE_STATE_IO_TIMEOUT_MS,
         "salvar rodadas do Validador",
         false,
       );
+      if (calendarChange.changed) {
+        await withTimeout(
+          persistNeuralCalendarStats(env, calendarChange),
+          LIVE_STATE_IO_TIMEOUT_MS,
+          "salvar Calendario Neural",
+          false,
+        );
+      }
       const dashboardBeforeTieScoreboard = liveDashboardData;
       liveDashboardData = trackServerTieRoundScoreboard(
         liveDashboardData,
@@ -2865,12 +2940,21 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
     liveDashboardData = updateDashboardData(liveDashboardData, body);
     if (incomingRounds.length) {
+      const calendarChange = trackNeuralCalendarRounds(incomingRounds);
       await withTimeout(
         persistValidatorRounds(env, incomingRounds),
         LIVE_STATE_IO_TIMEOUT_MS,
         "salvar rodadas do Validador",
         false,
       );
+      if (calendarChange.changed) {
+        await withTimeout(
+          persistNeuralCalendarStats(env, calendarChange),
+          LIVE_STATE_IO_TIMEOUT_MS,
+          "salvar Calendario Neural",
+          false,
+        );
+      }
     }
     await processValidatorLiveMonitoring(env, {
       allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
@@ -2880,6 +2964,783 @@ async function handleDashboardRequest(request: Request, env: unknown) {
   }
 
   return null;
+}
+
+async function handleNeuralCalendarRequest(request: Request, url: URL, env: unknown) {
+  if (url.pathname !== "/calendar/neural") return null;
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "GET") return json({ error: "Metodo nao permitido." }, 405);
+
+  if (!(await isNeuralCalendarAuthorized(request, url, env))) {
+    return json({ error: "Calendario Neural disponivel apenas para usuarios premium." }, 403);
+  }
+
+  await hydrateNeuralCalendarStatsFromTables(env);
+
+  const now = saoPauloDateParts();
+  const year = clampCalendarYear(url.searchParams.get("year"), now.year);
+  const month = clampCalendarMonth(url.searchParams.get("month"), now.month);
+  const selectedDate = normalizeCalendarDateParam(url.searchParams.get("date"));
+
+  return json({
+    calendar: buildNeuralCalendarPayload({
+      year,
+      month,
+      selectedDate,
+      range: readString({ range: url.searchParams.get("range") }, "range") || "este_mes",
+    }),
+  });
+}
+
+async function isNeuralCalendarAuthorized(request: Request, url: URL, env: unknown) {
+  if (isDashboardAuthorized(request, url, env)) return true;
+
+  const token = getBearerToken(request);
+  if (!token) return false;
+
+  const session = await verifySessionToken(env, token);
+  if (!session) return false;
+  if (!sessionMatchesRequestBinding(env, request, session)) return false;
+  if (session.scope === "owner") return true;
+  if (session.scope !== "client") return false;
+  if (session.approved && (session.plan === "premium" || session.plan === "vip")) return true;
+
+  const client = findClientByEmail(session.email);
+  const overview = client ? buildBillingOverview(client) : null;
+  return Boolean(
+    overview?.approved &&
+      overview.accessMode === "full" &&
+      (overview.plan === "premium" || overview.plan === "vip"),
+  );
+}
+
+function trackNeuralCalendarRounds(rounds: Round[]): NeuralCalendarChangeSet {
+  const change: NeuralCalendarChangeSet = {
+    changed: false,
+    dailyIds: new Set(),
+    hourlyIds: new Set(),
+  };
+  if (!rounds.length) return change;
+
+  const dailyById = new Map(liveNeuralCalendarDailyStats.map((row) => [row.id, row]));
+  const hourlyById = new Map(liveNeuralCalendarHourlyStats.map((row) => [row.id, row]));
+  const counted = { ...liveNeuralCalendarCountedRoundKeys };
+
+  for (const round of rounds) {
+    const parts = neuralCalendarPartsForRound(round);
+    if (!parts || parts.date < NEURAL_CALENDAR_START_DATE) continue;
+
+    const countedKey = `${parts.date}:${roundHistoryKey(round)}`;
+    if (counted[countedKey]) continue;
+    counted[countedKey] = true;
+
+    const dailyId = parts.date;
+    const hourlyId = `${parts.date}:${String(parts.hour).padStart(2, "0")}`;
+    const daily = dailyById.get(dailyId) || emptyNeuralCalendarDailyStat(parts);
+    const hourly = hourlyById.get(hourlyId) || emptyNeuralCalendarHourlyStat(parts);
+
+    incrementNeuralCalendarStat(daily, round);
+    incrementNeuralCalendarStat(hourly, round);
+    recomputeNeuralCalendarStat(daily, NEURAL_CALENDAR_MIN_DAILY_SAMPLE);
+    recomputeNeuralCalendarStat(hourly, NEURAL_CALENDAR_MIN_HOURLY_SAMPLE);
+
+    dailyById.set(dailyId, daily);
+    hourlyById.set(hourlyId, hourly);
+    change.changed = true;
+    change.dailyIds.add(dailyId);
+    change.hourlyIds.add(hourlyId);
+  }
+
+  if (!change.changed) return change;
+
+  for (const dailyId of change.dailyIds) {
+    const daily = dailyById.get(dailyId);
+    if (!daily) continue;
+    refreshNeuralCalendarDailyExtremes(daily, [...hourlyById.values()]);
+    dailyById.set(dailyId, daily);
+  }
+
+  liveNeuralCalendarDailyStats = [...dailyById.values()].sort((a, b) => a.date.localeCompare(b.date));
+  liveNeuralCalendarHourlyStats = [...hourlyById.values()].sort((a, b) => a.id.localeCompare(b.id));
+  liveNeuralCalendarCountedRoundKeys = pruneNeuralCalendarCountedKeys(counted);
+  return change;
+}
+
+function emptyNeuralCalendarDailyStat(parts: NeuralCalendarDateParts): NeuralCalendarDailyStat {
+  const now = new Date().toISOString();
+  return {
+    id: parts.date,
+    date: parts.date,
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    weekday: parts.weekday,
+    totalRounds: 0,
+    greens: 0,
+    reds: 0,
+    ties: 0,
+    bankerCount: 0,
+    playerCount: 0,
+    tieCount: 0,
+    accuracy: 0,
+    score: 0,
+    classification: "sem_amostra",
+    bestHour: "",
+    worstHour: "",
+    bestModule: "Tendencia",
+    bestForce: "NONE",
+    observation: "Sem amostra suficiente no historico real coletado.",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function emptyNeuralCalendarHourlyStat(parts: NeuralCalendarDateParts): NeuralCalendarHourlyStat {
+  return {
+    ...emptyNeuralCalendarDailyStat(parts),
+    id: `${parts.date}:${String(parts.hour).padStart(2, "0")}`,
+    hour: parts.hour,
+    bankerPercent: 0,
+    playerPercent: 0,
+    tiePercent: 0,
+    bestReading: "Aguardando amostra real.",
+  };
+}
+
+function incrementNeuralCalendarStat(
+  stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat,
+  round: Round,
+) {
+  stat.totalRounds += 1;
+  if (round.result === "B") stat.bankerCount += 1;
+  if (round.result === "P") stat.playerCount += 1;
+  if (round.result === "T") {
+    stat.tieCount += 1;
+    stat.ties += 1;
+  }
+  stat.updatedAt = new Date().toISOString();
+}
+
+function recomputeNeuralCalendarStat(
+  stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat,
+  minSample: number,
+) {
+  const best = neuralCalendarBestForce(stat);
+  const total = Math.max(0, stat.totalRounds);
+  stat.bestForce = best.force;
+  stat.greens = best.count;
+  stat.reds = Math.max(0, total - best.count);
+  stat.accuracy = total ? roundCalendarPercent((best.count / total) * 100) : 0;
+  stat.score = stat.accuracy;
+  stat.classification = classifyNeuralCalendarScore(stat.score, total, minSample);
+  stat.bestModule = inferNeuralCalendarModule(stat);
+  stat.observation = neuralCalendarObservation(stat);
+
+  if ("hour" in stat) {
+    stat.bankerPercent = total ? roundCalendarPercent((stat.bankerCount / total) * 100) : 0;
+    stat.playerPercent = total ? roundCalendarPercent((stat.playerCount / total) * 100) : 0;
+    stat.tiePercent = total ? roundCalendarPercent((stat.tieCount / total) * 100) : 0;
+    stat.bestReading =
+      stat.bestForce === "NONE"
+        ? "Aguardando amostra real."
+        : `${neuralCalendarForceLabel(stat.bestForce)} dominante no horario.`;
+  }
+}
+
+function refreshNeuralCalendarDailyExtremes(
+  daily: NeuralCalendarDailyStat,
+  hourlyStats: NeuralCalendarHourlyStat[],
+) {
+  const hours = hourlyStats
+    .filter((hour) => hour.date === daily.date && hour.classification !== "sem_amostra")
+    .sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds);
+  daily.bestHour = hours[0] ? `${String(hours[0].hour).padStart(2, "0")}:00` : "";
+  daily.worstHour = hours.at(-1) ? `${String(hours.at(-1)?.hour ?? 0).padStart(2, "0")}:00` : "";
+}
+
+function neuralCalendarBestForce(stat: Pick<NeuralCalendarDailyStat, "bankerCount" | "playerCount" | "tieCount">) {
+  const rows: Array<{ force: NeuralCalendarForce; count: number }> = [
+    { force: "BANKER", count: stat.bankerCount },
+    { force: "PLAYER", count: stat.playerCount },
+    { force: "TIE", count: stat.tieCount },
+  ];
+  rows.sort((a, b) => b.count - a.count);
+  return rows[0]?.count ? rows[0] : { force: "NONE" as const, count: 0 };
+}
+
+function classifyNeuralCalendarScore(
+  score: number,
+  totalRounds: number,
+  minSample: number,
+): NeuralCalendarClassification {
+  if (totalRounds < minSample) return "sem_amostra";
+  if (score >= 87) return "muito_pagante";
+  if (score >= 56) return "operavel";
+  return "perigoso";
+}
+
+function inferNeuralCalendarModule(stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat): NeuralCalendarModule {
+  if (stat.bestForce === "TIE") return "Validador";
+  if (stat.classification === "muito_pagante") return "Neural Pagante";
+  if (stat.classification === "perigoso") return "Surf Analyzer";
+  return "Tendencia";
+}
+
+function neuralCalendarObservation(stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat) {
+  if (stat.classification === "sem_amostra") {
+    return "Sem amostra suficiente no historico real coletado.";
+  }
+  if (stat.classification === "muito_pagante") {
+    return "Periodo favoravel. A forca dominante apareceu com alta consistencia no historico real.";
+  }
+  if (stat.classification === "operavel") {
+    return "Periodo operavel. Existe vantagem historica, mas precisa de leitura e protecao.";
+  }
+  return "Periodo perigoso. Historico com baixa concentracao e maior risco de quebra.";
+}
+
+function buildNeuralCalendarPayload({
+  year,
+  month,
+  selectedDate,
+  range,
+}: {
+  year: number;
+  month: number;
+  selectedDate: string;
+  range: string;
+}) {
+  const now = saoPauloDateParts();
+  const years = neuralCalendarAvailableYears(now.year);
+  const dailyByDate = new Map(liveNeuralCalendarDailyStats.map((row) => [row.date, row]));
+  const hourlyById = new Map(liveNeuralCalendarHourlyStats.map((row) => [row.id, row]));
+  const daysInMonth = calendarDaysInMonth(year, month);
+  const monthDays = Array.from({ length: daysInMonth }, (_, index) => {
+    const date = calendarDateString(year, month, index + 1);
+    return dailyByDate.get(date) || emptyNeuralCalendarDailyStat(calendarPartsFromDateString(date));
+  });
+  const fallbackSelectedDate =
+    [...monthDays]
+      .filter((day) => day.classification !== "sem_amostra")
+      .sort((a, b) => b.date.localeCompare(a.date))[0]?.date ||
+    (now.year === year && now.month === month ? now.date : calendarDateString(year, month, 1));
+  const cleanSelectedDate =
+    selectedDate && selectedDate.startsWith(`${year}-${String(month).padStart(2, "0")}`)
+      ? selectedDate
+      : fallbackSelectedDate;
+  const selectedDay =
+    dailyByDate.get(cleanSelectedDate) ||
+    emptyNeuralCalendarDailyStat(calendarPartsFromDateString(cleanSelectedDate));
+  const selectedHours = Array.from({ length: 24 }, (_, hour) => {
+    const id = `${cleanSelectedDate}:${String(hour).padStart(2, "0")}`;
+    return (
+      hourlyById.get(id) ||
+      emptyNeuralCalendarHourlyStat({
+        ...calendarPartsFromDateString(cleanSelectedDate),
+        hour,
+      })
+    );
+  });
+
+  return {
+    timezone: DASHBOARD_CYCLE_TIME_ZONE,
+    startDate: NEURAL_CALENDAR_START_DATE,
+    updatedAt: new Date().toISOString(),
+    range,
+    years,
+    selected: {
+      year,
+      month,
+      date: cleanSelectedDate,
+    },
+    month: {
+      year,
+      month,
+      label: neuralCalendarMonthLabel(year, month),
+      days: monthDays,
+      firstWeekday: calendarFirstWeekday(year, month),
+      summary: neuralCalendarMonthSummary(monthDays, selectedHours),
+      distribution: neuralCalendarDistribution(monthDays),
+      weekdayAverages: neuralCalendarWeekdayAverages(monthDays),
+      heatmap: neuralCalendarHeatmap(year, month),
+    },
+    selectedDay,
+    selectedHours,
+    rankings: {
+      topHours: neuralCalendarTopHours(),
+      topWeekdays: neuralCalendarTopWeekdays(),
+      topMonthDays: neuralCalendarTopMonthDays(),
+    },
+  };
+}
+
+function neuralCalendarMonthSummary(
+  days: NeuralCalendarDailyStat[],
+  selectedHours: NeuralCalendarHourlyStat[],
+) {
+  const sampledDays = days.filter((day) => day.classification !== "sem_amostra");
+  const sampledHours = selectedHours.filter((hour) => hour.classification !== "sem_amostra");
+  const bestDay = [...sampledDays].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
+  const worstDay = [...sampledDays].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
+  const bestHour = [...sampledHours].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
+  const worstHour = [...sampledHours].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
+  return {
+    averageScore: sampledDays.length
+      ? roundCalendarPercent(sampledDays.reduce((sum, day) => sum + day.score, 0) / sampledDays.length)
+      : 0,
+    bestDay,
+    worstDay,
+    bestHour,
+    worstHour,
+    counts: neuralCalendarDistribution(days),
+  };
+}
+
+function neuralCalendarDistribution(days: NeuralCalendarDailyStat[]) {
+  return days.reduce(
+    (acc, day) => {
+      acc[day.classification] += 1;
+      return acc;
+    },
+    { muito_pagante: 0, operavel: 0, perigoso: 0, sem_amostra: 0 },
+  );
+}
+
+function neuralCalendarWeekdayAverages(days: NeuralCalendarDailyStat[]) {
+  const byWeekday = new Map<string, { total: number; count: number }>();
+  for (const day of days) {
+    if (day.classification === "sem_amostra") continue;
+    const current = byWeekday.get(day.weekday) || { total: 0, count: 0 };
+    current.total += day.score;
+    current.count += 1;
+    byWeekday.set(day.weekday, current);
+  }
+  return calendarWeekdayOrder().map((weekday) => {
+    const item = byWeekday.get(weekday) || { total: 0, count: 0 };
+    return {
+      weekday,
+      score: item.count ? roundCalendarPercent(item.total / item.count) : 0,
+      total: item.count,
+      classification: classifyNeuralCalendarScore(
+        item.count ? item.total / item.count : 0,
+        item.count,
+        1,
+      ),
+    };
+  });
+}
+
+function neuralCalendarHeatmap(year: number, month: number) {
+  return liveNeuralCalendarHourlyStats
+    .filter((hour) => hour.year === year && hour.month === month)
+    .map((hour) => ({
+      date: hour.date,
+      day: hour.day,
+      hour: hour.hour,
+      score: hour.score,
+      classification: hour.classification,
+      totalRounds: hour.totalRounds,
+    }));
+}
+
+function neuralCalendarTopHours() {
+  const byHour = new Map<number, { totalScore: number; count: number; totalRounds: number }>();
+  for (const hour of liveNeuralCalendarHourlyStats) {
+    if (hour.classification === "sem_amostra") continue;
+    const current = byHour.get(hour.hour) || { totalScore: 0, count: 0, totalRounds: 0 };
+    current.totalScore += hour.score;
+    current.totalRounds += hour.totalRounds;
+    current.count += 1;
+    byHour.set(hour.hour, current);
+  }
+  return [...byHour.entries()]
+    .map(([hour, value]) => ({
+      hour,
+      label: `${String(hour).padStart(2, "0")}:00`,
+      score: value.count ? roundCalendarPercent(value.totalScore / value.count) : 0,
+      totalRounds: value.totalRounds,
+    }))
+    .sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)
+    .slice(0, 8);
+}
+
+function neuralCalendarTopWeekdays() {
+  return neuralCalendarWeekdayAverages(liveNeuralCalendarDailyStats)
+    .filter((item) => item.total > 0)
+    .sort((a, b) => b.score - a.score || b.total - a.total)
+    .slice(0, 7);
+}
+
+function neuralCalendarTopMonthDays() {
+  return liveNeuralCalendarDailyStats
+    .filter((day) => day.classification !== "sem_amostra")
+    .map((day) => ({
+      date: day.date,
+      label: `${String(day.day).padStart(2, "0")}/${String(day.month).padStart(2, "0")}`,
+      score: day.score,
+      totalRounds: day.totalRounds,
+      classification: day.classification,
+    }))
+    .sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)
+    .slice(0, 8);
+}
+
+async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
+  if (!getSupabasePersistenceConfig(env) || neuralCalendarHydratedFromTables) return;
+  neuralCalendarHydratedFromTables = true;
+
+  const [dailyRows, hourlyRows] = await Promise.all([
+    fetchSupabaseRows(
+      env,
+      CALENDAR_DAILY_STATS_TABLE,
+      "select=*&order=date.asc",
+    ),
+    fetchSupabaseRows(
+      env,
+      CALENDAR_HOURLY_STATS_TABLE,
+      "select=*&order=date.asc,hour.asc",
+    ),
+  ]);
+  if (dailyRows.length) {
+    liveNeuralCalendarDailyStats = mergeNeuralCalendarDailyStats([
+      ...liveNeuralCalendarDailyStats,
+      ...dailyRows.map(neuralCalendarDailyFromRow).filter(Boolean),
+    ] as NeuralCalendarDailyStat[]);
+  }
+  if (hourlyRows.length) {
+    liveNeuralCalendarHourlyStats = mergeNeuralCalendarHourlyStats([
+      ...liveNeuralCalendarHourlyStats,
+      ...hourlyRows.map(neuralCalendarHourlyFromRow).filter(Boolean),
+    ] as NeuralCalendarHourlyStat[]);
+  }
+
+  const storedRounds = await withTimeout(
+    fetchStoredValidatorRounds(env, MAX_SERVER_ROUND_HISTORY, "bac-bo"),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar rodadas reais para Calendario Neural",
+    [] as Round[],
+  );
+  const change = trackNeuralCalendarRounds(storedRounds);
+  if (change.changed) {
+    await withTimeout(
+      persistNeuralCalendarStats(env, change),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "salvar catch-up do Calendario Neural",
+      false,
+    );
+    await saveLiveState(env);
+  }
+}
+
+async function persistNeuralCalendarStats(env: unknown, change: NeuralCalendarChangeSet) {
+  if (!getSupabasePersistenceConfig(env) || !change.changed) return false;
+  const dailyRows = liveNeuralCalendarDailyStats
+    .filter((row) => change.dailyIds.has(row.id))
+    .map(neuralCalendarDailyToRow);
+  const hourlyRows = liveNeuralCalendarHourlyStats
+    .filter((row) => change.hourlyIds.has(row.id))
+    .map(neuralCalendarHourlyToRow);
+  const [dailySaved, hourlySaved] = await Promise.all([
+    persistSupabaseRows(env, CALENDAR_DAILY_STATS_TABLE, dailyRows, "id"),
+    persistSupabaseRows(env, CALENDAR_HOURLY_STATS_TABLE, hourlyRows, "id"),
+  ]);
+  return dailySaved || hourlySaved;
+}
+
+function mergeNeuralCalendarDailyStats(rows: NeuralCalendarDailyStat[]) {
+  const byId = new Map<string, NeuralCalendarDailyStat>();
+  for (const row of rows) {
+    const existing = byId.get(row.id);
+    if (!existing || stateEntityUpdatedAtMs(neuralCalendarDailyToRow(row)) >= stateEntityUpdatedAtMs(neuralCalendarDailyToRow(existing))) {
+      byId.set(row.id, row);
+    }
+  }
+  return [...byId.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function mergeNeuralCalendarHourlyStats(rows: NeuralCalendarHourlyStat[]) {
+  const byId = new Map<string, NeuralCalendarHourlyStat>();
+  for (const row of rows) {
+    const existing = byId.get(row.id);
+    if (!existing || stateEntityUpdatedAtMs(neuralCalendarHourlyToRow(row)) >= stateEntityUpdatedAtMs(neuralCalendarHourlyToRow(existing))) {
+      byId.set(row.id, row);
+    }
+  }
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function neuralCalendarDailyToRow(stat: NeuralCalendarDailyStat) {
+  return {
+    id: stat.id,
+    date: stat.date,
+    year: stat.year,
+    month: stat.month,
+    day: stat.day,
+    weekday: stat.weekday,
+    total_rounds: stat.totalRounds,
+    greens: stat.greens,
+    reds: stat.reds,
+    ties: stat.ties,
+    banker_count: stat.bankerCount,
+    player_count: stat.playerCount,
+    tie_count: stat.tieCount,
+    accuracy: stat.accuracy,
+    score: stat.score,
+    classification: stat.classification,
+    best_hour: stat.bestHour,
+    worst_hour: stat.worstHour,
+    best_module: stat.bestModule,
+    best_force: stat.bestForce,
+    observation: stat.observation,
+    created_at: stat.createdAt,
+    updated_at: stat.updatedAt,
+  };
+}
+
+function neuralCalendarHourlyToRow(stat: NeuralCalendarHourlyStat) {
+  return {
+    ...neuralCalendarDailyToRow(stat),
+    hour: stat.hour,
+    banker_percent: stat.bankerPercent,
+    player_percent: stat.playerPercent,
+    tie_percent: stat.tiePercent,
+    best_reading: stat.bestReading,
+  };
+}
+
+function neuralCalendarDailyFromRow(row: Record<string, unknown>): NeuralCalendarDailyStat | null {
+  const date = readString(row, "date");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const parts = calendarPartsFromDateString(date);
+  const stat = {
+    ...emptyNeuralCalendarDailyStat(parts),
+    id: readString(row, "id") || date,
+    date,
+    year: Math.floor(Number(row.year) || parts.year),
+    month: Math.floor(Number(row.month) || parts.month),
+    day: Math.floor(Number(row.day) || parts.day),
+    weekday: readString(row, "weekday") || parts.weekday,
+    totalRounds: Math.max(0, Math.floor(Number(row.total_rounds ?? row.totalRounds) || 0)),
+    greens: Math.max(0, Math.floor(Number(row.greens) || 0)),
+    reds: Math.max(0, Math.floor(Number(row.reds) || 0)),
+    ties: Math.max(0, Math.floor(Number(row.ties) || 0)),
+    bankerCount: Math.max(0, Math.floor(Number(row.banker_count ?? row.bankerCount) || 0)),
+    playerCount: Math.max(0, Math.floor(Number(row.player_count ?? row.playerCount) || 0)),
+    tieCount: Math.max(0, Math.floor(Number(row.tie_count ?? row.tieCount ?? row.ties) || 0)),
+    accuracy: roundCalendarPercent(Number(row.accuracy) || 0),
+    score: roundCalendarPercent(Number(row.score) || 0),
+    classification: normalizeNeuralCalendarClassification(row.classification),
+    bestHour: readString(row, "best_hour") || readString(row, "bestHour"),
+    worstHour: readString(row, "worst_hour") || readString(row, "worstHour"),
+    bestModule: normalizeNeuralCalendarModule(row.best_module ?? row.bestModule),
+    bestForce: normalizeNeuralCalendarForce(row.best_force ?? row.bestForce),
+    observation: readString(row, "observation"),
+    createdAt: readString(row, "created_at") || readString(row, "createdAt") || new Date().toISOString(),
+    updatedAt: readString(row, "updated_at") || readString(row, "updatedAt") || new Date().toISOString(),
+  };
+  recomputeNeuralCalendarStat(stat, NEURAL_CALENDAR_MIN_DAILY_SAMPLE);
+  return stat;
+}
+
+function neuralCalendarHourlyFromRow(row: Record<string, unknown>): NeuralCalendarHourlyStat | null {
+  const daily = neuralCalendarDailyFromRow(row);
+  if (!daily) return null;
+  const hour = Math.max(0, Math.min(23, Math.floor(Number(row.hour) || 0)));
+  const stat: NeuralCalendarHourlyStat = {
+    ...daily,
+    id: readString(row, "id") || `${daily.date}:${String(hour).padStart(2, "0")}`,
+    hour,
+    bankerPercent: roundCalendarPercent(Number(row.banker_percent ?? row.bankerPercent) || 0),
+    playerPercent: roundCalendarPercent(Number(row.player_percent ?? row.playerPercent) || 0),
+    tiePercent: roundCalendarPercent(Number(row.tie_percent ?? row.tiePercent) || 0),
+    bestReading: readString(row, "best_reading") || readString(row, "bestReading") || "Aguardando amostra real.",
+  };
+  recomputeNeuralCalendarStat(stat, NEURAL_CALENDAR_MIN_HOURLY_SAMPLE);
+  return stat;
+}
+
+function pruneNeuralCalendarCountedKeys(keys: Record<string, true>) {
+  const entries = Object.keys(keys).sort();
+  if (entries.length <= MAX_NEURAL_CALENDAR_COUNTED_KEYS) return keys;
+  return entries.slice(-MAX_NEURAL_CALENDAR_COUNTED_KEYS).reduce<Record<string, true>>((acc, key) => {
+    acc[key] = true;
+    return acc;
+  }, {});
+}
+
+function neuralCalendarPartsForRound(round: Round): NeuralCalendarDateParts | null {
+  const date = parseRoundDate(round);
+  if (!date) return null;
+  return saoPauloDateParts(date);
+}
+
+function parseRoundDate(round: Round) {
+  const raw = String(round.time || "").trim();
+  if (!raw || raw === "--:--") return new Date();
+  const direct = new Date(raw);
+  if (Number.isFinite(direct.getTime())) return direct;
+  const timeMatch = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (timeMatch) {
+    const now = new Date();
+    now.setHours(Number(timeMatch[1]), Number(timeMatch[2]), Number(timeMatch[3] || 0), 0);
+    return now;
+  }
+  return null;
+}
+
+function saoPauloDateParts(date = new Date()): NeuralCalendarDateParts {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: DASHBOARD_CYCLE_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+    weekday: "short",
+  })
+    .formatToParts(date)
+    .reduce<Record<string, string>>((acc, part) => {
+      if (part.type !== "literal") acc[part.type] = part.value;
+      return acc;
+    }, {});
+  const year = Math.floor(Number(parts.year) || date.getFullYear());
+  const month = Math.floor(Number(parts.month) || date.getMonth() + 1);
+  const day = Math.floor(Number(parts.day) || date.getDate());
+  return {
+    date: calendarDateString(year, month, day),
+    year,
+    month,
+    day,
+    hour: Math.max(0, Math.min(23, Math.floor(Number(parts.hour) || 0))),
+    weekday: normalizeCalendarWeekday(parts.weekday),
+  };
+}
+
+function calendarPartsFromDateString(date: string): NeuralCalendarDateParts {
+  const [year, month, day] = date.split("-").map((part) => Math.floor(Number(part) || 0));
+  const safeYear = year || 2026;
+  const safeMonth = month || 1;
+  const safeDay = day || 1;
+  const utcDate = new Date(Date.UTC(safeYear, safeMonth - 1, safeDay, 12));
+  return {
+    date: calendarDateString(safeYear, safeMonth, safeDay),
+    year: safeYear,
+    month: safeMonth,
+    day: safeDay,
+    hour: 0,
+    weekday: normalizeCalendarWeekday(
+      new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(utcDate),
+    ),
+  };
+}
+
+function calendarDateString(year: number, month: number, day: number) {
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function normalizeCalendarDateParam(value: string | null) {
+  const text = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+}
+
+function calendarDaysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function calendarFirstWeekday(year: number, month: number) {
+  return new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+}
+
+function clampCalendarYear(value: string | null, fallback: number) {
+  const year = Math.floor(Number(value) || fallback);
+  return Math.max(2026, Math.min(2100, year));
+}
+
+function clampCalendarMonth(value: string | null, fallback: number) {
+  const month = Math.floor(Number(value) || fallback);
+  return Math.max(1, Math.min(12, month));
+}
+
+function neuralCalendarAvailableYears(currentYear: number) {
+  const years = new Set([2026, currentYear]);
+  for (const stat of liveNeuralCalendarDailyStats) years.add(stat.year);
+  return [...years].sort((a, b) => b - a);
+}
+
+function normalizeCalendarWeekday(value: unknown) {
+  const text = String(value || "").slice(0, 3).toLowerCase();
+  const map: Record<string, string> = {
+    sun: "Domingo",
+    mon: "Segunda",
+    tue: "Terca",
+    wed: "Quarta",
+    thu: "Quinta",
+    fri: "Sexta",
+    sat: "Sabado",
+    dom: "Domingo",
+    seg: "Segunda",
+    ter: "Terca",
+    qua: "Quarta",
+    qui: "Quinta",
+    sex: "Sexta",
+    sab: "Sabado",
+  };
+  return map[text] || "Segunda";
+}
+
+function calendarWeekdayOrder() {
+  return ["Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado", "Domingo"];
+}
+
+function neuralCalendarMonthLabel(year: number, month: number) {
+  const labels = [
+    "Janeiro",
+    "Fevereiro",
+    "Marco",
+    "Abril",
+    "Maio",
+    "Junho",
+    "Julho",
+    "Agosto",
+    "Setembro",
+    "Outubro",
+    "Novembro",
+    "Dezembro",
+  ];
+  return `${labels[month - 1] || "Mes"} ${year}`;
+}
+
+function roundCalendarPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round((Number(value) || 0) * 100) / 100));
+}
+
+function neuralCalendarForceLabel(force: NeuralCalendarForce) {
+  if (force === "BANKER") return "Banker";
+  if (force === "PLAYER") return "Player";
+  if (force === "TIE") return "Tie";
+  return "Sem leitura";
+}
+
+function normalizeNeuralCalendarClassification(value: unknown): NeuralCalendarClassification {
+  const text = String(value || "").toLowerCase();
+  if (text === "muito_pagante" || text === "operavel" || text === "perigoso" || text === "sem_amostra") {
+    return text;
+  }
+  return "sem_amostra";
+}
+
+function normalizeNeuralCalendarForce(value: unknown): NeuralCalendarForce {
+  const text = String(value || "").toUpperCase();
+  if (text === "BANKER" || text === "PLAYER" || text === "TIE") return text;
+  return "NONE";
+}
+
+function normalizeNeuralCalendarModule(value: unknown): NeuralCalendarModule {
+  const text = String(value || "");
+  if (text === "Neural Pagante" || text === "Surf Analyzer" || text === "Tendencia" || text === "Validador") {
+    return text;
+  }
+  return "Tendencia";
 }
 
 async function handleValidatorStorageRequest(request: Request, url: URL, env: unknown) {
@@ -8883,6 +9744,28 @@ function applyLiveState(state: Record<string, unknown>) {
       .slice(0, 1000);
   }
 
+  if (Array.isArray(state.neuralCalendarDailyStats)) {
+    liveNeuralCalendarDailyStats = state.neuralCalendarDailyStats
+      .map((row) => neuralCalendarDailyFromRow(readRecord(row)))
+      .filter((row): row is NeuralCalendarDailyStat => Boolean(row));
+  }
+
+  if (Array.isArray(state.neuralCalendarHourlyStats)) {
+    liveNeuralCalendarHourlyStats = state.neuralCalendarHourlyStats
+      .map((row) => neuralCalendarHourlyFromRow(readRecord(row)))
+      .filter((row): row is NeuralCalendarHourlyStat => Boolean(row));
+  }
+
+  const calendarKeys = readRecord(state.neuralCalendarCountedRoundKeys);
+  if (Object.keys(calendarKeys).length > 0) {
+    liveNeuralCalendarCountedRoundKeys = pruneNeuralCalendarCountedKeys(
+      Object.keys(calendarKeys).reduce<Record<string, true>>((acc, key) => {
+        if (calendarKeys[key]) acc[key] = true;
+        return acc;
+      }, {}),
+    );
+  }
+
   if (Array.isArray(state.recipients)) {
     liveRecipients = state.recipients
       .map(readRecord)
@@ -9004,6 +9887,18 @@ function mergeLiveStates(
       durable.validatorNotifications,
       cache.validatorNotifications,
     ).slice(0, 1000),
+    neuralCalendarDailyStats: mergeStateArrays(
+      durable.neuralCalendarDailyStats,
+      cache.neuralCalendarDailyStats,
+    ),
+    neuralCalendarHourlyStats: mergeStateArrays(
+      durable.neuralCalendarHourlyStats,
+      cache.neuralCalendarHourlyStats,
+    ),
+    neuralCalendarCountedRoundKeys: {
+      ...readRecord(cache.neuralCalendarCountedRoundKeys),
+      ...readRecord(durable.neuralCalendarCountedRoundKeys),
+    },
     recipients: filterDeletedEntityRows(
       mergeEntityStateArrays(
         durable.recipients,
@@ -9377,6 +10272,9 @@ function buildLiveStateSnapshot(env?: unknown) {
     validatorPatterns: validatorUsesDedicatedTables ? [] : liveValidatorPatterns,
     validatorChannels: validatorUsesDedicatedTables ? [] : liveValidatorChannels,
     validatorNotifications: validatorUsesDedicatedTables ? [] : liveValidatorNotifications.slice(0, 1000),
+    neuralCalendarDailyStats: liveNeuralCalendarDailyStats,
+    neuralCalendarHourlyStats: liveNeuralCalendarHourlyStats,
+    neuralCalendarCountedRoundKeys: liveNeuralCalendarCountedRoundKeys,
     recipients: liveRecipients,
     clients: liveClients.map(removeLegacyPassword),
     accessEvents: liveAccessEvents,

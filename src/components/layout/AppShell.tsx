@@ -10,6 +10,7 @@ import {
   Settings,
   ShieldCheck,
   Network,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -26,6 +27,7 @@ const navItems = [
   { to: "/app/ia", label: "Aprendizado IA", icon: Brain },
   { to: "/app/padroes", label: "Padrões IA", icon: BrainCircuit },
   { to: "/app/validador", label: "Validador", icon: ShieldCheck },
+  { to: "/app/calendario", label: "Calendario", icon: CalendarDays },
   { to: "/app/planos", label: "Assinar", icon: Crown },
   { to: "/app/conta", label: "Conta", icon: User },
 ] as const;
