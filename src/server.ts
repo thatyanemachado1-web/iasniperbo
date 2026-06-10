@@ -6,10 +6,6 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import {
-  NUMERO_PAGANTE_NEURAL_MIN_ROUNDS,
-  buildNumeroPaganteNeural,
-} from "./utils/numeroPaganteNeural";
-import {
   DEFAULT_SITE_CONTENT_SETTINGS,
   normalizeAnnouncementTone,
   normalizeAssetUrl,
@@ -2838,7 +2834,6 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     changed = await processValidatorLiveMonitoring(env, {
       allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
     }) || changed;
-    liveDashboardData = applyServerNumeroPaganteNeural(liveDashboardData);
     if (changed) await saveLiveState(env);
     return json(publicDashboardSnapshot(liveDashboardData));
   }
@@ -4086,9 +4081,25 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
           ...signal,
           lastResult: null,
         },
-    neuralReading: dashboard.neuralReading,
-    neuralScoreboard: dashboard.neuralScoreboard,
-    neuralSequenceLastOutcome: dashboard.neuralSequenceLastOutcome ?? null,
+    neuralReading: dashboard.neuralReading
+      ? {
+          ...dashboard.neuralReading,
+          sequencePositive: 0,
+          sequenceNegative: 0,
+          maxSequencePositive: 0,
+          maxSequenceNegative: 0,
+        }
+      : dashboard.neuralReading,
+    neuralScoreboard: dashboard.neuralScoreboard
+      ? {
+          ...dashboard.neuralScoreboard,
+          sequencePositive: 0,
+          sequenceNegative: 0,
+          maxSequencePositive: 0,
+          maxSequenceNegative: 0,
+        }
+      : dashboard.neuralScoreboard,
+    neuralSequenceLastOutcome: null,
   };
 }
 
@@ -4366,8 +4377,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
   };
 
-  const dashboardWithServerNeural = applyServerNumeroPaganteNeural(nextDashboard);
-  return trackServerEntryModeStats(trackServerNeuralSequences(dashboardWithServerNeural, currentDashboard));
+  return trackServerEntryModeStats(trackServerNeuralSequences(nextDashboard, currentDashboard));
 }
 
 function ensureDashboardDailyCycle(
@@ -4531,92 +4541,36 @@ function resetNeuralReadingDailyCounters(
   };
 }
 
-function applyServerNumeroPaganteNeural(dashboard: LiveDashboardData): LiveDashboardData {
-  const snapshot = buildNumeroPaganteNeural(liveValidatorRoundHistory);
-  if (snapshot) {
-    return {
-      ...dashboard,
-      neuralReading: snapshot.reading,
-      neuralScoreboard: snapshot.scoreboard,
-      neuralSequenceLastOutcome: inferServerNeuralOutcome(
-        serverSafeCounter(snapshot.scoreboard.sequencePositive),
-        serverSafeCounter(snapshot.scoreboard.sequenceNegative),
-      ),
-    };
-  }
-
-  if (
-    liveValidatorRoundHistory.length >= NUMERO_PAGANTE_NEURAL_MIN_ROUNDS ||
-    !hasServerNeuralPayingNumber(dashboard.neuralReading)
-  ) {
-    return dashboard;
-  }
-
-  return {
-    ...dashboard,
-    neuralReading: {
-      mode: "SCANNING",
-      numero: null,
-      origem: null,
-      origemTipo: null,
-      direcao: null,
-      validade: "G1",
-      alertas: null,
-      acertos: null,
-      greenSemGale: null,
-      greenG1: null,
-      erros: null,
-      reds: null,
-      assertividade: null,
-      sequencePositive: 0,
-      sequenceNegative: 0,
-      maxSequencePositive: 0,
-      maxSequenceNegative: 0,
-      paganteStatus: "AMOSTRA_MINIMA_180",
-      paganteAlert: `Aguardando ${NUMERO_PAGANTE_NEURAL_MIN_ROUNDS} rodadas reais para ativar numero pagante.`,
-      paganteWindow: null,
-      isSaturated: false,
-      isRedAlert: false,
-      postTie: false,
-    },
-    neuralScoreboard: {
-      totalAlerts: null,
-      acertos: null,
-      greens: null,
-      greenSemGale: null,
-      greenG1: null,
-      erros: null,
-      reds: null,
-      assertividade: null,
-      sequencePositive: 0,
-      sequenceNegative: 0,
-      maxSequencePositive: 0,
-      maxSequenceNegative: 0,
-    },
-    neuralSequenceLastOutcome: null,
-  };
-}
-
-function hasServerNeuralPayingNumber(reading: DashboardData["neuralReading"]) {
-  return Boolean(reading && typeof reading.numero === "number" && reading.origem);
-}
-
 function trackServerNeuralSequences(
   dashboard: LiveDashboardData,
   previousDashboard: LiveDashboardData,
 ): LiveDashboardData {
   if (!dashboard.neuralReading && !dashboard.neuralScoreboard) return dashboard;
-  void previousDashboard;
-  const sequencePositive = serverSafeCounter(
-    dashboard.neuralScoreboard?.sequencePositive ?? dashboard.neuralReading?.sequencePositive,
-  );
-  const sequenceNegative = serverSafeCounter(
-    dashboard.neuralScoreboard?.sequenceNegative ?? dashboard.neuralReading?.sequenceNegative,
-  );
+
+  const neuralReading = dashboard.neuralReading
+    ? {
+        ...dashboard.neuralReading,
+        sequencePositive: 0,
+        sequenceNegative: 0,
+        maxSequencePositive: 0,
+        maxSequenceNegative: 0,
+      }
+    : dashboard.neuralReading;
+  const neuralScoreboard = dashboard.neuralScoreboard
+    ? {
+        ...dashboard.neuralScoreboard,
+        sequencePositive: 0,
+        sequenceNegative: 0,
+        maxSequencePositive: 0,
+        maxSequenceNegative: 0,
+      }
+    : dashboard.neuralScoreboard;
 
   return {
     ...dashboard,
-    neuralSequenceLastOutcome: inferServerNeuralOutcome(sequencePositive, sequenceNegative),
+    neuralReading,
+    neuralScoreboard,
+    neuralSequenceLastOutcome: null,
   };
 }
 

@@ -46,11 +46,6 @@ interface NumeroPaganteNeuralSnapshot {
   scoreboard: NeuralScoreboard;
 }
 
-interface ActivePayingEvent {
-  event: PayingEvent;
-  pendingG1: boolean;
-}
-
 const EMPTY_DIRECTION_STATS: DirectionStats = {
   sg: 0,
   g1: 0,
@@ -64,8 +59,6 @@ const EMPTY_DIRECTION_STATS: DirectionStats = {
   lastOutcome: null,
 };
 
-export const NUMERO_PAGANTE_NEURAL_MIN_ROUNDS = 180;
-export const NUMERO_PAGANTE_NEURAL_MAX_ROUNDS = 300;
 const MIN_ACTIVE_VALIDATED = 3;
 const MIN_ACTIVE_ACCURACY = 99;
 const RED_ALERT_ACCURACY = 45;
@@ -73,24 +66,19 @@ const RED_ALERT_ACCURACY = 45;
 export function buildNumeroPaganteNeural(
   rounds: Round[] | undefined,
 ): NumeroPaganteNeuralSnapshot | null {
-  const validRounds = (rounds ?? []).filter(isValidRound).slice(-NUMERO_PAGANTE_NEURAL_MAX_ROUNDS);
-  if (validRounds.length < NUMERO_PAGANTE_NEURAL_MIN_ROUNDS) return null;
+  const validRounds = (rounds ?? []).filter(isValidRound);
+  if (!validRounds.length) return null;
+
+  const latestEvent = payingEventForRound(validRounds[validRounds.length - 1]);
+  if (!latestEvent) return null;
 
   const buckets = catalogPayingNumbers(validRounds);
-  const activeEvent = pickActivePayingEvent(validRounds, buckets);
-  if (!activeEvent) return null;
-
-  const latestEvent = activeEvent.event;
   const currentBucket = buckets.get(candidateKey(latestEvent));
   const currentDirection = pickBestDirection(currentBucket, latestEvent.origem);
   const currentStats = currentDirection?.stats ?? cloneStats(EMPTY_DIRECTION_STATS);
-  const globalStats = buildGlobalStats(validRounds, buckets);
   const totalGreens = currentStats.sg + currentStats.g1;
   const total = totalGreens + currentStats.red;
-  const globalGreens = globalStats.sg + globalStats.g1;
-  const globalTotal = globalGreens + globalStats.red;
   const accuracy = calculateMotorAssertiveness(totalGreens, currentStats.red);
-  const globalAccuracy = calculateMotorAssertiveness(globalGreens, globalStats.red);
   const expectedSide = resultToNeuralSide(currentDirection?.expected ?? sideToResult(latestEvent.origem));
   const origemTipo = originKindFor(latestEvent.origem, expectedSide);
   const isActivePagante =
@@ -126,51 +114,27 @@ export function buildNumeroPaganteNeural(
       maxSequencePositive: currentStats.maxSequencePositive,
       maxSequenceNegative: currentStats.maxSequenceNegative,
       paganteStatus,
-      paganteAlert: alertFor(latestEvent, expectedSide, total, accuracy, activeEvent.pendingG1),
-      paganteWindow: activeEvent.pendingG1 ? 1 : 2,
+      paganteAlert: alertFor(latestEvent, expectedSide, total, accuracy),
+      paganteWindow: 2,
       isSaturated,
       isRedAlert,
       postTie: latestEvent.origem === "TIE",
     },
     scoreboard: {
-      totalAlerts: globalTotal,
-      acertos: globalGreens,
-      greens: globalGreens,
-      greenSemGale: globalStats.sg,
-      greenG1: globalStats.g1,
-      erros: globalStats.red,
-      reds: globalStats.red,
-      assertividade: globalAccuracy,
-      sequencePositive: globalStats.sequencePositive,
-      sequenceNegative: globalStats.sequenceNegative,
-      maxSequencePositive: globalStats.maxSequencePositive,
-      maxSequenceNegative: globalStats.maxSequenceNegative,
+      totalAlerts: total,
+      acertos: totalGreens,
+      greens: totalGreens,
+      greenSemGale: currentStats.sg,
+      greenG1: currentStats.g1,
+      erros: currentStats.red,
+      reds: currentStats.red,
+      assertividade: accuracy,
+      sequencePositive: currentStats.sequencePositive,
+      sequenceNegative: currentStats.sequenceNegative,
+      maxSequencePositive: currentStats.maxSequencePositive,
+      maxSequenceNegative: currentStats.maxSequenceNegative,
     },
   };
-}
-
-function pickActivePayingEvent(
-  rounds: Round[],
-  buckets: Map<string, CandidateBucket>,
-): ActivePayingEvent | null {
-  const lastIndex = rounds.length - 1;
-  const previousIndex = lastIndex - 1;
-  const previousEvent = payingEventForRound(rounds[previousIndex]);
-
-  if (previousEvent) {
-    const direction = pickBestDirection(
-      buckets.get(candidateKey(previousEvent)),
-      previousEvent.origem,
-    );
-    const expected = direction?.expected ?? sideToResult(previousEvent.origem);
-    const validation = validateOccurrence(rounds, previousIndex + 1, expected);
-    if (validation.kind === "pending") {
-      return { event: previousEvent, pendingG1: true };
-    }
-  }
-
-  const latestEvent = payingEventForRound(rounds[lastIndex]);
-  return latestEvent ? { event: latestEvent, pendingG1: false } : null;
 }
 
 function catalogPayingNumbers(rounds: Round[]) {
@@ -228,25 +192,6 @@ function applyValidation(
 
   stats.red += 1;
   applySequence(stats, "red");
-}
-
-function buildGlobalStats(rounds: Round[], buckets: Map<string, CandidateBucket>) {
-  const expectedByKey = new Map<string, RoundResult>();
-  for (const [key, bucket] of buckets) {
-    const direction = pickBestDirection(bucket, bucket.event.origem);
-    expectedByKey.set(key, direction?.expected ?? sideToResult(bucket.event.origem));
-  }
-
-  const stats = cloneStats(EMPTY_DIRECTION_STATS);
-  for (let index = 0; index < rounds.length; index += 1) {
-    const event = payingEventForRound(rounds[index]);
-    if (!event) continue;
-
-    const expected = expectedByKey.get(candidateKey(event)) ?? sideToResult(event.origem);
-    applyValidation(stats, rounds, index + 1, expected);
-  }
-
-  return stats;
 }
 
 function validateOccurrence(
@@ -412,17 +357,8 @@ function statusFor({
   return "OBSERVACAO";
 }
 
-function alertFor(
-  event: PayingEvent,
-  expectedSide: NeuralSide,
-  total: number,
-  accuracy: number,
-  pendingG1 = false,
-) {
+function alertFor(event: PayingEvent, expectedSide: NeuralSide, total: number, accuracy: number) {
   const direction = expectedSide === "BANKER" ? "Banker" : expectedSide === "PLAYER" ? "Player" : "Tie";
-  if (pendingG1) {
-    return `${event.label}: aguardando G1 para ${direction}.`;
-  }
   if (total < MIN_ACTIVE_VALIDATED) {
     return `${event.label}: coletando amostra para ${direction}.`;
   }
