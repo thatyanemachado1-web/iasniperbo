@@ -2808,6 +2808,12 @@ async function handleDashboardRequest(request: Request, env: unknown) {
         "salvar rodadas do Validador",
         false,
       );
+      const dashboardBeforeTieScoreboard = liveDashboardData;
+      liveDashboardData = trackServerTieRoundScoreboard(
+        liveDashboardData,
+        dashboardBeforeTieScoreboard,
+        incomingRounds,
+      );
       await processValidatorLiveMonitoring(env, {
         allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
       });
@@ -4558,22 +4564,38 @@ function trackServerTieRoundScoreboard(
   const recentRounds = incomingRounds.slice(-MAX_MONITOR_ROUND_HISTORY);
   if (!recentRounds.length) return dashboard;
 
-  const currentScoreboard = dashboard.tieAlertScoreboard ?? previousDashboard.tieAlertScoreboard;
-  const previousScoreboard = previousDashboard.tieAlertScoreboard;
-  const payloadAlreadyAdvanced =
-    serverSafeCounter(currentScoreboard.greenTieAlerts) >
-      serverSafeCounter(previousScoreboard.greenTieAlerts) ||
-    serverSafeCounter(currentScoreboard.expired) >
-      serverSafeCounter(previousScoreboard.expired);
+  const fallbackScoreboard = {
+    greenTieAlerts: 0,
+    expired: 0,
+    totalAlerts: 0,
+    assertiveness: 0,
+    sequencePositive: 0,
+    sequenceExpired: 0,
+  };
+  const currentScoreboard =
+    dashboard.tieAlertScoreboard ?? previousDashboard.tieAlertScoreboard ?? fallbackScoreboard;
+  const previousScoreboard = previousDashboard.tieAlertScoreboard ?? fallbackScoreboard;
+  const currentGreenTieAlerts = serverSafeCounter(currentScoreboard.greenTieAlerts);
+  const previousGreenTieAlerts = serverSafeCounter(previousScoreboard.greenTieAlerts);
+  const payloadGreenAlreadyAdvanced = currentGreenTieAlerts > previousGreenTieAlerts;
 
   const countedRoundKeys = {
     ...(previousDashboard.tieAlertCountedRoundKeys ?? {}),
     ...(dashboard.tieAlertCountedRoundKeys ?? {}),
   };
-  let greenTieAlerts = serverSafeCounter(currentScoreboard.greenTieAlerts);
-  const expired = serverSafeCounter(currentScoreboard.expired);
-  let sequencePositive = serverSafeCounter(currentScoreboard.sequencePositive);
-  let sequenceExpired = serverSafeCounter(currentScoreboard.sequenceExpired);
+  let greenTieAlerts = Math.max(currentGreenTieAlerts, previousGreenTieAlerts);
+  const expired = Math.max(
+    serverSafeCounter(currentScoreboard.expired),
+    serverSafeCounter(previousScoreboard.expired),
+  );
+  let sequencePositive = Math.max(
+    serverSafeCounter(currentScoreboard.sequencePositive),
+    serverSafeCounter(previousScoreboard.sequencePositive),
+  );
+  let sequenceExpired = Math.max(
+    serverSafeCounter(currentScoreboard.sequenceExpired),
+    serverSafeCounter(previousScoreboard.sequenceExpired),
+  );
   let changed = false;
 
   for (const round of recentRounds.slice().sort(compareRoundHistory)) {
@@ -4582,9 +4604,9 @@ function trackServerTieRoundScoreboard(
     countedRoundKeys[key] = true;
     changed = true;
 
-    if (payloadAlreadyAdvanced) continue;
+    if (payloadGreenAlreadyAdvanced) continue;
 
-    if (round.result === "T") {
+    if (String(round.result).toUpperCase() === "T") {
       greenTieAlerts += 1;
       sequencePositive += 1;
       sequenceExpired = 0;
@@ -4593,29 +4615,31 @@ function trackServerTieRoundScoreboard(
     }
   }
 
-  if (!changed) return dashboard;
-
   const totalAlerts = greenTieAlerts + expired;
   const tieAlertCountedRoundKeys = pruneTieCountedRoundKeys(countedRoundKeys);
+  const nextScoreboard = {
+    ...currentScoreboard,
+    greenTieAlerts,
+    expired,
+    totalAlerts,
+    assertiveness: calculateMotorAssertiveness(greenTieAlerts, expired),
+    sequencePositive,
+    sequenceExpired,
+  };
+  const scoreboardChanged =
+    nextScoreboard.greenTieAlerts !== currentGreenTieAlerts ||
+    nextScoreboard.expired !== serverSafeCounter(currentScoreboard.expired) ||
+    nextScoreboard.totalAlerts !== serverSafeCounter(currentScoreboard.totalAlerts) ||
+    nextScoreboard.sequencePositive !== serverSafeCounter(currentScoreboard.sequencePositive) ||
+    nextScoreboard.sequenceExpired !== serverSafeCounter(currentScoreboard.sequenceExpired) ||
+    nextScoreboard.assertiveness !== safeNumber(currentScoreboard.assertiveness);
+
+  if (!changed && !scoreboardChanged) return dashboard;
 
   return {
     ...dashboard,
     tieAlertCountedRoundKeys,
-    tieAlertScoreboard: payloadAlreadyAdvanced
-      ? {
-          ...currentScoreboard,
-          sequencePositive,
-          sequenceExpired,
-        }
-      : {
-          ...currentScoreboard,
-          greenTieAlerts,
-          expired,
-          totalAlerts,
-          assertiveness: calculateMotorAssertiveness(greenTieAlerts, expired),
-          sequencePositive,
-          sequenceExpired,
-        },
+    tieAlertScoreboard: nextScoreboard,
   };
 }
 
