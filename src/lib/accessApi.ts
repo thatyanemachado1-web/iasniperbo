@@ -1,6 +1,16 @@
 import { getInitialApiUrl } from "@/lib/adminApi";
 import { readUserSession, saveUserSession, type UserSession } from "@/lib/userSession";
 
+export class AccessApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AccessApiError";
+    this.status = status;
+  }
+}
+
 export interface ClientAccess {
   registered: boolean;
   approved: boolean;
@@ -217,7 +227,7 @@ async function apiRequest<T>(
     } catch {
       message = text;
     }
-    throw new Error(message || "Não foi possível validar o acesso.");
+    throw new AccessApiError(message || "Não foi possível validar o acesso.", response.status);
   }
   return (await response.json()) as T;
 }

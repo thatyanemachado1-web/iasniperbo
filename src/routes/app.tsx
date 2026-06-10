@@ -1,7 +1,7 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
-import { getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
+import { AccessApiError, getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
 import { clearUserSession, hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app")({
@@ -104,9 +104,11 @@ function ProtectedAppRoute() {
         if (changed) {
           window.location.reload();
         }
-      } catch {
-        clearUserSession();
-        if (!stopped) window.location.reload();
+      } catch (error) {
+        if (shouldClearSessionAfterRefreshError(error)) {
+          clearUserSession();
+          if (!stopped) window.location.reload();
+        }
       } finally {
         refreshing = false;
       }
@@ -138,4 +140,11 @@ function isExpiredAt(value: string) {
   if (!value) return false;
   const expires = Date.parse(value);
   return Number.isFinite(expires) && expires <= Date.now();
+}
+
+function shouldClearSessionAfterRefreshError(error: unknown) {
+  if (error instanceof AccessApiError) {
+    return error.status === 401 || error.status === 403;
+  }
+  return false;
 }
