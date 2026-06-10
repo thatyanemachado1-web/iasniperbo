@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import type { Round } from "@/types/dashboard";
 import type { PatternMinerHistoryLimit, PatternMinerSnapshot } from "@/types/patternMiner";
 import { DEFAULT_PATTERN_MINER_CONFIG } from "@/patternMiner/PatternMinerEngine";
@@ -11,17 +11,13 @@ interface UsePatternMinerParams {
 }
 
 export function usePatternMiner({ rounds, historyLimit = 15000, enabled }: UsePatternMinerParams) {
-  const [snapshot, setSnapshot] = useState<PatternMinerSnapshot>(() =>
-    buildEmptySnapshot(historyLimit),
-  );
-
-  useEffect(() => {
-    if (!enabled || typeof window === "undefined") return;
+  const snapshot = useMemo(() => {
+    if (!enabled || typeof window === "undefined") return buildEmptySnapshot(historyLimit);
     const agent = new PatternMinerAgent({
       ...DEFAULT_PATTERN_MINER_CONFIG,
       historyLimit,
     });
-    setSnapshot(agent.scan(rounds));
+    return agent.scan(rounds);
   }, [enabled, historyLimit, rounds]);
 
   return {

@@ -7,7 +7,7 @@ import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } fr
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import { buildNumeroPaganteNeural } from "@/utils/numeroPaganteNeural";
 
-const LIVE_REFETCH_INTERVAL_MS = 1_500;
+const LIVE_REFETCH_INTERVAL_MS = 800;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
 const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v2";
