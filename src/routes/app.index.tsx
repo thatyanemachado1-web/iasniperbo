@@ -149,6 +149,8 @@ function DashboardPage() {
           >
             <TieAlertCard
               alert={d.currentTieAlert}
+              rounds={d.rounds}
+              patternMinerSnapshot={patternMiner.snapshot}
               toggles={d.moduleToggles}
               onModuleTogglesChange={setModuleToggles}
             />

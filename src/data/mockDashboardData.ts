@@ -50,6 +50,8 @@ function randScore(side: Round["result"]) {
   return { bankerScore: Math.min(a, b), playerScore: Math.max(a, b) };
 }
 
+const TIE_MULTIPLIER_EXAMPLES = [4, 6, 10, 25, 4];
+
 const baseId = 1640;
 export const rounds: Round[] = ROADMAP.map((r, i) => {
   const { bankerScore, playerScore } = randScore(r);
@@ -58,6 +60,7 @@ export const rounds: Round[] = ROADMAP.map((r, i) => {
     result: r,
     bankerScore,
     playerScore,
+    tieMultiplier: r === "T" ? TIE_MULTIPLIER_EXAMPLES[i % TIE_MULTIPLIER_EXAMPLES.length] : null,
     time: `${10 + Math.floor(i / 6)}:${String((i * 7) % 60).padStart(2, "0")}`,
   };
 });

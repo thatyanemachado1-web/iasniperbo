@@ -4,8 +4,8 @@ import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { LeituraNeuralMiniCard } from "@/components/dashboard/LeituraNeuralMiniCard";
 import { cn } from "@/lib/utils";
-import type { MainSignal, NeuralReading, NeuralScoreboard, SurfEntrySummary, TieAlert } from "@/types/dashboard";
-import { CheckCircle2, Clock3, Radio, ShieldCheck, Target, Zap } from "lucide-react";
+import type { MainSignal, NeuralReading, NeuralScoreboard, SignalSide, SurfEntrySummary, TieAlert } from "@/types/dashboard";
+import { CheckCircle2, Clock3, Radio, ShieldCheck, Target } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function SignalCard({
@@ -85,6 +85,7 @@ export function SignalCard({
   const mainSequence = buildMotorSequence(mainSequencePositive, mainSequenceNegative, "Motor principal");
   const StatusIcon = status.Icon;
   const tieRisk = !isResultStatus && tieAlert ? tieRiskBadge(tieAlert) : null;
+  const focus = buildOperationalFocus(signal, neuralReading, tieAlert, surfSummary);
   const riskTone =
     surfSummary?.oppositeRiskLevel === "ALTO"
       ? "text-destructive"
@@ -149,7 +150,6 @@ export function SignalCard({
       <div className="relative grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-4">
         <div className="min-w-0 pt-0.5">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-neon-cyan/25 bg-background/35 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-neon-cyan">
-            <Zap className="size-3" />
             {isWaiting
               ? "Monitorando mesa"
               : isTieWatch
@@ -176,11 +176,7 @@ export function SignalCard({
           >
             <span className="truncate">{mainSequence.label}</span>
           </div>
-          {operationalMessage && (
-            <div className="mt-2 max-w-[42rem] rounded-xl border border-white/5 bg-background/28 px-3 py-2 text-xs leading-relaxed text-foreground/85">
-              {operationalMessage}
-            </div>
-          )}
+          <OperationalFocus focus={focus} fallback={operationalMessage} />
         </div>
         <div className="justify-self-stretch lg:justify-self-end">
           <LeituraNeuralMiniCard
@@ -273,6 +269,193 @@ function buildMotorSequence(positive: number | null | undefined, negative: numbe
 function safeSequenceNumber(value: number | null | undefined) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
+}
+
+interface OperationalFocusSummary {
+  sideLabel: string;
+  sideClassName: string;
+  strength: string;
+  badgeClassName: string;
+  reason: string;
+}
+
+function OperationalFocus({
+  focus,
+  fallback,
+}: {
+  focus: OperationalFocusSummary;
+  fallback?: string;
+}) {
+  return (
+    <div className="mt-2 grid max-w-[42rem] gap-2 rounded-xl border border-neon-cyan/12 bg-background/28 p-2.5 text-xs sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div>
+        <div className="text-[9px] font-black uppercase tracking-[0.14em] text-muted-foreground">
+          Melhor leitura agora
+        </div>
+        <div className={cn("mt-1 text-base font-black leading-tight", focus.sideClassName)}>
+          {focus.sideLabel}
+        </div>
+        <div
+          className={cn(
+            "mt-1 inline-flex rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.1em]",
+            focus.badgeClassName,
+          )}
+        >
+          {focus.strength}
+        </div>
+      </div>
+      <div className="min-w-0">
+        <div className="text-[9px] font-black uppercase tracking-[0.14em] text-muted-foreground">
+          Base
+        </div>
+        <div className="mt-1 font-semibold leading-snug text-foreground/88">{focus.reason}</div>
+        {fallback ? (
+          <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+            {fallback}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function buildOperationalFocus(
+  signal: MainSignal,
+  neuralReading?: NeuralReading,
+  tieAlert?: TieAlert,
+  surfSummary?: SurfEntrySummary,
+): OperationalFocusSummary {
+  const mainSide = activeMainSide(signal);
+  const neural = neuralFocus(neuralReading);
+  const tie = tieFocus(tieAlert);
+  const surfAligned = Boolean(mainSide && surfSummary && surfSummary.oppositeRiskLevel !== "ALTO");
+
+  if (mainSide && neural.side && neural.side !== mainSide) {
+    return focusSummary(
+      "NONE",
+      "Sem consenso",
+      "Aguardar",
+      "Entrada Principal e Leitura Neural estao em lados diferentes.",
+      "border-warning/30 bg-warning/10 text-warning",
+    );
+  }
+
+  if (mainSide) {
+    const parts = ["Entrada Principal"];
+    if (neural.side === mainSide) parts.push("Leitura Neural alinhada");
+    if (surfAligned) parts.push("Surf sem risco alto");
+    if (tie.active) parts.push("Tie em observacao");
+    return focusSummary(
+      mainSide,
+      sideDisplay(mainSide),
+      tie.high ? "Atencao" : parts.length >= 2 ? "Alta" : "Confirmada",
+      parts.join(" + "),
+      tie.high
+        ? "border-warning/30 bg-warning/10 text-warning"
+        : "border-success/30 bg-success/10 text-success",
+    );
+  }
+
+  if (neural.side) {
+    return focusSummary(
+      neural.side,
+      sideDisplay(neural.side),
+      neural.watch ? "Observacao" : "Forte",
+      neural.reason,
+      neural.watch
+        ? "border-warning/30 bg-warning/10 text-warning"
+        : "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
+    );
+  }
+
+  if (tie.active) {
+    return focusSummary(
+      "TIE",
+      "🟡 Tie",
+      tie.high ? "Possivel Tie" : "Observacao",
+      tie.high
+        ? "Radar de Empate com forca alta. Aguardar validade aberta."
+        : "Empate em observacao, sem entrada confirmada.",
+      "border-warning/30 bg-warning/10 text-warning",
+    );
+  }
+
+  return focusSummary(
+    "NONE",
+    "Aguardando",
+    "Sem entrada",
+    "Nenhuma ferramenta confirmou entrada com forca suficiente.",
+    "border-white/10 bg-white/5 text-muted-foreground",
+  );
+}
+
+type FocusSide = SignalSide | "TIE" | "NONE";
+
+function focusSummary(
+  side: FocusSide,
+  sideLabel: string,
+  strength: string,
+  reason: string,
+  badgeClassName: string,
+): OperationalFocusSummary {
+  return {
+    sideLabel,
+    sideClassName: focusSideClass(side),
+    strength,
+    reason,
+    badgeClassName,
+  };
+}
+
+function activeMainSide(signal: MainSignal): SignalSide | null {
+  if (
+    (signal.status === "pending" || signal.status === "g1") &&
+    (signal.side === "BANKER" || signal.side === "PLAYER")
+  ) {
+    return signal.side;
+  }
+  return null;
+}
+
+function neuralFocus(reading?: NeuralReading): {
+  side: SignalSide | "TIE" | null;
+  watch: boolean;
+  reason: string;
+} {
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") {
+    return { side: null, watch: false, reason: "Leitura Neural procurando numero pagante." };
+  }
+
+  const side = reading.direcao ?? reading.origem ?? null;
+  if (!side) return { side: null, watch: true, reason: "Leitura Neural ainda sem lado claro." };
+
+  const watch = reading.mode === "OBSERVING" || Boolean(reading.isRedAlert || reading.isSaturated);
+  const numberLabel = reading.origem === "TIE" ? `${reading.numero}x${reading.numero}` : String(reading.numero);
+  return {
+    side,
+    watch,
+    reason: `Leitura Neural: ${numberLabel} puxando ${sideDisplay(side)} ate ${reading.validade ?? "G1"}.`,
+  };
+}
+
+function tieFocus(alert?: TieAlert): { active: boolean; high: boolean } {
+  if (!alert || alert.status !== "active") return { active: false, high: false };
+  const high = normalizeRisk(alert.level) === "ALTO" || alert.confidence >= 75;
+  return { active: true, high };
+}
+
+function sideDisplay(side: FocusSide) {
+  if (side === "BANKER") return "🔴 Banker";
+  if (side === "PLAYER") return "🔵 Player";
+  if (side === "TIE") return "🟡 Tie";
+  return "Aguardando";
+}
+
+function focusSideClass(side: FocusSide) {
+  if (side === "BANKER") return "text-banker";
+  if (side === "PLAYER") return "text-player";
+  if (side === "TIE") return "text-tie";
+  return "text-muted-foreground";
 }
 
 function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRounds = 4) {

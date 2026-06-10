@@ -5220,6 +5220,7 @@ function normalizeRounds(rounds: unknown[], limit = 30) {
         result,
         bankerScore: Number(item.bankerScore ?? item.banker_score ?? item.banker ?? 0),
         playerScore: Number(item.playerScore ?? item.player_score ?? item.player ?? 0),
+        tieMultiplier: readNullableNumber(item.tieMultiplier ?? item.tie_multiplier ?? item.multiplier),
         time: String(item.time || item.createdAt || "--:--"),
       };
     })
@@ -5377,6 +5378,7 @@ function storedValidatorRoundFromRow(row: Record<string, unknown>): Round | null
     result,
     bankerScore: Number(row.banker_score ?? row.bankerScore ?? 0),
     playerScore: Number(row.player_score ?? row.playerScore ?? 0),
+    tieMultiplier: readNullableNumber(row.tie_multiplier ?? row.tieMultiplier ?? row.multiplier),
     time: readString(row, "round_time") || readString(row, "time") || readString(row, "created_at") || "--:--",
   };
 }

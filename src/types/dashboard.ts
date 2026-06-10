@@ -5,6 +5,7 @@ export interface Round {
   result: RoundResult;
   bankerScore: number;
   playerScore: number;
+  tieMultiplier?: number | null;
   time: string;
 }
 
