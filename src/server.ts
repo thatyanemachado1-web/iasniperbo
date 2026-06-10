@@ -197,8 +197,11 @@ const CALENDAR_DAILY_STATS_TABLE = "calendar_daily_stats";
 const CALENDAR_HOURLY_STATS_TABLE = "calendar_hourly_stats";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const NEURAL_CALENDAR_START_DATE = "2026-06-10";
+const NEURAL_CALENDAR_AGGREGATE_VERSION = "2026-06-10-time-v2";
 const NEURAL_CALENDAR_MIN_DAILY_SAMPLE = 5;
 const NEURAL_CALENDAR_MIN_HOURLY_SAMPLE = 2;
+const NEURAL_CALENDAR_CATCHUP_ROUND_LIMIT = 20_000;
+const NEURAL_CALENDAR_CATCHUP_TIMEOUT_MS = 8_000;
 const MAX_NEURAL_CALENDAR_COUNTED_KEYS = 120_000;
 const MERCADOPAGO_PREFERENCE_URL = "https://api.mercadopago.com/checkout/preferences";
 const MERCADOPAGO_PAYMENT_URL = "https://api.mercadopago.com/v1/payments";
@@ -265,6 +268,7 @@ let liveValidatorNotifications: Array<Record<string, unknown>> = [];
 let liveNeuralCalendarDailyStats: NeuralCalendarDailyStat[] = [];
 let liveNeuralCalendarHourlyStats: NeuralCalendarHourlyStat[] = [];
 let liveNeuralCalendarCountedRoundKeys: Record<string, true> = {};
+let liveNeuralCalendarStorageVersion = "";
 let neuralCalendarHydratedFromTables = false;
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
@@ -2846,12 +2850,22 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       "carregar historico do Validador",
       [] as Round[],
     );
+    let calendarChange: NeuralCalendarChangeSet | null = null;
     if (storedRounds.length) {
       liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, storedRounds);
+      calendarChange = trackNeuralCalendarRounds(storedRounds);
+      if (calendarChange.changed) {
+        await withTimeout(
+          persistNeuralCalendarStats(env, calendarChange),
+          LIVE_STATE_IO_TIMEOUT_MS,
+          "salvar Calendario Neural",
+          false,
+        );
+      }
     }
-    const changed = await processValidatorLiveMonitoring(env, {
+    const changed = (await processValidatorLiveMonitoring(env, {
       allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-    });
+    })) || Boolean(calendarChange?.changed);
     if (changed) await saveLiveState(env);
     const rounds = mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, limit);
     return json({
@@ -2921,6 +2935,16 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       liveDashboardData = cycle.dashboard;
       changed = true;
     }
+    const calendarChange = trackNeuralCalendarRounds(liveDashboardData.rounds || []);
+    if (calendarChange.changed) {
+      await withTimeout(
+        persistNeuralCalendarStats(env, calendarChange),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "salvar Calendario Neural",
+        false,
+      );
+      changed = true;
+    }
     changed = await processValidatorLiveMonitoring(env, {
       allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
     }) || changed;
@@ -2938,6 +2962,9 @@ async function handleDashboardRequest(request: Request, env: unknown) {
 
     const body = await request.json().catch(() => ({}));
     const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
+    if (incomingRounds.length) {
+      liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
+    }
     liveDashboardData = updateDashboardData(liveDashboardData, body);
     if (incomingRounds.length) {
       const calendarChange = trackNeuralCalendarRounds(incomingRounds);
@@ -3389,34 +3416,9 @@ async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
   if (!getSupabasePersistenceConfig(env) || neuralCalendarHydratedFromTables) return;
   neuralCalendarHydratedFromTables = true;
 
-  const [dailyRows, hourlyRows] = await Promise.all([
-    fetchSupabaseRows(
-      env,
-      CALENDAR_DAILY_STATS_TABLE,
-      "select=*&order=date.asc",
-    ),
-    fetchSupabaseRows(
-      env,
-      CALENDAR_HOURLY_STATS_TABLE,
-      "select=*&order=date.asc,hour.asc",
-    ),
-  ]);
-  if (dailyRows.length) {
-    liveNeuralCalendarDailyStats = mergeNeuralCalendarDailyStats([
-      ...liveNeuralCalendarDailyStats,
-      ...dailyRows.map(neuralCalendarDailyFromRow).filter(Boolean),
-    ] as NeuralCalendarDailyStat[]);
-  }
-  if (hourlyRows.length) {
-    liveNeuralCalendarHourlyStats = mergeNeuralCalendarHourlyStats([
-      ...liveNeuralCalendarHourlyStats,
-      ...hourlyRows.map(neuralCalendarHourlyFromRow).filter(Boolean),
-    ] as NeuralCalendarHourlyStat[]);
-  }
-
   const storedRounds = await withTimeout(
-    fetchStoredValidatorRounds(env, MAX_SERVER_ROUND_HISTORY, "bac-bo"),
-    LIVE_STATE_IO_TIMEOUT_MS,
+    fetchStoredValidatorRounds(env, NEURAL_CALENDAR_CATCHUP_ROUND_LIMIT, "bac-bo"),
+    NEURAL_CALENDAR_CATCHUP_TIMEOUT_MS,
     "carregar rodadas reais para Calendario Neural",
     [] as Round[],
   );
@@ -3569,8 +3571,19 @@ function pruneNeuralCalendarCountedKeys(keys: Record<string, true>) {
 }
 
 function neuralCalendarPartsForRound(round: Round): NeuralCalendarDateParts | null {
-  const date = parseRoundDate(round);
-  if (!date) return null;
+  const raw = String(round.time || "").trim();
+  const timeMatch = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (timeMatch) {
+    const current = saoPauloDateParts();
+    return {
+      ...current,
+      hour: Math.max(0, Math.min(23, Math.floor(Number(timeMatch[1]) || 0))),
+    };
+  }
+
+  const recordedAt = readString(round as unknown as Record<string, unknown>, "recordedAt");
+  const date = parseRoundDate(round) || (recordedAt ? new Date(recordedAt) : null);
+  if (!date || Number.isNaN(date.getTime())) return null;
   return saoPauloDateParts(date);
 }
 
@@ -9744,26 +9757,35 @@ function applyLiveState(state: Record<string, unknown>) {
       .slice(0, 1000);
   }
 
-  if (Array.isArray(state.neuralCalendarDailyStats)) {
-    liveNeuralCalendarDailyStats = state.neuralCalendarDailyStats
-      .map((row) => neuralCalendarDailyFromRow(readRecord(row)))
-      .filter((row): row is NeuralCalendarDailyStat => Boolean(row));
-  }
+  const calendarVersion = readString(state, "neuralCalendarVersion");
+  liveNeuralCalendarStorageVersion = NEURAL_CALENDAR_AGGREGATE_VERSION;
+  if (calendarVersion === NEURAL_CALENDAR_AGGREGATE_VERSION) {
+    if (Array.isArray(state.neuralCalendarDailyStats)) {
+      liveNeuralCalendarDailyStats = state.neuralCalendarDailyStats
+        .map((row) => neuralCalendarDailyFromRow(readRecord(row)))
+        .filter((row): row is NeuralCalendarDailyStat => Boolean(row));
+    }
 
-  if (Array.isArray(state.neuralCalendarHourlyStats)) {
-    liveNeuralCalendarHourlyStats = state.neuralCalendarHourlyStats
-      .map((row) => neuralCalendarHourlyFromRow(readRecord(row)))
-      .filter((row): row is NeuralCalendarHourlyStat => Boolean(row));
-  }
+    if (Array.isArray(state.neuralCalendarHourlyStats)) {
+      liveNeuralCalendarHourlyStats = state.neuralCalendarHourlyStats
+        .map((row) => neuralCalendarHourlyFromRow(readRecord(row)))
+        .filter((row): row is NeuralCalendarHourlyStat => Boolean(row));
+    }
 
-  const calendarKeys = readRecord(state.neuralCalendarCountedRoundKeys);
-  if (Object.keys(calendarKeys).length > 0) {
-    liveNeuralCalendarCountedRoundKeys = pruneNeuralCalendarCountedKeys(
-      Object.keys(calendarKeys).reduce<Record<string, true>>((acc, key) => {
-        if (calendarKeys[key]) acc[key] = true;
-        return acc;
-      }, {}),
-    );
+    const calendarKeys = readRecord(state.neuralCalendarCountedRoundKeys);
+    if (Object.keys(calendarKeys).length > 0) {
+      liveNeuralCalendarCountedRoundKeys = pruneNeuralCalendarCountedKeys(
+        Object.keys(calendarKeys).reduce<Record<string, true>>((acc, key) => {
+          if (calendarKeys[key]) acc[key] = true;
+          return acc;
+        }, {}),
+      );
+    }
+  } else {
+    liveNeuralCalendarDailyStats = [];
+    liveNeuralCalendarHourlyStats = [];
+    liveNeuralCalendarCountedRoundKeys = {};
+    neuralCalendarHydratedFromTables = false;
   }
 
   if (Array.isArray(state.recipients)) {
@@ -10272,6 +10294,7 @@ function buildLiveStateSnapshot(env?: unknown) {
     validatorPatterns: validatorUsesDedicatedTables ? [] : liveValidatorPatterns,
     validatorChannels: validatorUsesDedicatedTables ? [] : liveValidatorChannels,
     validatorNotifications: validatorUsesDedicatedTables ? [] : liveValidatorNotifications.slice(0, 1000),
+    neuralCalendarVersion: NEURAL_CALENDAR_AGGREGATE_VERSION,
     neuralCalendarDailyStats: liveNeuralCalendarDailyStats,
     neuralCalendarHourlyStats: liveNeuralCalendarHourlyStats,
     neuralCalendarCountedRoundKeys: liveNeuralCalendarCountedRoundKeys,
