@@ -5,6 +5,7 @@ import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
+import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
 import {
   DEFAULT_SITE_CONTENT_SETTINGS,
   normalizeAnnouncementTone,
@@ -5239,6 +5240,14 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       : [];
   if (incomingRounds.length) {
     liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
+  }
+
+  const generatedNeural = acceptsCurrentCycle
+    ? buildNumeroPaganteNeural(liveValidatorRoundHistory)
+    : null;
+  if (generatedNeural) {
+    pickedSections.neuralReading = generatedNeural.reading;
+    pickedSections.neuralScoreboard = generatedNeural.scoreboard;
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;

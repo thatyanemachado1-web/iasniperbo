@@ -62,12 +62,14 @@ const EMPTY_DIRECTION_STATS: DirectionStats = {
 const MIN_ACTIVE_VALIDATED = 3;
 const MIN_ACTIVE_ACCURACY = 99;
 const RED_ALERT_ACCURACY = 45;
+const MIN_NEURAL_WINDOW = 180;
+const MAX_NEURAL_WINDOW = 300;
 
 export function buildNumeroPaganteNeural(
   rounds: Round[] | undefined,
 ): NumeroPaganteNeuralSnapshot | null {
-  const validRounds = (rounds ?? []).filter(isValidRound);
-  if (!validRounds.length) return null;
+  const validRounds = (rounds ?? []).filter(isValidRound).slice(-MAX_NEURAL_WINDOW);
+  if (validRounds.length < MIN_NEURAL_WINDOW) return null;
 
   const latestEvent = payingEventForRound(validRounds[validRounds.length - 1]);
   if (!latestEvent) return null;
@@ -115,7 +117,7 @@ export function buildNumeroPaganteNeural(
       maxSequenceNegative: currentStats.maxSequenceNegative,
       paganteStatus,
       paganteAlert: alertFor(latestEvent, expectedSide, total, accuracy),
-      paganteWindow: 2,
+      paganteWindow: validRounds.length,
       isSaturated,
       isRedAlert,
       postTie: latestEvent.origem === "TIE",
