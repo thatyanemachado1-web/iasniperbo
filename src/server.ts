@@ -2099,7 +2099,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ access: await approverAccess(env, email, request) });
     }
 
-    let client = findClientByEmail(email) || (await hydrateClientFromBilling(env, email));
+    let client =
+      findClientByEmail(email) ||
+      (await hydrateClientFromBilling(env, email)) ||
+      syncClientFromRecipientEmail(email);
     if (!client && password) {
       client = await ensureBlockedTrialClientForLogin(env, request, email, password);
     }
@@ -2174,6 +2177,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     );
     if (existingIndex < 0) {
       await hydrateClientFromBilling(env, email);
+      syncClientFromRecipientEmail(email);
       existingIndex = liveClients.findIndex(
         (item) => readString(item, "email").toLowerCase() === email,
       );
@@ -2275,7 +2279,9 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
 
     let client =
-      findClientByEmail(session.email) || (await hydrateClientFromBilling(env, session.email));
+      findClientByEmail(session.email) ||
+      (await hydrateClientFromBilling(env, session.email)) ||
+      syncClientFromRecipientEmail(session.email);
     if (!client && session.scope === "client") {
       client = await ensureSessionClientForExpiredTrial(env, request, session);
     }
@@ -7158,6 +7164,20 @@ function findClientByEmail(email: string) {
   return liveClients.find((item) => readString(item, "email").toLowerCase() === cleanEmail) || null;
 }
 
+function findRecipientByEmail(email: string) {
+  const cleanEmail = email.trim().toLowerCase();
+  return (
+    liveRecipients.find((item) => readString(item, "email").toLowerCase() === cleanEmail) || null
+  );
+}
+
+function syncClientFromRecipientEmail(email: string) {
+  const recipient = findRecipientByEmail(email);
+  if (!recipient) return null;
+  upsertClientFromRecipient(recipient);
+  return findClientByEmail(email);
+}
+
 function clientHasLiveAccess(client: Record<string, unknown>) {
   const status = readString(client, "access_status").toLowerCase();
   if (Boolean(client.isBlocked) || Boolean(client.is_blocked) || status === "blocked") return false;
@@ -8611,6 +8631,13 @@ function upsertClientFromRecipient(recipient: Record<string, unknown>) {
     starts_at: readString(recipient, "starts_at"),
     validity_days: Number(recipient.validity_days || 30),
     expires_at: readString(recipient, "expires_at"),
+    ...(readString(recipient, "password_hash") || readString(recipient, "passwordHash")
+      ? {
+          password_hash:
+            readString(recipient, "password_hash") || readString(recipient, "passwordHash"),
+        }
+      : {}),
+    ...(readString(recipient, "password") ? { password: readString(recipient, "password") } : {}),
     created_at: readString(recipient, "created_at") || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
