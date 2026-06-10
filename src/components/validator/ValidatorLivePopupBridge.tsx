@@ -25,6 +25,7 @@ import type {
 
 const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
 const SAVED_PATTERN_REFRESH_MS = 3_000;
+const SERVER_TAIL_REFRESH_MS = 1_500;
 
 type PopupStatus = "entry" | "green" | "red" | "tie";
 
@@ -50,28 +51,80 @@ interface PatternPopup {
 export function ValidatorLivePopupBridge() {
   const { data, mode } = useDashboardData();
   const [patterns, setPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
+  const [serverRounds, setServerRounds] = useState<Round[]>([]);
   const [popups, setPopups] = useState<PatternPopup[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
   const liveRounds = mode === "live" && !data.mockMode ? data.rounds : [];
-  const rounds = useMemo(() => readValidatorHistory(liveRounds), [liveRounds, data.updatedAt]);
+  const storedRounds = useMemo(() => readValidatorHistory(liveRounds), [liveRounds, data.updatedAt]);
+  const rounds = useMemo(
+    () => mergeRoundSources([storedRounds, serverRounds]),
+    [storedRounds, serverRounds],
+  );
   const roundsKey = roundsSignature(rounds);
   const liveHits = useMemo(() => detectSavedPatternHits(patterns, rounds), [patterns, roundsKey]);
   const liveHitKey = liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|");
 
   useEffect(() => {
+    let stopped = false;
+
     function refreshPatterns() {
-      setPatterns(readSavedPatterns());
+      setPatterns((current) => mergeSavedPatterns(current, readSavedPatterns()));
+    }
+
+    async function refreshServerPatterns() {
+      try {
+        const serverPatterns = await fetchServerSavedPatterns();
+        if (stopped) return;
+        setPatterns((current) => {
+          const next = mergeSavedPatterns(current, readSavedPatterns(), serverPatterns);
+          writeSavedPatterns(next);
+          return next;
+        });
+      } catch {
+        refreshPatterns();
+      }
     }
 
     refreshPatterns();
-    const interval = window.setInterval(refreshPatterns, SAVED_PATTERN_REFRESH_MS);
+    void refreshServerPatterns();
+    const interval = window.setInterval(() => {
+      refreshPatterns();
+      void refreshServerPatterns();
+    }, SAVED_PATTERN_REFRESH_MS);
     const onStorage = () => refreshPatterns();
     window.addEventListener("storage", onStorage);
     return () => {
+      stopped = true;
       window.clearInterval(interval);
       window.removeEventListener("storage", onStorage);
     };
   }, []);
+
+  useEffect(() => {
+    if (!patterns.length) {
+      setServerRounds([]);
+      return;
+    }
+
+    let stopped = false;
+    const limit = monitorRoundLimit(patterns);
+
+    async function refreshRoundTail() {
+      try {
+        const nextRounds = await fetchValidatorRoundTail(limit);
+        if (!stopped) setServerRounds(nextRounds);
+      } catch {
+        if (!stopped) setServerRounds([]);
+      }
+    }
+
+    void refreshRoundTail();
+    const interval = window.setInterval(refreshRoundTail, SERVER_TAIL_REFRESH_MS);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [patterns.map((pattern) => `${pattern.id}:${pattern.updatedAt}:${pattern.pattern.length}:${pattern.galeLimit}`).join("|")]);
 
   useEffect(() => {
     if (!liveHits.length) return;
@@ -237,6 +290,96 @@ function SideLine({
       {side ? <span>{sideEmoji(side)}</span> : null}
       {sideName(side)}
     </span>
+  );
+}
+
+async function fetchServerSavedPatterns() {
+  const response = await fetch("/validator/patterns", {
+    cache: "no-store",
+    headers: validatorApiHeaders(),
+  });
+  if (!response.ok) throw new Error("Validator patterns unavailable");
+  const data = await response.json().catch(() => null) as { patterns?: SavedValidatorPattern[] } | null;
+  return Array.isArray(data?.patterns) ? data.patterns.filter(isSavedPattern) : [];
+}
+
+async function fetchValidatorRoundTail(limit: number) {
+  const url = new URL("/validator/round-history", window.location.origin);
+  url.searchParams.set("limit", String(limit));
+  const response = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: validatorApiHeaders(),
+  });
+  if (!response.ok) throw new Error("Validator round tail unavailable");
+  const data = await response.json().catch(() => null) as { rounds?: unknown[] } | null;
+  return Array.isArray(data?.rounds)
+    ? data.rounds.filter(isValidatorRound).sort(compareValidatorRounds)
+    : [];
+}
+
+function monitorRoundLimit(patterns: SavedValidatorPattern[]) {
+  const needed = patterns.reduce((max, pattern) => {
+    const patternLength = Math.max(1, pattern.pattern.length);
+    const gale = Math.max(0, Number(pattern.galeLimit) || 0);
+    return Math.max(max, patternLength + gale + 8);
+  }, 40);
+  return Math.min(200, Math.max(60, needed));
+}
+
+function mergeSavedPatterns(...sources: SavedValidatorPattern[][]) {
+  const byId = new Map<string, SavedValidatorPattern>();
+  for (const source of sources) {
+    for (const pattern of source.filter(isSavedPattern)) {
+      const current = byId.get(pattern.id);
+      if (!current || Date.parse(pattern.updatedAt || "") >= Date.parse(current.updatedAt || "")) {
+        byId.set(pattern.id, pattern);
+      }
+    }
+  }
+  return [...byId.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+}
+
+function mergeRoundSources(sources: Round[][]) {
+  const byKey = new Map<string, Round>();
+  for (const source of sources) {
+    for (const round of source.filter(isValidatorRound)) {
+      byKey.set(roundSourceKey(round), round);
+    }
+  }
+  return [...byKey.values()].sort(compareValidatorRounds);
+}
+
+function roundSourceKey(round: Round) {
+  return `${round.time}:${round.id}:${round.result}:${round.bankerScore}:${round.playerScore}`;
+}
+
+function compareValidatorRounds(a: Round, b: Round) {
+  const idCompare = a.id - b.id;
+  if (idCompare) return idCompare;
+  const timeCompare = a.time.localeCompare(b.time);
+  if (timeCompare) return timeCompare;
+  return `${a.result}:${a.bankerScore}:${a.playerScore}`.localeCompare(
+    `${b.result}:${b.bankerScore}:${b.playerScore}`,
+  );
+}
+
+function isValidatorRound(value: unknown): value is Round {
+  const round = value as Partial<Round>;
+  return (
+    typeof round.id === "number" &&
+    (round.result === "B" || round.result === "P" || round.result === "T") &&
+    typeof round.bankerScore === "number" &&
+    typeof round.playerScore === "number" &&
+    typeof round.time === "string"
+  );
+}
+
+function isSavedPattern(value: unknown): value is SavedValidatorPattern {
+  const pattern = value as Partial<SavedValidatorPattern>;
+  return (
+    typeof pattern.id === "string" &&
+    Array.isArray(pattern.pattern) &&
+    typeof pattern.updatedAt === "string"
   );
 }
 
