@@ -19,6 +19,8 @@ interface NeuralScoreSummary {
   reds: number | null;
   total: number;
   accuracy: number | null;
+  greenSequence: number | null;
+  redSequence: number | null;
   maxGreenSequence: number | null;
   maxRedSequence: number | null;
 }
@@ -179,6 +181,11 @@ export function LeituraNeuralMiniCard({
               <div className="truncate text-[8px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[9px]">
                 Placar: {formatCount(totalGreens)}G / {formatCount(red, true)}R
               </div>
+              {sequencePositive > 0 ? (
+                <div className="mt-1 truncate text-[8px] font-black uppercase tracking-[0.06em] text-success sm:text-[9px]">
+                  {sequencePositive} GREENS SEGUIDOS
+                </div>
+              ) : null}
               <div
                 className={cn(
                   "mt-1 rounded-full border px-1.5 py-0.5 text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[7px]",
@@ -309,9 +316,16 @@ function NeuralGeneralScorePopover({
             <ScoreBox label="G1 geral" value={score.g1} tone="cyan" />
             <ScoreBox label="Alertas" value={score.totalAlerts} tone="neutral" />
             <ScoreBox label="Total" value={score.total} tone="neutral" />
+            <ScoreBox label="Greens seguidos" value={score.greenSequence ?? "0"} tone="green" />
+            <ScoreBox label="Reds seguidos" value={score.redSequence ?? "0"} tone="red" />
             <ScoreBox label="SQ max green" value={score.maxGreenSequence ?? "coletando"} tone="green" />
             <ScoreBox label="SQ max red" value={score.maxRedSequence ?? "coletando"} tone="red" />
           </div>
+          {score.greenSequence ? (
+            <div className="rounded-lg border border-success/25 bg-success/10 px-2 py-1 text-center text-[10px] font-black uppercase tracking-[0.08em] text-success">
+              {score.greenSequence} GREENS SEGUIDOS
+            </div>
+          ) : null}
           <div className="space-y-2 rounded-lg border border-neon-cyan/15 bg-neon-cyan/5 px-2 py-2 text-[10px] leading-relaxed text-muted-foreground">
             <div>
               <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">Para que serve: </span>
@@ -480,6 +494,12 @@ function buildGeneralScore(
   const total = numberFrom(greens) + numberFrom(reds);
   const totalAlerts = optionalNumberFrom(scoreboard?.totalAlerts ?? fallbackReading.alertas ?? total) ?? total;
   const accuracy = accuracyFrom(null, greens, reds) ?? optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
+  const greenSequence = optionalPositiveNumberFrom(
+    scoreboard?.sequencePositive ?? fallbackReading.sequencePositive,
+  );
+  const redSequence = optionalPositiveNumberFrom(
+    scoreboard?.sequenceNegative ?? fallbackReading.sequenceNegative,
+  );
   const maxGreenSequence = optionalPositiveNumberFrom(scoreboard?.maxSequencePositive ?? fallbackReading.maxSequencePositive);
   const maxRedSequence = optionalPositiveNumberFrom(scoreboard?.maxSequenceNegative ?? fallbackReading.maxSequenceNegative);
 
@@ -491,6 +511,8 @@ function buildGeneralScore(
     reds,
     total,
     accuracy,
+    greenSequence,
+    redSequence,
     maxGreenSequence,
     maxRedSequence,
   };

@@ -325,10 +325,22 @@ function normalizeNeuralScoreboard(
           record.win_rate,
         ),
       ) ?? fallback?.assertividade ?? null,
-    sequencePositive: 0,
-    sequenceNegative: 0,
-    maxSequencePositive: 0,
-    maxSequenceNegative: 0,
+    sequencePositive:
+      readOptionalNumber(firstDefined(record.sequencePositive, record.sequence_positive)) ??
+      fallback?.sequencePositive ??
+      0,
+    sequenceNegative:
+      readOptionalNumber(firstDefined(record.sequenceNegative, record.sequence_negative)) ??
+      fallback?.sequenceNegative ??
+      0,
+    maxSequencePositive:
+      readOptionalNumber(firstDefined(record.maxSequencePositive, record.max_sequence_positive)) ??
+      fallback?.maxSequencePositive ??
+      0,
+    maxSequenceNegative:
+      readOptionalNumber(firstDefined(record.maxSequenceNegative, record.max_sequence_negative)) ??
+      fallback?.maxSequenceNegative ??
+      0,
   };
 }
 
@@ -477,10 +489,22 @@ function normalizeNeuralReading(value: unknown, fallback?: NeuralReading): Neura
       ) ??
       fallback?.assertividade ??
       null,
-    sequencePositive: 0,
-    sequenceNegative: 0,
-    maxSequencePositive: 0,
-    maxSequenceNegative: 0,
+    sequencePositive:
+      readOptionalNumber(firstDefined(record.sequencePositive, record.sequence_positive)) ??
+      fallback?.sequencePositive ??
+      0,
+    sequenceNegative:
+      readOptionalNumber(firstDefined(record.sequenceNegative, record.sequence_negative)) ??
+      fallback?.sequenceNegative ??
+      0,
+    maxSequencePositive:
+      readOptionalNumber(firstDefined(record.maxSequencePositive, record.max_sequence_positive)) ??
+      fallback?.maxSequencePositive ??
+      0,
+    maxSequenceNegative:
+      readOptionalNumber(firstDefined(record.maxSequenceNegative, record.max_sequence_negative)) ??
+      fallback?.maxSequenceNegative ??
+      0,
     paganteStatus:
       readOptionalString(
         firstDefined(record.paganteStatus, record.pagante_status, record.statusPagante),
@@ -629,10 +653,11 @@ function applyNeuralScoreBaseline(
   const totalGreens = greenSemGale + greenG1 || acertos;
   const totalLosses = reds || erros;
   const total = totalGreens + totalLosses;
-  const sequencePositive = 0;
-  const sequenceNegative = 0;
-  const maxSequencePositive = 0;
-  const maxSequenceNegative = 0;
+  const sequence = currentNeuralSequence(reading, scoreboard);
+  const sequencePositive = sequence.sequencePositive;
+  const sequenceNegative = sequence.sequenceNegative;
+  const maxSequencePositive = sequence.maxSequencePositive;
+  const maxSequenceNegative = sequence.maxSequenceNegative;
 
   const neuralReading = {
     ...reading,
