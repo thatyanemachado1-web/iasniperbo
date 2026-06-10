@@ -2138,9 +2138,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         delete (client as Record<string, unknown>).password;
         await saveLiveState(env);
       }
-    } else if (clientHasLiveAccess(client)) {
+    } else {
       return json(
-        { error: "Compra localizada. Abra a aba Cadastro e crie sua senha para ativar o login." },
+        {
+          error:
+            "Conta encontrada sem senha. Abra a aba Cadastro e crie sua senha para entrar ou finalizar o checkout.",
+        },
         401,
       );
     }
@@ -2181,8 +2184,26 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       );
     }
     const now = new Date().toISOString();
-    const passwordHash = await hashPassword(password);
     const existingClient = existingIndex >= 0 ? liveClients[existingIndex] : {};
+    const existingPasswordHash = readString(existingClient, "password_hash");
+    const existingLegacyPassword = readString(existingClient, "password");
+
+    if (existingIndex >= 0 && (existingPasswordHash || existingLegacyPassword)) {
+      const passwordMatches = existingPasswordHash
+        ? await verifyPassword(password, existingPasswordHash)
+        : constantTimeStringEqual(password, existingLegacyPassword);
+      if (!passwordMatches) {
+        return json(
+          {
+            error:
+              "E-mail ja cadastrado. Use a aba Entrar com a senha cadastrada ou fale com o suporte para redefinir.",
+          },
+          409,
+        );
+      }
+    }
+
+    const passwordHash = await hashPassword(password);
     const binding = await requestSessionBinding(env, request);
     const trialAccess = buildRegistrationTrialAccess(env, email, existingClient, binding, now);
     const client: Record<string, unknown> = {

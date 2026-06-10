@@ -128,6 +128,7 @@ function LoginPage() {
   const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState("");
   const [notice, setNotice] = useState("");
   const [pendingAccess, setPendingAccess] = useState<ClientAccess | null>(null);
+  const [prefillEmail, setPrefillEmail] = useState(savedUser.email || "");
   const [salesClosed, setSalesClosed] = useState<boolean | null>(null);
   const [plans, setPlans] = useState<BillingPlan[]>(landingFallbackPlans);
   const [checkoutLeadName, setCheckoutLeadName] = useState(savedUser.name || "");
@@ -173,6 +174,8 @@ function LoginPage() {
     const data = new FormData(event.currentTarget);
     const email = String(data.get("email") || "").trim();
     const password = String(data.get("password") || "");
+    setPrefillEmail(email);
+    setCheckoutLeadEmail(email);
     try {
       const access = await checkClientAccess(email, password);
       if (!access.registered) {
@@ -191,7 +194,11 @@ function LoginPage() {
       saveAccessSession(access, email);
       window.location.href = "/app";
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Não foi possível validar seu acesso.");
+      const message = err instanceof Error ? err.message : "Não foi possível validar seu acesso.";
+      if (!salesClosed && shouldOpenRegisterForPasswordSetup(message)) {
+        setMode("register");
+      }
+      setNotice(message);
     } finally {
       setLoading(false);
     }
@@ -211,6 +218,8 @@ function LoginPage() {
     const email = String(data.get("email") || "").trim();
     const password = String(data.get("password") || "");
     const passwordConfirm = String(data.get("password_confirm") || "");
+    setPrefillEmail(email);
+    setCheckoutLeadEmail(email);
     if (password.length < 4) {
       setNotice("A senha precisa ter pelo menos 4 caracteres.");
       setLoading(false);
@@ -480,7 +489,7 @@ function LoginPage() {
 
               {mode === "login" || salesClosed ? (
                 <form onSubmit={handleLogin} className="space-y-4">
-                  <LoginField icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
+                  <LoginField icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={prefillEmail} placeholder="seu@email.com" />
                   <LoginField icon={<ShieldCheck className="size-4" />} label="Senha" name="password" type="password" placeholder="sua senha" />
                   <button
                     type="submit"
@@ -507,7 +516,7 @@ function LoginPage() {
               ) : (
                 <form onSubmit={handleRegister} className="space-y-3">
                   <LoginField icon={<UserPlus className="size-4" />} label="Nome completo" name="full_name" placeholder="Nome completo" />
-                  <LoginField icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={savedUser.email} placeholder="seu@email.com" />
+                  <LoginField key={`register-email-${prefillEmail}`} icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={prefillEmail} placeholder="seu@email.com" />
                   <LoginField icon={<KeyRound className="size-4" />} label="Criar senha" name="password" type="password" placeholder="mínimo 4 caracteres" />
                   <LoginField icon={<ShieldCheck className="size-4" />} label="Confirmar senha" name="password_confirm" type="password" placeholder="repita sua senha" />
                   <CountryDialField
@@ -739,6 +748,14 @@ function canEnterWhenSalesClosed(access: ClientAccess) {
 
 function isValidCheckoutEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function shouldOpenRegisterForPasswordSetup(message: string) {
+  const normalized = message
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+  return normalized.includes("conta encontrada sem senha") || normalized.includes("crie sua senha");
 }
 
 function formatMoney(amount: number, currency: string) {
