@@ -51,6 +51,7 @@ type LiveDashboardData = DashboardData & {
   cycleDate?: string;
   dailyCycleDate?: string;
   strictDailyCounters?: boolean;
+  tieAlertCountedRoundKeys?: Record<string, true>;
   entryModeSignalModes?: Record<string, ActiveEntryMode[]>;
   entryModeCountedResults?: Record<string, true>;
   latestEntryModeSignalId?: string;
@@ -4377,7 +4378,14 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
   };
 
-  return trackServerEntryModeStats(trackServerNeuralSequences(nextDashboard, currentDashboard));
+  const dashboardWithTieScoreboard = trackServerTieRoundScoreboard(
+    nextDashboard,
+    currentDashboard,
+    incomingRounds,
+  );
+  return trackServerEntryModeStats(
+    trackServerNeuralSequences(dashboardWithTieScoreboard, currentDashboard),
+  );
 }
 
 function ensureDashboardDailyCycle(
@@ -4479,6 +4487,7 @@ function resetDashboardDailyCycle(
       sequenceNegative: 0,
     },
     entryModeStats: emptyServerEntryModeStatsByMode(),
+    tieAlertCountedRoundKeys: {},
     entryModeSignalModes: {},
     entryModeCountedResults: {},
     latestEntryModeSignalId: undefined,
@@ -4539,6 +4548,86 @@ function resetNeuralReadingDailyCounters(
     maxSequencePositive: 0,
     maxSequenceNegative: 0,
   };
+}
+
+function trackServerTieRoundScoreboard(
+  dashboard: LiveDashboardData,
+  previousDashboard: LiveDashboardData,
+  incomingRounds: Round[],
+): LiveDashboardData {
+  const recentRounds = incomingRounds.slice(-MAX_MONITOR_ROUND_HISTORY);
+  if (!recentRounds.length) return dashboard;
+
+  const currentScoreboard = dashboard.tieAlertScoreboard ?? previousDashboard.tieAlertScoreboard;
+  const previousScoreboard = previousDashboard.tieAlertScoreboard;
+  const payloadAlreadyAdvanced =
+    serverSafeCounter(currentScoreboard.greenTieAlerts) >
+      serverSafeCounter(previousScoreboard.greenTieAlerts) ||
+    serverSafeCounter(currentScoreboard.expired) >
+      serverSafeCounter(previousScoreboard.expired);
+
+  const countedRoundKeys = {
+    ...(previousDashboard.tieAlertCountedRoundKeys ?? {}),
+    ...(dashboard.tieAlertCountedRoundKeys ?? {}),
+  };
+  let greenTieAlerts = serverSafeCounter(currentScoreboard.greenTieAlerts);
+  const expired = serverSafeCounter(currentScoreboard.expired);
+  let sequencePositive = serverSafeCounter(currentScoreboard.sequencePositive);
+  let sequenceExpired = serverSafeCounter(currentScoreboard.sequenceExpired);
+  let changed = false;
+
+  for (const round of recentRounds.slice().sort(compareRoundHistory)) {
+    const key = roundHistoryKey(round);
+    if (countedRoundKeys[key]) continue;
+    countedRoundKeys[key] = true;
+    changed = true;
+
+    if (payloadAlreadyAdvanced) continue;
+
+    if (round.result === "T") {
+      greenTieAlerts += 1;
+      sequencePositive += 1;
+      sequenceExpired = 0;
+    } else {
+      sequencePositive = 0;
+    }
+  }
+
+  if (!changed) return dashboard;
+
+  const totalAlerts = greenTieAlerts + expired;
+  const tieAlertCountedRoundKeys = pruneTieCountedRoundKeys(countedRoundKeys);
+
+  return {
+    ...dashboard,
+    tieAlertCountedRoundKeys,
+    tieAlertScoreboard: payloadAlreadyAdvanced
+      ? {
+          ...currentScoreboard,
+          sequencePositive,
+          sequenceExpired,
+        }
+      : {
+          ...currentScoreboard,
+          greenTieAlerts,
+          expired,
+          totalAlerts,
+          assertiveness: calculateMotorAssertiveness(greenTieAlerts, expired),
+          sequencePositive,
+          sequenceExpired,
+        },
+  };
+}
+
+function pruneTieCountedRoundKeys(keys: Record<string, true>) {
+  const allowedKeys = new Set(
+    liveValidatorRoundHistory.slice(-MAX_MONITOR_ROUND_HISTORY).map(roundHistoryKey),
+  );
+  const out: Record<string, true> = {};
+  for (const key of Object.keys(keys)) {
+    if (allowedKeys.has(key)) out[key] = true;
+  }
+  return out;
 }
 
 function trackServerNeuralSequences(
