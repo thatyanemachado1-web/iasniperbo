@@ -25,7 +25,7 @@ import type {
 
 const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
 const SAVED_PATTERN_REFRESH_MS = 3_000;
-const SERVER_TAIL_REFRESH_MS = 1_500;
+const SERVER_TAIL_REFRESH_MS = 800;
 
 type PopupStatus = "entry" | "green" | "red" | "tie";
 
@@ -187,7 +187,7 @@ export function ValidatorLivePopupBridge() {
   if (!popups.length) return null;
 
   return (
-    <div className="pointer-events-none fixed right-3 top-[4.25rem] z-[80] w-[min(360px,calc(100vw-1.5rem))] space-y-2 sm:right-5 lg:top-20">
+    <div className="pointer-events-none fixed right-2 top-16 z-[80] w-[min(292px,calc(100vw-1rem))] space-y-1.5 sm:right-4 lg:top-[4.5rem]">
       {popups.map((popup) => (
         <PatternPopupCard
           key={popup.id}
@@ -209,48 +209,41 @@ function PatternPopupCard({
   const tone = popupTone(popup.outcome.status);
   const entry = popup.hit.entry;
   return (
-    <div className={`pointer-events-auto overflow-hidden rounded-2xl border ${tone.border} ${tone.bg} shadow-2xl backdrop-blur-xl`}>
-      <div className={`h-1 ${tone.bar}`} />
-      <div className="p-3.5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-2.5">
-            <div className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl border ${tone.iconBorder} ${tone.iconBg}`}>
+    <div className={`pointer-events-auto overflow-hidden rounded-xl border ${tone.border} ${tone.bg} shadow-xl backdrop-blur-xl`}>
+      <div className={`h-0.5 ${tone.bar}`} />
+      <div className="p-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-start gap-2">
+            <div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border ${tone.iconBorder} ${tone.iconBg}`}>
               {popupIcon(popup.outcome.status)}
             </div>
             <div className="min-w-0">
-              <div className="text-xs font-black uppercase tracking-wide text-muted-foreground">
-                {popup.outcome.status === "entry" ? "Padrao salvo detectado" : "Resultado do padrao"}
+              <div className="text-[10px] font-black uppercase tracking-wide text-muted-foreground">
+                {popup.outcome.status === "entry" ? "Padrao detectado" : "Resultado"}
               </div>
-              <div className={`mt-0.5 text-base font-black ${tone.text}`}>{popup.outcome.label}</div>
-              <div className="mt-1 text-xs text-muted-foreground">{popup.outcome.description}</div>
+              <div className={`text-sm font-black leading-tight ${tone.text}`}>{popup.outcome.label}</div>
             </div>
           </div>
           <button
             type="button"
             aria-label="Fechar alerta"
             onClick={onDismiss}
-            className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background/45 text-muted-foreground transition hover:border-neon-cyan/50 hover:text-foreground"
+            className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border/50 bg-background/45 text-muted-foreground transition hover:border-neon-cyan/50 hover:text-foreground"
           >
-            <X className="size-3.5" />
+            <X className="size-3" />
           </button>
         </div>
 
-        <div className="mt-3 rounded-xl border border-border/55 bg-background/45 p-2.5">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Padrao</div>
+        <div className="mt-2 rounded-lg border border-border/55 bg-background/45 px-2 py-1.5">
           <PopupPatternLine pattern={popup.hit.pattern.pattern} />
-          <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded-lg border border-border/50 bg-secondary/25 px-2 py-1.5">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Entrada</div>
-              <SideLine side={entry} />
-            </div>
-            <div className="rounded-lg border border-border/50 bg-secondary/25 px-2 py-1.5">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Validade</div>
-              <div className="font-black text-foreground">SG + G{Number(popup.hit.pattern.galeLimit) || 0}</div>
-            </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+            <span className="text-muted-foreground">Entrada:</span>
+            <SideLine side={entry} inline />
+            <span className="text-muted-foreground">G{Number(popup.hit.pattern.galeLimit) || 0}</span>
           </div>
           {popup.outcome.resultRoundId ? (
-            <div className="mt-2 text-[11px] text-muted-foreground">
-              Rodada {popup.outcome.resultRoundId}
+            <div className="mt-1 text-[10px] text-muted-foreground">
+              Rod. {popup.outcome.resultRoundId}
               {popup.outcome.result ? (
                 <>
                   {" "}
@@ -267,9 +260,9 @@ function PatternPopupCard({
 
 function PopupPatternLine({ pattern }: { pattern: ValidatorPatternToken[] }) {
   return (
-    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-sm font-black">
+    <div className="flex min-w-0 flex-wrap items-center gap-1 text-xs font-black">
       {pattern.map((token, index) => (
-        <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1.5">
+        <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1">
           <span className={sideTone(token.side)}>{sideEmoji(token.side)}{token.score ?? ""}</span>
           {index < pattern.length - 1 ? <span className="text-muted-foreground">-&gt;</span> : null}
         </span>
@@ -598,10 +591,10 @@ function sideEmoji(side: RoundResult) {
 }
 
 function popupIcon(status: PopupStatus) {
-  if (status === "green") return <CheckCircle2 className="size-5 text-success" />;
-  if (status === "red") return <XCircle className="size-5 text-destructive" />;
-  if (status === "tie") return <Clock3 className="size-5 text-warning" />;
-  return <BellRing className="size-5 text-neon-cyan" />;
+  if (status === "green") return <CheckCircle2 className="size-4 text-success" />;
+  if (status === "red") return <XCircle className="size-4 text-destructive" />;
+  if (status === "tie") return <Clock3 className="size-4 text-warning" />;
+  return <BellRing className="size-4 text-neon-cyan" />;
 }
 
 function popupTone(status: PopupStatus) {
