@@ -12,6 +12,9 @@ const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
 const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v2";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
+const LOCAL_LIVE_API_BASE_URL = "http://127.0.0.1:8787";
+const PUBLIC_LIVE_API_BASE_URL = "https://sniperbo.com";
+const DASHBOARD_SOURCE_STORAGE_KEY = "sniper_admin_api_url";
 const DEFAULT_MODULE_TOGGLES: ModuleToggles = {
   tieAlert: true,
   surfAnalyzer: true,
@@ -20,10 +23,12 @@ const ALLOWED_REMOTE_API_HOSTS = new Set(["sniperbo.com", "www.sniperbo.com"]);
 
 function configuredDashboardUrl() {
   const directUrl = import.meta.env.VITE_SNIPER_DASHBOARD_URL as string | undefined;
-  if (directUrl) return directUrl;
+  if (directUrl) return ensureDashboardPath(directUrl);
 
-  const apiBase = import.meta.env.VITE_SNIPER_API_URL as string | undefined;
-  if (apiBase) return `${apiBase.replace(/\/+$/, "")}/dashboard`;
+  const apiBase =
+    (import.meta.env.VITE_API_BASE_URL as string | undefined) ||
+    (import.meta.env.VITE_SNIPER_API_URL as string | undefined);
+  if (apiBase) return ensureDashboardPath(apiBase);
 
   if (typeof window !== "undefined") {
     // Only accept the ?sniper_api= override on local dev frontends.
@@ -32,19 +37,19 @@ function configuredDashboardUrl() {
     if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
       const queryUrl = dashboardUrlFromQuery(window.location.search);
       if (queryUrl) {
-        window.localStorage.setItem("sniper_admin_api_url", stripDashboardPath(queryUrl));
+        window.localStorage.setItem(DASHBOARD_SOURCE_STORAGE_KEY, stripDashboardPath(queryUrl));
         return queryUrl;
       }
     }
 
-    const savedAdminApi = window.localStorage.getItem("sniper_admin_api_url");
+    const savedAdminApi = window.localStorage.getItem(DASHBOARD_SOURCE_STORAGE_KEY);
     if (savedAdminApi && isSameOriginApiBaseUrl(savedAdminApi)) {
-      window.localStorage.removeItem("sniper_admin_api_url");
+      window.localStorage.removeItem(DASHBOARD_SOURCE_STORAGE_KEY);
       return defaultDashboardUrl();
     }
     if (savedAdminApi && isAllowedApiBaseUrl(savedAdminApi))
       return ensureDashboardPath(savedAdminApi);
-    if (savedAdminApi) window.localStorage.removeItem("sniper_admin_api_url");
+    if (savedAdminApi) window.localStorage.removeItem(DASHBOARD_SOURCE_STORAGE_KEY);
   }
 
   return defaultDashboardUrl();
@@ -100,14 +105,32 @@ function stripDashboardPath(url: string) {
 
 function defaultDashboardUrl() {
   if (typeof window === "undefined") return "";
-  return `${window.location.origin}/dashboard`;
+  if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
+    return ensureDashboardPath(LOCAL_LIVE_API_BASE_URL);
+  }
+  return ensureDashboardPath(PUBLIC_LIVE_API_BASE_URL);
+}
+
+function configuredDashboardToken(url: string) {
+  const envToken = import.meta.env.VITE_SNIPER_DASHBOARD_TOKEN as string | undefined;
+  if (!envToken?.trim()) return "";
+  return isLocalDashboardUrl(url) ? envToken.trim() : "";
+}
+
+function isLocalDashboardUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    return ["127.0.0.1", "localhost"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
 async function fetchDashboardData(): Promise<DashboardData> {
   const url = configuredDashboardUrl();
   const userSession = readUserSession();
   const adminSession = readAdminSession();
-  const token = adminSession?.token || userSession.clientToken;
+  const token = configuredDashboardToken(url) || adminSession?.token || userSession.clientToken;
   const response = await fetch(url, {
     cache: "no-store",
     headers: {
@@ -165,6 +188,7 @@ export function useDashboardData() {
 
   return {
     data,
+    dashboardUrl,
     mode: !dashboardUrl
       ? "mock"
       : query.isError

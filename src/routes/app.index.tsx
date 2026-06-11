@@ -42,7 +42,7 @@ export const Route = createFileRoute("/app/")({
 });
 
 function DashboardPage() {
-  const { data: d, mode, setModuleToggles } = useDashboardData();
+  const { data: d, dashboardUrl, mode, setModuleToggles } = useDashboardData();
   const userSession = readUserSession();
   const fullAccess = hasFullAccess(userSession);
   const patternMiner = usePatternMiner({
@@ -85,6 +85,7 @@ function DashboardPage() {
         ? "Conectando API"
         : "Modo demonstração";
   const dataModeTone = mode === "live" ? "green" : mode === "connecting" ? "blue" : "amber";
+  const dashboardSourceLabel = formatDashboardSource(dashboardUrl);
 
   return (
     <div className="space-y-4">
@@ -105,6 +106,9 @@ function DashboardPage() {
           </AppBadge>
           <AppBadge tone="blue" pulse>
             Engine operacional
+          </AppBadge>
+          <AppBadge tone={mode === "live" ? "green" : "amber"}>
+            {dashboardSourceLabel}
           </AppBadge>
           {fullAccess ? (
             <AppBadge tone="green">
@@ -371,6 +375,21 @@ function formatCompactCount(value: number) {
 
 function neuralMaxSequenceLabel(value: number) {
   return value > 0 ? value : "coletando";
+}
+
+function formatDashboardSource(url: string) {
+  if (!url) return "API offline";
+  try {
+    const parsed = new URL(url);
+    const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+    const host =
+      parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost"
+        ? "local"
+        : parsed.hostname.replace(/^www\./, "");
+    return `API ${host}:${port}`;
+  } catch {
+    return "API configurada";
+  }
 }
 
 function TrialCountdown({ expiresAt }: { expiresAt: string }) {
