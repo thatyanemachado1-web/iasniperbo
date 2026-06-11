@@ -71,7 +71,7 @@ export function buildSurfCopy(alert?: SurfAlert | null) {
 }
 
 export function buildNeuralCopy(reading?: NeuralReading | null) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number" || !reading.origem) {
+  if (!reading || typeof reading.numero !== "number" || !reading.origem) {
     return "Nenhum número pagante confirmado no momento. Aguardar.";
   }
 
@@ -166,7 +166,7 @@ function entryRisk(data: DashboardData, side: SignalSide) {
 }
 
 function activePaganteSide(reading?: NeuralReading | null, favorableOnly = true): CurrentSignalSide | null {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
+  if (!reading || typeof reading.numero !== "number") return null;
   if (isOppositeTrigger(reading)) return null;
 
   const status = paganteKind(reading);
@@ -185,6 +185,7 @@ function paganteKind(reading?: NeuralReading | null): PaganteKind {
     return "risk";
   }
   if (
+    reading.mode === "SCANNING" ||
     reading.mode === "OBSERVING" ||
     status.includes("INICIANTE") ||
     status.includes("OBSERV") ||

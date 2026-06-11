@@ -110,7 +110,7 @@ export function buildNumeroPaganteNeural(
     isBlockedByRedSequence,
     isQualifiedNumber,
   } = qualifyCandidate(latestEvent, currentDirection);
-  const mode = isBlockedByRedSequence ? "SCANNING" : isQualifiedNumber ? "ACTIVE" : "OBSERVING";
+  const mode = isQualifiedNumber ? "ACTIVE" : "OBSERVING";
   const isRedAlert =
     isBlockedByRedSequence ||
     (total >= MIN_ACTIVE_VALIDATED && accuracy < RED_ALERT_ACCURACY);

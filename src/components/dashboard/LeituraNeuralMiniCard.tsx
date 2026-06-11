@@ -123,7 +123,7 @@ export function LeituraNeuralMiniCard({
         </div>
       </div>
 
-      {mode === "SCANNING" || !hasNumber ? (
+      {!hasNumber ? (
         <div className="relative mt-2">
           <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
             IA procurando números pagantes...
@@ -719,7 +719,7 @@ function formatCount(value: number | null, pad = false) {
 }
 
 function neuralStatusKind(reading: NeuralReading): "green" | "amber" | "red" | "muted" {
-  if (reading.mode === "SCANNING" || typeof reading.numero !== "number") return "muted";
+  if (typeof reading.numero !== "number") return "muted";
 
   const status = normalizeStatus(reading.paganteStatus);
   if (
@@ -759,7 +759,7 @@ function neuralStatusKind(reading: NeuralReading): "green" | "amber" | "red" | "
 }
 
 function statusLabel(reading: NeuralReading) {
-  if (reading.mode === "SCANNING" || typeof reading.numero !== "number") return "Procurando pagante";
+  if (typeof reading.numero !== "number") return "Procurando pagante";
   const status = reading.paganteStatus?.trim();
   if (status) return status.toLocaleLowerCase("pt-BR").replace(/_/g, " ");
   if (neuralStatusKind(reading) === "green") return "leitura batendo";

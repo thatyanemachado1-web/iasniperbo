@@ -425,7 +425,7 @@ function neuralFocus(reading?: NeuralReading): {
   watch: boolean;
   reason: string;
 } {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") {
+  if (!reading || typeof reading.numero !== "number") {
     return { side: null, watch: false, reason: "Leitura Neural procurando numero pagante." };
   }
 

@@ -477,7 +477,7 @@ function buildPaganteContext(
   entrySide: CurrentSignalSide | undefined,
   style: VoiceNarrationStyle,
 ) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") {
+  if (!reading || typeof reading.numero !== "number") {
     return { key: "no-pagante", text: "", isAlignedWithEntry: false };
   }
 
@@ -626,7 +626,7 @@ function buildNeuralEvent(
   style: VoiceNarrationStyle,
   roundId: string,
 ): VoiceEvent | null {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
+  if (!reading || typeof reading.numero !== "number") return null;
 
   const side = reading.direcao ?? reading.origem;
   if (!side) return null;
@@ -778,7 +778,7 @@ function buildTieEvent(
 }
 
 function isFavorablePagante(reading?: NeuralReading) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
+  if (!reading || typeof reading.numero !== "number") return false;
   if (isOppositeTrigger(reading)) return false;
   const side = reading.direcao ?? reading.origem;
   return Boolean(side) && paganteStatusKind(reading) === "favorable";
@@ -802,6 +802,7 @@ function paganteStatusKind(reading?: NeuralReading): PaganteStatusKind {
   }
 
   if (
+    reading.mode === "SCANNING" ||
     reading.mode === "OBSERVING" ||
     status.includes("INICIANTE") ||
     status.includes("OBSERV") ||
