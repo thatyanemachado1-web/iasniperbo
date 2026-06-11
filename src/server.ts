@@ -5,6 +5,7 @@ import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
+import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
 import {
   DEFAULT_SITE_CONTENT_SETTINGS,
@@ -222,6 +223,7 @@ const DEFAULT_EDGE_TTS_VOICE = "pt-BR-AntonioNeural";
 const MAX_SERVER_ROUND_HISTORY = 50_000;
 const MAX_MONITOR_ROUND_HISTORY = 300;
 const MAX_VALIDATOR_ROUND_WRITE_BATCH = 500;
+const MAX_VALIDATOR_DETAIL_RESPONSE = 200;
 const VALIDATOR_ROUND_PRUNE_MIN_INTERVAL_MS = 10 * 60_000;
 const VALIDATOR_MONITOR_CACHE_TTL_MS = 1_000;
 const MAX_NARRATION_CHARS = 900;
@@ -315,6 +317,7 @@ let protectedClientRegistryLoadedAt = 0;
 let clientRegistrySnapshotSavedAt = 0;
 let clientRegistrySnapshotFingerprint = "";
 const validatorRoundPrunedAt = new Map<string, number>();
+const serverValidatorEngine = new NeuralValidatorEngine();
 let validatorMonitorCacheLoadedAt = 0;
 let validatorMonitorCachePromise: Promise<void> | null = null;
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
@@ -537,6 +540,7 @@ function rateLimitForRequest(method: string, pathname: string) {
   if (pathname === "/dashboard") return method === "GET" ? 120 : 240;
   if (pathname === "/dashboard/round-history") return 120;
   if (pathname === "/dashboard/signal") return 240;
+  if (pathname === "/validator/validate") return 120;
   if (pathname === "/validator/round-history") return method === "GET" ? 120 : 240;
   if (
     pathname === "/validator/patterns" ||
@@ -2798,6 +2802,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/dashboard/signal" ||
       url.pathname === "/dashboard/round-history" ||
       url.pathname === "/calendar/neural" ||
+      url.pathname === "/validator/validate" ||
       url.pathname === "/validator/round-history" ||
       url.pathname === "/validator/patterns" ||
       url.pathname.startsWith("/validator/patterns/") ||
@@ -2817,6 +2822,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   const validatorStorageResponse = await handleValidatorStorageRequest(request, url, env);
   if (validatorStorageResponse) return validatorStorageResponse;
+
+  const validatorValidationResponse = await handleValidatorValidationRequest(request, url, env);
+  if (validatorValidationResponse) return validatorValidationResponse;
 
   if (
     request.method === "POST" &&
@@ -2979,7 +2987,6 @@ async function persistDashboardRoundIngestion(
   calendarChange: NeuralCalendarChangeSet,
   allowInsecureTelegramFallback: boolean,
 ) {
-  await processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback });
   const writes = [
     withTimeout(
       persistValidatorRounds(env, incomingRounds),
@@ -2999,6 +3006,7 @@ async function persistDashboardRoundIngestion(
     );
   }
   await Promise.all(writes);
+  await processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback });
   await saveLiveState(env);
 }
 
@@ -3763,6 +3771,51 @@ function normalizeNeuralCalendarModule(value: unknown): NeuralCalendarModule {
     return text;
   }
   return "Tendencia";
+}
+
+async function handleValidatorValidationRequest(request: Request, url: URL, env: unknown) {
+  if (url.pathname !== "/validator/validate") return null;
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
+
+  const userId = await validatorRequestUserId(request, url, env);
+  if (!userId) return json({ error: "Nao autorizado." }, 401);
+
+  const body = readRecord(await request.json().catch(() => ({})));
+  const pattern = normalizeServerPatternTokens(body.pattern);
+  if (!pattern.length) return json({ error: "Padrao invalido." }, 400);
+
+  const tableId = validatorTableId(readString(body, "tableId"));
+  const historySize = clampRoundHistoryLimit(String(body.historySize || ""));
+  const storedRounds = await withTimeout(
+    fetchStoredValidatorRounds(env, historySize, tableId),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "validar estrategia no backend",
+    [] as Round[],
+  );
+  const rounds = mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, historySize);
+  const result = serverValidatorEngine.validatePattern(rounds, pattern, {
+    tableId,
+    entryType: normalizeValidatorEntryType(body.entryType),
+    galeLimit: normalizeValidatorGaleLimit(body.galeLimit),
+    tieProtection: readBooleanField(body, "tieProtection"),
+    historySize,
+  });
+
+  return json({
+    result: summarizeValidatorResultForResponse(result),
+    history: {
+      requested: historySize,
+      available: rounds.length,
+      tableId,
+    },
+  });
+}
+
+function summarizeValidatorResultForResponse(result: ValidatorResult): ValidatorResult {
+  return {
+    ...result,
+    details: result.details.slice(-MAX_VALIDATOR_DETAIL_RESPONSE),
+  };
 }
 
 async function handleValidatorStorageRequest(request: Request, url: URL, env: unknown) {

@@ -37,7 +37,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
-import { PatternMinerStorage } from "@/patternMiner/PatternMinerStorage";
 import {
   DEFAULT_VALIDATOR_CONFIG,
   NeuralValidatorEngine,
@@ -57,7 +56,6 @@ import {
   readNotificationChannels,
   readPatternDraft,
   readSavedPatterns,
-  readValidatorHistory,
   removeNotificationChannel,
   removeSavedPattern,
   upsertNotificationChannel,
@@ -84,8 +82,8 @@ export const Route = createFileRoute("/app/validador")({
 });
 
 const engine = new NeuralValidatorEngine();
-const patternMinerStorage = new PatternMinerStorage();
 const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
+const VALIDATOR_CLIENT_HISTORY_LIMIT = 200;
 
 const ENTRY_OPTIONS: Array<{ value: ValidatorEntryType; label: string }> = [
   { value: "AI", label: "Entrada sugerida pela IA" },
@@ -111,26 +109,13 @@ function NeuralValidatorPage() {
   const adminAccess = Boolean(adminSession?.token);
   const fullAccess = adminAccess || hasFullAccess(session);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [storageVersion, setStorageVersion] = useState(0);
   const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
   const planLimits = adminAccess ? planLimitForSession("vip", true) : planLimitForSession(session.plan, fullAccess);
   const [serverHistory, setServerHistory] = useState<Round[]>([]);
   const [serverHistoryStatus, setServerHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [validationSnapshot, setValidationSnapshot] = useState<{
-    inputKey: string;
-    historyKey: string;
-    rounds: Round[];
-  }>({ inputKey: "", historyKey: "", rounds: [] });
   const historyRounds = useMemo(
-    () => {
-      const validatorHistory = readValidatorHistory(realTimeRounds);
-      return mergeRoundSources([
-        serverHistory,
-        validatorHistory,
-        patternMinerStorage.read().rounds,
-      ]);
-    },
-    [realTimeRounds, serverHistory, storageVersion],
+    () => mergeRoundSources([serverHistory, realTimeRounds]).slice(-VALIDATOR_CLIENT_HISTORY_LIMIT),
+    [realTimeRounds, serverHistory],
   );
   const hasHistory = historyRounds.length > 0;
   const [notice, setNotice] = useState("");
@@ -183,21 +168,9 @@ function NeuralValidatorPage() {
   }, [filters, hasHistory, historyRounds, planLimits.ai]);
 
   const historySignature = roundsSignature(historyRounds);
-  const serverHistorySignature = serverHistory.length
-    ? `server:${serverHistory.length}:${serverHistory[0]?.id ?? 0}:${serverHistory.at(-1)?.id ?? 0}`
-    : "";
   const patternSignature = pattern.map(formatToken).join(">");
-  const validationInputSignature = [
-    patternSignature,
-    config.entryType,
-    config.galeLimit,
-    config.historySize,
-    config.tableId,
-    config.tieProtection ? "tie-on" : "tie-off",
-  ].join("|");
-  const validationHistoryRounds = validationSnapshot.rounds.length ? validationSnapshot.rounds : historyRounds;
-  const validationHistorySignature = roundsSignature(validationHistoryRounds);
-  const hasValidationHistory = validationHistoryRounds.length > 0;
+  const validationHistoryRounds = historyRounds;
+  const hasValidationHistory = Boolean(manualResult?.analyzedRounds || historyRounds.length);
   const currentSavedPattern = useMemo(
     () => findSavedPattern(savedPatterns, pattern, config),
     [savedPatterns, pattern, config.entryType, config.galeLimit, config.tableId, config.tieProtection],
@@ -209,40 +182,12 @@ function NeuralValidatorPage() {
   );
 
   useEffect(() => {
-    if (!realTimeRounds.length) return;
-    patternMinerStorage.ingest(realTimeRounds);
-  }, [realTimeRounds]);
-
-  useEffect(() => {
-    setValidationSnapshot((current) => {
-      if (!hasHistory) {
-        return current.rounds.length || current.inputKey || current.historyKey
-          ? { inputKey: "", historyKey: "", rounds: [] }
-          : current;
-      }
-
-      const preferredHistoryKey = serverHistorySignature || `live:${historySignature}`;
-      const inputChanged = current.inputKey !== validationInputSignature;
-      const serverHistoryLoaded = Boolean(serverHistorySignature) && !current.historyKey.startsWith("server:");
-      const missingSnapshot = current.rounds.length === 0;
-
-      if (!inputChanged && !serverHistoryLoaded && !missingSnapshot) return current;
-
-      return {
-        inputKey: validationInputSignature,
-        historyKey: preferredHistoryKey,
-        rounds: historyRounds,
-      };
-    });
-  }, [hasHistory, historyRounds, historySignature, serverHistorySignature, validationInputSignature]);
-
-  useEffect(() => {
     let cancelled = false;
 
     async function loadValidatorHistory() {
       setServerHistoryStatus("loading");
       try {
-        const rounds = await fetchValidatorRoundHistory(planLimits.history);
+        const rounds = await fetchValidatorRoundHistory(VALIDATOR_CLIENT_HISTORY_LIMIT);
         if (cancelled) return;
         setServerHistory(rounds);
         setServerHistoryStatus("ready");
@@ -257,7 +202,7 @@ function NeuralValidatorPage() {
     return () => {
       cancelled = true;
     };
-  }, [data.updatedAt, planLimits.history]);
+  }, [data.updatedAt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -302,20 +247,45 @@ function NeuralValidatorPage() {
   }, [session.email, session.clientToken, adminSession?.email, adminSession?.token]);
 
   useEffect(() => {
-    if (!hasValidationHistory || pattern.length < 1) {
+    let cancelled = false;
+
+    async function validateCurrentPattern() {
+      if (pattern.length < 1) {
+        setManualResult(null);
+        return;
+      }
+
       setManualResult(null);
-      return;
+      try {
+        const result = await validatePatternOnServer(pattern, config);
+        if (!cancelled) setManualResult(result);
+      } catch {
+        if (cancelled) return;
+        const fallbackHistory = validationHistoryRounds.slice(-VALIDATOR_CLIENT_HISTORY_LIMIT);
+        setManualResult(
+          fallbackHistory.length
+            ? engine.validatePattern(fallbackHistory, pattern, {
+              ...config,
+              historySize: fallbackHistory.length,
+            })
+            : null,
+        );
+      }
     }
 
-    setManualResult(engine.validatePattern(validationHistoryRounds, pattern, config));
+    void validateCurrentPattern();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     config.entryType,
     config.galeLimit,
     config.historySize,
     config.tableId,
     config.tieProtection,
-    hasValidationHistory,
-    validationHistorySignature,
+    data.updatedAt,
+    historySignature,
     patternSignature,
   ]);
 
@@ -346,7 +316,6 @@ function NeuralValidatorPage() {
       if (changed) writeSavedPatterns(next);
       return changed ? next : current;
     });
-    setStorageVersion((value) => value + 1);
   }, [liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|")]);
 
   function addToken(side: RoundResult, scoreText = tokenScore) {
@@ -434,13 +403,20 @@ function NeuralValidatorPage() {
     showNotice("Padrao removido.");
   }
 
-  function refreshPattern(patternItem: SavedValidatorPattern) {
-    const validation = engine.validatePattern(historyRounds, patternItem.pattern, {
+  async function refreshPattern(patternItem: SavedValidatorPattern) {
+    const validationConfig = {
       ...config,
       entryType: patternItem.entryType,
       galeLimit: patternItem.galeLimit,
       tieProtection: patternItem.tieProtection,
-    });
+      tableId: patternItem.tableId,
+    };
+    const validation = await validatePatternOnServer(patternItem.pattern, validationConfig).catch(() =>
+      engine.validatePattern(historyRounds, patternItem.pattern, {
+        ...validationConfig,
+        historySize: Math.min(historyRounds.length || 1, VALIDATOR_CLIENT_HISTORY_LIMIT),
+      }),
+    );
     const nextItem = {
       ...patternItem,
       validation,
@@ -2106,6 +2082,28 @@ async function fetchValidatorRoundHistory(limit: number) {
   throw new Error(`Validator history returned ${lastStatus || "unknown"}`);
 }
 
+async function validatePatternOnServer(pattern: ValidatorPatternToken[], config: ValidatorConfig) {
+  if (typeof window === "undefined") throw new Error("Validador indisponivel.");
+
+  const response = await fetch("/validator/validate", {
+    method: "POST",
+    cache: "no-store",
+    headers: validatorApiHeaders(true),
+    body: JSON.stringify({
+      tableId: config.tableId,
+      pattern,
+      entryType: config.entryType,
+      galeLimit: config.galeLimit,
+      tieProtection: config.tieProtection,
+      historySize: config.historySize,
+    }),
+  });
+  const payload = await response.json().catch(() => null) as { result?: unknown; error?: string } | null;
+  if (!response.ok) throw new Error(payload?.error || "Falha ao validar no servidor.");
+  if (!isValidatorResult(payload?.result)) throw new Error("Resultado do Validador invalido.");
+  return payload.result;
+}
+
 async function fetchServerValidatorPatterns() {
   const response = await fetch("/validator/patterns", {
     cache: "no-store",
@@ -2342,6 +2340,26 @@ function isValidatorRound(value: unknown): value is Round {
     typeof round.bankerScore === "number" &&
     typeof round.playerScore === "number" &&
     typeof round.time === "string"
+  );
+}
+
+function isValidatorResult(value: unknown): value is ValidatorResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Partial<ValidatorResult>;
+  return (
+    typeof result.totalSignals === "number" &&
+    typeof result.totalValidated === "number" &&
+    typeof result.sgWins === "number" &&
+    typeof result.g1Wins === "number" &&
+    typeof result.g2Wins === "number" &&
+    typeof result.losses === "number" &&
+    typeof result.ties === "number" &&
+    typeof result.tieWins === "number" &&
+    typeof result.currentGreenStreak === "number" &&
+    typeof result.bestGreenStreak === "number" &&
+    typeof result.bestLossStreak === "number" &&
+    typeof result.analyzedRounds === "number" &&
+    Array.isArray(result.details)
   );
 }
 

@@ -26,6 +26,7 @@ import type {
 const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
 const SAVED_PATTERN_REFRESH_MS = 3_000;
 const SERVER_TAIL_REFRESH_MS = 600;
+const MAX_CLIENT_MONITOR_ROUNDS = 200;
 
 type PopupStatus = "entry" | "green" | "red" | "tie";
 
@@ -55,9 +56,12 @@ export function ValidatorLivePopupBridge() {
   const [popups, setPopups] = useState<PatternPopup[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
   const liveRounds = mode === "live" && !data.mockMode ? data.rounds : [];
-  const storedRounds = useMemo(() => readValidatorHistory(liveRounds), [liveRounds, data.updatedAt]);
+  const storedRounds = useMemo(
+    () => readValidatorHistory(liveRounds).slice(-MAX_CLIENT_MONITOR_ROUNDS),
+    [liveRounds, data.updatedAt],
+  );
   const rounds = useMemo(
-    () => mergeRoundSources([storedRounds, serverRounds]),
+    () => mergeRoundSources([storedRounds, serverRounds]).slice(-MAX_CLIENT_MONITOR_ROUNDS),
     [storedRounds, serverRounds],
   );
   const roundsKey = roundsSignature(rounds);
