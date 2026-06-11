@@ -163,6 +163,9 @@ export function LeituraNeuralMiniCard({
 
           {showPayingStats ? (
             <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
+              <div className="truncate text-[7px] font-black uppercase tracking-[0.1em] text-neon-cyan/85">
+                Numero atual
+              </div>
               <div className="flex items-baseline justify-between gap-1">
                 <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
                   {originKind === "OPOSTO"
@@ -191,8 +194,12 @@ export function LeituraNeuralMiniCard({
                   {numberStage.label}
                 </span>
               </div>
+              <div className="my-1 h-px bg-neon-cyan/10" />
+              <div className="truncate text-[7px] font-black uppercase tracking-[0.1em] text-neon-cyan/85">
+                Placar geral
+              </div>
               <div className="truncate text-[7.5px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[8px]">
-                Geral SG:{formatCount(generalScore.sg, true)} G1:{formatCount(generalScore.g1, true)} RD:{formatCount(generalScore.reds, true)}
+                SG:{formatCount(generalScore.sg, true)} G1:{formatCount(generalScore.g1, true)} RD:{formatCount(generalScore.reds, true)}
               </div>
               <div className="truncate text-[7.5px] font-black uppercase tracking-[0.04em] text-muted-foreground sm:text-[8px]">
                 SQG:{formatCount(generalScore.maxGreenSequence, true)} SQR:{formatCount(generalScore.maxRedSequence, true)} {formatPercent(generalScore.accuracy)}
@@ -240,7 +247,7 @@ export function LeituraNeuralMiniCard({
 function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) {
   if (sequenceNegative > 0) {
     return {
-      label: `Neural: ${sequenceNegative} RED ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
+      label: `Seq geral: ${sequenceNegative} RED ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de reds da Leitura Neural.",
       className: "border-destructive/35 bg-destructive/10 text-destructive",
     };
@@ -248,14 +255,14 @@ function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) 
 
   if (sequencePositive > 0) {
     return {
-      label: `Neural: ${sequencePositive} GREEN ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
+      label: `Seq geral: ${sequencePositive} GREEN ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de greens da Leitura Neural.",
       className: "border-success/35 bg-success/10 text-success",
     };
   }
 
   return {
-    label: "Neural: aguardando resultado",
+    label: "Seq geral: aguardando",
     title: "Aguardando resultado real da Leitura Neural.",
     className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
   };
