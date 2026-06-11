@@ -5313,6 +5313,21 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;
+  const currentLatestRound = Array.isArray(currentDashboard.rounds)
+    ? currentDashboard.rounds[currentDashboard.rounds.length - 1]
+    : null;
+  const incomingLatestRound = incomingRounds[incomingRounds.length - 1];
+  const currentLatestKey = currentLatestRound ? roundHistoryKey(currentLatestRound) : "";
+  const incomingLatestKey = incomingLatestRound ? roundHistoryKey(incomingLatestRound) : "";
+  const receivedNewRound = Boolean(incomingLatestKey && incomingLatestKey !== currentLatestKey);
+  const incomingUpdatedAt = readString(incoming, "updatedAt") || readString(incoming, "updated_at");
+  const nextUpdatedAt =
+    incomingUpdatedAt ||
+    (incomingRounds.length
+      ? receivedNewRound
+        ? new Date().toISOString()
+        : currentDashboard.updatedAt || new Date().toISOString()
+      : new Date().toISOString());
 
   const nextDashboard: LiveDashboardData = {
     ...currentDashboard,
@@ -5331,7 +5346,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       acceptsCurrentCycle && Array.isArray(incoming.pressureSeries)
         ? incoming.pressureSeries
         : currentDashboard.pressureSeries,
-    updatedAt: dashboard.updatedAt || new Date().toISOString(),
+    updatedAt: nextUpdatedAt,
     cycleDate,
     dailyCycleDate: cycleDate,
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
