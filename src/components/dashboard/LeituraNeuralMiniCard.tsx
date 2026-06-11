@@ -19,6 +19,8 @@ interface NeuralScoreSummary {
   reds: number | null;
   total: number;
   accuracy: number | null;
+  currentGreenSequence: number | null;
+  currentRedSequence: number | null;
   maxGreenSequence: number | null;
   maxRedSequence: number | null;
 }
@@ -55,9 +57,6 @@ export function LeituraNeuralMiniCard({
   const sg = optionalNumberFrom(data.greenSemGale);
   const g1 = optionalNumberFrom(data.greenG1);
   const red = optionalNumberFrom(data.reds ?? data.erros);
-  const sequencePositive = mode === "SCANNING" || !hasNumber ? 0 : numberFrom(data.sequencePositive);
-  const sequenceNegative = mode === "SCANNING" || !hasNumber ? 0 : numberFrom(data.sequenceNegative);
-  const sequenceCopy = neuralSequenceCopy(sequencePositive, sequenceNegative);
   const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
   const totalAlerts = totalFrom(data.alertas, data.acertos, data.erros);
   const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
@@ -72,6 +71,11 @@ export function LeituraNeuralMiniCard({
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
   const generalScoreState = neuralScoreState(generalScore);
+  const sequenceCopy = neuralSequenceCopy(
+    numberFrom(generalScore.currentGreenSequence),
+    numberFrom(generalScore.currentRedSequence),
+  );
+  const numberStage = numberPaymentStage(sg, g1, red);
 
   return (
     <aside
@@ -173,11 +177,25 @@ export function LeituraNeuralMiniCard({
                   {formatPercent(accuracy)}
                 </span>
               </div>
-              <div className="truncate text-[8px] font-semibold text-muted-foreground sm:text-[9px]">
-                SG:{formatCount(sg)}  G1:{formatCount(g1)}  RED:{formatCount(red, true)}
+              <div className="flex items-center justify-between gap-1">
+                <span className="truncate text-[8px] font-semibold text-muted-foreground sm:text-[9px]">
+                  SG:{formatCount(sg, true)} G1:{formatCount(g1, true)} RD:{formatCount(red, true)}
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full border px-1 py-0.5 text-[6.5px] font-black uppercase leading-none tracking-[0.06em]",
+                    numberStage.className,
+                  )}
+                  title={numberStage.title}
+                >
+                  {numberStage.label}
+                </span>
               </div>
-              <div className="truncate text-[8px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[9px]">
-                Placar: {formatCount(totalGreens)}G / {formatCount(red, true)}R
+              <div className="truncate text-[7.5px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[8px]">
+                Geral SG:{formatCount(generalScore.sg, true)} G1:{formatCount(generalScore.g1, true)} RD:{formatCount(generalScore.reds, true)}
+              </div>
+              <div className="truncate text-[7.5px] font-black uppercase tracking-[0.04em] text-muted-foreground sm:text-[8px]">
+                SQG:{formatCount(generalScore.maxGreenSequence, true)} SQR:{formatCount(generalScore.maxRedSequence, true)} {formatPercent(generalScore.accuracy)}
               </div>
               <div
                 className={cn(
@@ -309,8 +327,10 @@ function NeuralGeneralScorePopover({
             <ScoreBox label="G1 geral" value={score.g1} tone="cyan" />
             <ScoreBox label="Alertas" value={score.totalAlerts} tone="neutral" />
             <ScoreBox label="Total" value={score.total} tone="neutral" />
-            <ScoreBox label="SQ max green" value={score.maxGreenSequence ?? "coletando"} tone="green" />
-            <ScoreBox label="SQ max red" value={score.maxRedSequence ?? "coletando"} tone="red" />
+            <ScoreBox label="Seq Green" value={score.currentGreenSequence ?? "coletando"} tone="green" />
+            <ScoreBox label="Seq RED" value={score.currentRedSequence ?? "coletando"} tone="red" />
+            <ScoreBox label="SQG max" value={score.maxGreenSequence ?? "coletando"} tone="green" />
+            <ScoreBox label="SQR max" value={score.maxRedSequence ?? "coletando"} tone="red" />
           </div>
           <div className="space-y-2 rounded-lg border border-neon-cyan/15 bg-neon-cyan/5 px-2 py-2 text-[10px] leading-relaxed text-muted-foreground">
             <div>
@@ -480,6 +500,8 @@ function buildGeneralScore(
   const total = numberFrom(greens) + numberFrom(reds);
   const totalAlerts = optionalNumberFrom(scoreboard?.totalAlerts ?? fallbackReading.alertas ?? total) ?? total;
   const accuracy = accuracyFrom(null, greens, reds) ?? optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
+  const currentGreenSequence = optionalPositiveNumberFrom(scoreboard?.sequencePositive ?? fallbackReading.sequencePositive);
+  const currentRedSequence = optionalPositiveNumberFrom(scoreboard?.sequenceNegative ?? fallbackReading.sequenceNegative);
   const maxGreenSequence = optionalPositiveNumberFrom(scoreboard?.maxSequencePositive ?? fallbackReading.maxSequencePositive);
   const maxRedSequence = optionalPositiveNumberFrom(scoreboard?.maxSequenceNegative ?? fallbackReading.maxSequenceNegative);
 
@@ -491,8 +513,53 @@ function buildGeneralScore(
     reds,
     total,
     accuracy,
+    currentGreenSequence,
+    currentRedSequence,
     maxGreenSequence,
     maxRedSequence,
+  };
+}
+
+function numberPaymentStage(sg: number | null, g1: number | null, red: number | null) {
+  const greens = numberFrom(sg) + numberFrom(g1);
+  const losses = numberFrom(red);
+
+  if (losses >= 2) {
+    return {
+      label: "Bloqueado",
+      title: "Esse nÃºmero tomou 2 reds e saiu da linha.",
+      className: "border-destructive/35 bg-destructive/10 text-destructive",
+    };
+  }
+
+  if (greens <= 3 && losses === 0) {
+    return {
+      label: "Novo",
+      title: "ComeÃ§ou a pagar agora.",
+      className: "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
+    };
+  }
+
+  if (greens >= 8 && losses === 0) {
+    return {
+      label: "Esticado",
+      title: "JÃ¡ pagou bastante sem red. Entrar com mais cautela.",
+      className: "border-warning/35 bg-warning/10 text-warning",
+    };
+  }
+
+  if (greens >= 8) {
+    return {
+      label: "Maduro",
+      title: "JÃ¡ tem bastante leitura validada.",
+      className: "border-warning/30 bg-warning/10 text-warning",
+    };
+  }
+
+  return {
+    label: "Pagando",
+    title: "NÃºmero pagante com validaÃ§Ã£o ativa.",
+    className: "border-success/30 bg-success/10 text-success",
   };
 }
 

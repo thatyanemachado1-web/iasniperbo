@@ -5694,30 +5694,18 @@ function trackServerNeuralSequences(
 ): LiveDashboardData {
   if (!dashboard.neuralReading && !dashboard.neuralScoreboard) return dashboard;
 
-  const neuralReading = dashboard.neuralReading
-    ? {
-        ...dashboard.neuralReading,
-        sequencePositive: 0,
-        sequenceNegative: 0,
-        maxSequencePositive: 0,
-        maxSequenceNegative: 0,
-      }
-    : dashboard.neuralReading;
-  const neuralScoreboard = dashboard.neuralScoreboard
-    ? {
-        ...dashboard.neuralScoreboard,
-        sequencePositive: 0,
-        sequenceNegative: 0,
-        maxSequencePositive: 0,
-        maxSequenceNegative: 0,
-      }
-    : dashboard.neuralScoreboard;
+  const sequencePositive = Math.max(
+    serverSafeCounter(dashboard.neuralScoreboard?.sequencePositive),
+    serverSafeCounter(dashboard.neuralReading?.sequencePositive),
+  );
+  const sequenceNegative = Math.max(
+    serverSafeCounter(dashboard.neuralScoreboard?.sequenceNegative),
+    serverSafeCounter(dashboard.neuralReading?.sequenceNegative),
+  );
 
   return {
     ...dashboard,
-    neuralReading,
-    neuralScoreboard,
-    neuralSequenceLastOutcome: null,
+    neuralSequenceLastOutcome: inferServerNeuralOutcome(sequencePositive, sequenceNegative),
   };
 }
 
