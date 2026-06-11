@@ -478,17 +478,22 @@ function pickRoundEvent(
       const stats = direction?.stats ?? cloneStats(EMPTY_DIRECTION_STATS);
       const kindPriority =
         event.origemTipo === "PAGANTE" ? 3 : event.origemTipo === "TIE" ? 2 : 1;
+      const matureScore =
+        qualification.total >= MIN_ACTIVE_VALIDATED
+          ? qualification.accuracy * 100 +
+            qualification.totalGreens * 25 +
+            qualification.total * 5 -
+            stats.red * 80
+          : qualification.total * 10;
 
       return {
         event,
         qualification,
+        // O tipo do gatilho e so desempate: se o oposto estiver pagando melhor, ele aparece.
         score:
-          (qualification.isQualifiedNumber ? 10000 : 0) +
-          kindPriority * 1000 +
-          qualification.accuracy * 10 +
-          qualification.totalGreens * 4 +
-          qualification.total -
-          stats.red * 2,
+          (qualification.isQualifiedNumber ? 100000 : 0) +
+          matureScore +
+          kindPriority * 3,
       };
     })
     .sort((a, b) => b.score - a.score)[0]?.event ?? null;
