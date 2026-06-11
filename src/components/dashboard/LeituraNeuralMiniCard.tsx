@@ -66,7 +66,7 @@ export function LeituraNeuralMiniCard({
   const postTie = Boolean(data.postTie);
   const originKind = neuralOriginKind(data);
   const originBadge = originBadgeFor(originKind);
-  const pullingSide = mode === "ACTIVE" ? data.direcao : null;
+  const pullingSide = data.direcao ?? data.origem;
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
@@ -382,7 +382,7 @@ function NeuralGeneralScorePopover({
 }
 
 function neuralToolInsight(reading: NeuralReading) {
-  const side = reading.mode === "ACTIVE" ? reading.direcao : null;
+  const side = reading.direcao ?? reading.origem;
   const validity = reading.validade ?? "G1";
   const hasNumber = typeof reading.numero === "number" && Boolean(reading.origem);
   const originKind = neuralOriginKind(reading);

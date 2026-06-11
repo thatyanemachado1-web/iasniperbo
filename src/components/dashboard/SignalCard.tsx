@@ -426,16 +426,7 @@ function neuralFocus(reading?: NeuralReading): {
     return { side: null, watch: false, reason: "Leitura Neural procurando numero pagante." };
   }
 
-  if (reading.mode !== "ACTIVE") {
-    const numberLabel = reading.origem === "TIE" ? `${reading.numero}x${reading.numero}` : String(reading.numero);
-    return {
-      side: null,
-      watch: true,
-      reason: `Leitura Neural: ${numberLabel} coletando amostra. Aguardar 2 greens reais e 100%.`,
-    };
-  }
-
-  const side = reading.direcao ?? null;
+  const side = reading.direcao ?? reading.origem ?? null;
   if (!side) return { side: null, watch: true, reason: "Leitura Neural ainda sem lado claro." };
 
   const watch = reading.mode === "OBSERVING" || Boolean(reading.isRedAlert || reading.isSaturated);

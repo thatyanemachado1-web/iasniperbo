@@ -166,7 +166,7 @@ function entryRisk(data: DashboardData, side: SignalSide) {
 }
 
 function activePaganteSide(reading?: NeuralReading | null, favorableOnly = true): CurrentSignalSide | null {
-  if (!reading || reading.mode !== "ACTIVE" || typeof reading.numero !== "number") return null;
+  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
   if (isOppositeTrigger(reading)) return null;
 
   const status = paganteKind(reading);
