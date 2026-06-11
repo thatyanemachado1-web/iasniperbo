@@ -138,6 +138,7 @@ export function LeituraNeuralMiniCard({
           >
             <span className="max-w-full whitespace-normal break-words">{sequenceCopy.label}</span>
           </div>
+          <TieMultiplierMiniLine multipliers={tieMultipliers} />
         </div>
       ) : (
         <div className="relative mt-2 space-y-1">
@@ -256,9 +257,12 @@ export function LeituraNeuralMiniCard({
               ) : null}
             </div>
           ) : (
-            <div className="inline-flex items-center gap-1 text-[9px] font-semibold text-neon-cyan/85">
-              <Sparkles className="size-2.5" />
-              Observando
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1 text-[9px] font-semibold text-neon-cyan/85">
+                <Sparkles className="size-2.5" />
+                Observando
+              </div>
+              <TieMultiplierMiniLine multipliers={tieMultipliers} />
             </div>
           )}
         </div>
@@ -591,7 +595,7 @@ function tieMultiplierStats(rounds: Round[] | undefined) {
 
   for (const round of rounds ?? []) {
     if (round.result !== "T") continue;
-    const multiplier = normalizeTieMultiplier(round.tieMultiplier);
+    const multiplier = multiplierForTieRound(round);
     if (!multiplier) continue;
     const label = `${multiplier}x` as (typeof TIE_MULTIPLIER_LABELS)[number];
     counts.set(label, (counts.get(label) ?? 0) + 1);
@@ -601,6 +605,21 @@ function tieMultiplierStats(rounds: Round[] | undefined) {
     label,
     value: counts.get(label) ?? 0,
   }));
+}
+
+function multiplierForTieRound(round: Round) {
+  const explicit = normalizeTieMultiplier(round.tieMultiplier);
+  if (explicit) return explicit;
+  if (round.bankerScore !== round.playerScore) return null;
+
+  const score = Math.round(Number(round.bankerScore));
+  if (!Number.isFinite(score)) return null;
+  if (score === 2 || score === 12) return 88;
+  if (score === 3 || score === 11) return 25;
+  if (score === 4 || score === 10) return 10;
+  if (score === 5 || score === 9) return 6;
+  if (score === 6 || score === 7 || score === 8) return 4;
+  return null;
 }
 
 function normalizeTieMultiplier(value: unknown) {

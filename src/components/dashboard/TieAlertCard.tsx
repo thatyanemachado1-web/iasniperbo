@@ -219,7 +219,7 @@ function tieMultiplierStats(rounds: Round[] | undefined) {
   const counts = new Map(DEFAULT_TIE_MULTIPLIERS.map((item) => [item.label, 0]));
   for (const round of rounds ?? []) {
     if (round.result !== "T") continue;
-    const multiplier = normalizeMultiplier(round.tieMultiplier);
+    const multiplier = multiplierForTieRound(round);
     if (!multiplier) continue;
     const label = `${multiplier}x`;
     counts.set(label, (counts.get(label) ?? 0) + 1);
@@ -232,6 +232,21 @@ function tieMultiplierStats(rounds: Round[] | undefined) {
     label: item.label,
     value: counts.get(item.label) ?? 0,
   }));
+}
+
+function multiplierForTieRound(round: Round) {
+  const explicit = normalizeMultiplier(round.tieMultiplier);
+  if (explicit) return explicit;
+  if (round.bankerScore !== round.playerScore) return null;
+
+  const score = Math.round(Number(round.bankerScore));
+  if (!Number.isFinite(score)) return null;
+  if (score === 2 || score === 12) return 88;
+  if (score === 3 || score === 11) return 25;
+  if (score === 4 || score === 10) return 10;
+  if (score === 5 || score === 9) return 6;
+  if (score === 6 || score === 7 || score === 8) return 4;
+  return null;
 }
 
 function normalizeMultiplier(value: unknown) {
