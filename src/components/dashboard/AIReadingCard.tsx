@@ -45,7 +45,7 @@ function buildSnapshot(
   userFirstName: string,
   allowUseName: boolean,
 ): AIReadingSnapshot {
-  const paganteSide = d.neuralReading?.direcao ?? d.neuralReading?.origem ?? null;
+  const paganteSide = d.neuralReading?.mode === "ACTIVE" ? d.neuralReading?.direcao ?? null : null;
   const lastRounds = d.rounds
     .slice(-12)
     .map((r) => r.result)

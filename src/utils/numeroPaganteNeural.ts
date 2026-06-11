@@ -79,7 +79,7 @@ const NEURAL_PANEL_ROUND_LIMIT = 156;
 const NEURAL_GENERAL_SCORE_ROUND_LIMIT = 300;
 const MIN_ACTIVE_VALIDATED = 2;
 const MIN_ACTIVE_GREENS = 2;
-const MIN_ACTIVE_ACCURACY = 90;
+const MIN_ACTIVE_ACCURACY = 100;
 const RED_ALERT_ACCURACY = 45;
 
 export function buildNumeroPaganteNeural(
@@ -113,6 +113,7 @@ export function buildNumeroPaganteNeural(
     isQualifiedNumber,
   } = qualifyCandidate(latestEvent, currentDirection);
   const mode = isBlockedByRedSequence ? "SCANNING" : isQualifiedNumber ? "ACTIVE" : "OBSERVING";
+  const activeExpectedSide = isQualifiedNumber ? expectedSide : null;
   const isRedAlert =
     isBlockedByRedSequence ||
     (total >= MIN_ACTIVE_VALIDATED && accuracy < RED_ALERT_ACCURACY);
@@ -127,8 +128,8 @@ export function buildNumeroPaganteNeural(
       numero: latestEvent.numero,
       origem: latestEvent.origem,
       origemTipo,
-      direcao: expectedSide,
-      validade: "G1",
+      direcao: activeExpectedSide,
+      validade: isQualifiedNumber ? "G1" : null,
       alertas: total,
       acertos: totalGreens,
       greenSemGale: currentStats.sg,
@@ -141,7 +142,7 @@ export function buildNumeroPaganteNeural(
       maxSequencePositive: currentStats.maxSequencePositive,
       maxSequenceNegative: currentStats.maxSequenceNegative,
       paganteStatus,
-      paganteAlert: alertFor(latestEvent, expectedSide, origemTipo, total, accuracy),
+      paganteAlert: alertFor(latestEvent, activeExpectedSide, origemTipo, total, accuracy),
       paganteWindow: NEURAL_PANEL_ROUND_LIMIT,
       paganteCycleProgress: validRounds.length,
       paganteCycleLimit: NEURAL_PANEL_ROUND_LIMIT,
@@ -623,21 +624,21 @@ function statusFor({
 
 function alertFor(
   event: PayingEvent,
-  expectedSide: NeuralSide,
+  expectedSide: NeuralSide | null,
   origemTipo: NonNullable<NeuralReading["origemTipo"]>,
   total: number,
   accuracy: number,
 ) {
-  const direction = expectedSide === "BANKER" ? "Banker" : expectedSide === "PLAYER" ? "Player" : "Tie";
   const trigger =
     origemTipo === "OPOSTO"
       ? "gatilho oposto"
       : origemTipo === "TIE"
         ? "empate puxador"
         : "numero pagante";
-  if (total < MIN_ACTIVE_VALIDATED) {
-    return `${event.label}: coletando amostra de ${trigger} para ${direction}.`;
+  if (!expectedSide || total < MIN_ACTIVE_VALIDATED || accuracy < MIN_ACTIVE_ACCURACY) {
+    return `${event.label}: coletando amostra de ${trigger}. Precisa de ${MIN_ACTIVE_GREENS} greens reais e 100% para liberar entrada.`;
   }
+  const direction = expectedSide === "BANKER" ? "Banker" : expectedSide === "PLAYER" ? "Player" : "Tie";
   return `${event.label}: ${trigger} puxando ${direction} ate G1 com ${accuracy.toFixed(1)}%.`;
 }
 

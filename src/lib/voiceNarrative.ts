@@ -626,9 +626,9 @@ function buildNeuralEvent(
   style: VoiceNarrationStyle,
   roundId: string,
 ): VoiceEvent | null {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return null;
+  if (!reading || reading.mode !== "ACTIVE" || typeof reading.numero !== "number") return null;
 
-  const side = reading.direcao ?? reading.origem;
+  const side = reading.direcao;
   if (!side) return null;
 
   const statusKind = paganteStatusKind(reading);
@@ -778,9 +778,9 @@ function buildTieEvent(
 }
 
 function isFavorablePagante(reading?: NeuralReading) {
-  if (!reading || reading.mode === "SCANNING" || typeof reading.numero !== "number") return false;
+  if (!reading || reading.mode !== "ACTIVE" || typeof reading.numero !== "number") return false;
   if (isOppositeTrigger(reading)) return false;
-  const side = reading.direcao ?? reading.origem;
+  const side = reading.direcao;
   return Boolean(side) && paganteStatusKind(reading) === "favorable";
 }
 
