@@ -707,17 +707,35 @@ function applyNeuralScoreBaseline(
   scoreboard: NeuralScoreboard | undefined,
   day: string,
 ): Pick<DashboardData, "neuralReading" | "neuralScoreboard"> {
-  const current = neuralScoreFrom(reading, scoreboard);
-  const greenSemGale = current.greenSemGale;
-  const greenG1 = current.greenG1;
-  const acertos = current.acertos;
-  const reds = current.reds;
-  const erros = current.erros;
-  const alertas = current.alertas;
+  const generalScore = neuralScoreFrom(reading, scoreboard);
+  const numberScore = neuralScoreFrom(reading);
+  const greenSemGale = generalScore.greenSemGale;
+  const greenG1 = generalScore.greenG1;
+  const acertos = generalScore.acertos;
+  const reds = generalScore.reds;
+  const erros = generalScore.erros;
+  const alertas = generalScore.alertas;
   const totalGreens = greenSemGale + greenG1 || acertos;
   const totalLosses = reds || erros;
   const total = totalGreens + totalLosses;
-  const providedSequence = currentNeuralSequence(reading, scoreboard);
+  const numberGreenSemGale = numberScore.greenSemGale;
+  const numberGreenG1 = numberScore.greenG1;
+  const numberAcertos = numberScore.acertos;
+  const numberReds = numberScore.reds;
+  const numberErros = numberScore.erros;
+  const numberAlertas = numberScore.alertas;
+  const numberTotalGreens = numberGreenSemGale + numberGreenG1 || numberAcertos;
+  const numberTotalLosses = numberReds || numberErros;
+  const numberTotal = numberTotalGreens + numberTotalLosses;
+  const providedSequence = scoreboard
+    ? {
+        sequencePositive: safeCounter(scoreboard.sequencePositive),
+        sequenceNegative: safeCounter(scoreboard.sequenceNegative),
+        maxSequencePositive: safeCounter(scoreboard.maxSequencePositive),
+        maxSequenceNegative: safeCounter(scoreboard.maxSequenceNegative),
+      }
+    : currentNeuralSequence(reading);
+  const numberSequence = currentNeuralSequence(reading);
   const liveSequence =
     typeof window === "undefined"
       ? {
@@ -735,17 +753,17 @@ function applyNeuralScoreBaseline(
 
   const neuralReading = {
     ...reading,
-    alertas: Math.max(alertas, total),
-    acertos: totalGreens,
-    greenSemGale,
-    greenG1,
-    erros: totalLosses,
-    reds: totalLosses,
-    assertividade: calculateMotorAssertiveness(totalGreens, totalLosses),
-    sequencePositive,
-    sequenceNegative,
-    maxSequencePositive: Math.max(maxSequencePositive, sequencePositive),
-    maxSequenceNegative: Math.max(maxSequenceNegative, sequenceNegative),
+    alertas: Math.max(numberAlertas, numberTotal),
+    acertos: numberTotalGreens,
+    greenSemGale: numberGreenSemGale,
+    greenG1: numberGreenG1,
+    erros: numberTotalLosses,
+    reds: numberTotalLosses,
+    assertividade: calculateMotorAssertiveness(numberTotalGreens, numberTotalLosses),
+    sequencePositive: numberSequence.sequencePositive,
+    sequenceNegative: numberSequence.sequenceNegative,
+    maxSequencePositive: numberSequence.maxSequencePositive,
+    maxSequenceNegative: numberSequence.maxSequenceNegative,
   };
   return {
     neuralReading,
