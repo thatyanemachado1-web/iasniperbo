@@ -126,6 +126,7 @@ type SalesSettings = {
 type LiveStateSaveStatus = {
   durable: boolean;
   cache: boolean;
+  clientBackup?: boolean;
   durableConfigured: boolean;
   saved_at: string;
 };
@@ -190,6 +191,8 @@ type AdminActionType =
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
 const LIVE_STATE_TABLE = "sniper_live_state";
+const CLIENT_REGISTRY_SNAPSHOT_LATEST_ID = `${LIVE_STATE_ID}:client_registry_latest`;
+const CLIENT_REGISTRY_SNAPSHOT_PREFIX = `${LIVE_STATE_ID}:client_registry:`;
 const CRM_CLIENTS_TABLE = "crm_clients";
 const CRM_DEALS_TABLE = "crm_deals";
 const CRM_INVOICES_TABLE = "crm_invoices";
@@ -227,6 +230,8 @@ const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
 const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
+const CLIENT_REGISTRY_PROTECTION_INTERVAL_MS = 60_000;
+const CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS = 5 * 60_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
 const LIVE_FEED_STALE_MS = 75_000;
 const FREE_TRIAL_MINUTES = 10;
@@ -305,6 +310,10 @@ let liveStateSaveStatus: LiveStateSaveStatus = {
 let liveStateLoadedAt = 0;
 let liveStateLoadPromise: Promise<void> | null = null;
 let liveStateSavePromise: Promise<LiveStateSaveStatus> | null = null;
+let protectedClientRegistryState: Record<string, unknown> | null = null;
+let protectedClientRegistryLoadedAt = 0;
+let clientRegistrySnapshotSavedAt = 0;
+let clientRegistrySnapshotFingerprint = "";
 const validatorRoundPrunedAt = new Map<string, number>();
 let validatorMonitorCacheLoadedAt = 0;
 let validatorMonitorCachePromise: Promise<void> | null = null;
@@ -2469,6 +2478,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   if (request.method === "GET" && url.pathname === "/admin/overview") {
     await hydrateClientsFromBillingUsers(env);
     return json({ overview: buildAdminPanelOverview(syncAdminManagedUsers(env)) });
+  }
+
+  if (url.pathname === "/admin/client-registry/backup") {
+    return handleAdminClientRegistryBackupRequest(request, env, adminRole);
   }
 
   if (url.pathname === "/admin/crm" || url.pathname.startsWith("/admin/crm/")) {
@@ -7233,6 +7246,48 @@ async function handleAdminCrmRequest(
   return json({ error: "Metodo nao permitido." }, 405);
 }
 
+async function handleAdminClientRegistryBackupRequest(
+  request: Request,
+  env: unknown,
+  adminRole: AdminRole,
+) {
+  if (adminRole !== "owner") return json({ error: "Permissao insuficiente." }, 403);
+
+  if (request.method === "GET") {
+    await hydrateClientsFromBillingUsers(env);
+    const protectedState = await protectClientRegistryBeforeSave(env, buildLiveStateSnapshot(env));
+    const backup = extractClientRegistryState(protectedState);
+    return json({
+      backup,
+      counts: readRecord(backup.counts),
+      warning:
+        "Backup contem password_hash bcrypt para restaurar login. Nunca transforme isso em senha aberta.",
+    });
+  }
+
+  if (request.method === "POST") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const backup = readRecord(body.backup || body);
+    const incoming = extractClientRegistryState(backup);
+    if (clientRegistryProtectedCount(incoming) === 0) {
+      return json({ error: "Backup vazio ou invalido." }, 400);
+    }
+
+    const before = extractClientRegistryState(buildLiveStateSnapshot(env));
+    applyClientRegistryState(incoming, env);
+    const saveStatus = await saveLiveState(env);
+    const after = extractClientRegistryState(buildLiveStateSnapshot(env));
+    return json({
+      ok: true,
+      restored: readRecord(after.counts),
+      before: readRecord(before.counts),
+      saveStatus,
+    });
+  }
+
+  return json({ error: "Metodo nao permitido." }, 405);
+}
+
 async function loadCrmResponse(env: unknown): Promise<CrmResponse> {
   const storageConfigured = Boolean(getSupabasePersistenceConfig(env));
   const [clientRows, dealRows, invoiceRows] = storageConfigured
@@ -10409,16 +10464,224 @@ async function saveLiveState(env: unknown): Promise<LiveStateSaveStatus> {
   return liveStateSavePromise;
 }
 
+async function protectClientRegistryBeforeSave(
+  env: unknown,
+  state: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (!getSupabasePersistenceConfig(env)) return state;
+
+  let protectedState = protectedClientRegistryState
+    ? mergeClientRegistryIntoState(state, protectedClientRegistryState)
+    : state;
+  const cachedCount = protectedClientRegistryState
+    ? clientRegistryProtectedCount(protectedClientRegistryState)
+    : 0;
+  const currentCount = clientRegistryProtectedCount(protectedState);
+  const shouldRefresh =
+    !protectedClientRegistryState ||
+    currentCount < cachedCount ||
+    Date.now() - protectedClientRegistryLoadedAt > CLIENT_REGISTRY_PROTECTION_INTERVAL_MS;
+
+  if (!shouldRefresh) return protectedState;
+
+  const dailyId = clientRegistryDailySnapshotId();
+  const [durableState, latestSnapshot, dailySnapshot] = await withTimeout(
+    Promise.all([
+      loadDurableLiveStateById(env, LIVE_STATE_ID),
+      loadDurableLiveStateById(env, CLIENT_REGISTRY_SNAPSHOT_LATEST_ID),
+      loadDurableLiveStateById(env, dailyId),
+    ]),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "proteger cadastro de clientes",
+    [null, null, null] as Array<Record<string, unknown> | null>,
+  );
+
+  for (const candidate of [durableState, latestSnapshot, dailySnapshot]) {
+    if (candidate) protectedState = mergeClientRegistryIntoState(protectedState, candidate);
+  }
+
+  protectedClientRegistryState = extractClientRegistryState(protectedState);
+  protectedClientRegistryLoadedAt = Date.now();
+  return protectedState;
+}
+
+function extractClientRegistryState(state: Record<string, unknown>) {
+  const deletedEntities = Array.isArray(state.deletedEntities)
+    ? state.deletedEntities.map(readRecord).filter(hasRecordFields)
+    : [];
+  const registry = {
+    snapshotType: "client_registry",
+    recipients: filterDeletedEntityRows(
+      pickStateArray(state.recipients, []),
+      deletedEntities,
+    ),
+    clients: filterDeletedEntityRows(
+      pickStateArray(state.clients, []).map(removeLegacyPassword),
+      deletedEntities,
+    ),
+    subscriptions: filterDeletedEntityRows(
+      pickStateArray(state.subscriptions, []),
+      deletedEntities,
+    ).slice(0, 500),
+    payments: filterDeletedEntityRows(pickStateArray(state.payments, []), deletedEntities).slice(
+      0,
+      1000,
+    ),
+    adminUsers: filterDeletedEntityRows(pickStateArray(state.adminUsers, []), deletedEntities),
+    deletedEntities,
+    savedAt: readString(state, "savedAt") || new Date().toISOString(),
+  };
+  return {
+    ...registry,
+    counts: {
+      recipients: registry.recipients.length,
+      clients: registry.clients.length,
+      subscriptions: registry.subscriptions.length,
+      payments: registry.payments.length,
+      adminUsers: registry.adminUsers.length,
+      deletedEntities: registry.deletedEntities.length,
+    },
+  };
+}
+
+function mergeClientRegistryIntoState(
+  state: Record<string, unknown>,
+  registryLike: Record<string, unknown>,
+) {
+  const stateSavedAt = stateSavedAtMs(state);
+  const registry = extractClientRegistryState(registryLike);
+  const registrySavedAt = stateSavedAtMs(registry);
+  const deletedEntities = mergeDeletedEntityStates(
+    state.deletedEntities,
+    registry.deletedEntities,
+  ).slice(0, 1000);
+
+  return {
+    ...state,
+    deletedEntities,
+    recipients: filterDeletedEntityRows(
+      mergeEntityStateArrays(state.recipients, registry.recipients, stateSavedAt, registrySavedAt, true),
+      deletedEntities,
+    ),
+    clients: filterDeletedEntityRows(
+      mergeEntityStateArrays(state.clients, registry.clients, stateSavedAt, registrySavedAt, true),
+      deletedEntities,
+    ).map(removeLegacyPassword),
+    subscriptions: filterDeletedEntityRows(
+      mergeEntityStateArrays(
+        state.subscriptions,
+        registry.subscriptions,
+        stateSavedAt,
+        registrySavedAt,
+      ),
+      deletedEntities,
+    ).slice(0, 500),
+    payments: filterDeletedEntityRows(
+      mergeEntityStateArrays(state.payments, registry.payments, stateSavedAt, registrySavedAt),
+      deletedEntities,
+    ).slice(0, 1000),
+    adminUsers: filterDeletedEntityRows(
+      mergeEntityStateArrays(state.adminUsers, registry.adminUsers, stateSavedAt, registrySavedAt, true),
+      deletedEntities,
+    ),
+  };
+}
+
+function clientRegistryProtectedCount(state: Record<string, unknown>) {
+  return (
+    pickStateArray(state.clients, []).length +
+    pickStateArray(state.subscriptions, []).length +
+    pickStateArray(state.payments, []).length +
+    pickStateArray(state.recipients, []).length +
+    pickStateArray(state.adminUsers, []).length
+  );
+}
+
+function applyClientRegistryState(registryLike: Record<string, unknown>, env?: unknown) {
+  const merged = mergeClientRegistryIntoState(buildLiveStateSnapshot(env), registryLike);
+  liveDeletedEntities = pickStateArray(merged.deletedEntities, []).slice(0, 1000);
+  liveRecipients = filterDeletedEntityRows(pickStateArray(merged.recipients, []), liveDeletedEntities);
+  liveClients = filterDeletedEntityRows(
+    pickStateArray(merged.clients, []).map(removeLegacyPassword),
+    liveDeletedEntities,
+  );
+  liveSubscriptions = filterDeletedEntityRows(
+    pickStateArray(merged.subscriptions, []),
+    liveDeletedEntities,
+  ).slice(0, 500);
+  livePayments = filterDeletedEntityRows(
+    pickStateArray(merged.payments, []),
+    liveDeletedEntities,
+  ).slice(0, 1000);
+  liveAdminUsers = filterDeletedEntityRows(pickStateArray(merged.adminUsers, []), liveDeletedEntities);
+  protectedClientRegistryState = extractClientRegistryState(buildLiveStateSnapshot(env));
+  protectedClientRegistryLoadedAt = Date.now();
+}
+
+async function maybeSaveClientRegistrySnapshot(env: unknown, state: Record<string, unknown>) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const snapshot = extractClientRegistryState(state);
+  const fingerprint = stableClientRegistryFingerprint(snapshot);
+  const due =
+    fingerprint !== clientRegistrySnapshotFingerprint ||
+    Date.now() - clientRegistrySnapshotSavedAt > CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS;
+  if (!due) return false;
+
+  const savedAt = new Date().toISOString();
+  const snapshotState = {
+    ...snapshot,
+    snapshotType: "client_registry",
+    savedAt,
+  };
+  const dailyId = clientRegistryDailySnapshotId();
+  const [latestResult, dailyResult] = await Promise.allSettled([
+    saveDurableLiveStateById(env, CLIENT_REGISTRY_SNAPSHOT_LATEST_ID, snapshotState),
+    saveDurableLiveStateById(env, dailyId, snapshotState),
+  ]);
+
+  const ok =
+    latestResult.status === "fulfilled" &&
+    latestResult.value === true &&
+    dailyResult.status === "fulfilled" &&
+    dailyResult.value === true;
+  if (ok) {
+    protectedClientRegistryState = snapshotState;
+    protectedClientRegistryLoadedAt = Date.now();
+    clientRegistrySnapshotSavedAt = Date.now();
+    clientRegistrySnapshotFingerprint = fingerprint;
+  }
+  return ok;
+}
+
+function stableClientRegistryFingerprint(state: Record<string, unknown>) {
+  const parts = ["clients", "subscriptions", "payments", "recipients", "adminUsers"].map((key) => {
+    const rows = pickStateArray(state[key], [])
+      .map((row) => `${stateEntityKey(row, true)}:${stateEntityUpdatedAtMs(row)}`)
+      .sort();
+    return `${key}:${rows.join("|")}`;
+  });
+  const deleted = pickStateArray(state.deletedEntities, [])
+    .map((row) => `${deletedEntityKey(row)}:${deletedEntityTime(row)}`)
+    .sort();
+  return [...parts, `deleted:${deleted.join("|")}`].join(";");
+}
+
+function clientRegistryDailySnapshotId() {
+  return `${CLIENT_REGISTRY_SNAPSHOT_PREFIX}${currentDashboardCycleDate()}`;
+}
+
 async function saveLiveStateNow(env: unknown): Promise<LiveStateSaveStatus> {
-  const state = buildLiveStateSnapshot(env);
+  const state = await protectClientRegistryBeforeSave(env, buildLiveStateSnapshot(env));
   const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
-  const [durableResult, cacheResult] = await Promise.allSettled([
+  const [durableResult, cacheResult, clientBackupResult] = await Promise.allSettled([
     saveDurableLiveState(env, state),
     saveLiveStateCache(state),
+    maybeSaveClientRegistrySnapshot(env, state),
   ]);
   liveStateSaveStatus = {
     durable: durableResult.status === "fulfilled" && durableResult.value === true,
     cache: cacheResult.status === "fulfilled" && cacheResult.value === true,
+    clientBackup: clientBackupResult.status === "fulfilled" && clientBackupResult.value === true,
     durableConfigured,
     saved_at: new Date().toISOString(),
   };
@@ -10449,6 +10712,10 @@ async function saveLiveStateCache(state: Record<string, unknown>) {
 }
 
 async function loadDurableLiveState(env: unknown) {
+  return loadDurableLiveStateById(env, LIVE_STATE_ID);
+}
+
+async function loadDurableLiveStateById(env: unknown, id: string) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return null;
   const controller = new AbortController();
@@ -10456,7 +10723,7 @@ async function loadDurableLiveState(env: unknown) {
 
   try {
     const response = await fetch(
-      `${config.url}/rest/v1/${LIVE_STATE_TABLE}?id=eq.${encodeURIComponent(LIVE_STATE_ID)}&select=state`,
+      `${config.url}/rest/v1/${LIVE_STATE_TABLE}?id=eq.${encodeURIComponent(id)}&select=state`,
       {
         headers: supabasePersistenceHeaders(config.key),
         signal: controller.signal,
@@ -10481,6 +10748,14 @@ async function loadDurableLiveState(env: unknown) {
 }
 
 async function saveDurableLiveState(env: unknown, state: Record<string, unknown>) {
+  return saveDurableLiveStateById(env, LIVE_STATE_ID, state);
+}
+
+async function saveDurableLiveStateById(
+  env: unknown,
+  id: string,
+  state: Record<string, unknown>,
+) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return false;
   const controller = new AbortController();
@@ -10495,7 +10770,7 @@ async function saveDurableLiveState(env: unknown, state: Record<string, unknown>
         Prefer: "resolution=merge-duplicates,return=minimal",
       },
       body: JSON.stringify({
-        id: LIVE_STATE_ID,
+        id,
         state,
         updated_at: new Date().toISOString(),
       }),
