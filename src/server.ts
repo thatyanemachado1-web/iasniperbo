@@ -2932,15 +2932,17 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     liveDashboardData = updateDashboardData(liveDashboardData, body);
     if (incomingRounds.length) {
       const calendarChange = trackNeuralCalendarRounds(incomingRounds);
+      const saveStatus = await saveLiveState(env);
       runBackgroundTask(
         ctx,
         persistDashboardRoundIngestion(env, incomingRounds, calendarChange, isLocalDevelopmentRequest(request)),
         "persistir rodada e monitorar sinais",
       );
+      return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
     } else {
-      runBackgroundTask(ctx, saveLiveState(env), "salvar dashboard");
+      const saveStatus = await saveLiveState(env);
+      return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
     }
-    return json({ ok: true, dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
 
   return null;
@@ -5329,7 +5331,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       acceptsCurrentCycle && Array.isArray(incoming.pressureSeries)
         ? incoming.pressureSeries
         : currentDashboard.pressureSeries,
-    updatedAt: new Date().toISOString(),
+    updatedAt: dashboard.updatedAt || new Date().toISOString(),
     cycleDate,
     dailyCycleDate: cycleDate,
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
@@ -5480,7 +5482,7 @@ function resetDashboardDailyCycle(
       currentHitStreak: 0,
     },
     pressureSeries: [],
-    updatedAt: new Date().toISOString(),
+    updatedAt: dashboard.updatedAt || new Date().toISOString(),
     cycleDate,
     dailyCycleDate: cycleDate,
     strictDailyCounters: true,
