@@ -5032,15 +5032,9 @@ function formatServerPercent(value?: number) {
 function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
   const safeDashboard = liveFeedLooksStale(dashboard) ? pausedDashboardSnapshot(dashboard) : dashboard;
   const signal = safeDashboard.currentSignal;
-  const hasVisibleResult = Boolean(terminalSignalStatus(signal.status));
   return {
     ...safeDashboard,
-    currentSignal: hasVisibleResult
-      ? signal
-      : {
-          ...signal,
-          lastResult: null,
-        },
+    currentSignal: signal,
     neuralReading: safeDashboard.neuralReading
       ? {
           ...safeDashboard.neuralReading,
@@ -5891,7 +5885,10 @@ function normalizeSignal(
     fallback.side === side &&
     (side === "BANKER" || side === "PLAYER");
   const incomingLastResult = readServerLastResult(signal.lastResult);
-  const canAcceptTerminalResult = Boolean(terminalStatus && previousVisibleEntry);
+  const canAcceptTerminalResult = Boolean(
+    terminalStatus &&
+      (previousVisibleEntry || (incomingLastResult && incomingLastResult.side === side)),
+  );
 
   if (terminalStatus) {
     if (!canAcceptTerminalResult || (side !== "BANKER" && side !== "PLAYER")) {
@@ -5938,7 +5935,7 @@ function normalizeSignal(
     strength: clampPercent(
       signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
     ),
-    lastResult: null,
+    lastResult: incomingLastResult,
   };
 }
 

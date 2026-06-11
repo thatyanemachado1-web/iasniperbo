@@ -83,7 +83,7 @@ export function SignalCard({
   const status = signalStatus(signal, tieAlertIsActive, tieAlert?.validityRounds);
   const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
   const lastResultKey = signal.lastResult ? signalResultKey(signal.lastResult) : null;
-  const shouldShowLastResult = Boolean(lastResult && isResultStatus);
+  const shouldShowLastResult = Boolean(lastResult);
   const mainSequence = buildMotorSequence(mainSequencePositive, mainSequenceNegative, "Motor principal");
   const StatusIcon = status.Icon;
   const tieRisk = !isResultStatus && tieAlert ? tieRiskBadge(tieAlert) : null;
@@ -112,7 +112,6 @@ export function SignalCard({
       lastResultKey &&
       lastResultKey !== previousMainResultKey.current &&
       signal.lastResult &&
-      isResultStatus &&
       isGreenSignalResult(signal.lastResult)
     ) {
       pulseGreen(setMainGreenFlash);
