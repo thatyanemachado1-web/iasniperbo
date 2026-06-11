@@ -228,6 +228,7 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
 const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
+const LIVE_FEED_STALE_MS = 75_000;
 const FREE_TRIAL_MINUTES = 10;
 const ELEVENLABS_API_KEY_SECRET_NAMES = [
   "ELEVENLABS_TTS_API_KEY",
@@ -2963,21 +2964,26 @@ async function persistDashboardRoundIngestion(
   calendarChange: NeuralCalendarChangeSet,
   allowInsecureTelegramFallback: boolean,
 ) {
-  await withTimeout(
-    persistValidatorRounds(env, incomingRounds),
-    LIVE_STATE_IO_TIMEOUT_MS,
-    "salvar rodadas do Validador",
-    false,
-  );
-  if (calendarChange.changed) {
-    await withTimeout(
-      persistNeuralCalendarStats(env, calendarChange),
+  await processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback });
+  const writes = [
+    withTimeout(
+      persistValidatorRounds(env, incomingRounds),
       LIVE_STATE_IO_TIMEOUT_MS,
-      "salvar Calendario Neural",
+      "salvar rodadas do Validador",
       false,
+    ),
+  ];
+  if (calendarChange.changed) {
+    writes.push(
+      withTimeout(
+        persistNeuralCalendarStats(env, calendarChange),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "salvar Calendario Neural",
+        false,
+      ),
     );
   }
-  await processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback });
+  await Promise.all(writes);
   await saveLiveState(env);
 }
 
@@ -4953,35 +4959,97 @@ function formatServerPercent(value?: number) {
 }
 
 function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
-  const signal = dashboard.currentSignal;
+  const safeDashboard = liveFeedLooksStale(dashboard) ? pausedDashboardSnapshot(dashboard) : dashboard;
+  const signal = safeDashboard.currentSignal;
   const hasVisibleResult = Boolean(terminalSignalStatus(signal.status));
   return {
-    ...dashboard,
+    ...safeDashboard,
     currentSignal: hasVisibleResult
       ? signal
       : {
           ...signal,
           lastResult: null,
         },
-    neuralReading: dashboard.neuralReading
+    neuralReading: safeDashboard.neuralReading
       ? {
-          ...dashboard.neuralReading,
+          ...safeDashboard.neuralReading,
           sequencePositive: 0,
           sequenceNegative: 0,
           maxSequencePositive: 0,
           maxSequenceNegative: 0,
         }
-      : dashboard.neuralReading,
-    neuralScoreboard: dashboard.neuralScoreboard
+      : safeDashboard.neuralReading,
+    neuralScoreboard: safeDashboard.neuralScoreboard
       ? {
-          ...dashboard.neuralScoreboard,
+          ...safeDashboard.neuralScoreboard,
           sequencePositive: 0,
           sequenceNegative: 0,
           maxSequencePositive: 0,
           maxSequenceNegative: 0,
         }
-      : dashboard.neuralScoreboard,
+      : safeDashboard.neuralScoreboard,
     neuralSequenceLastOutcome: null,
+  };
+}
+
+function liveFeedLooksStale(dashboard: LiveDashboardData) {
+  const updatedAt = Date.parse(readString(dashboard, "updatedAt"));
+  if (!Number.isFinite(updatedAt)) return !Array.isArray(dashboard.rounds) || dashboard.rounds.length === 0;
+  return Date.now() - updatedAt > LIVE_FEED_STALE_MS;
+}
+
+function pausedDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
+  return {
+    ...dashboard,
+    currentSignal: {
+      id: "feed-paused",
+      side: "NONE",
+      status: "waiting",
+      protection: "-",
+      strength: 0,
+      lastResult: null,
+    },
+    currentTieAlert: {
+      id: "feed-paused-tie",
+      level: "Baixo",
+      confidence: 0,
+      validityRounds: 0,
+      status: "expired",
+    },
+    currentSurfAlert: {
+      surf_alert: false,
+      surf_phase: "SEM_RISCO",
+      surf_side: "NONE",
+      surf_status: "SEM_RISCO",
+      surf_risk: 0,
+      surf_break_risk: 0,
+      surf_confidence: 0,
+      stretched_count: 0,
+      correction_count: 0,
+      reason: "Feed da mesa pausado. Aguardando nova rodada real antes de liberar sinais.",
+      panels: {
+        big_road: "Aguardando nova rodada real.",
+        big_eye_boy: "Aguardando nova rodada real.",
+        small_road: "Aguardando nova rodada real.",
+        cockroach_pig: "Aguardando nova rodada real.",
+      },
+      surf_prediction_side: "NONE",
+      surf_prediction_status: "EXPIRED",
+      surf_prediction_confidence: 0,
+      surf_prediction_window: 0,
+    },
+    neuralReading: {
+      ...(dashboard.neuralReading || { mode: "SCANNING" }),
+      mode: "SCANNING",
+      paganteStatus: "FEED_PAUSADO",
+      paganteAlert: "Aguardando nova rodada real da mesa.",
+    },
+    engineDecision: {
+      state: "AGUARDAR",
+      reason: "Feed da mesa pausado. Nenhuma entrada sera liberada ate chegar rodada nova.",
+      confidence: 0,
+      debug: "feed=stale",
+    },
   };
 }
 
@@ -5307,7 +5375,7 @@ function resetDashboardDailyCycle(
   return {
     ...dashboard,
     mockMode: false,
-    rounds: [],
+    rounds: Array.isArray(dashboard.rounds) ? dashboard.rounds.slice(-30) : [],
     currentSignal: {
       id: "waiting",
       side: "NONE",
