@@ -13,6 +13,7 @@ type ValidationKind = "sg" | "g1" | "red" | "tie_sg" | "tie_g1" | "pending";
 interface PayingEvent {
   numero: number;
   origem: NeuralSide;
+  origemTipo: NonNullable<NeuralReading["origemTipo"]>;
   label: string;
 }
 
@@ -88,7 +89,7 @@ export function buildNumeroPaganteNeural(
 
   const buckets = catalogPayingNumbers(validRounds);
   const activeEventIndex = pickActiveEventIndex(validRounds, buckets);
-  const latestEvent = payingEventForRound(validRounds[activeEventIndex]);
+  const latestEvent = pickRoundEvent(validRounds, activeEventIndex, buckets);
   if (!latestEvent) return null;
 
   const currentBucket = buckets.get(candidateKey(latestEvent));
@@ -150,7 +151,7 @@ function buildGeneralScoreboard(
   const outcomes: GeneralNeuralOutcome[] = [];
 
   for (let index = 0; index < rounds.length; index += 1) {
-    const event = payingEventForRound(rounds[index]);
+    const event = pickRoundEvent(rounds, index, buckets);
     if (!event) continue;
 
     const direction = pickBestDirection(buckets.get(candidateKey(event)), event.origem);
@@ -247,7 +248,7 @@ function pickActiveEventIndex(rounds: Round[], buckets: Map<string, CandidateBuc
 
   if (wasPreviousRoundLockedByOlderG1(rounds, buckets, latestIndex)) return latestIndex;
 
-  const previousEvent = payingEventForRound(rounds[previousIndex]);
+  const previousEvent = pickRoundEvent(rounds, previousIndex, buckets);
   if (!previousEvent) return latestIndex;
 
   const previousDirection = pickBestDirection(
@@ -276,7 +277,7 @@ function wasPreviousRoundLockedByOlderG1(
   const priorSgIndex = latestIndex - 1;
   if (priorTriggerIndex < 0 || priorSgIndex < 0) return false;
 
-  const priorEvent = payingEventForRound(rounds[priorTriggerIndex]);
+  const priorEvent = pickRoundEvent(rounds, priorTriggerIndex, buckets);
   if (!priorEvent) return false;
 
   const priorDirection = pickBestDirection(
@@ -298,7 +299,7 @@ function qualifyCandidate(
   const total = totalGreens + stats.red;
   const accuracy = calculateMotorAssertiveness(totalGreens, stats.red);
   const expectedSide = resultToNeuralSide(direction?.expected ?? sideToResult(event.origem));
-  const origemTipo = originKindFor(event.origem, expectedSide);
+  const origemTipo = event.origemTipo;
   const isBlockedByRedSequence = stats.sequenceNegative >= 2;
   const isQualifiedNumber =
     !isBlockedByRedSequence &&
@@ -329,27 +330,26 @@ function catalogPayingNumbers(rounds: Round[]) {
   const buckets = new Map<string, CandidateBucket>();
 
   for (let index = 0; index < rounds.length; index += 1) {
-    const event = payingEventForRound(rounds[index]);
-    if (!event) continue;
+    for (const event of payingEventsForRound(rounds[index])) {
+      const key = candidateKey(event);
+      const bucket = buckets.get(key) ?? {
+        event,
+        occurrences: 0,
+        byExpected: {
+          B: cloneStats(EMPTY_DIRECTION_STATS),
+          P: cloneStats(EMPTY_DIRECTION_STATS),
+          T: cloneStats(EMPTY_DIRECTION_STATS),
+        },
+      };
 
-    const key = candidateKey(event);
-    const bucket = buckets.get(key) ?? {
-      event,
-      occurrences: 0,
-      byExpected: {
-        B: cloneStats(EMPTY_DIRECTION_STATS),
-        P: cloneStats(EMPTY_DIRECTION_STATS),
-        T: cloneStats(EMPTY_DIRECTION_STATS),
-      },
-    };
+      bucket.occurrences += 1;
 
-    bucket.occurrences += 1;
+      for (const expected of ["B", "P", "T"] as const) {
+        applyValidation(bucket.byExpected[expected], rounds, index + 1, expected);
+      }
 
-    for (const expected of ["B", "P", "T"] as const) {
-      applyValidation(bucket.byExpected[expected], rounds, index + 1, expected);
+      buckets.set(key, bucket);
     }
-
-    buckets.set(key, bucket);
   }
 
   return buckets;
@@ -463,33 +463,90 @@ function pickBestDirection(
     })[0];
 }
 
-function payingEventForRound(round: Round | undefined): PayingEvent | null {
-  if (!round || !isValidRound(round)) return null;
+function pickRoundEvent(
+  rounds: Round[],
+  index: number,
+  buckets: Map<string, CandidateBucket>,
+): PayingEvent | null {
+  const events = payingEventsForRound(rounds[index]);
+  if (!events.length) return null;
+
+  return events
+    .map((event) => {
+      const direction = pickBestDirection(buckets.get(candidateKey(event)), event.origem);
+      const qualification = qualifyCandidate(event, direction);
+      const stats = direction?.stats ?? cloneStats(EMPTY_DIRECTION_STATS);
+      const kindPriority =
+        event.origemTipo === "PAGANTE" ? 3 : event.origemTipo === "TIE" ? 2 : 1;
+
+      return {
+        event,
+        qualification,
+        score:
+          (qualification.isQualifiedNumber ? 10000 : 0) +
+          kindPriority * 1000 +
+          qualification.accuracy * 10 +
+          qualification.totalGreens * 4 +
+          qualification.total -
+          stats.red * 2,
+      };
+    })
+    .sort((a, b) => b.score - a.score)[0]?.event ?? null;
+}
+
+function payingEventsForRound(round: Round | undefined): PayingEvent[] {
+  if (!round || !isValidRound(round)) return [];
 
   if (round.result === "B") {
-    return {
-      numero: normalizeScore(round.bankerScore),
-      origem: "BANKER",
-      label: `${normalizeScore(round.bankerScore)} Banker`,
-    };
+    const bankerScore = normalizeScore(round.bankerScore);
+    const playerScore = normalizeScore(round.playerScore);
+    return [
+      {
+        numero: bankerScore,
+        origem: "BANKER",
+        origemTipo: "PAGANTE",
+        label: `${bankerScore} Banker`,
+      },
+      {
+        numero: playerScore,
+        origem: "PLAYER",
+        origemTipo: "OPOSTO",
+        label: `${playerScore} Player`,
+      },
+    ];
   }
   if (round.result === "P") {
-    return {
-      numero: normalizeScore(round.playerScore),
-      origem: "PLAYER",
-      label: `${normalizeScore(round.playerScore)} Player`,
-    };
+    const bankerScore = normalizeScore(round.bankerScore);
+    const playerScore = normalizeScore(round.playerScore);
+    return [
+      {
+        numero: playerScore,
+        origem: "PLAYER",
+        origemTipo: "PAGANTE",
+        label: `${playerScore} Player`,
+      },
+      {
+        numero: bankerScore,
+        origem: "BANKER",
+        origemTipo: "OPOSTO",
+        label: `${bankerScore} Banker`,
+      },
+    ];
   }
 
   const tieScore =
     round.bankerScore === round.playerScore
       ? round.bankerScore
       : Math.max(round.bankerScore, round.playerScore);
-  return {
-    numero: normalizeScore(tieScore),
-    origem: "TIE",
-    label: `${normalizeScore(tieScore)} Tie`,
-  };
+  const normalizedTieScore = normalizeScore(tieScore);
+  return [
+    {
+      numero: normalizedTieScore,
+      origem: "TIE",
+      origemTipo: "TIE",
+      label: `${normalizedTieScore} Tie`,
+    },
+  ];
 }
 
 function isValidRound(round: Round) {
@@ -505,7 +562,7 @@ function normalizeScore(value: number) {
 }
 
 function candidateKey(event: PayingEvent) {
-  return `${event.numero}:${event.origem}`;
+  return `${event.numero}:${event.origem}:${event.origemTipo}`;
 }
 
 function resultToNeuralSide(result: RoundResult): NeuralSide {
@@ -518,14 +575,6 @@ function sideToResult(side: NeuralSide): RoundResult {
   if (side === "BANKER") return "B";
   if (side === "PLAYER") return "P";
   return "T";
-}
-
-function originKindFor(
-  origem: NeuralSide,
-  expectedSide: NeuralSide,
-): NonNullable<NeuralReading["origemTipo"]> {
-  if (origem === "TIE" || expectedSide === "TIE") return "TIE";
-  return origem === expectedSide ? "PAGANTE" : "OPOSTO";
 }
 
 function statusFor({
