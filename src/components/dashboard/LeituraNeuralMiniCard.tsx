@@ -74,6 +74,12 @@ export function LeituraNeuralMiniCard({
   const sequenceCopy = neuralSequenceCopy(
     numberFrom(generalScore.currentGreenSequence),
     numberFrom(generalScore.currentRedSequence),
+    "geral",
+  );
+  const numberSequenceCopy = neuralSequenceCopy(
+    numberFrom(data.sequencePositive),
+    numberFrom(data.sequenceNegative),
+    "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
 
@@ -194,6 +200,15 @@ export function LeituraNeuralMiniCard({
                   {numberStage.label}
                 </span>
               </div>
+              <div
+                className={cn(
+                  "mt-1 rounded-full border px-1.5 py-0.5 text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[7px]",
+                  numberSequenceCopy.className,
+                )}
+                title={numberSequenceCopy.title}
+              >
+                {numberSequenceCopy.label}
+              </div>
               <div className="my-1 h-px bg-neon-cyan/10" />
               <div className="truncate text-[7px] font-black uppercase tracking-[0.1em] text-neon-cyan/85">
                 Placar geral
@@ -244,10 +259,16 @@ export function LeituraNeuralMiniCard({
   );
 }
 
-function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) {
+function neuralSequenceCopy(
+  sequencePositive: number,
+  sequenceNegative: number,
+  scope: "numero" | "geral" = "geral",
+) {
+  const labelPrefix = scope === "numero" ? "Seq numero" : "Seq geral";
+
   if (sequenceNegative > 0) {
     return {
-      label: `Seq geral: ${sequenceNegative} RED ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
+      label: `${labelPrefix}: ${sequenceNegative} RED ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de reds da Leitura Neural.",
       className: "border-destructive/35 bg-destructive/10 text-destructive",
     };
@@ -255,14 +276,14 @@ function neuralSequenceCopy(sequencePositive: number, sequenceNegative: number) 
 
   if (sequencePositive > 0) {
     return {
-      label: `Seq geral: ${sequencePositive} GREEN ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
+      label: `${labelPrefix}: ${sequencePositive} GREEN ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
       title: "Sequência atual de greens da Leitura Neural.",
       className: "border-success/35 bg-success/10 text-success",
     };
   }
 
   return {
-    label: "Seq geral: aguardando",
+    label: `${labelPrefix}: aguardando`,
     title: "Aguardando resultado real da Leitura Neural.",
     className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
   };
