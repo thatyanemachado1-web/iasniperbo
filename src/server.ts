@@ -46,6 +46,9 @@ import type {
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
+type ExecutionContextLike = {
+  waitUntil?: (promise: Promise<unknown>) => void;
+};
 
 type LiveDashboardData = DashboardData & {
   updatedAt?: string;
@@ -224,6 +227,7 @@ const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
 const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
+const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
 const FREE_TRIAL_MINUTES = 10;
 const ELEVENLABS_API_KEY_SECRET_NAMES = [
   "ELEVENLABS_TTS_API_KEY",
@@ -420,7 +424,7 @@ export default {
       const adminApiResponse = await handleAdminApiRequest(request, env);
       if (adminApiResponse) return withSecurityHeaders(adminApiResponse);
 
-      const dashboardResponse = await handleDashboardRequest(request, env);
+      const dashboardResponse = await handleDashboardRequest(request, env, ctx);
       if (dashboardResponse) return withSecurityHeaders(dashboardResponse);
 
       const adaptiveStrategyResponse = await handleAdaptiveStrategyRequest(request, env);
@@ -2770,7 +2774,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   return json({ error: "Rota não encontrada." }, 404);
 }
 
-async function handleDashboardRequest(request: Request, env: unknown) {
+async function handleDashboardRequest(request: Request, env: unknown, ctx?: unknown) {
   const url = new URL(request.url);
 
   if (
@@ -2851,23 +2855,9 @@ async function handleDashboardRequest(request: Request, env: unknown) {
       "carregar historico do Validador",
       [] as Round[],
     );
-    let calendarChange: NeuralCalendarChangeSet | null = null;
     if (storedRounds.length) {
       liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, storedRounds);
-      calendarChange = trackNeuralCalendarRounds(storedRounds);
-      if (calendarChange.changed) {
-        await withTimeout(
-          persistNeuralCalendarStats(env, calendarChange),
-          LIVE_STATE_IO_TIMEOUT_MS,
-          "salvar Calendario Neural",
-          false,
-        );
-      }
     }
-    const changed = (await processValidatorLiveMonitoring(env, {
-      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-    })) || Boolean(calendarChange?.changed);
-    if (changed) await saveLiveState(env);
     const rounds = mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, limit);
     return json({
       rounds,
@@ -2892,30 +2882,17 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     if (incomingRounds.length) {
       liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
       const calendarChange = trackNeuralCalendarRounds(incomingRounds);
-      await withTimeout(
-        persistValidatorRounds(env, incomingRounds),
-        LIVE_STATE_IO_TIMEOUT_MS,
-        "salvar rodadas do Validador",
-        false,
-      );
-      if (calendarChange.changed) {
-        await withTimeout(
-          persistNeuralCalendarStats(env, calendarChange),
-          LIVE_STATE_IO_TIMEOUT_MS,
-          "salvar Calendario Neural",
-          false,
-        );
-      }
       const dashboardBeforeTieScoreboard = liveDashboardData;
       liveDashboardData = trackServerTieRoundScoreboard(
         liveDashboardData,
         dashboardBeforeTieScoreboard,
         incomingRounds,
       );
-      await processValidatorLiveMonitoring(env, {
-        allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-      });
-      await saveLiveState(env);
+      runBackgroundTask(
+        ctx,
+        persistDashboardRoundIngestion(env, incomingRounds, calendarChange, isLocalDevelopmentRequest(request)),
+        "persistir historico e monitorar Validador",
+      );
     }
 
     return json({
@@ -2931,25 +2908,10 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     }
 
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
-    let changed = false;
     if (cycle.changed) {
       liveDashboardData = cycle.dashboard;
-      changed = true;
+      runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
-    const calendarChange = trackNeuralCalendarRounds(liveDashboardData.rounds || []);
-    if (calendarChange.changed) {
-      await withTimeout(
-        persistNeuralCalendarStats(env, calendarChange),
-        LIVE_STATE_IO_TIMEOUT_MS,
-        "salvar Calendario Neural",
-        false,
-      );
-      changed = true;
-    }
-    changed = await processValidatorLiveMonitoring(env, {
-      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-    }) || changed;
-    if (changed) await saveLiveState(env);
     return json(publicDashboardSnapshot(liveDashboardData));
   }
 
@@ -2969,29 +2931,54 @@ async function handleDashboardRequest(request: Request, env: unknown) {
     liveDashboardData = updateDashboardData(liveDashboardData, body);
     if (incomingRounds.length) {
       const calendarChange = trackNeuralCalendarRounds(incomingRounds);
-      await withTimeout(
-        persistValidatorRounds(env, incomingRounds),
-        LIVE_STATE_IO_TIMEOUT_MS,
-        "salvar rodadas do Validador",
-        false,
+      runBackgroundTask(
+        ctx,
+        persistDashboardRoundIngestion(env, incomingRounds, calendarChange, isLocalDevelopmentRequest(request)),
+        "persistir rodada e monitorar sinais",
       );
-      if (calendarChange.changed) {
-        await withTimeout(
-          persistNeuralCalendarStats(env, calendarChange),
-          LIVE_STATE_IO_TIMEOUT_MS,
-          "salvar Calendario Neural",
-          false,
-        );
-      }
+    } else {
+      runBackgroundTask(ctx, saveLiveState(env), "salvar dashboard");
     }
-    await processValidatorLiveMonitoring(env, {
-      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-    });
-    await saveLiveState(env);
     return json({ ok: true, dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
 
   return null;
+}
+
+function runBackgroundTask(ctx: unknown, promise: Promise<unknown>, label: string) {
+  const task = promise.catch((error) => {
+    console.warn(`Falha em tarefa de fundo: ${label}.`, error);
+  });
+  const waitUntil = (ctx as ExecutionContextLike | undefined)?.waitUntil;
+  if (typeof waitUntil === "function") {
+    waitUntil.call(ctx, task);
+    return;
+  }
+  void task;
+}
+
+async function persistDashboardRoundIngestion(
+  env: unknown,
+  incomingRounds: Round[],
+  calendarChange: NeuralCalendarChangeSet,
+  allowInsecureTelegramFallback: boolean,
+) {
+  await withTimeout(
+    persistValidatorRounds(env, incomingRounds),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "salvar rodadas do Validador",
+    false,
+  );
+  if (calendarChange.changed) {
+    await withTimeout(
+      persistNeuralCalendarStats(env, calendarChange),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "salvar Calendario Neural",
+      false,
+    );
+  }
+  await processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback });
+  await saveLiveState(env);
 }
 
 async function handleNeuralCalendarRequest(request: Request, url: URL, env: unknown) {
@@ -4018,11 +4005,14 @@ async function sendTelegramMessage({
   }
 
   let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TELEGRAM_SEND_TIMEOUT_MS);
   try {
     response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     });
   } catch {
     if (allowInsecureNodeFallback) {
@@ -4037,6 +4027,8 @@ async function sendTelegramMessage({
       status: 502,
       error: "Nao foi possivel conectar ao Telegram agora.",
     };
+  } finally {
+    clearTimeout(timeout);
   }
 
   const data = readRecord(await response.json().catch(() => ({})));
