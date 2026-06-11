@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import ssl
 import time
 from pathlib import Path
@@ -25,6 +26,10 @@ def load_env_file(path: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip().strip('"').strip("'")
     return values
+
+
+def env_value(env: dict[str, str], name: str, default: str = "") -> str:
+    return os.getenv(name) or env.get(name, default)
 
 
 def request_json(
@@ -104,9 +109,9 @@ def main() -> int:
     )
 
     env = load_env_file(args.env_file)
-    admin_email = env.get("SNIPER_ADMIN_EMAIL") or env.get("SNIPER_ADMIN_EMAILS", "").split(",", 1)[0].strip()
-    admin_password = env.get("SNIPER_ADMIN_PASSWORD", "")
-    local_token = env.get("SNIPER_ADMIN_TOKEN") or env.get("SNIPER_DASHBOARD_TOKEN", "")
+    admin_email = env_value(env, "SNIPER_ADMIN_EMAIL") or env_value(env, "SNIPER_ADMIN_EMAILS").split(",", 1)[0].strip()
+    admin_password = env_value(env, "SNIPER_ADMIN_PASSWORD")
+    local_token = env_value(env, "SNIPER_ADMIN_TOKEN") or env_value(env, "SNIPER_DASHBOARD_TOKEN")
     if not admin_email or not admin_password or not local_token:
         logging.error("Missing admin email/password or local token in env file.")
         return 2
