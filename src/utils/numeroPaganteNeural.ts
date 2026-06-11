@@ -76,6 +76,7 @@ const EMPTY_DIRECTION_STATS: DirectionStats = {
 };
 
 const NEURAL_PANEL_ROUND_LIMIT = 156;
+const NEURAL_GENERAL_SCORE_ROUND_LIMIT = 300;
 const MIN_ACTIVE_VALIDATED = 2;
 const MIN_ACTIVE_GREENS = 2;
 const MIN_ACTIVE_ACCURACY = 90;
@@ -83,9 +84,13 @@ const RED_ALERT_ACCURACY = 45;
 
 export function buildNumeroPaganteNeural(
   rounds: Round[] | undefined,
+  currentCycleRounds?: Round[] | undefined,
 ): NumeroPaganteNeuralSnapshot | null {
-  const validRounds = (rounds ?? []).filter(isValidRound).slice(-NEURAL_PANEL_ROUND_LIMIT);
-  if (!validRounds.length) return null;
+  const allValidRounds = (rounds ?? []).filter(isValidRound);
+  const validRounds = currentPanelCycle(
+    (currentCycleRounds?.length ? currentCycleRounds : allValidRounds).filter(isValidRound),
+  );
+  if (!allValidRounds.length || !validRounds.length) return null;
 
   const buckets = catalogPayingNumbers(validRounds);
   const activeEventIndex = pickActiveEventIndex(validRounds, buckets);
@@ -94,7 +99,9 @@ export function buildNumeroPaganteNeural(
 
   const currentBucket = buckets.get(candidateKey(latestEvent));
   const currentDirection = pickBestDirection(currentBucket, latestEvent.origem);
-  const generalScoreboard = buildGeneralScoreboard(validRounds, buckets);
+  const generalRounds = allValidRounds.slice(-NEURAL_GENERAL_SCORE_ROUND_LIMIT);
+  const generalBuckets = catalogPayingNumbers(generalRounds);
+  const generalScoreboard = buildGeneralScoreboard(generalRounds, generalBuckets);
   const currentStats = currentDirection?.stats ?? cloneStats(EMPTY_DIRECTION_STATS);
   const {
     totalGreens,
@@ -136,12 +143,20 @@ export function buildNumeroPaganteNeural(
       paganteStatus,
       paganteAlert: alertFor(latestEvent, expectedSide, origemTipo, total, accuracy),
       paganteWindow: NEURAL_PANEL_ROUND_LIMIT,
+      paganteCycleProgress: validRounds.length,
+      paganteCycleLimit: NEURAL_PANEL_ROUND_LIMIT,
       isSaturated,
       isRedAlert,
       postTie: latestEvent.origem === "TIE",
     },
     scoreboard: generalScoreboard,
   };
+}
+
+function currentPanelCycle(rounds: Round[]) {
+  if (rounds.length <= NEURAL_PANEL_ROUND_LIMIT) return rounds;
+  const cycleStart = Math.floor((rounds.length - 1) / NEURAL_PANEL_ROUND_LIMIT) * NEURAL_PANEL_ROUND_LIMIT;
+  return rounds.slice(cycleStart);
 }
 
 function buildGeneralScoreboard(

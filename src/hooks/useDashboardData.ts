@@ -585,6 +585,28 @@ function normalizeNeuralReading(value: unknown, fallback?: NeuralReading): Neura
       ) ??
       fallback?.paganteWindow ??
       null,
+    paganteCycleProgress:
+      readOptionalNumber(
+        firstDefined(
+          record.paganteCycleProgress,
+          record.pagante_cycle_progress,
+          record.cycleProgress,
+          record.cycle_progress,
+        ),
+      ) ??
+      fallback?.paganteCycleProgress ??
+      null,
+    paganteCycleLimit:
+      readOptionalNumber(
+        firstDefined(
+          record.paganteCycleLimit,
+          record.pagante_cycle_limit,
+          record.cycleLimit,
+          record.cycle_limit,
+        ),
+      ) ??
+      fallback?.paganteCycleLimit ??
+      null,
     isSaturated:
       readOptionalBoolean(firstDefined(record.isSaturated, record.is_saturated)) ??
       fallback?.isSaturated ??

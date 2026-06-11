@@ -62,6 +62,8 @@ type LiveDashboardData = DashboardData & {
   latestEntryModeSignalId?: string;
   latestEntryModeSignalModes?: ActiveEntryMode[];
   neuralSequenceLastOutcome?: "GREEN" | "RED" | null;
+  neuralPanelCycleResetVersion?: string;
+  neuralPanelCycleResetRoundKey?: string;
 };
 type NeuralCalendarClassification =
   | "muito_pagante"
@@ -226,6 +228,7 @@ const MAX_VALIDATOR_ROUND_WRITE_BATCH = 500;
 const MAX_VALIDATOR_DETAIL_RESPONSE = 200;
 const VALIDATOR_ROUND_PRUNE_MIN_INTERVAL_MS = 10 * 60_000;
 const VALIDATOR_MONITOR_CACHE_TTL_MS = 1_000;
+const NEURAL_PANEL_CYCLE_RESET_VERSION = "2026-06-11-manual-reset-v1";
 const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
@@ -5370,8 +5373,18 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
   }
 
+  const neuralPanelCycle = acceptsCurrentCycle
+    ? resolveNeuralPanelCycle(currentDashboard, incomingRounds)
+    : {
+        cycleRounds: [] as Round[],
+        resetVersion: currentDashboard.neuralPanelCycleResetVersion,
+        resetRoundKey: currentDashboard.neuralPanelCycleResetRoundKey,
+      };
   const generatedNeural = acceptsCurrentCycle
-    ? buildNumeroPaganteNeural(liveValidatorRoundHistory)
+    ? buildNumeroPaganteNeural(
+        liveValidatorRoundHistory,
+        neuralPanelCycle.cycleRounds.length ? neuralPanelCycle.cycleRounds : undefined,
+      )
     : null;
   if (generatedNeural) {
     pickedSections.neuralReading = generatedNeural.reading;
@@ -5415,6 +5428,10 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     updatedAt: nextUpdatedAt,
     cycleDate,
     dailyCycleDate: cycleDate,
+    neuralPanelCycleResetVersion:
+      neuralPanelCycle.resetVersion ?? currentDashboard.neuralPanelCycleResetVersion,
+    neuralPanelCycleResetRoundKey:
+      neuralPanelCycle.resetRoundKey ?? currentDashboard.neuralPanelCycleResetRoundKey,
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
   };
 
@@ -5426,6 +5443,39 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   return trackServerEntryModeStats(
     trackServerNeuralSequences(dashboardWithTieScoreboard, currentDashboard),
   );
+}
+
+function resolveNeuralPanelCycle(
+  dashboard: LiveDashboardData,
+  incomingRounds: Round[],
+): { cycleRounds: Round[]; resetVersion?: string; resetRoundKey?: string } {
+  const latestRound =
+    incomingRounds[incomingRounds.length - 1] ??
+    liveValidatorRoundHistory[liveValidatorRoundHistory.length - 1];
+  let resetVersion = dashboard.neuralPanelCycleResetVersion;
+  let resetRoundKey = dashboard.neuralPanelCycleResetRoundKey;
+
+  if (resetVersion !== NEURAL_PANEL_CYCLE_RESET_VERSION) {
+    resetVersion = NEURAL_PANEL_CYCLE_RESET_VERSION;
+    resetRoundKey = latestRound ? roundHistoryKey(latestRound) : "";
+  }
+
+  const cycleRounds = resetRoundKey
+    ? roundsFromNeuralCycleReset(liveValidatorRoundHistory, resetRoundKey)
+    : incomingRounds;
+
+  return {
+    cycleRounds: cycleRounds.length ? cycleRounds : incomingRounds,
+    resetVersion,
+    resetRoundKey,
+  };
+}
+
+function roundsFromNeuralCycleReset(rounds: Round[], resetRoundKey: string) {
+  const sortedRounds = rounds.slice().sort(compareRoundHistory);
+  const resetIndex = sortedRounds.findIndex((round) => roundHistoryKey(round) === resetRoundKey);
+  if (resetIndex < 0) return [];
+  return sortedRounds.slice(resetIndex);
 }
 
 function ensureDashboardDailyCycle(

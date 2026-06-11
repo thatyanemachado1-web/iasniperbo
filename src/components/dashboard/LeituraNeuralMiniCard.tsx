@@ -228,9 +228,11 @@ export function LeituraNeuralMiniCard({
               >
                 {sequenceCopy.label}
               </div>
-              {data.paganteWindow ? (
+              {data.paganteCycleProgress || data.paganteWindow ? (
                 <div className="truncate text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                  Janela: {data.paganteWindow} rodadas
+                  {data.paganteCycleProgress
+                    ? `Ciclo: ${formatCount(numberFrom(data.paganteCycleProgress))}/${formatCount(numberFrom(data.paganteCycleLimit ?? data.paganteWindow))}`
+                    : `Janela: ${data.paganteWindow} rodadas`}
                 </div>
               ) : null}
               {data.paganteStatus && data.paganteStatus !== "VALIDO" ? (

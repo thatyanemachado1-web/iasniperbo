@@ -54,6 +54,8 @@ export interface NeuralReading {
   paganteStatus?: string | null;
   paganteAlert?: string | null;
   paganteWindow?: number | null;
+  paganteCycleProgress?: number | null;
+  paganteCycleLimit?: number | null;
   isSaturated?: boolean | null;
   isRedAlert?: boolean | null;
   postTie?: boolean | null;
