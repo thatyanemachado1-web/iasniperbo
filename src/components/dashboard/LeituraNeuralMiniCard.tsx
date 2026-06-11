@@ -7,7 +7,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { NeuralReading, NeuralScoreboard, SignalSide } from "@/types/dashboard";
+import type { NeuralReading, NeuralScoreboard, Round, SignalSide } from "@/types/dashboard";
 
 type NeuralSide = SignalSide | "TIE";
 
@@ -29,7 +29,10 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
   className?: string;
   greenFlash?: boolean;
   neuralScoreboard?: NeuralScoreboard;
+  rounds?: Round[];
 };
+
+const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
 
 const SCANNING_READING: NeuralReading = {
   mode: "SCANNING",
@@ -49,6 +52,7 @@ export function LeituraNeuralMiniCard({
   className,
   greenFlash = false,
   neuralScoreboard,
+  rounds,
   ...reading
 }: LeituraNeuralMiniCardProps) {
   const data = { ...SCANNING_READING, ...reading };
@@ -70,6 +74,7 @@ export function LeituraNeuralMiniCard({
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
+  const tieMultipliers = tieMultiplierStats(rounds);
   const generalScoreState = neuralScoreState(generalScore);
   const sequenceCopy = neuralSequenceCopy(
     numberFrom(generalScore.currentGreenSequence),
@@ -235,6 +240,7 @@ export function LeituraNeuralMiniCard({
                     : `Janela: ${data.paganteWindow} rodadas`}
                 </div>
               ) : null}
+              <TieMultiplierMiniLine multipliers={tieMultipliers} />
               {data.paganteStatus && data.paganteStatus !== "VALIDO" ? (
                 <div
                   className={cn(
@@ -378,6 +384,34 @@ function NeuralGeneralScorePopover({
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function TieMultiplierMiniLine({
+  multipliers,
+}: {
+  multipliers: Array<{ label: (typeof TIE_MULTIPLIER_LABELS)[number]; value: number }>;
+}) {
+  return (
+    <div
+      className="mt-1 rounded-lg border border-warning/15 bg-warning/5 px-1.5 py-1"
+      title="Empates pegos no historico real carregado hoje"
+    >
+      <div className="mb-0.5 truncate text-[6.5px] font-black uppercase tracking-[0.1em] text-warning/90">
+        Empates do dia
+      </div>
+      <div className="flex flex-wrap items-end gap-x-1.5 gap-y-1">
+        {multipliers.map((item) => (
+          <span key={item.label} className="inline-flex items-end gap-0.5 leading-none">
+            <span className="grid place-items-center">
+              <span className="text-[6px] font-black text-warning">{item.label}</span>
+              <span className="size-2 rounded-full border border-warning/45 bg-warning shadow-[0_0_8px_-3px_var(--warning)]" />
+            </span>
+            <span className="text-[7.5px] font-black text-foreground">{item.value}</span>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -548,6 +582,32 @@ function buildGeneralScore(
     maxGreenSequence,
     maxRedSequence,
   };
+}
+
+function tieMultiplierStats(rounds: Round[] | undefined) {
+  const counts = new Map<(typeof TIE_MULTIPLIER_LABELS)[number], number>(
+    TIE_MULTIPLIER_LABELS.map((label) => [label, 0]),
+  );
+
+  for (const round of rounds ?? []) {
+    if (round.result !== "T") continue;
+    const multiplier = normalizeTieMultiplier(round.tieMultiplier);
+    if (!multiplier) continue;
+    const label = `${multiplier}x` as (typeof TIE_MULTIPLIER_LABELS)[number];
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+
+  return TIE_MULTIPLIER_LABELS.map((label) => ({
+    label,
+    value: counts.get(label) ?? 0,
+  }));
+}
+
+function normalizeTieMultiplier(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const rounded = Math.round(numeric);
+  return [4, 6, 10, 25, 88].includes(rounded) ? rounded : null;
 }
 
 function numberPaymentStage(sg: number | null, g1: number | null, red: number | null) {

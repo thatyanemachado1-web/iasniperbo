@@ -132,6 +132,7 @@ function DashboardPage() {
               signal={d.currentSignal}
               neuralReading={d.neuralReading}
               neuralScoreboard={d.neuralScoreboard}
+              rounds={d.rounds}
               mainSequencePositive={mainResult.sequencePositive}
               mainSequenceNegative={mainResult.sequenceNegative}
               surfSummary={surfSummary}
