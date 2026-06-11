@@ -25,7 +25,7 @@ import type {
 
 const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
 const SAVED_PATTERN_REFRESH_MS = 3_000;
-const SERVER_TAIL_REFRESH_MS = 600;
+const SERVER_TAIL_REFRESH_MS = 1500;
 const MAX_CLIENT_MONITOR_ROUNDS = 200;
 
 type PopupStatus = "entry" | "green" | "red" | "tie";
