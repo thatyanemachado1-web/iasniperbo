@@ -689,7 +689,7 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
   if (request.method === "OPTIONS") return json(null, 204);
   if (request.method !== "GET") return json({ error: "Método não permitido." }, 405);
 
-  if (!isDashboardAuthorized(request, url, env)) {
+  if (!(await isDashboardAuthorized(request, url, env))) {
     return json({ error: "Não autorizado." }, 401);
   }
 
@@ -2102,7 +2102,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "GET" && url.pathname === "/auth/diagnostics") {
-    if (!isDashboardAuthorized(request, url, env)) {
+    if (!(await isDashboardAuthorized(request, url, env))) {
       return json({ error: "Não autorizado." }, 401);
     }
     return json({
@@ -2893,7 +2893,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
   }
 
   if (request.method === "POST" && url.pathname === "/validator/round-history") {
-    if (!isDashboardAuthorized(request, url, env)) {
+    if (!(await isDashboardAuthorized(request, url, env))) {
       return json({ error: "NÃ£o autorizado." }, 401);
     }
 
@@ -2944,7 +2944,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     request.method === "POST" &&
     (url.pathname === "/dashboard" || url.pathname === "/dashboard/signal")
   ) {
-    if (!isDashboardAuthorized(request, url, env)) {
+    if (!(await isDashboardAuthorized(request, url, env))) {
       return json({ error: "Não autorizado." }, 401);
     }
 
@@ -3040,7 +3040,7 @@ async function handleNeuralCalendarRequest(request: Request, url: URL, env: unkn
 }
 
 async function isNeuralCalendarAuthorized(request: Request, url: URL, env: unknown) {
-  if (isDashboardAuthorized(request, url, env)) return true;
+  if (await isDashboardAuthorized(request, url, env)) return true;
 
   const token = getBearerToken(request);
   if (!token) return false;
@@ -4284,7 +4284,7 @@ async function validatorRequestUserId(request: Request, url: URL, env: unknown) 
     }
   }
 
-  if (isDashboardAuthorized(request, url, env) && isLocalDevelopmentRequest(request)) {
+  if ((await isDashboardAuthorized(request, url, env)) && isLocalDevelopmentRequest(request)) {
     return normalizeValidatorUserId(request.headers.get("x-validator-user-id") || "local-user");
   }
 
@@ -6625,11 +6625,16 @@ function clampPercent(value: unknown) {
   return Math.max(0, Math.min(100, Math.round(number)));
 }
 
-function isDashboardAuthorized(request: Request, _url: URL, env: unknown) {
+async function isDashboardAuthorized(request: Request, _url: URL, env: unknown) {
   const token = readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", "");
   const headerToken = getBearerToken(request);
-  if (token) return headerToken === token;
-  return false;
+  if (token && headerToken === token) return true;
+  if (!headerToken) return false;
+
+  const session = await verifySessionToken(env, headerToken);
+  if (!session) return false;
+  if (session.scope !== "owner" && session.scope !== "admin_approver") return false;
+  return sessionMatchesRequestBinding(env, request, session);
 }
 
 function isLocalDevelopmentRequest(request: Request) {
@@ -6638,7 +6643,7 @@ function isLocalDevelopmentRequest(request: Request) {
 }
 
 async function isDashboardReadAuthorized(request: Request, url: URL, env: unknown) {
-  if (isDashboardAuthorized(request, url, env)) return true;
+  if (await isDashboardAuthorized(request, url, env)) return true;
 
   const token = getBearerToken(request);
   if (!token) return false;
