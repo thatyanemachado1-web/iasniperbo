@@ -22,6 +22,7 @@ export function SurfAnalyzerDashboardCard({
         toggles={toggles}
         onModuleTogglesChange={onModuleTogglesChange}
         compact
+        showRoadPanels={false}
       />
     </PremiumFeature>
   );

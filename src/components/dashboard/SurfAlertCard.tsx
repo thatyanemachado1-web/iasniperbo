@@ -16,12 +16,14 @@ export function SurfAlertCard({
   onModuleTogglesChange,
   locked,
   compact = false,
+  showRoadPanels = true,
 }: {
   alert: SurfAlert;
   toggles?: ModuleToggles;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
   locked?: boolean;
   compact?: boolean;
+  showRoadPanels?: boolean;
 }) {
   const breakRisk = clampPercent(alert.surf_break_risk ?? alert.surf_risk);
   const confidence = clampPercent(alert.surf_confidence);
@@ -176,17 +178,19 @@ export function SurfAlertCard({
           </div>
         </div>
 
-        <div
-          className={cn(
-            "mt-3 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2",
-            compact && "mt-2",
-          )}
-        >
-          <Panel label="Big Road" value={alert.panels.big_road} />
-          <Panel label="Big Eye Boy" value={alert.panels.big_eye_boy} />
-          <Panel label="Small Road" value={alert.panels.small_road} />
-          <Panel label="Cockroach Pig" value={alert.panels.cockroach_pig} />
-        </div>
+        {showRoadPanels && (
+          <div
+            className={cn(
+              "mt-3 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2",
+              compact && "mt-2",
+            )}
+          >
+            <Panel label="Big Road" value={alert.panels.big_road} />
+            <Panel label="Big Eye Boy" value={alert.panels.big_eye_boy} />
+            <Panel label="Small Road" value={alert.panels.small_road} />
+            <Panel label="Cockroach Pig" value={alert.panels.cockroach_pig} />
+          </div>
+        )}
 
         <div className={cn("mt-3 text-[11px] text-muted-foreground", compact && "mt-2")}>
           <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">Como usar: </span>
