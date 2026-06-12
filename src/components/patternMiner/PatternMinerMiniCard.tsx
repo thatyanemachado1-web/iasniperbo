@@ -239,7 +239,7 @@ function PatternScoreLine({
           SQ {currentSequenceLabel(data)}
         </span>
       </div>
-      <div className="grid grid-cols-6 gap-1 text-center">
+      <div className="grid grid-cols-3 gap-1 text-center">
         <TinyStat label="SG" value={formatScoreValue(data?.sg ?? null)} tone="green" />
         <TinyStat label="G1" value={formatScoreValue(data?.g1 ?? null)} tone="cyan" />
         <TinyStat label="RD" value={formatScoreValue(data?.red ?? null)} tone="red" />
@@ -265,9 +265,9 @@ function TinyStat({
   tone: "green" | "cyan" | "red" | "amber" | "neutral";
 }) {
   return (
-    <div className={cn("min-w-0 rounded-md border px-1 py-0.5", scoreToneClass(tone))}>
-      <div className="truncate text-[7px] font-bold uppercase opacity-75">{label}</div>
-      <div className="truncate text-[10px] font-black leading-tight">{value}</div>
+    <div className={cn("min-w-0 rounded-md border px-1.5 py-1", scoreToneClass(tone))}>
+      <div className="text-[7px] font-bold uppercase leading-none opacity-75">{label}</div>
+      <div className="mt-0.5 text-[11px] font-black leading-none">{value}</div>
     </div>
   );
 }
