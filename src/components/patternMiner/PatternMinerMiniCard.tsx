@@ -65,8 +65,8 @@ export function PatternMinerMiniCard({
           />
         </div>
 
-        <div className="rounded-xl border border-neon-cyan/12 bg-background/20 px-2.5 py-2">
-          <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="rounded-xl border border-neon-cyan/12 bg-background/20 px-2 py-1.5">
+          <div className="mb-1 flex items-center justify-between gap-2">
             <span className="text-[9px] font-black uppercase tracking-[0.14em] text-neon-cyan">
               Em formação
             </span>
@@ -75,7 +75,7 @@ export function PatternMinerMiniCard({
             </span>
           </div>
           {formingAlerts.length ? (
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {formingAlerts.map((alert) => (
                 <FormationMiniRow key={alert.id} alert={alert} />
               ))}
@@ -132,39 +132,93 @@ function FormationMiniRow({ alert }: { alert: PatternMinerAlert }) {
   const progress = Math.round(alert.progress * 100);
 
   return (
-    <div className="rounded-lg border border-white/5 bg-secondary/18 px-2 py-1.5">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-1.5">
+    <div className="rounded-lg border border-white/5 bg-secondary/16 px-2 py-1">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1">
           <Flame className="size-3 shrink-0 text-warning" />
-          <span className="truncate text-[10px] font-black uppercase text-foreground">
-            Padrão em formação
+          <span className="truncate text-[9px] font-black uppercase text-foreground">
+            Padrão em form.
           </span>
         </div>
-        <span className="rounded-full border border-success/25 bg-success/10 px-1.5 py-0.5 text-[8px] font-black text-success">
+        <span className="rounded-full border border-success/25 bg-success/10 px-1.5 py-0.5 text-[7px] font-black text-success">
           {progress}%
         </span>
       </div>
-      <div className="min-w-0 scale-[0.92] origin-left">
-        <PatternSequence sequence={strategy.sequence} compact />
+      <div className="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden">
+        <TinyPatternSequence sequence={strategy.sequence} maxItems={5} />
+        <span className="shrink-0 text-[8px] text-muted-foreground">=</span>
+        {strategy.expectedResult ? (
+          <span className="shrink-0 text-[9px] font-black">
+            {formatPulledSide(strategy.expectedResult)}
+          </span>
+        ) : (
+          <span className="shrink-0 text-[9px] text-warning">sem amostra</span>
+        )}
       </div>
       {alert.missingTokens.length > 0 && (
-        <div className="mt-1 flex min-w-0 items-center gap-1 text-[9px] text-muted-foreground">
+        <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[8px] text-muted-foreground">
           <span>Falta:</span>
-          <div className="scale-[0.82] origin-left">
-            <PatternSequence sequence={alert.missingTokens} compact />
-          </div>
+          <TinyPatternSequence sequence={alert.missingTokens} maxItems={2} tiny />
         </div>
       )}
-      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[9px]">
-        <span className="text-muted-foreground">Puxou</span>
-        {strategy.expectedResult ? (
-          <span className="font-black">{formatPulledSide(strategy.expectedResult)}</span>
-        ) : (
-          <span className="text-warning">sem amostra</span>
-        )}
-        <span className="text-neon-cyan">{formatPercent(strategy.assertiveness)}</span>
+      <div className="mt-0.5 flex items-center justify-between gap-2 text-[8px]">
+        <span className="truncate text-muted-foreground">
+          SG {strategy.sg} · G1 {strategy.g1} · RD {strategy.red}
+        </span>
+        <span className="shrink-0 font-black text-neon-cyan">
+          {compactPercent(strategy.assertiveness)}
+        </span>
       </div>
     </div>
+  );
+}
+
+function TinyPatternSequence({
+  sequence,
+  maxItems,
+  tiny = false,
+}: {
+  sequence: string[];
+  maxItems: number;
+  tiny?: boolean;
+}) {
+  const visible = sequence.slice(0, maxItems);
+  const hidden = Math.max(0, sequence.length - visible.length);
+
+  return (
+    <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+      {visible.map((token, index) => (
+        <div key={`${token}-${index}`} className="flex shrink-0 items-center gap-1">
+          <TinyToken token={token} tiny={tiny} />
+          {index < visible.length - 1 && (
+            <span className="text-[9px] text-muted-foreground">→</span>
+          )}
+        </div>
+      ))}
+      {hidden > 0 && (
+        <span className="shrink-0 text-[8px] font-bold text-muted-foreground">+{hidden}</span>
+      )}
+    </div>
+  );
+}
+
+function TinyToken({ token, tiny = false }: { token: string; tiny?: boolean }) {
+  const side = token[0];
+  const value = token.slice(1);
+  const label = side === "T" && value ? `${value}x` : value || side;
+
+  return (
+    <span
+      className={cn(
+        "grid shrink-0 place-items-center rounded-full border font-black leading-none text-white",
+        tiny ? "size-4 text-[7px]" : "size-5 text-[8px]",
+        side === "B" && "border-banker/60 bg-banker",
+        side === "P" && "border-player/60 bg-player",
+        side === "T" && "border-warning/70 bg-warning text-background",
+      )}
+    >
+      {label}
+    </span>
   );
 }
 
