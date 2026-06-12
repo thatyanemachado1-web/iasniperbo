@@ -47,18 +47,29 @@ export function TieAlertCard({
     <GlassCard
       className={cn(
         "digital-risk-card border-warning/18 p-3 sm:p-3",
-        compact && "h-full p-2.5 sm:p-2.5",
+        compact && "h-full p-2 sm:p-2",
         !enabled && "border-muted-foreground/20",
       )}
     >
       <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warning/22 to-transparent" />
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
+      <div
+        className={cn("mb-2 flex items-center justify-between gap-3", compact && "mb-1.5 gap-1")}
+      >
+        <div
+          className={cn(
+            "text-[10px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80",
+            compact && "max-w-[94px] text-[9px] leading-tight tracking-[0.16em]",
+          )}
+        >
           Radar de Empate
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <AppBadge tone={status.badgeTone} pulse={enabled && alert.status === "active"}>
+        <div className={cn("flex shrink-0 items-center gap-1.5", compact && "gap-1")}>
+          <AppBadge
+            tone={status.badgeTone}
+            pulse={enabled && alert.status === "active"}
+            className={compact ? "px-2 text-[9px]" : undefined}
+          >
             {status.badge}
           </AppBadge>
           <ModuleToggleStrip
@@ -73,47 +84,105 @@ export function TieAlertCard({
         <div
           className={cn(
             "grid gap-2 sm:grid-cols-[minmax(160px,0.45fr)_minmax(0,1fr)] sm:items-stretch",
-            compact && "sm:grid-cols-1",
+            compact && "gap-1.5 sm:grid-cols-1",
           )}
         >
-          <div className="rounded-xl border border-warning/12 bg-background/24 px-3 py-2">
-            <div className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+          <div
+            className={cn(
+              "rounded-xl border border-warning/12 bg-background/24 px-3 py-2",
+              compact && "px-2.5 py-1.5",
+            )}
+          >
+            <div
+              className={cn(
+                "text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground",
+                compact && "text-[9px]",
+              )}
+            >
               Agora
             </div>
-            <div className={cn("mt-1 text-xl font-extrabold", status.className)}>
+            <div
+              className={cn("mt-1 text-xl font-extrabold", compact && "text-lg", status.className)}
+            >
               {status.label}
             </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">{status.description}</div>
+            <div
+              className={cn(
+                "mt-1 text-[11px] text-muted-foreground",
+                compact && "text-[10px] leading-snug",
+              )}
+            >
+              {status.description}
+            </div>
           </div>
 
-          <div className="rounded-xl border border-warning/12 bg-background/24 px-3 py-2">
-            <div className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+          <div
+            className={cn(
+              "rounded-xl border border-warning/12 bg-background/24 px-3 py-2",
+              compact && "px-2.5 py-1.5",
+            )}
+          >
+            <div
+              className={cn(
+                "text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground",
+                compact && "text-[9px]",
+              )}
+            >
               Multiplicadores pegos
             </div>
-            <div className="mt-2 grid grid-cols-5 gap-1.5">
+            <div className={cn("mt-2 grid grid-cols-5 gap-1.5", compact && "mt-1.5 gap-1")}>
               {multipliers.map((item) => (
                 <div
                   key={item.label}
-                  className="rounded-lg border border-warning/18 bg-warning/10 px-1.5 py-1 text-center"
+                  className={cn(
+                    "rounded-lg border border-warning/18 bg-warning/10 px-1.5 py-1 text-center",
+                    compact && "rounded-md px-1 py-0.5",
+                  )}
                 >
-                  <div className="text-[10px] font-black text-warning">{item.label}</div>
-                  <div className="text-sm font-black text-foreground">{item.value}</div>
+                  <div
+                    className={cn("text-[10px] font-black text-warning", compact && "text-[9px]")}
+                  >
+                    {item.label}
+                  </div>
+                  <div className={cn("text-sm font-black text-foreground", compact && "text-xs")}>
+                    {item.value}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         </div>
 
-        <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
-          <div className="rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5">
+        <div
+          className={cn(
+            "mt-2 grid grid-cols-3 gap-2 text-[11px]",
+            compact && "mt-1.5 gap-1 text-[10px]",
+          )}
+        >
+          <div
+            className={cn(
+              "rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5",
+              compact && "px-1.5 py-1",
+            )}
+          >
             <div className="text-muted-foreground">Forca</div>
             <div className="font-semibold text-neon-purple">{alert.confidence}%</div>
           </div>
-          <div className="rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5">
+          <div
+            className={cn(
+              "rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5",
+              compact && "px-1.5 py-1",
+            )}
+          >
             <div className="text-muted-foreground">Validade</div>
             <div className="font-semibold">{alert.validityRounds} rodadas</div>
           </div>
-          <div className="rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5">
+          <div
+            className={cn(
+              "rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5",
+              compact && "px-1.5 py-1",
+            )}
+          >
             <div className="text-muted-foreground">Status</div>
             <div
               className={`font-semibold ${alert.status === "expired" ? "text-muted-foreground" : "text-warning"}`}
@@ -124,21 +193,34 @@ export function TieAlertCard({
         </div>
 
         <div
-          className={cn("mt-2 grid gap-2 text-[11px] sm:grid-cols-2", compact && "sm:grid-cols-1")}
+          className={cn(
+            "mt-2 grid gap-2 text-[11px] sm:grid-cols-2",
+            compact && "mt-1.5 gap-1.5 text-[10px] sm:grid-cols-1",
+          )}
         >
-          <div className="rounded-xl border border-warning/12 bg-background/24 px-3 py-2">
+          <div
+            className={cn(
+              "rounded-xl border border-warning/12 bg-background/24 px-3 py-2",
+              compact && "px-2.5 py-1.5",
+            )}
+          >
             <div className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">
               Numero puxando Tie
             </div>
-            <div className="mt-1 font-black text-warning">
+            <div className={cn("mt-1 font-black text-warning", compact && "mt-0.5")}>
               {tieNumber ? `🟡 ${tieNumber.score} com ${tieNumber.count} Tie` : "Coletando"}
             </div>
           </div>
-          <div className="rounded-xl border border-warning/12 bg-background/24 px-3 py-2">
+          <div
+            className={cn(
+              "rounded-xl border border-warning/12 bg-background/24 px-3 py-2",
+              compact && "px-2.5 py-1.5",
+            )}
+          >
             <div className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">
               Empate especifico
             </div>
-            <div className="mt-1 font-black text-warning">
+            <div className={cn("mt-1 font-black text-warning", compact && "mt-0.5")}>
               {bestMultiplier
                 ? `🟡 ${bestMultiplier.label} (${bestMultiplier.value})`
                 : "Coletando"}
@@ -146,22 +228,41 @@ export function TieAlertCard({
           </div>
         </div>
 
-        <div className="mt-2 rounded-xl border border-warning/12 bg-background/24 px-3 py-2 text-[11px] leading-relaxed text-foreground/82">
+        <div
+          className={cn(
+            "mt-2 rounded-xl border border-warning/12 bg-background/24 px-3 py-2 text-[11px] leading-relaxed text-foreground/82",
+            compact && "mt-1.5 px-2.5 py-1.5 text-[10px] leading-snug",
+          )}
+        >
           {buildTieCopy(alert)}
         </div>
 
         {tiePattern ? (
-          <div className="mt-2 rounded-xl border border-warning/18 bg-warning/10 px-3 py-2 text-[11px]">
-            <div className="text-[10px] font-black uppercase tracking-[0.12em] text-warning">
+          <div
+            className={cn(
+              "mt-2 rounded-xl border border-warning/18 bg-warning/10 px-3 py-2 text-[11px]",
+              compact && "mt-1.5 px-2.5 py-1.5 text-[10px]",
+            )}
+          >
+            <div
+              className={cn(
+                "text-[10px] font-black uppercase tracking-[0.12em] text-warning",
+                compact && "text-[9px]",
+              )}
+            >
               Padrao IA para Tie
             </div>
-            <div className="mt-1">
+            <div className={cn("mt-1", compact && "origin-left scale-[0.9]")}>
               <PatternSequence sequence={tiePattern.sequence} compact />
             </div>
-            <div className="mt-1 grid grid-cols-3 gap-1.5">
-              <MiniStat label="Puxou Tie" value={tiePattern.tie} />
-              <MiniStat label="Amostras" value={tiePattern.totalValidated} />
-              <MiniStat label="Acerto" value={formatPercent(tiePattern.assertiveness)} />
+            <div className={cn("mt-1 grid grid-cols-3 gap-1.5", compact && "gap-1")}>
+              <MiniStat compact={compact} label="Puxou Tie" value={tiePattern.tie} />
+              <MiniStat compact={compact} label="Amostras" value={tiePattern.totalValidated} />
+              <MiniStat
+                compact={compact}
+                label="Acerto"
+                value={formatPercent(tiePattern.assertiveness)}
+              />
             </div>
           </div>
         ) : null}
@@ -322,13 +423,26 @@ function tiePatternScore(strategy: PatternMinerStrategy) {
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string | number }) {
+function MiniStat({
+  label,
+  value,
+  compact = false,
+}: {
+  label: string;
+  value: string | number;
+  compact?: boolean;
+}) {
   return (
-    <div className="rounded-lg border border-white/5 bg-background/30 px-2 py-1">
+    <div
+      className={cn(
+        "rounded-lg border border-white/5 bg-background/30 px-2 py-1",
+        compact && "px-1.5 py-1",
+      )}
+    >
       <div className="text-[8px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </div>
-      <div className="font-black text-foreground">{value}</div>
+      <div className={cn("font-black text-foreground", compact && "text-[10px]")}>{value}</div>
     </div>
   );
 }
