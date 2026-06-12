@@ -4,7 +4,15 @@ import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { LeituraNeuralMiniCard } from "@/components/dashboard/LeituraNeuralMiniCard";
 import { cn } from "@/lib/utils";
-import type { MainSignal, NeuralReading, NeuralScoreboard, Round, SignalSide, SurfEntrySummary, TieAlert } from "@/types/dashboard";
+import type {
+  MainSignal,
+  NeuralReading,
+  NeuralScoreboard,
+  Round,
+  SignalSide,
+  SurfEntrySummary,
+  TieAlert,
+} from "@/types/dashboard";
 import { CheckCircle2, Clock3, Radio, ShieldCheck, Target } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -21,6 +29,7 @@ export function SignalCard({
   locked,
   priority = false,
   enableResultFlash = false,
+  showNeuralReading = true,
 }: {
   signal: MainSignal;
   neuralReading?: NeuralReading;
@@ -34,6 +43,7 @@ export function SignalCard({
   locked?: boolean;
   priority?: boolean;
   enableResultFlash?: boolean;
+  showNeuralReading?: boolean;
 }) {
   const [mainGreenFlash, setMainGreenFlash] = useState(false);
   const mainResultSeen = useRef(false);
@@ -42,7 +52,10 @@ export function SignalCard({
   const isPlayer = signal.side === "PLAYER";
   const tieAlertIsActive = tieAlert?.status === "active";
   const isResultStatus =
-    signal.status === "green" || signal.status === "green_g1" || signal.status === "red" || signal.status === "tie";
+    signal.status === "green" ||
+    signal.status === "green_g1" ||
+    signal.status === "red" ||
+    signal.status === "tie";
   const isTieWatch =
     !isResultStatus &&
     (signal.status === "tie_watch" || (signal.status === "waiting" && tieAlertIsActive));
@@ -84,7 +97,11 @@ export function SignalCard({
   const lastResult = signal.lastResult ? lastSignalResult(signal.lastResult) : null;
   const lastResultKey = signal.lastResult ? signalResultKey(signal.lastResult) : null;
   const shouldShowLastResult = Boolean(lastResult);
-  const mainSequence = buildMotorSequence(mainSequencePositive, mainSequenceNegative, "Motor principal");
+  const mainSequence = buildMotorSequence(
+    mainSequencePositive,
+    mainSequenceNegative,
+    "Motor principal",
+  );
   const StatusIcon = status.Icon;
   const tieRisk = !isResultStatus && tieAlert ? tieRiskBadge(tieAlert) : null;
   const focus = buildOperationalFocus(signal, neuralReading, tieAlert, surfSummary);
@@ -179,14 +196,16 @@ export function SignalCard({
           </div>
           <OperationalFocus focus={focus} fallback={operationalMessage} />
         </div>
-        <div className="justify-self-stretch lg:justify-self-end">
-          <LeituraNeuralMiniCard
-            {...(neuralReading ?? { mode: "SCANNING" })}
-            neuralScoreboard={neuralScoreboard}
-            rounds={rounds}
-            greenFlash={false}
-          />
-        </div>
+        {showNeuralReading && (
+          <div className="justify-self-stretch lg:justify-self-end">
+            <LeituraNeuralMiniCard
+              {...(neuralReading ?? { mode: "SCANNING" })}
+              neuralScoreboard={neuralScoreboard}
+              rounds={rounds}
+              greenFlash={false}
+            />
+          </div>
+        )}
       </div>
       <div className="relative mt-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
         <div className="rounded-xl border border-white/5 bg-secondary/32 p-2.5">
@@ -241,7 +260,11 @@ export function SignalCard({
   );
 }
 
-function buildMotorSequence(positive: number | null | undefined, negative: number | null | undefined, label: string) {
+function buildMotorSequence(
+  positive: number | null | undefined,
+  negative: number | null | undefined,
+  label: string,
+) {
   const greens = safeSequenceNumber(positive);
   const reds = safeSequenceNumber(negative);
 
@@ -432,7 +455,8 @@ function neuralFocus(reading?: NeuralReading): {
   if (!side) return { side: null, watch: true, reason: "Leitura Neural ainda sem lado claro." };
 
   const watch = reading.mode === "OBSERVING" || Boolean(reading.isRedAlert || reading.isSaturated);
-  const numberLabel = reading.origem === "TIE" ? `${reading.numero}x${reading.numero}` : String(reading.numero);
+  const numberLabel =
+    reading.origem === "TIE" ? `${reading.numero}x${reading.numero}` : String(reading.numero);
   return {
     side,
     watch,

@@ -5,14 +5,12 @@ import { ChevronRight, Clock, Crown } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { SignalCard } from "@/components/dashboard/SignalCard";
-import { TieAlertCard } from "@/components/dashboard/TieAlertCard";
-import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
 import { ModuleMiniScoreboard } from "@/components/dashboard/ModuleMiniScoreboard";
 import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
 import { AIReadingCard } from "@/components/dashboard/AIReadingCard";
 import { RoadmapDots } from "@/components/dashboard/RoadmapDots";
 import { PressureChart } from "@/components/dashboard/PressureChart";
-import { PatternMinerMiniCard } from "@/components/patternMiner/PatternMinerMiniCard";
+import { DashboardMainCardsGrid } from "@/components/dashboard/DashboardMainCardsGrid";
 import { RoundHistoryAuditCard } from "@/components/dashboard/RoundHistoryAuditCard";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
@@ -50,7 +48,10 @@ function DashboardPage() {
     historyLimit: 15000,
     enabled: mode === "live" && !d.mockMode,
   });
-  const { history: roundHistory, resetHistory } = useRoundHistory(d, mode === "live" && !d.mockMode);
+  const { history: roundHistory, resetHistory } = useRoundHistory(
+    d,
+    mode === "live" && !d.mockMode,
+  );
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const tieAlertEnabled = d.moduleToggles?.tieAlert !== false;
   const surfAnalyzerEnabled = d.moduleToggles?.surfAnalyzer !== false;
@@ -107,9 +108,7 @@ function DashboardPage() {
           <AppBadge tone="blue" pulse>
             Engine operacional
           </AppBadge>
-          <AppBadge tone={mode === "live" ? "green" : "amber"}>
-            {dashboardSourceLabel}
-          </AppBadge>
+          <AppBadge tone={mode === "live" ? "green" : "amber"}>{dashboardSourceLabel}</AppBadge>
           {fullAccess ? (
             <AppBadge tone="green">
               {userSession.plan === "vip" ? "Conta VIP" : "Conta Premium"}
@@ -124,6 +123,14 @@ function DashboardPage() {
           )}
         </div>
       </div>
+
+      <DashboardMainCardsGrid
+        data={d}
+        surfAlert={surfAlert}
+        patternMinerSnapshot={patternMiner.snapshot}
+        patternMinerIsUsingRealData={patternMiner.isUsingRealData}
+        onModuleTogglesChange={setModuleToggles}
+      />
 
       <div className="dashboard-command-grid grid grid-cols-1 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)] gap-4 xl:items-start">
         <div className="contents xl:block xl:space-y-4 xl:rounded-2xl xl:border xl:border-neon-cyan/10 xl:bg-background/10 xl:p-2">
@@ -144,36 +151,9 @@ function DashboardPage() {
               operationalMessage={buildSignalCopy(d)}
               enableResultFlash={mode === "live"}
               priority
+              showNeuralReading={false}
             />
           </PremiumFeature>
-
-          <PremiumFeature
-            title="Tie Alert VIP"
-            description="Alerta de pressão e risco de empate fica completo apenas no acesso liberado."
-            className="order-2"
-          >
-            <TieAlertCard
-              alert={d.currentTieAlert}
-              rounds={d.rounds}
-              patternMinerSnapshot={patternMiner.snapshot}
-              toggles={d.moduleToggles}
-              onModuleTogglesChange={setModuleToggles}
-            />
-          </PremiumFeature>
-
-          {surfAlert && (
-            <PremiumFeature
-              title="Surf Analyzer VIP"
-              description="Leitura completa de surf fica bloqueada no demo."
-              className="order-7 space-y-2"
-            >
-              <SurfAlertCard
-                alert={surfAlert}
-                toggles={d.moduleToggles}
-                onModuleTogglesChange={setModuleToggles}
-              />
-            </PremiumFeature>
-          )}
         </div>
 
         <div className="contents xl:block xl:space-y-4 xl:rounded-2xl xl:border xl:border-neon-purple/10 xl:bg-background/10 xl:p-2">
@@ -192,13 +172,6 @@ function DashboardPage() {
           >
             <AIReadingCard data={d} mode={mode} />
           </PremiumFeature>
-
-          <div className="order-3">
-            <PatternMinerMiniCard
-              snapshot={patternMiner.snapshot}
-              isUsingRealData={patternMiner.isUsingRealData}
-            />
-          </div>
 
           <PremiumFeature
             title="Placares VIP"
@@ -230,8 +203,16 @@ function DashboardPage() {
                 { label: "SG", value: neuralResult.greenSemGale, variant: "green" },
                 { label: "G1", value: neuralResult.greenG1, variant: "cyan" },
                 { label: "RED", value: neuralResult.reds, variant: "red" },
-                { label: "SQ max green", value: neuralMaxSequenceLabel(neuralResult.maxSequencePositive), variant: "green" },
-                { label: "SQ max red", value: neuralMaxSequenceLabel(neuralResult.maxSequenceNegative), variant: "red" },
+                {
+                  label: "SQ max green",
+                  value: neuralMaxSequenceLabel(neuralResult.maxSequencePositive),
+                  variant: "green",
+                },
+                {
+                  label: "SQ max red",
+                  value: neuralMaxSequenceLabel(neuralResult.maxSequenceNegative),
+                  variant: "red",
+                },
                 { label: "EMP", value: tableTieLabel, variant: "purple" },
                 { label: "Total", value: neuralResult.total, variant: "neutral" },
               ]}

@@ -23,6 +23,7 @@ export function TieAlertCard({
   toggles,
   onModuleTogglesChange,
   locked,
+  compact = false,
 }: {
   alert: TieAlert;
   rounds?: Round[];
@@ -30,18 +31,23 @@ export function TieAlertCard({
   toggles?: ModuleToggles;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
   locked?: boolean;
+  compact?: boolean;
 }) {
   const enabled = toggles?.tieAlert !== false;
   const status = tieRadarStatus(alert);
   const multipliers = tieMultiplierStats(rounds);
   const tieNumber = bestTieNumber(rounds);
-  const bestMultiplier = multipliers.reduce((best, item) => (item.value > best.value ? item : best), multipliers[0]);
+  const bestMultiplier = multipliers.reduce(
+    (best, item) => (item.value > best.value ? item : best),
+    multipliers[0],
+  );
   const tiePattern = bestTiePattern(patternMinerSnapshot);
 
   return (
     <GlassCard
       className={cn(
         "digital-risk-card border-warning/18 p-3 sm:p-3",
+        compact && "h-full p-2.5 sm:p-2.5",
         !enabled && "border-muted-foreground/20",
       )}
     >
@@ -64,7 +70,12 @@ export function TieAlertCard({
       </div>
 
       <div className={cn("transition duration-200", !enabled && "opacity-45 saturate-50")}>
-        <div className="grid gap-2 sm:grid-cols-[minmax(160px,0.45fr)_minmax(0,1fr)] sm:items-stretch">
+        <div
+          className={cn(
+            "grid gap-2 sm:grid-cols-[minmax(160px,0.45fr)_minmax(0,1fr)] sm:items-stretch",
+            compact && "sm:grid-cols-1",
+          )}
+        >
           <div className="rounded-xl border border-warning/12 bg-background/24 px-3 py-2">
             <div className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">
               Agora
@@ -72,9 +83,7 @@ export function TieAlertCard({
             <div className={cn("mt-1 text-xl font-extrabold", status.className)}>
               {status.label}
             </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {status.description}
-            </div>
+            <div className="mt-1 text-[11px] text-muted-foreground">{status.description}</div>
           </div>
 
           <div className="rounded-xl border border-warning/12 bg-background/24 px-3 py-2">
@@ -106,13 +115,17 @@ export function TieAlertCard({
           </div>
           <div className="rounded-xl border border-white/5 bg-secondary/20 px-2 py-1.5">
             <div className="text-muted-foreground">Status</div>
-            <div className={`font-semibold ${alert.status === "expired" ? "text-muted-foreground" : "text-warning"}`}>
+            <div
+              className={`font-semibold ${alert.status === "expired" ? "text-muted-foreground" : "text-warning"}`}
+            >
               {tieStatusLabel(alert.status)}
             </div>
           </div>
         </div>
 
-        <div className="mt-2 grid gap-2 text-[11px] sm:grid-cols-2">
+        <div
+          className={cn("mt-2 grid gap-2 text-[11px] sm:grid-cols-2", compact && "sm:grid-cols-1")}
+        >
           <div className="rounded-xl border border-warning/12 bg-background/24 px-3 py-2">
             <div className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">
               Numero puxando Tie
@@ -126,7 +139,9 @@ export function TieAlertCard({
               Empate especifico
             </div>
             <div className="mt-1 font-black text-warning">
-              {bestMultiplier ? `🟡 ${bestMultiplier.label} (${bestMultiplier.value})` : "Coletando"}
+              {bestMultiplier
+                ? `🟡 ${bestMultiplier.label} (${bestMultiplier.value})`
+                : "Coletando"}
             </div>
           </div>
         </div>
@@ -298,7 +313,13 @@ function bestTiePattern(snapshot?: PatternMinerSnapshot) {
 function tiePatternScore(strategy: PatternMinerStrategy) {
   const tieWeight = strategy.expectedResult === "T" ? 50 : 0;
   const hotWeight = strategy.status === "VERY_HOT" ? 30 : strategy.status === "HOT" ? 20 : 0;
-  return tieWeight + hotWeight + strategy.tie * 6 + (strategy.assertiveness ?? 0) + strategy.totalValidated / 10;
+  return (
+    tieWeight +
+    hotWeight +
+    strategy.tie * 6 +
+    (strategy.assertiveness ?? 0) +
+    strategy.totalValidated / 10
+  );
 }
 
 function MiniStat({ label, value }: { label: string; value: string | number }) {
