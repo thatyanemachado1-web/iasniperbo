@@ -132,12 +132,11 @@ function DashboardPage() {
         onModuleTogglesChange={setModuleToggles}
       />
 
-      <div className="dashboard-command-grid grid grid-cols-1 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)] gap-4 xl:items-start">
-        <div className="contents xl:block xl:space-y-4 xl:rounded-2xl xl:border xl:border-neon-cyan/10 xl:bg-background/10 xl:p-2">
+      <div className="dashboard-command-grid grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)] xl:items-start">
+        <div className="space-y-4 xl:rounded-2xl xl:border xl:border-neon-cyan/10 xl:bg-background/10 xl:p-2">
           <PremiumFeature
             title="Entrada principal VIP"
             description="A entrada confirmada completa só aparece para clientes liberados."
-            className="order-1"
           >
             <SignalCard
               signal={d.currentSignal}
@@ -154,13 +153,73 @@ function DashboardPage() {
               showNeuralReading={false}
             />
           </PremiumFeature>
+
+          <RoundHistoryAuditCard history={roundHistory} onReset={resetHistory} />
+
+          <PremiumFeature
+            title="Análise estatística VIP"
+            description="O demo mostra a estrutura, mas bloqueia a leitura completa."
+          >
+            <GlassCard>
+              <SectionTitle
+                title="Análise estatística da mesa"
+                subtitle="Pressão estatística calculada pelas últimas rodadas."
+                right={
+                  <AppBadge tone={dataModeTone} pulse={mode !== "mock"}>
+                    {dataModeLabel}
+                  </AppBadge>
+                }
+              />
+              <PressureChart data={d.pressureSeries} />
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                <span className="inline-flex items-center gap-1">
+                  <span className="size-2 rounded-full bg-banker" /> Banker Pressure
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="size-2 rounded-full bg-player" /> Player Pressure
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="size-2 rounded-full bg-tie" /> Tie Pressure
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] sm:grid-cols-6">
+                <Metric
+                  label="Pressão B"
+                  value={`${stats.banker.toFixed(0)}%`}
+                  tone="text-banker"
+                />
+                <Metric
+                  label="Pressão P"
+                  value={`${stats.player.toFixed(0)}%`}
+                  tone="text-player"
+                />
+                <Metric label="Pressão T" value={`${stats.tie.toFixed(0)}%`} tone="text-tie" />
+                <Metric label="Sequência" value={`${sequence.side ?? "-"} x${sequence.count}`} />
+                <Metric label="Alternância" value={`${stats.alt.toFixed(0)}%`} />
+                <Metric label="Padrão" value="Observação" />
+              </div>
+            </GlassCard>
+          </PremiumFeature>
+
+          <GlassCard>
+            <SectionTitle
+              title="Bolinhas Bac Bo"
+              right={<AppBadge tone="blue">Últimas 30 rodadas</AppBadge>}
+            />
+            <RoadmapDots rounds={d.rounds} compact showScore />
+            <Link
+              to="/app"
+              className="mt-3 inline-flex items-center gap-1 text-xs text-neon-cyan hover:text-neon-blue"
+            >
+              Ver histórico completo <ChevronRight className="size-3" />
+            </Link>
+          </GlassCard>
         </div>
 
-        <div className="contents xl:block xl:space-y-4 xl:rounded-2xl xl:border xl:border-neon-purple/10 xl:bg-background/10 xl:p-2">
+        <div className="space-y-4 xl:rounded-2xl xl:border xl:border-neon-purple/10 xl:bg-background/10 xl:p-2">
           <PremiumFeature
             title="Decisão da engine VIP"
             description="A decisão técnica fica completa apenas no acesso liberado."
-            className="order-3"
           >
             <EngineDecisionCard decision={d.engineDecision} data={d} />
           </PremiumFeature>
@@ -168,7 +227,6 @@ function DashboardPage() {
           <PremiumFeature
             title="Leitura IA das entradas"
             description="Análise automática das entradas liberada no acesso Premium."
-            className="order-3"
           >
             <AIReadingCard data={d} mode={mode} />
           </PremiumFeature>
@@ -176,7 +234,7 @@ function DashboardPage() {
           <PremiumFeature
             title="Placares VIP"
             description="Os resultados completos ficam liberados após aprovação do ADM."
-            className="digital-score-rail order-4 space-y-3"
+            className="digital-score-rail space-y-3"
           >
             <ModuleMiniScoreboard
               moduleType="MAIN"
@@ -255,75 +313,8 @@ function DashboardPage() {
               />
             )}
           </PremiumFeature>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-4">
-          <RoundHistoryAuditCard history={roundHistory} onReset={resetHistory} />
-
-          <PremiumFeature
-            title="Análise estatística VIP"
-            description="O demo mostra a estrutura, mas bloqueia a leitura completa."
-          >
-            <GlassCard>
-              <SectionTitle
-                title="Análise estatística da mesa"
-                subtitle="Pressão estatística calculada pelas últimas rodadas."
-                right={
-                  <AppBadge tone={dataModeTone} pulse={mode !== "mock"}>
-                    {dataModeLabel}
-                  </AppBadge>
-                }
-              />
-              <PressureChart data={d.pressureSeries} />
-              <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                <span className="inline-flex items-center gap-1">
-                  <span className="size-2 rounded-full bg-banker" /> Banker Pressure
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="size-2 rounded-full bg-player" /> Player Pressure
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="size-2 rounded-full bg-tie" /> Tie Pressure
-                </span>
-              </div>
-              <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-2 text-[11px]">
-                <Metric
-                  label="Pressão B"
-                  value={`${stats.banker.toFixed(0)}%`}
-                  tone="text-banker"
-                />
-                <Metric
-                  label="Pressão P"
-                  value={`${stats.player.toFixed(0)}%`}
-                  tone="text-player"
-                />
-                <Metric label="Pressão T" value={`${stats.tie.toFixed(0)}%`} tone="text-tie" />
-                <Metric label="Sequência" value={`${sequence.side ?? "-"} x${sequence.count}`} />
-                <Metric label="Alternância" value={`${stats.alt.toFixed(0)}%`} />
-                <Metric label="Padrão" value="Observação" />
-              </div>
-            </GlassCard>
-          </PremiumFeature>
-
-          <GlassCard>
-            <SectionTitle
-              title="Bolinhas Bac Bo"
-              right={<AppBadge tone="blue">Últimas 30 rodadas</AppBadge>}
-            />
-            <RoadmapDots rounds={d.rounds} compact showScore />
-            <Link
-              to="/app"
-              className="mt-3 inline-flex items-center gap-1 text-xs text-neon-cyan hover:text-neon-blue"
-            >
-              Ver histórico completo <ChevronRight className="size-3" />
-            </Link>
-          </GlassCard>
-        </div>
-
-        {!fullAccess && (
-          <div className="space-y-4">
+          {!fullAccess && (
             <GlassCard className="border-gold/40">
               <div className="flex items-center gap-3">
                 <div className="size-10 rounded-xl btn-gold-grad flex items-center justify-center glow-gold">
@@ -343,8 +334,8 @@ function DashboardPage() {
                 Desbloquear Premium
               </Link>
             </GlassCard>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
