@@ -153,8 +153,8 @@ function FormingPreviewBlock({ alert }: { alert: PatternMinerAlert }) {
           <TinyPatternSequence sequence={alert.missingTokens} maxItems={2} tiny />
         </div>
       )}
-      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[9px]">
-        <span className="text-muted-foreground">Leitura provável:</span>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 rounded-lg border border-neon-cyan/12 bg-background/24 px-2 py-1 text-[9px]">
+        <span className="text-muted-foreground">Entrada provável:</span>
         {strategy.expectedResult ? (
           <span className="font-black">{formatPulledSide(strategy.expectedResult)}</span>
         ) : (
@@ -187,7 +187,7 @@ function FormationMiniRow({ alert }: { alert: PatternMinerAlert }) {
       </div>
       <div className="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden">
         <TinyPatternSequence sequence={strategy.sequence} maxItems={5} />
-        <span className="shrink-0 text-[8px] text-muted-foreground">=</span>
+        <span className="shrink-0 text-[8px] text-muted-foreground">Entrada</span>
         {strategy.expectedResult ? (
           <span className="shrink-0 text-[9px] font-black">
             {formatPulledSide(strategy.expectedResult)}
