@@ -3436,6 +3436,29 @@ async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
   if (!getSupabasePersistenceConfig(env) || neuralCalendarHydratedFromTables) return;
   neuralCalendarHydratedFromTables = true;
 
+  const [storedDailyStats, storedHourlyStats] = await Promise.all([
+    fetchStoredNeuralCalendarDailyStats(env),
+    fetchStoredNeuralCalendarHourlyStats(env),
+  ]);
+  if (storedDailyStats.length) {
+    liveNeuralCalendarDailyStats = mergeNeuralCalendarDailyStats([
+      ...liveNeuralCalendarDailyStats,
+      ...storedDailyStats,
+    ]);
+  }
+  if (storedHourlyStats.length) {
+    liveNeuralCalendarHourlyStats = mergeNeuralCalendarHourlyStats([
+      ...liveNeuralCalendarHourlyStats,
+      ...storedHourlyStats,
+    ]);
+  }
+  if (storedDailyStats.length || storedHourlyStats.length) {
+    liveNeuralCalendarDailyStats = liveNeuralCalendarDailyStats.map((daily) => {
+      refreshNeuralCalendarDailyExtremes(daily, liveNeuralCalendarHourlyStats);
+      return daily;
+    });
+  }
+
   const storedRounds = await withTimeout(
     fetchStoredValidatorRounds(env, NEURAL_CALENDAR_CATCHUP_ROUND_LIMIT, "bac-bo"),
     NEURAL_CALENDAR_CATCHUP_TIMEOUT_MS,
@@ -3452,6 +3475,28 @@ async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
     );
     await saveLiveState(env);
   }
+}
+
+async function fetchStoredNeuralCalendarDailyStats(env: unknown) {
+  const rows = await fetchSupabaseRowsPaged(
+    env,
+    CALENDAR_DAILY_STATS_TABLE,
+    "select=*&order=date.asc",
+  );
+  return rows
+    .map((row) => neuralCalendarDailyFromRow(row))
+    .filter((row): row is NeuralCalendarDailyStat => Boolean(row));
+}
+
+async function fetchStoredNeuralCalendarHourlyStats(env: unknown) {
+  const rows = await fetchSupabaseRowsPaged(
+    env,
+    CALENDAR_HOURLY_STATS_TABLE,
+    "select=*&order=date.asc,hour.asc",
+  );
+  return rows
+    .map((row) => neuralCalendarHourlyFromRow(row))
+    .filter((row): row is NeuralCalendarHourlyStat => Boolean(row));
 }
 
 async function persistNeuralCalendarStats(env: unknown, change: NeuralCalendarChangeSet) {
