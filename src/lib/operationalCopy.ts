@@ -50,7 +50,9 @@ export function buildAssistantCopy(data: DashboardData) {
 export function buildSignalCopy(data: DashboardData) {
   const signal = data.currentSignal;
   if (signal.lastResult && (signal.status === "waiting" || isFinalSignalStatus(signal.status))) {
-    const result = signal.lastResult.status === "red"
+    const result = signal.lastResult.status === "tie"
+      ? `Tie registrado na entrada principal em ${sideLabel(signal.lastResult.side)}. Aguardar nova analise.`
+      : signal.lastResult.status === "red"
       ? "Red registrado na entrada principal. Aguardar nova análise."
       : `Green registrado na entrada principal em ${sideLabel(signal.lastResult.side)}. Aguardar nova análise.`;
     return result;
@@ -203,7 +205,7 @@ function surfSide(alert: SurfAlert): CurrentSignalSide {
 }
 
 function isFinalSignalStatus(status: DashboardData["currentSignal"]["status"]) {
-  return status === "green" || status === "green_g1" || status === "red";
+  return status === "green" || status === "green_g1" || status === "red" || status === "tie";
 }
 
 function riskLabel(value: number) {

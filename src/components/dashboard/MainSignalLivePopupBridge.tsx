@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import type { MainSignal, SignalSide } from "@/types/dashboard";
 
-type PopupKind = "entry" | "g1" | "green" | "red";
+type PopupKind = "entry" | "g1" | "green" | "red" | "tie";
 
 interface MainSignalPopup {
   id: string;
@@ -87,12 +87,13 @@ function buildSignalPopup(signal: MainSignal): MainSignalPopup | null {
 
   if (result && isFreshResult(result.finishedAt)) {
     const green = result.status === "green" || result.status === "green_g1";
+    const tie = result.status === "tie";
     return {
       id: `main-result-${result.id}-${result.status}`,
-      kind: green ? "green" : "red",
+      kind: tie ? "tie" : green ? "green" : "red",
       side: result.side,
-      title: green ? (result.status === "green_g1" ? "GREEN G1" : "GREEN SG") : "RED",
-      subtitle: `${sideLabel(result.side)} finalizado`,
+      title: tie ? "TIE" : green ? (result.status === "green_g1" ? "GREEN G1" : "GREEN SG") : "RED",
+      subtitle: tie ? `Empate protegido em ${sideLabel(result.side)}` : `${sideLabel(result.side)} finalizado`,
       createdAt: now,
     };
   }
@@ -154,6 +155,16 @@ function popupTone(kind: PopupKind) {
       iconBorder: "border-destructive/45",
       iconBg: "bg-destructive/15 text-destructive",
       text: "text-destructive",
+    };
+  }
+  if (kind === "tie") {
+    return {
+      border: "border-warning/55",
+      bg: "bg-warning/10",
+      bar: "bg-warning",
+      iconBorder: "border-warning/45",
+      iconBg: "bg-warning/15 text-warning",
+      text: "text-warning",
     };
   }
   if (kind === "g1") {

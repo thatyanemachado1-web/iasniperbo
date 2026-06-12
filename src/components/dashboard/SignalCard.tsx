@@ -42,7 +42,7 @@ export function SignalCard({
   const isPlayer = signal.side === "PLAYER";
   const tieAlertIsActive = tieAlert?.status === "active";
   const isResultStatus =
-    signal.status === "green" || signal.status === "green_g1" || signal.status === "red";
+    signal.status === "green" || signal.status === "green_g1" || signal.status === "red" || signal.status === "tie";
   const isTieWatch =
     !isResultStatus &&
     (signal.status === "tie_watch" || (signal.status === "waiting" && tieAlertIsActive));
@@ -527,6 +527,17 @@ function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRoun
       Icon: Radio,
     };
   }
+  if (signal.status === "tie") {
+    return {
+      badge: "Tie",
+      badgeTone: "amber" as const,
+      pulse: false,
+      kicker: "Resultado",
+      value: "TIE",
+      valueClass: "text-tie",
+      Icon: Radio,
+    };
+  }
   return {
     badge: "Sinal ativo",
     badgeTone: "amber" as const,
@@ -539,6 +550,14 @@ function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRoun
 }
 
 function lastSignalResult(result: NonNullable<MainSignal["lastResult"]>) {
+  if (result.status === "tie") {
+    return {
+      label: "TIE",
+      className: "text-tie",
+      side: result.side,
+      protection: result.protection,
+    };
+  }
   if (result.status === "red") {
     return {
       label: "RED",

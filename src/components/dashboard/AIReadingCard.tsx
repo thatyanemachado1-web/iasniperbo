@@ -454,6 +454,9 @@ function buildSignalResultVoiceText(data: DashboardData) {
   const result = data.currentSignal.lastResult;
   if (!result || !isRecentSignalResult(result.finishedAt)) return "";
   const side = result.side === "BANKER" ? "Banker" : "Player";
+  if (result.status === "tie") {
+    return `Tie confirmado em ${side}. Entrada encerrada. Aguarde a proxima leitura.`;
+  }
   if (result.status === "red") {
     return `Red confirmado em ${side}. Aguarde a próxima leitura.`;
   }
@@ -465,7 +468,7 @@ function buildSignalResultVoiceText(data: DashboardData) {
 
 function shouldSuppressReadingText(data: DashboardData) {
   const status = data.currentSignal.status;
-  if (status === "green" || status === "green_g1" || status === "red") return true;
+  if (status === "green" || status === "green_g1" || status === "red" || status === "tie") return true;
   return Boolean(data.currentSignal.lastResult && isRecentSignalResult(data.currentSignal.lastResult.finishedAt));
 }
 

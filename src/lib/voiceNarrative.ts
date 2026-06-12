@@ -297,12 +297,15 @@ function blockedText(name: string, reason: string, paganteText: string, style: V
 function mainResultText(
   name: string,
   side: CurrentSignalSide,
-  status: "green" | "green_g1" | "red",
+  status: "green" | "green_g1" | "red" | "tie",
   protection: string,
   style: VoiceNarrationStyle,
 ) {
   const resultSideText = sideLabel(side);
   const resultSeed = `${side}:${status}:${protection}`;
+  if (status === "tie") {
+    return `${voiceLead("tieResult", style, resultSeed, name)}Empate confirmado na entrada ${resultSideText}. Entrada encerrada. Aguarde a proxima leitura.`;
+  }
   if (status === "red") {
     return `${voiceLead("resultRed", style, resultSeed, name)}Red confirmado em ${resultSideText}. Aguarde a próxima leitura.`;
   }

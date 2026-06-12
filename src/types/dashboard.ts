@@ -11,12 +11,12 @@ export interface Round {
 
 export type SignalSide = "BANKER" | "PLAYER";
 export type CurrentSignalSide = SignalSide | "TIE" | "NONE";
-export type SignalStatus = "waiting" | "pending" | "g1" | "green" | "green_g1" | "red" | "tie_watch";
+export type SignalStatus = "waiting" | "pending" | "g1" | "green" | "green_g1" | "red" | "tie" | "tie_watch";
 
 export interface LastSignalResult {
   id: string;
   side: SignalSide;
-  status: "green" | "green_g1" | "red";
+  status: "green" | "green_g1" | "red" | "tie";
   protection: string;
   finishedAt?: string;
 }

@@ -5401,6 +5401,17 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
         ? new Date().toISOString()
         : currentDashboard.updatedAt || new Date().toISOString()
       : new Date().toISOString());
+  const normalizedSignal = acceptsCurrentCycle
+    ? normalizeSignal(readMainSignal(incoming), currentDashboard.currentSignal)
+    : currentDashboard.currentSignal;
+  const currentSignal = acceptsCurrentCycle
+    ? resolveSignalImmediatelyFromRound(
+        currentDashboard.currentSignal,
+        normalizedSignal,
+        incomingLatestRound,
+        receivedNewRound,
+      )
+    : currentDashboard.currentSignal;
 
   const nextDashboard: LiveDashboardData = {
     ...currentDashboard,
@@ -5408,9 +5419,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     mockMode: false,
     user: { ...currentDashboard.user, ...readRecord(incoming.user) },
     rounds,
-    currentSignal: acceptsCurrentCycle
-      ? normalizeSignal(readMainSignal(incoming), currentDashboard.currentSignal)
-      : currentDashboard.currentSignal,
+    currentSignal,
     currentTieAlert: normalizeTieAlert(
       acceptsCurrentCycle ? incoming.currentTieAlert || incoming.tieAlert : {},
       currentDashboard.currentTieAlert,
@@ -5870,6 +5879,74 @@ function readMainSignal(payload: Record<string, unknown>) {
   );
 }
 
+function resolveSignalImmediatelyFromRound(
+  previousSignal: DashboardData["currentSignal"],
+  incomingSignal: DashboardData["currentSignal"],
+  latestRound: Round | undefined,
+  receivedNewRound: boolean,
+): DashboardData["currentSignal"] {
+  if (!receivedNewRound || !latestRound) return incomingSignal;
+  if (terminalSignalStatus(incomingSignal.status) && incomingSignal.lastResult) return incomingSignal;
+  if (!isServerEntrySide(previousSignal.side)) return incomingSignal;
+  if (previousSignal.status !== "pending" && previousSignal.status !== "g1") return incomingSignal;
+
+  const expectedResult = previousSignal.side === "BANKER" ? "B" : "P";
+  if (latestRound.result === "T") {
+    return buildResolvedSignalFromRound(previousSignal, latestRound, "tie");
+  }
+
+  if (latestRound.result === expectedResult) {
+    return buildResolvedSignalFromRound(
+      previousSignal,
+      latestRound,
+      previousSignal.status === "g1" ? "green_g1" : "green",
+    );
+  }
+
+  if (previousSignal.status === "pending" && signalAllowsG1(previousSignal.protection)) {
+    return {
+      ...previousSignal,
+      status: "g1",
+      lastResult: null,
+    };
+  }
+
+  return buildResolvedSignalFromRound(previousSignal, latestRound, "red");
+}
+
+function buildResolvedSignalFromRound(
+  signal: DashboardData["currentSignal"],
+  round: Round,
+  status: NonNullable<ReturnType<typeof terminalSignalStatus>>,
+): DashboardData["currentSignal"] {
+  const side = isServerEntrySide(signal.side) ? signal.side : "BANKER";
+  const protection = signal.protection || "G1";
+  const resultId = `${signal.id || "signal"}:${roundHistoryKey(round)}:${status}`;
+  return {
+    ...signal,
+    side,
+    status,
+    protection,
+    lastResult: {
+      id: resultId,
+      side,
+      status,
+      protection,
+      finishedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function signalAllowsG1(protection: string) {
+  const clean = String(protection || "")
+    .trim()
+    .toUpperCase();
+  if (!clean || clean === "-" || clean === "SG") return false;
+  if (clean.includes("G1") || clean.includes("G2") || clean.includes("GALE")) return true;
+  const numeric = Number(clean.replace(/[^0-9]+/g, ""));
+  return Number.isFinite(numeric) && numeric >= 1;
+}
+
 function normalizeSignal(
   signal: Record<string, unknown>,
   fallback: DashboardData["currentSignal"],
@@ -5955,7 +6032,7 @@ function readServerLastResult(value: unknown): DashboardData["currentSignal"]["l
 }
 
 function terminalSignalStatus(status: DashboardData["currentSignal"]["status"]) {
-  if (status === "green" || status === "green_g1" || status === "red") return status;
+  if (status === "green" || status === "green_g1" || status === "red" || status === "tie") return status;
   return null;
 }
 
@@ -6593,6 +6670,7 @@ function normalizeSignalStatus(
   if (["green", "win", "sg"].includes(text)) return "green";
   if (["green_g1", "greeng1"].includes(text)) return "green_g1";
   if (["red", "loss"].includes(text)) return "red";
+  if (["tie", "tie_result", "empate_resultado", "empate_final"].includes(text)) return "tie";
   if (["tie_watch", "empate"].includes(text)) return "tie_watch";
   if (side === "BANKER" || side === "PLAYER") return "pending";
   if (side === "TIE") return "tie_watch";
