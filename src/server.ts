@@ -5885,6 +5885,12 @@ function resolveSignalImmediatelyFromRound(
   latestRound: Round | undefined,
   receivedNewRound: boolean,
 ): DashboardData["currentSignal"] {
+  const preservedTerminalSignal = preserveTerminalSignalWhileStale(
+    previousSignal,
+    incomingSignal,
+    receivedNewRound,
+  );
+  if (preservedTerminalSignal) return preservedTerminalSignal;
   if (!receivedNewRound || !latestRound) return incomingSignal;
   if (terminalSignalStatus(incomingSignal.status) && incomingSignal.lastResult) return incomingSignal;
   if (!isServerEntrySide(previousSignal.side)) return incomingSignal;
@@ -5912,6 +5918,19 @@ function resolveSignalImmediatelyFromRound(
   }
 
   return buildResolvedSignalFromRound(previousSignal, latestRound, "red");
+}
+
+function preserveTerminalSignalWhileStale(
+  previousSignal: DashboardData["currentSignal"],
+  incomingSignal: DashboardData["currentSignal"],
+  receivedNewRound: boolean,
+): DashboardData["currentSignal"] | null {
+  if (receivedNewRound) return null;
+  if (!terminalSignalStatus(previousSignal.status) || !previousSignal.lastResult) return null;
+  if (terminalSignalStatus(incomingSignal.status)) return null;
+  if (incomingSignal.status !== "pending" && incomingSignal.status !== "g1") return null;
+  if (!isServerEntrySide(previousSignal.side) || previousSignal.side !== incomingSignal.side) return null;
+  return previousSignal;
 }
 
 function buildResolvedSignalFromRound(
@@ -6004,6 +6023,24 @@ function normalizeSignal(
     };
   }
 
+  if (status === "g1" && incomingLastResult && (side === "BANKER" || side === "PLAYER")) {
+    const resolvedProtection = incomingLastResult.protection || protection;
+    return {
+      id: String(signal.id || signal.signalId || fallback.id || `result-${Date.now()}`),
+      side,
+      status: incomingLastResult.status,
+      protection: resolvedProtection,
+      strength: clampPercent(
+        signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
+      ),
+      lastResult: {
+        ...incomingLastResult,
+        side,
+        protection: resolvedProtection,
+      },
+    };
+  }
+
   return {
     id: String(signal.id || signal.signalId || `signal-${Date.now()}`),
     side,
@@ -6012,7 +6049,7 @@ function normalizeSignal(
     strength: clampPercent(
       signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
     ),
-    lastResult: incomingLastResult,
+    lastResult: null,
   };
 }
 
