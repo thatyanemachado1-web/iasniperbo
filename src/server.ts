@@ -3591,6 +3591,16 @@ function pruneNeuralCalendarCountedKeys(keys: Record<string, true>) {
 }
 
 function neuralCalendarPartsForRound(round: Round): NeuralCalendarDateParts | null {
+  const recordedAt = getRoundRecordedAt(round);
+  if (recordedAt) {
+    const recordedDate = new Date(recordedAt);
+    if (Number.isFinite(recordedDate.getTime())) {
+      const parts = saoPauloDateParts(recordedDate);
+      const timeHour = roundHourFromTimeText(round.time);
+      return timeHour === null ? parts : { ...parts, hour: timeHour };
+    }
+  }
+
   const raw = String(round.time || "").trim();
   const timeMatch = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
   if (timeMatch) {
@@ -3601,10 +3611,46 @@ function neuralCalendarPartsForRound(round: Round): NeuralCalendarDateParts | nu
     };
   }
 
-  const recordedAt = readString(round as unknown as Record<string, unknown>, "recordedAt");
-  const date = parseRoundDate(round) || (recordedAt ? new Date(recordedAt) : null);
+  const date = parseRoundDate(round);
   if (!date || Number.isNaN(date.getTime())) return null;
   return saoPauloDateParts(date);
+}
+
+function normalizeRoundRecordedAt(item: Record<string, unknown>) {
+  const direct =
+    readString(item, "recordedAt") ||
+    readString(item, "recorded_at") ||
+    readString(item, "createdAt") ||
+    readString(item, "created_at");
+  if (direct && Number.isFinite(Date.parse(direct))) return new Date(direct).toISOString();
+
+  const time = readString(item, "time") || readString(item, "round_time");
+  if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(time)) {
+    const now = new Date();
+    const [hour, minute, second = "0"] = time.split(":");
+    now.setHours(Number(hour), Number(minute), Number(second), 0);
+    return now.toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
+function getRoundRecordedAt(round: Round) {
+  const record = round as unknown as Record<string, unknown>;
+  const value =
+    readString(record, "recordedAt") ||
+    readString(record, "recorded_at") ||
+    readString(record, "createdAt") ||
+    readString(record, "created_at");
+  return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : "";
+}
+
+function roundHourFromTimeText(value: unknown) {
+  const match = String(value || "")
+    .trim()
+    .match(/^(\d{1,2}):\d{2}(?::\d{2})?$/);
+  if (!match) return null;
+  return Math.max(0, Math.min(23, Math.floor(Number(match[1]) || 0)));
 }
 
 function parseRoundDate(round: Round) {
@@ -6518,6 +6564,7 @@ function normalizeRounds(rounds: unknown[], limit = 30) {
         playerScore: Number(item.playerScore ?? item.player_score ?? item.player ?? 0),
         tieMultiplier: readNullableNumber(item.tieMultiplier ?? item.tie_multiplier ?? item.multiplier),
         time: String(item.time || item.createdAt || "--:--"),
+        recordedAt: normalizeRoundRecordedAt(item),
       };
     })
     .filter((round): round is DashboardData["rounds"][number] => Boolean(round))
@@ -6546,10 +6593,24 @@ function mergeMonitorRoundHistory(current: Round[], incoming: Round[]) {
 function mergeRoundHistoryWithLimit(current: Round[], incoming: Round[], limit: number) {
   const byKey = new Map<string, Round>();
   for (const round of current) byKey.set(roundHistoryKey(round), round);
-  for (const round of incoming) byKey.set(roundHistoryKey(round), round);
+  for (const round of incoming) {
+    const key = roundHistoryKey(round);
+    const existing = byKey.get(key);
+    byKey.set(key, existing ? mergeRoundRecord(existing, round) : round);
+  }
   return [...byKey.values()]
     .sort(compareRoundHistory)
     .slice(-Math.max(1, limit));
+}
+
+function mergeRoundRecord(existing: Round, incoming: Round): Round {
+  const existingRecord = existing as unknown as Record<string, unknown>;
+  const incomingRecord = incoming as unknown as Record<string, unknown>;
+  return {
+    ...existing,
+    ...incoming,
+    recordedAt: readString(existingRecord, "recordedAt") || readString(incomingRecord, "recordedAt"),
+  } as Round;
 }
 
 function normalizeStoredRoundHistory(value: unknown) {
@@ -6652,6 +6713,7 @@ async function pruneStoredValidatorRounds(env: unknown, tableId = "bac-bo") {
 }
 
 function storedValidatorRoundToRow(round: Round, tableId: string) {
+  const recordedAt = getRoundRecordedAt(round) || new Date().toISOString();
   return {
     id: validatorRoundStorageId(round, tableId),
     table_id: tableId,
@@ -6660,7 +6722,7 @@ function storedValidatorRoundToRow(round: Round, tableId: string) {
     banker_score: round.bankerScore,
     player_score: round.playerScore,
     round_time: round.time,
-    created_at: new Date().toISOString(),
+    created_at: recordedAt,
   };
 }
 
@@ -6676,6 +6738,7 @@ function storedValidatorRoundFromRow(row: Record<string, unknown>): Round | null
     playerScore: Number(row.player_score ?? row.playerScore ?? 0),
     tieMultiplier: readNullableNumber(row.tie_multiplier ?? row.tieMultiplier ?? row.multiplier),
     time: readString(row, "round_time") || readString(row, "time") || readString(row, "created_at") || "--:--",
+    recordedAt: readString(row, "created_at") || readString(row, "recordedAt") || readString(row, "recorded_at"),
   };
 }
 
