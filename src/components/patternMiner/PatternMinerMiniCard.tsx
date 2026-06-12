@@ -32,6 +32,7 @@ export function PatternMinerMiniCard({
   const hasPatternData =
     isUsingRealData && Boolean(currentPattern) && (currentPattern?.totalValidated ?? 0) > 0;
   const formingAlerts = snapshot.formingAlerts.slice(0, 2);
+  const leadingFormingAlert = formingAlerts[0];
 
   return (
     <GlassCard className="h-full rounded-xl border-neon-cyan/35 p-3">
@@ -48,6 +49,8 @@ export function PatternMinerMiniCard({
               </div>
             ) : confirmedPattern ? (
               <ConfirmedPatternBlock alert={confirmedAlert} />
+            ) : leadingFormingAlert ? (
+              <FormingPreviewBlock alert={leadingFormingAlert} />
             ) : (
               <div className="mt-1 rounded-xl border border-neon-cyan/12 bg-background/25 px-2.5 py-2 text-[10px] leading-snug text-muted-foreground">
                 Aguardando padrão confirmado. Em formação aparece abaixo quando a sequência estiver
@@ -115,13 +118,51 @@ function ConfirmedPatternBlock({ alert }: { alert: PatternMinerAlert }) {
         <PatternSequence sequence={strategy.sequence} compact />
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
-        <span className="text-muted-foreground">Entrada:</span>
+        <span className="text-muted-foreground">Entrada confirmada:</span>
         {strategy.expectedResult ? (
           <span className="font-black">{formatPulledSide(strategy.expectedResult)}</span>
         ) : (
           <span className="text-warning">amostra insuficiente</span>
         )}
         <span className="text-neon-cyan">{formatPercent(strategy.assertiveness)}</span>
+      </div>
+    </div>
+  );
+}
+
+function FormingPreviewBlock({ alert }: { alert: PatternMinerAlert }) {
+  const strategy = alert.strategy;
+  const progress = Math.round(alert.progress * 100);
+
+  return (
+    <div className="mt-1 rounded-xl border border-warning/20 bg-warning/5 px-2.5 py-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.12em] text-warning">
+          Padrão quase confirmado
+        </span>
+        <span className="rounded-full border border-success/25 bg-success/10 px-1.5 py-0.5 text-[7px] font-black text-success">
+          {progress}%
+        </span>
+      </div>
+      <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+        <TinyPatternSequence sequence={strategy.sequence} maxItems={5} />
+      </div>
+      {alert.missingTokens.length > 0 && (
+        <div className="mt-1 flex min-w-0 items-center gap-1 text-[8px] text-muted-foreground">
+          <span>Falta:</span>
+          <TinyPatternSequence sequence={alert.missingTokens} maxItems={2} tiny />
+        </div>
+      )}
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[9px]">
+        <span className="text-muted-foreground">Leitura provável:</span>
+        {strategy.expectedResult ? (
+          <span className="font-black">{formatPulledSide(strategy.expectedResult)}</span>
+        ) : (
+          <span className="text-warning">sem amostra</span>
+        )}
+        <span className="font-black text-neon-cyan">
+          {compactPercent(strategy.assertiveness)}
+        </span>
       </div>
     </div>
   );
