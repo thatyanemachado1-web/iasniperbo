@@ -230,7 +230,7 @@ function PatternScoreLine({
   data: PatternMinerScoreboard | PatternMinerStrategy | null;
 }) {
   return (
-    <div className="rounded-xl border border-neon-cyan/12 bg-background/24 px-2 py-1.5">
+    <div className="rounded-xl border border-neon-cyan/10 bg-background/18 px-2 py-1.5">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
           Placar {title}
@@ -239,7 +239,7 @@ function PatternScoreLine({
           SQ {currentSequenceLabel(data)}
         </span>
       </div>
-      <div className="grid grid-cols-3 gap-1 text-center">
+      <div className="grid grid-cols-3 gap-0.5">
         <TinyStat label="SG" value={formatScoreValue(data?.sg ?? null)} tone="green" />
         <TinyStat label="G1" value={formatScoreValue(data?.g1 ?? null)} tone="cyan" />
         <TinyStat label="RD" value={formatScoreValue(data?.red ?? null)} tone="red" />
@@ -265,9 +265,14 @@ function TinyStat({
   tone: "green" | "cyan" | "red" | "amber" | "neutral";
 }) {
   return (
-    <div className={cn("min-w-0 rounded-md border px-1.5 py-1", scoreToneClass(tone))}>
-      <div className="text-[7px] font-bold uppercase leading-none opacity-75">{label}</div>
-      <div className="mt-0.5 text-[11px] font-black leading-none">{value}</div>
+    <div
+      className={cn(
+        "flex min-w-0 items-center justify-center gap-1 rounded-md border px-1 py-0.5 leading-none",
+        scoreToneClass(tone),
+      )}
+    >
+      <span className="text-[7px] font-bold uppercase opacity-70">{label}</span>
+      <span className="text-[9px] font-black">{value}</span>
     </div>
   );
 }
@@ -289,9 +294,9 @@ function compactPercent(value: number | undefined) {
 }
 
 function scoreToneClass(tone: "green" | "cyan" | "red" | "amber" | "neutral") {
-  if (tone === "green") return "border-success/25 bg-success/10 text-success";
-  if (tone === "cyan") return "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan";
-  if (tone === "red") return "border-destructive/30 bg-destructive/10 text-destructive";
-  if (tone === "amber") return "border-warning/25 bg-warning/10 text-warning";
+  if (tone === "green") return "border-success/20 bg-success/5 text-success";
+  if (tone === "cyan") return "border-neon-cyan/20 bg-neon-cyan/5 text-neon-cyan";
+  if (tone === "red") return "border-destructive/20 bg-destructive/5 text-destructive";
+  if (tone === "amber") return "border-warning/20 bg-warning/5 text-warning";
   return "border-border/45 bg-secondary/30 text-muted-foreground";
 }
