@@ -67,7 +67,7 @@ export const Route = createFileRoute("/")({
   }),
 });
 
-const WAITLIST_URL = "https://chat.whatsapp.com/Gw6qhCXXtyeDrukSxlM71u?mode=gi_t";
+const WAITLIST_URL = "https://wa.me/5567992308362";
 
 const landingFallbackPlans: BillingPlan[] = [
   {
@@ -503,7 +503,7 @@ function LoginPage() {
                   <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 text-xs">
                     <button
                       type="button"
-                      onClick={() => setNotice("Para recuperar sua senha, fale com o suporte oficial.")}
+                      onClick={() => window.open(WAITLIST_URL, "_blank", "noopener,noreferrer")}
                       className="text-slate-400 transition hover:text-neon-cyan"
                     >
                       Esqueci minha senha

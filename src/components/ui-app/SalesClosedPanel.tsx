@@ -3,7 +3,7 @@ import { NeuralLines } from "@/components/brand/NeuralLines";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { cn } from "@/lib/utils";
 
-const WAITLIST_URL = "https://chat.whatsapp.com/Gw6qhCXXtyeDrukSxlM71u?mode=gi_t";
+const WAITLIST_URL = "https://wa.me/5567992308362";
 
 export function SalesClosedPanel({
   onClientLogin,
