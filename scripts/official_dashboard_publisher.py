@@ -46,6 +46,7 @@ def request_json(
     *,
     method: str = "GET",
     token: str = "",
+    extra_headers: dict[str, str] | None = None,
     payload: Any | None = None,
     timeout: float = 8.0,
     ssl_context: ssl.SSLContext | None = None,
@@ -58,6 +59,8 @@ def request_json(
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if extra_headers:
+        headers.update({key: value for key, value in extra_headers.items() if value})
     if payload is not None:
         data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -82,16 +85,27 @@ def admin_login(remote_base_url: str, email: str, password: str, timeout: float)
     return token
 
 
-def publish_once(args: argparse.Namespace, token: str, local_token: str) -> dict[str, Any]:
+def publish_once(
+    args: argparse.Namespace,
+    token: str,
+    local_token: str,
+    admin_email: str,
+    admin_password: str,
+) -> dict[str, Any]:
     local_payload = request_json(
         args.local_url,
         token=local_token,
         timeout=args.local_timeout,
     )
+    publisher_headers = {
+        "x-sniper-admin-email": admin_email,
+        "x-sniper-admin-password": admin_password,
+    }
     return request_json(
         args.remote_url,
         method="POST",
         token=token,
+        extra_headers=publisher_headers,
         payload=local_payload,
         timeout=args.remote_timeout,
         ssl_context=ssl._create_unverified_context(),
@@ -105,7 +119,7 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--local-url", default=default_local_url)
     parser.add_argument("--remote-base-url", default="https://sniperbo.com")
-    parser.add_argument("--remote-url", default="https://sniperbo.com/dashboard")
+    parser.add_argument("--remote-url", default="https://sniperbo.com/dashboard/publish")
     parser.add_argument("--interval", type=float, default=0.7)
     parser.add_argument("--local-timeout", type=float, default=2.0)
     parser.add_argument("--remote-timeout", type=float, default=6.0)
@@ -157,7 +171,7 @@ def main() -> int:
                     token = admin_login(args.remote_base_url, admin_email, admin_password, args.remote_timeout)
                     using_admin_session = True
                     logging.info("Admin session created.")
-            response = publish_once(args, token, local_token)
+            response = publish_once(args, token, local_token, admin_email, admin_password)
             token_index = 0
             dashboard = response.get("dashboard") if isinstance(response, dict) else {}
             rounds = len((dashboard or {}).get("rounds") or [])

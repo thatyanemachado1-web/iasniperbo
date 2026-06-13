@@ -670,6 +670,7 @@ function rateLimitForRequest(method: string, pathname: string) {
   if (pathname === "/dashboard") return method === "GET" ? 120 : 240;
   if (pathname === "/dashboard/round-history") return 120;
   if (pathname === "/dashboard/signal") return 240;
+  if (pathname === "/dashboard/publish") return 240;
   if (pathname === "/validator/validate") return 120;
   if (pathname === "/validator/round-history") return method === "GET" ? 120 : 240;
   if (
@@ -3087,7 +3088,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   if (
     request.method === "POST" &&
-    (url.pathname === "/dashboard" || url.pathname === "/dashboard/signal")
+    (url.pathname === "/dashboard" ||
+      url.pathname === "/dashboard/signal" ||
+      url.pathname === "/dashboard/publish")
   ) {
     if (!(await isDashboardWriteAuthorized(request, url, env))) {
       return json({ error: "Não autorizado." }, 401);
@@ -8718,15 +8721,39 @@ async function isDashboardAuthorized(request: Request, _url: URL, env: unknown) 
 async function isDashboardWriteAuthorized(request: Request, url: URL, env: unknown) {
   if (await isDashboardAuthorized(request, url, env)) return true;
 
+  const publisherToken = request.headers.get("x-sniper-publisher-token")?.trim() || "";
+  if (publisherToken && dashboardPublisherTokens(env).includes(publisherToken)) return true;
+
+  if (!(await isOfficialDashboardPublisherAuthorized(request, env))) return false;
+
   const token = getBearerToken(request);
-  if (!token) return false;
+  if (!token) return true;
 
   const session = await verifySessionToken(env, token);
-  if (!session) return false;
+  if (!session) return true;
   if (session.scope !== "owner" && session.scope !== "admin_approver") return false;
 
   if (await sessionMatchesRequestBinding(env, request, session)) return true;
   return isOfficialDashboardPublisherRequest(request);
+}
+
+function dashboardPublisherTokens(env: unknown) {
+  return [
+    readNamedServerSecret(env, "SNIPER_PUBLISHER_TOKEN", ""),
+    readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", ""),
+    readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", ""),
+  ].filter(Boolean);
+}
+
+async function isOfficialDashboardPublisherAuthorized(request: Request, env: unknown) {
+  if (!isOfficialDashboardPublisherRequest(request)) return false;
+
+  const email = (request.headers.get("x-sniper-admin-email") || "").trim().toLowerCase();
+  const password = request.headers.get("x-sniper-admin-password") || "";
+  const adminRole = email ? getAdminRoleForEmail(env, email) : null;
+  const adminPasswordHash = getAdminPasswordHash(env);
+  if (!adminRole || !password || !adminPasswordHash) return false;
+  return verifyPassword(password, adminPasswordHash);
 }
 
 function isOfficialDashboardPublisherRequest(request: Request) {
@@ -13349,7 +13376,7 @@ function json(data: unknown, status = 200) {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
       "access-control-allow-headers":
-        "Content-Type,Authorization,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature",
+        "Content-Type,Authorization,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature,x-sniper-admin-email,x-sniper-admin-password,x-sniper-publisher-token",
     },
   });
 }
