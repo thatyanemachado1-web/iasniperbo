@@ -3405,6 +3405,7 @@ async function backfillEngineCalendarFromLiveStateSnapshots(
       return;
     }
 
+    let previousSnapshot: EngineCalendarBackfillDashboardSnapshot | null = null;
     let previousCounters: Partial<Record<CalendarEngineKey, CalendarEngineCounterSnapshot>> | null = null;
     for (const snapshot of snapshots) {
       const nextCounters = readEngineCalendarCounterSnapshots(snapshot.data);
@@ -3412,14 +3413,21 @@ async function backfillEngineCalendarFromLiveStateSnapshots(
         addEngineCalendarBackfillSkip(source, "snapshot_without_engine_counters");
         continue;
       }
-      if (!previousCounters) {
+      if (!previousSnapshot || !previousCounters) {
+        previousSnapshot = snapshot;
         previousCounters = nextCounters;
         continue;
       }
 
+      const sameHour = isSameSaoPauloHour(previousSnapshot.occurredAt, snapshot.occurredAt);
       for (const engineKey of CALENDAR_BACKFILL_ENGINE_KEYS) {
         const delta = diffEngineCalendarCounters(previousCounters[engineKey], nextCounters[engineKey]);
-        if (!calendarCountersTotal(delta)) continue;
+        const total = calendarCountersTotal(delta);
+        if (!total) continue;
+        if (!sameHour) {
+          addEngineCalendarBackfillSkip(source, "snapshot_delta_crosses_hour_boundary", total);
+          continue;
+        }
         applyEngineCalendarBackfillCounters({
           key: `sniper_live_state:${safeBackfillKey(snapshot.key)}:${engineKey}`,
           engineKey,
@@ -3430,6 +3438,7 @@ async function backfillEngineCalendarFromLiveStateSnapshots(
           report,
         });
       }
+      previousSnapshot = snapshot;
       previousCounters = nextCounters;
     }
   } catch (error) {
@@ -3674,6 +3683,12 @@ function calendarCountersTotal(counters: CalendarEngineCounterSnapshot | undefin
     Math.max(0, Math.floor(Number(counters.reds) || 0)) +
     Math.max(0, Math.floor(Number(counters.ties) || 0))
   );
+}
+
+function isSameSaoPauloHour(first: Date, second: Date) {
+  const firstParts = saoPauloDateParts(first);
+  const secondParts = saoPauloDateParts(second);
+  return firstParts.date === secondParts.date && firstParts.hour === secondParts.hour;
 }
 
 function safeBackfillKey(value: unknown) {
@@ -3981,6 +3996,42 @@ function neuralCalendarMonthSummary(
     bestHour,
     worstHour,
     counts: neuralCalendarDistribution(days),
+  };
+}
+
+function engineCalendarMonthSummary(
+  days: NeuralCalendarDailyStat[],
+  monthHours: NeuralCalendarHourlyStat[],
+  monthAggregate: EngineCalendarAggregateStat | null,
+) {
+  const sampledDays = days.filter((day) => day.classification !== "sem_amostra" && day.totalRounds > 0);
+  const sampledHours = monthHours.filter((hour) => hour.classification !== "sem_amostra" && hour.totalRounds > 0);
+  const bestDay = [...sampledDays].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
+  const worstDay = [...sampledDays].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
+  const bestHour = [...sampledHours].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
+  const worstHour = [...sampledHours].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
+
+  return {
+    averageScore: monthAggregate?.totalSignals ? monthAggregate.score : 0,
+    bestDay,
+    worstDay,
+    bestHour,
+    worstHour,
+    counts: neuralCalendarDistribution(days),
+  };
+}
+
+function decorateEngineCalendarDayWithHours(
+  day: NeuralCalendarDailyStat,
+  hours: NeuralCalendarHourlyStat[],
+): NeuralCalendarDailyStat {
+  const sampledHours = hours.filter((hour) => hour.classification !== "sem_amostra" && hour.totalRounds > 0);
+  const bestHour = [...sampledHours].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
+  const worstHour = [...sampledHours].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
+  return {
+    ...day,
+    bestHour: bestHour ? `${String(bestHour.hour).padStart(2, "0")}:00` : "",
+    worstHour: worstHour ? `${String(worstHour.hour).padStart(2, "0")}:00` : "",
   };
 }
 
@@ -4321,6 +4372,13 @@ function buildEngineNeuralCalendarPayload({
   const monthDailyRows = combineEngineCalendarRowsForPayload("daily", engineKeys)
     .filter((row) => row.year === year && row.month === month)
     .map(engineAggregateToCalendarDailyStat);
+  const monthHourlyRows = combineEngineCalendarRowsForPayload("hourly", engineKeys)
+    .filter((row) => row.year === year && row.month === month)
+    .map(engineAggregateToCalendarHourlyStat);
+  const monthAggregate =
+    combineEngineCalendarRowsForPayload("monthly", engineKeys).find(
+      (row) => row.year === year && row.month === month,
+    ) || null;
   const dailyByDate = new Map(monthDailyRows.map((row) => [row.date, row]));
   const daysInMonth = calendarDaysInMonth(year, month);
   const monthDays = Array.from({ length: daysInMonth }, (_, index) => {
@@ -4367,12 +4425,12 @@ function buildEngineNeuralCalendarPayload({
       label: neuralCalendarMonthLabel(year, month),
       days: monthDays,
       firstWeekday: calendarFirstWeekday(year, month),
-      summary: neuralCalendarMonthSummary(monthDays, selectedHours),
+      summary: engineCalendarMonthSummary(monthDays, monthHourlyRows, monthAggregate),
       distribution: neuralCalendarDistribution(monthDays),
       weekdayAverages: neuralCalendarWeekdayAverages(monthDays),
       heatmap: engineCalendarHeatmap(year, month, engineKeys),
     },
-    selectedDay,
+    selectedDay: decorateEngineCalendarDayWithHours(selectedDay, selectedHours),
     selectedHours,
     rankings: {
       topHours: engineCalendarTopHours(year, month, engineKeys),
@@ -4393,9 +4451,82 @@ function combineEngineCalendarRowsForPayload(
   engineKeys: CalendarEngineKey[],
 ) {
   const selected = normalizeCalendarEngineSelection(engineKeys);
+  const rows = combineEngineCalendarRowsForPayloadRaw(kind, selected);
+  if (kind === "hourly") return filterConsistentEngineHourlyRows(rows, selected);
+  if (kind === "daily") return filterConsistentEngineDailyRows(rows, selected);
+  return rows;
+}
+
+function combineEngineCalendarRowsForPayloadRaw(
+  kind: EngineCalendarAggregateKind,
+  selected: CalendarEngineKey[],
+) {
   return combineEngineCalendarAggregateRows(
     engineCalendarAggregateRows(kind).filter((row) => selected.includes(row.engineKey)),
   );
+}
+
+function filterConsistentEngineDailyRows(
+  rows: EngineCalendarAggregateStat[],
+  selected: CalendarEngineKey[],
+) {
+  const monthlyByKey = new Map(
+    combineEngineCalendarRowsForPayloadRaw("monthly", selected).map((row) => [
+      `${row.year}-${String(row.month).padStart(2, "0")}`,
+      row,
+    ]),
+  );
+  const activeDaysByMonth = rows.reduce<Record<string, number>>((acc, row) => {
+    const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
+    if (row.totalSignals > 0) acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  return rows.filter((row) => {
+    const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
+    const month = monthlyByKey.get(key);
+    if (!month?.totalSignals || !row.totalSignals) return true;
+    if (row.totalSignals > month.totalSignals) return false;
+    if ((activeDaysByMonth[key] || 0) > 1 && row.totalSignals >= month.totalSignals) return false;
+    return true;
+  });
+}
+
+function filterConsistentEngineHourlyRows(
+  rows: EngineCalendarAggregateStat[],
+  selected: CalendarEngineKey[],
+) {
+  const dailyByDate = new Map(combineEngineCalendarRowsForPayloadRaw("daily", selected).map((row) => [row.date, row]));
+  const monthlyByKey = new Map(
+    combineEngineCalendarRowsForPayloadRaw("monthly", selected).map((row) => [
+      `${row.year}-${String(row.month).padStart(2, "0")}`,
+      row,
+    ]),
+  );
+  const activeHoursByDate = rows.reduce<Record<string, number>>((acc, row) => {
+    if (row.totalSignals > 0) acc[row.date] = (acc[row.date] || 0) + 1;
+    return acc;
+  }, {});
+  const activeDaysByMonth = Array.from(dailyByDate.values()).reduce<Record<string, number>>((acc, row) => {
+    const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
+    if (row.totalSignals > 0) acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  return rows.filter((row) => {
+    const day = dailyByDate.get(row.date);
+    const monthKey = `${row.year}-${String(row.month).padStart(2, "0")}`;
+    const month = monthlyByKey.get(monthKey);
+    if (day?.totalSignals) {
+      if (row.totalSignals > day.totalSignals) return false;
+      if ((activeHoursByDate[row.date] || 0) > 1 && row.totalSignals >= day.totalSignals) return false;
+    }
+    if (month?.totalSignals) {
+      if (row.totalSignals > month.totalSignals) return false;
+      if ((activeDaysByMonth[monthKey] || 0) > 1 && row.totalSignals >= month.totalSignals) return false;
+    }
+    return true;
+  });
 }
 
 function engineAggregateToCalendarDailyStat(row: EngineCalendarAggregateStat): NeuralCalendarDailyStat {
@@ -4592,22 +4723,25 @@ function engineCalendarAggregateFromRow(
   const engineKey = normalizeCalendarEngineKey(row.engine_key ?? row.engineKey);
   if (engineKey === DEFAULT_CALENDAR_ENGINE_KEY) return null;
   const date = readString(row, "date");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (!isValidCalendarDateString(date)) return null;
   const parts = calendarPartsFromDateString(date);
+  const safeHour =
+    row.hour === null || row.hour === undefined
+      ? null
+      : Math.max(0, Math.min(23, Math.floor(Number(row.hour) || 0)));
+  const fallbackOccurredAt = new Date(saoPauloLocalIso(date, periodKind === "hourly" ? safeHour ?? 0 : 0));
+  const fallbackPeriod = engineCalendarPeriod(periodKind, fallbackOccurredAt);
   const stat: EngineCalendarAggregateStat = {
     id: readString(row, "id") || `${engineKey}:${periodKind}:${date}`,
     engineKey,
     periodKind,
-    periodStart: readString(row, "period_start") || readString(row, "periodStart") || saoPauloLocalIso(date, 0),
-    periodEnd: readString(row, "period_end") || readString(row, "periodEnd") || saoPauloLocalIso(date, 23),
+    periodStart: readString(row, "period_start") || readString(row, "periodStart") || fallbackPeriod.start,
+    periodEnd: readString(row, "period_end") || readString(row, "periodEnd") || fallbackPeriod.end,
     date,
-    hour:
-      row.hour === null || row.hour === undefined
-        ? null
-        : Math.max(0, Math.min(23, Math.floor(Number(row.hour) || 0))),
+    hour: periodKind === "hourly" ? safeHour ?? fallbackPeriod.hour : null,
     week:
       row.week === null || row.week === undefined
-        ? null
+        ? fallbackPeriod.week
         : Math.max(1, Math.floor(Number(row.week) || saoPauloWeekNumber(date))),
     month: Math.max(1, Math.min(12, Math.floor(Number(row.month) || parts.month))),
     year: Math.max(2000, Math.floor(Number(row.year) || parts.year)),
@@ -4858,8 +4992,8 @@ function saoPauloDateParts(date = new Date()): NeuralCalendarDateParts {
 function calendarPartsFromDateString(date: string): NeuralCalendarDateParts {
   const [year, month, day] = date.split("-").map((part) => Math.floor(Number(part) || 0));
   const safeYear = year || 2026;
-  const safeMonth = month || 1;
-  const safeDay = day || 1;
+  const safeMonth = Math.max(1, Math.min(12, month || 1));
+  const safeDay = Math.max(1, Math.min(calendarDaysInMonth(safeYear, safeMonth), day || 1));
   const utcDate = new Date(Date.UTC(safeYear, safeMonth - 1, safeDay, 12));
   return {
     date: calendarDateString(safeYear, safeMonth, safeDay),
@@ -4879,11 +5013,21 @@ function calendarDateString(year: number, month: number, day: number) {
 
 function normalizeCalendarDateParam(value: string | null) {
   const text = String(value || "").trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : "";
+  return isValidCalendarDateString(text) ? text : "";
 }
 
 function calendarDaysInMonth(year: number, month: number) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function isValidCalendarDateString(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Math.floor(Number(match[1]) || 0);
+  const month = Math.floor(Number(match[2]) || 0);
+  const day = Math.floor(Number(match[3]) || 0);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  return day <= calendarDaysInMonth(year, month) && calendarDateString(year, month, day) === value;
 }
 
 function calendarFirstWeekday(year: number, month: number) {
@@ -4928,7 +5072,7 @@ function normalizeCalendarWeekday(value: unknown) {
 }
 
 function calendarWeekdayOrder() {
-  return ["Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado", "Domingo"];
+  return ["Domingo", "Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado"];
 }
 
 function neuralCalendarMonthLabel(year: number, month: number) {
@@ -5332,7 +5476,7 @@ function addMillisecondsIso(iso: string, milliseconds: number) {
 function saoPauloWeekStartDate(date: string) {
   const local = new Date(`${date}T00:00:00-03:00`);
   const day = local.getUTCDay();
-  const offset = (day + 6) % 7;
+  const offset = day;
   local.setUTCDate(local.getUTCDate() - offset);
   return local.toISOString().slice(0, 10);
 }
