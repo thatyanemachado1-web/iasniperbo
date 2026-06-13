@@ -138,8 +138,9 @@ def main() -> int:
     admin_password = env_value(env, "SNIPER_ADMIN_PASSWORD")
     local_token = (
         env_value(env, "SNIPER_LOCAL_DASHBOARD_TOKEN")
-        or env_value(env, "SNIPER_ADMIN_TOKEN")
         or env_value(env, "SNIPER_DASHBOARD_TOKEN")
+        or env_value(env, "VITE_SNIPER_DASHBOARD_TOKEN")
+        or env_value(env, "SNIPER_ADMIN_TOKEN")
     )
     remote_tokens = unique_tokens(
         env_value(env, "SNIPER_REMOTE_DASHBOARD_TOKEN"),
@@ -154,10 +155,14 @@ def main() -> int:
     token = ""
     token_index = 0
     using_admin_session = False
+    direct_publisher_endpoint = args.remote_url.rstrip("/").endswith("/dashboard/publish")
     logging.info("Official dashboard publisher started: %s -> %s", args.local_url, args.remote_url)
     while True:
         try:
-            if not token:
+            if direct_publisher_endpoint:
+                token = ""
+                using_admin_session = False
+            elif not token:
                 if token_index < len(remote_tokens):
                     token = remote_tokens[token_index]
                     token_index += 1

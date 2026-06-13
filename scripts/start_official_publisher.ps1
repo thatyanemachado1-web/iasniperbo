@@ -90,6 +90,16 @@ if (Test-Path -LiteralPath $projectPython) {
 $adminEmail = Read-EnvValue $localEnv "SNIPER_ADMIN_EMAIL"
 $adminPassword = Read-EnvValue $localEnv "SNIPER_ADMIN_PASSWORD"
 $adminToken = Read-EnvValue $localEnv "SNIPER_ADMIN_TOKEN"
+$localDashboardToken = Read-EnvValue $localEnv "SNIPER_LOCAL_DASHBOARD_TOKEN"
+if (-not $localDashboardToken) {
+  $localDashboardToken = Read-TokenFromEnvFile $ProjectEnvPath "SNIPER_LOCAL_DASHBOARD_TOKEN"
+}
+if (-not $localDashboardToken) {
+  $localDashboardToken = Read-TokenFromEnvFile $ProjectEnvPath "SNIPER_DASHBOARD_TOKEN"
+}
+if (-not $localDashboardToken) {
+  $localDashboardToken = Read-TokenFromEnvFile $ProjectEnvPath "VITE_SNIPER_DASHBOARD_TOKEN"
+}
 $publisherToken = Read-EnvValue $localEnv "SNIPER_PUBLISHER_TOKEN"
 if (-not $publisherToken) {
   $publisherToken = Read-TokenFromEnvFile $ProjectEnvPath "SNIPER_PUBLISHER_TOKEN"
@@ -108,6 +118,9 @@ $localDashboardUrl = Read-EnvValue $localEnv "SNIPER_LOCAL_DASHBOARD_URL" "http:
 
 if (-not $adminToken) {
   $adminToken = Read-TokenFromEnvFile $sourceEnvFile "SNIPER_ADMIN_TOKEN"
+}
+if (-not $localDashboardToken) {
+  $localDashboardToken = $adminToken
 }
 
 $running = @(Get-PublisherProcesses)
@@ -148,7 +161,7 @@ $startInfo.RedirectStandardError = $false
 Set-ProcessEnv $startInfo "SNIPER_ADMIN_EMAIL" $adminEmail
 Set-ProcessEnv $startInfo "SNIPER_ADMIN_PASSWORD" $adminPassword
 Set-ProcessEnv $startInfo "SNIPER_ADMIN_TOKEN" $adminToken
-Set-ProcessEnv $startInfo "SNIPER_LOCAL_DASHBOARD_TOKEN" $adminToken
+Set-ProcessEnv $startInfo "SNIPER_LOCAL_DASHBOARD_TOKEN" $localDashboardToken
 if ($publisherToken) {
   Set-ProcessEnv $startInfo "SNIPER_PUBLISHER_TOKEN" $publisherToken
 }
