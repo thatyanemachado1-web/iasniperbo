@@ -1,6 +1,8 @@
 param(
   [int]$LegacyApiPort = 8791,
   [int]$SignalsApiPort = 8787,
+  [int]$StaleAfterSeconds = 300,
+  [switch]$ForceRestart,
   [switch]$Quiet
 )
 
@@ -19,6 +21,8 @@ $LegacyScript = Join-Path $LegacyRoot "sniper_bo_scraper.py"
 $LegacyEnvPath = Join-Path $LegacyRoot ".env"
 $LegacyPython = Join-Path $LegacyRoot ".venv\Scripts\python.exe"
 $LegacyLog = Join-Path $LegacyRoot "official_legacy_collector.log"
+$LegacyBrowserProfileMarker = "browser_profile_77super"
+$StaleStatePath = Join-Path $LogDir "legacy_collector_watch_state.json"
 
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
@@ -55,6 +59,45 @@ function Get-CollectorProcesses {
     })
 }
 
+function Get-LegacyChromeProcesses {
+  @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Name -match "chrome" -and
+      $_.CommandLine -like "*$LegacyBrowserProfileMarker*"
+    })
+}
+
+function Stop-SafeProcess($ProcessId, $Reason) {
+  if (-not $ProcessId -or $ProcessId -eq $PID) { return }
+  try {
+    Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+    Write-StartupLog "stopped pid=$ProcessId reason=$Reason"
+  } catch {
+    Write-StartupLog "failed to stop pid=$ProcessId reason=$Reason error=$($_.Exception.Message)"
+  }
+}
+
+function Stop-LegacyCollectorStack($Reason) {
+  $collectorProcesses = Get-CollectorProcesses
+  foreach ($process in $collectorProcesses) {
+    Stop-SafeProcess $process.ProcessId $Reason
+  }
+
+  $legacyListenerPid = Get-LegacyApiListenerPid
+  if ($legacyListenerPid -and -not ($collectorProcesses.ProcessId -contains $legacyListenerPid)) {
+    Stop-SafeProcess $legacyListenerPid "$Reason-listener"
+  }
+
+  foreach ($process in Get-LegacyChromeProcesses) {
+    Stop-SafeProcess $process.ProcessId "$Reason-chrome"
+  }
+
+  if (Test-Path -LiteralPath $StaleStatePath) {
+    Remove-Item -LiteralPath $StaleStatePath -Force -ErrorAction SilentlyContinue
+  }
+  Start-Sleep -Seconds 2
+}
+
 function Get-LegacyApiListenerPid {
   try {
     $listener = Get-NetTCPConnection -LocalPort $LegacyApiPort -State Listen -ErrorAction SilentlyContinue |
@@ -84,6 +127,119 @@ function Test-Url($Url, $Token = "") {
   } catch {
     return $false
   }
+}
+
+function Test-FileFresh($Path, $MaxAgeSeconds) {
+  try {
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $age = (Get-Date) - (Get-Item -LiteralPath $Path).LastWriteTime
+    return $age.TotalSeconds -le $MaxAgeSeconds
+  } catch {
+    Write-StartupLog "freshness check failed path=$Path error=$($_.Exception.Message)"
+    return $false
+  }
+}
+
+function Get-LegacyDashboardSnapshot($Token) {
+  try {
+    $headers = @{ Accept = "application/json" }
+    if ($Token) { $headers.Authorization = "Bearer $Token" }
+    $dashboard = Invoke-RestMethod -Uri "http://127.0.0.1:$LegacyApiPort/dashboard" -Headers $headers -TimeoutSec 3
+    $latest = @($dashboard.rounds) | Select-Object -First 1
+    if (-not $latest) {
+      return [pscustomobject]@{
+        Ok = $true
+        Signature = "empty-rounds"
+        LatestId = ""
+        Result = ""
+        Banker = ""
+        Player = ""
+        RecordedAt = ""
+      }
+    }
+
+    $latestId = [string]$latest.id
+    $result = [string]$latest.resultado
+    $banker = [string]$latest.BankerScore
+    $player = [string]$latest.PlayerScore
+    $recordedAt = [string]$latest.recordedAt
+    $signature = "$latestId|$result|$banker|$player|$recordedAt"
+    return [pscustomobject]@{
+      Ok = $true
+      Signature = $signature
+      LatestId = $latestId
+      Result = $result
+      Banker = $banker
+      Player = $player
+      RecordedAt = $recordedAt
+    }
+  } catch {
+    Write-StartupLog "legacy dashboard snapshot failed: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+function Read-StaleState {
+  if (-not (Test-Path -LiteralPath $StaleStatePath)) { return $null }
+  try {
+    return Get-Content -LiteralPath $StaleStatePath -Raw | ConvertFrom-Json
+  } catch {
+    Write-StartupLog "legacy stale state unreadable: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+function Write-StaleState($Signature, $ChangedAt, $Failures = 0) {
+  $state = [pscustomobject]@{
+    signature = [string]$Signature
+    changedAt = $ChangedAt.ToString("o")
+    failures = [int]$Failures
+    checkedAt = (Get-Date).ToString("o")
+  }
+  $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $StaleStatePath -Encoding UTF8
+}
+
+function Test-LegacyCollectorFresh($Token) {
+  if ($ForceRestart) {
+    return [pscustomobject]@{ ShouldRestart = $true; Reason = "manual-force-restart" }
+  }
+
+  $now = Get-Date
+  $snapshot = Get-LegacyDashboardSnapshot $Token
+  $state = Read-StaleState
+
+  if (-not $snapshot) {
+    $failures = 1
+    if ($state -and $state.failures) { $failures = [int]$state.failures + 1 }
+    Write-StaleState "dashboard-failure" $now $failures
+    if ($failures -ge 3) {
+      return [pscustomobject]@{ ShouldRestart = $true; Reason = "legacy-dashboard-failures-$failures" }
+    }
+    return [pscustomobject]@{ ShouldRestart = $false; Reason = "legacy-dashboard-failure-$failures" }
+  }
+
+  if (-not $state -or [string]$state.signature -ne [string]$snapshot.Signature) {
+    Write-StaleState $snapshot.Signature $now 0
+    Write-StartupLog "legacy collector moving latest=$($snapshot.LatestId) result=$($snapshot.Result) score=$($snapshot.Banker)-$($snapshot.Player)"
+    return [pscustomobject]@{ ShouldRestart = $false; Reason = "moving" }
+  }
+
+  $changedAt = $now
+  try {
+    $changedAt = [DateTime]::Parse([string]$state.changedAt)
+  } catch {
+    $changedAt = $now
+  }
+
+  $staleSeconds = [int]([Math]::Max(0, ($now - $changedAt).TotalSeconds))
+  Write-StaleState $snapshot.Signature $changedAt 0
+  Write-StartupLog "legacy collector unchanged latest=$($snapshot.LatestId) score=$($snapshot.Banker)-$($snapshot.Player) staleSeconds=$staleSeconds"
+
+  if ($staleSeconds -ge $StaleAfterSeconds) {
+    return [pscustomobject]@{ ShouldRestart = $true; Reason = "legacy-round-stale-$staleSeconds-seconds" }
+  }
+
+  return [pscustomobject]@{ ShouldRestart = $false; Reason = "fresh-enough" }
 }
 
 function Set-ProcessEnv($StartInfo, $Name, $Value) {
@@ -130,9 +286,16 @@ if (-not $legacyToken -or -not $officialToken) {
   throw "Legacy collector bridge tokens are missing."
 }
 
+$freshness = Test-LegacyCollectorFresh $legacyToken
+if ($freshness.ShouldRestart) {
+  Write-StartupLog "restarting legacy collector reason=$($freshness.Reason)"
+  Stop-LegacyCollectorStack $freshness.Reason
+}
+
 $collectorProcesses = Get-CollectorProcesses
 $legacyListenerPid = Get-LegacyApiListenerPid
-if ($collectorProcesses.Count -eq 0 -and -not $legacyListenerPid) {
+$legacyDashboardReady = Test-Url "http://127.0.0.1:$LegacyApiPort/dashboard" $legacyToken
+if ($collectorProcesses.Count -eq 0 -and -not $legacyListenerPid -and -not $legacyDashboardReady) {
   Write-StartupLog "starting legacy collector isolated port=$LegacyApiPort"
   $collectorInfo = New-Object System.Diagnostics.ProcessStartInfo
   $collectorInfo.FileName = $LegacyPython
@@ -150,7 +313,7 @@ if ($collectorProcesses.Count -eq 0 -and -not $legacyListenerPid) {
   Start-Sleep -Seconds 4
 } else {
   $collectorPidText = ($collectorProcesses.ProcessId -join ",")
-  Write-StartupLog "legacy collector present count=$($collectorProcesses.Count) listener=$legacyListenerPid pids=$collectorPidText keeping collector/browser alive"
+  Write-StartupLog "legacy collector present count=$($collectorProcesses.Count) listener=$legacyListenerPid dashboard=$legacyDashboardReady pids=$collectorPidText keeping collector/browser alive"
 }
 
 if (-not (Test-Url "http://127.0.0.1:$LegacyApiPort/dashboard" $legacyToken)) {
@@ -160,7 +323,8 @@ if (-not (Test-Url "http://127.0.0.1:$LegacyApiPort/dashboard" $legacyToken)) {
 }
 
 $bridgeProcesses = Get-BridgeProcesses
-if ($bridgeProcesses.Count -eq 0) {
+$bridgeLogFresh = Test-FileFresh $BridgeLog 10
+if ($bridgeProcesses.Count -eq 0 -and -not $bridgeLogFresh) {
   Write-StartupLog "starting collector bridge $LegacyApiPort -> $SignalsApiPort"
   $bridgeInfo = New-Object System.Diagnostics.ProcessStartInfo
   $bridgeInfo.FileName = "python.exe"
@@ -174,6 +338,8 @@ if ($bridgeProcesses.Count -eq 0) {
   if ($adminPassword) { Set-ProcessEnv $bridgeInfo "SNIPER_ADMIN_PASSWORD" $adminPassword }
   Set-ProcessEnv $bridgeInfo "SNIPER_ADMIN_TOKEN" $officialToken
   [System.Diagnostics.Process]::Start($bridgeInfo) | Out-Null
+} elseif ($bridgeProcesses.Count -eq 0 -and $bridgeLogFresh) {
+  Write-StartupLog "collector bridge log fresh; not starting duplicate"
 } elseif ($bridgeProcesses.Count -gt 1) {
   $bridgeProcesses | Sort-Object ProcessId | Select-Object -Skip 1 | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue

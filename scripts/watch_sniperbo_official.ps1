@@ -15,6 +15,7 @@ $PortGuardScript = Join-Path $ScriptDir "sniper_port_guard.ps1"
 $StartPublisherScript = Join-Path $ScriptDir "start_official_publisher.ps1"
 $StartSignalsScript = Join-Path $ScriptDir "start_official_signals_api.ps1"
 $StartLegacyCollectorBridgeScript = Join-Path $ScriptDir "start_legacy_collector_bridge.ps1"
+$PublisherLog = Join-Path $ProjectRoot "official_dashboard_publisher.log"
 
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
@@ -74,6 +75,17 @@ function Test-Url($Url) {
     $response = Invoke-WebRequest -Uri $Url -Method GET -TimeoutSec 3 -UseBasicParsing
     return [int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500
   } catch {
+    return $false
+  }
+}
+
+function Test-FileFresh($Path, $MaxAgeSeconds) {
+  try {
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $age = (Get-Date) - (Get-Item -LiteralPath $Path).LastWriteTime
+    return $age.TotalSeconds -le $MaxAgeSeconds
+  } catch {
+    Write-WatchLog "freshness check failed path=$Path error=$($_.Exception.Message)"
     return $false
   }
 }
@@ -185,6 +197,13 @@ function Clean-LocalDuplicates($Processes) {
 
 function Ensure-Frontend($Processes) {
   $frontendOk = Test-Url "http://127.0.0.1:$FrontendPort/"
+  if ($frontendOk) {
+    $listener = Get-Listeners $FrontendPort | Select-Object -First 1
+    $pidText = if ($listener) { $listener.PID } else { "unknown" }
+    Write-WatchLog "frontend ok port=$FrontendPort pid=$pidText"
+    return
+  }
+
   $frontendProcesses = Get-OfficialFrontendProcesses $Processes
   $frontendListeners = @(Get-Listeners $FrontendPort | Where-Object {
     $_.CommandLine -match [regex]::Escape($ProjectRoot)
@@ -248,6 +267,11 @@ function Ensure-Publisher($Processes) {
 
   if ($publishers.Count -eq 1) {
     Write-WatchLog "publisher ok pid=$($publishers[0].ProcessId)"
+    return
+  }
+
+  if (Test-FileFresh $PublisherLog 45) {
+    Write-WatchLog "publisher ok log-fresh path=$PublisherLog"
     return
   }
 
