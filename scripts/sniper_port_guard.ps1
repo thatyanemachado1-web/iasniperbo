@@ -12,13 +12,10 @@ $LogDir = Join-Path $ProjectRoot "logs"
 $LogPath = Join-Path $LogDir "port_guard.log"
 $LockPath = Join-Path $LogDir "signals-api.pid.lock"
 $OldMarkers = @(
-  "2026-05-24",
-  "voc-um-desenvolvedor-python",
   "start_sniperbo_auto.ps1",
   "sniper_bo_scraper.py",
   "dashboard_remote_publisher.py",
   "__disable_validator_history__.sqlite3",
-  "browser_profile_77super",
   "local-codex-test-token"
 )
 
@@ -81,10 +78,22 @@ function Get-AllProcessesSafe {
 }
 
 function Test-OldSniperProcess($CommandLine) {
+  if (Test-AllowedLegacyCollectorProcess $CommandLine) {
+    return $false
+  }
   foreach ($marker in $OldMarkers) {
     if ($CommandLine -like "*$marker*") { return $true }
   }
   return $false
+}
+
+function Test-AllowedLegacyCollectorProcess($CommandLine) {
+  if (-not $CommandLine) { return $false }
+  return (
+    $CommandLine -like "*sniper_bo_scraper.py*" -and
+    $CommandLine -like "*official_legacy_collector.log*" -and
+    $CommandLine -notlike "*SNIPER_ADMIN_API_PORT=8787*"
+  )
 }
 
 function Get-PortListeners($Port) {

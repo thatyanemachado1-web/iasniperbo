@@ -61,7 +61,8 @@ function Get-PublisherProcesses {
   Get-CimInstance Win32_Process |
     Where-Object {
       $_.Name -match "python" -and
-      $_.CommandLine -match "official_dashboard_publisher.py"
+      $_.CommandLine -match "official_dashboard_publisher.py" -and
+      $_.CommandLine -notmatch "legacy_collector_bridge\.log"
     }
 }
 

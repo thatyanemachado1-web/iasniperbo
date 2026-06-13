@@ -14,6 +14,7 @@ $WatchLog = Join-Path $LogDir "sniperbo_official_watchdog.log"
 $PortGuardScript = Join-Path $ScriptDir "sniper_port_guard.ps1"
 $StartPublisherScript = Join-Path $ScriptDir "start_official_publisher.ps1"
 $StartSignalsScript = Join-Path $ScriptDir "start_official_signals_api.ps1"
+$StartLegacyCollectorBridgeScript = Join-Path $ScriptDir "start_legacy_collector_bridge.ps1"
 
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
@@ -110,7 +111,8 @@ function Get-OfficialPublisherProcesses($Processes) {
     $directMatches = @(Get-CimInstance Win32_Process -Property ProcessId,Name,CommandLine -ErrorAction Stop |
       Where-Object {
         $_.Name -match "python" -and
-        $_.CommandLine -like "*official_dashboard_publisher.py*"
+        $_.CommandLine -like "*official_dashboard_publisher.py*" -and
+        $_.CommandLine -notlike "*legacy_collector_bridge.log*"
       } |
       ForEach-Object {
         [pscustomobject]@{
@@ -128,13 +130,15 @@ function Get-OfficialPublisherProcesses($Processes) {
 
   return @($Processes | Where-Object {
     $_.Name -match "python" -and
-    $_.CommandLine -like "*official_dashboard_publisher.py*"
+    $_.CommandLine -like "*official_dashboard_publisher.py*" -and
+    $_.CommandLine -notlike "*legacy_collector_bridge.log*"
   })
 }
 
 function Stop-OldSniperPackage($Processes) {
-  $markers = @("start_sniperbo_auto.ps1", "sniper_bo_scraper.py", "2026-05-24\\voc-um-desenvolvedor-python")
+  $markers = @("start_sniperbo_auto.ps1", "sniper_bo_scraper.py")
   foreach ($process in $Processes) {
+    if (Test-AllowedLegacyCollectorProcess $process.CommandLine) { continue }
     foreach ($marker in $markers) {
       if ($process.CommandLine -like "*$marker*") {
         if ($process.CommandLine -match "official_dashboard_publisher.py") { continue }
@@ -143,6 +147,14 @@ function Stop-OldSniperPackage($Processes) {
       }
     }
   }
+}
+
+function Test-AllowedLegacyCollectorProcess($CommandLine) {
+  if (-not $CommandLine) { return $false }
+  return (
+    $CommandLine -like "*sniper_bo_scraper.py*" -and
+    $CommandLine -like "*official_legacy_collector.log*"
+  )
 }
 
 function Clean-LocalDuplicates($Processes) {
@@ -243,6 +255,20 @@ function Ensure-Publisher($Processes) {
   & $StartPublisherScript -Quiet
 }
 
+function Ensure-LegacyCollectorBridge {
+  if (-not (Test-Path -LiteralPath $StartLegacyCollectorBridgeScript)) {
+    Write-WatchLog "legacy collector bridge script missing"
+    return
+  }
+
+  try {
+    & $StartLegacyCollectorBridgeScript -LegacyApiPort 8791 -SignalsApiPort $SignalsApiPort -Quiet | Out-Null
+    Write-WatchLog "legacy collector bridge checked"
+  } catch {
+    Write-WatchLog "legacy collector bridge failed: $($_.Exception.Message)"
+  }
+}
+
 function Run-WatchdogTick {
   if (Test-Path -LiteralPath $PortGuardScript) {
     & $PortGuardScript -FrontendPort $FrontendPort -SignalsApiPort $SignalsApiPort | Out-Null
@@ -253,6 +279,7 @@ function Run-WatchdogTick {
   Clean-LocalDuplicates $processes
   Ensure-Frontend $processes
   Ensure-SignalsApi
+  Ensure-LegacyCollectorBridge
   $processes = Get-ProcessRecords
   Ensure-Publisher $processes
 }
