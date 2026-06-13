@@ -434,6 +434,7 @@ const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 const localAiRateBuckets = new Map<string, { count: number; resetAt: number }>();
 const localAiCache = new Map<string, { response: string; createdAt: number }>();
 const localAiCooldowns = new Map<string, number>();
+const SERVER_STARTED_AT = Date.now();
 
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
@@ -516,6 +517,9 @@ export default {
       const adminRedirect = redirectLegacyAdminRoute(request);
       if (adminRedirect) return withSecurityHeaders(adminRedirect);
 
+      const healthResponse = handleHealthRequest(request, env);
+      if (healthResponse) return withSecurityHeaders(healthResponse);
+
       const rateLimitResponse = handleRateLimit(request);
       if (rateLimitResponse) return withSecurityHeaders(rateLimitResponse);
 
@@ -563,6 +567,22 @@ export default {
     }
   },
 };
+
+function handleHealthRequest(request: Request, env: unknown) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/health") return null;
+
+  const uptimeSeconds = Math.max(0, Math.round((Date.now() - SERVER_STARTED_AT) / 1000));
+  return json({
+    status: "online",
+    service: "signals-api",
+    port: readServerNumber(env, "SIGNALS_API_PORT", 8787),
+    pid: typeof process !== "undefined" ? String(process.pid) : "edge-runtime",
+    uptime: `${uptimeSeconds}s`,
+    uptimeSeconds,
+    startedAt: new Date(SERVER_STARTED_AT).toISOString(),
+  });
+}
 
 function redirectLegacyAdminRoute(request: Request) {
   if (request.method !== "GET" && request.method !== "HEAD") return null;
@@ -8680,9 +8700,13 @@ function clampPercent(value: unknown) {
 }
 
 async function isDashboardAuthorized(request: Request, _url: URL, env: unknown) {
-  const token = readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", "");
+  const acceptedTokens = [
+    readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", ""),
+    readNamedServerSecret(env, "SNIPER_PUBLISHER_TOKEN", ""),
+    readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", ""),
+  ].filter(Boolean);
   const headerToken = getBearerToken(request);
-  if (token && headerToken === token) return true;
+  if (headerToken && acceptedTokens.includes(headerToken)) return true;
   if (!headerToken) return false;
 
   const session = await verifySessionToken(env, headerToken);

@@ -32,6 +32,15 @@ def env_value(env: dict[str, str], name: str, default: str = "") -> str:
     return os.getenv(name) or env.get(name, default)
 
 
+def unique_tokens(*values: str) -> list[str]:
+    tokens: list[str] = []
+    for value in values:
+        token = str(value or "").strip()
+        if token and token not in tokens:
+            tokens.append(token)
+    return tokens
+
+
 def request_json(
     url: str,
     *,
@@ -90,9 +99,11 @@ def publish_once(args: argparse.Namespace, token: str, local_token: str) -> dict
 
 
 def main() -> int:
+    default_signals_port = os.getenv("SIGNALS_API_PORT") or os.getenv("VITE_SIGNALS_API_PORT") or "8787"
+    default_local_url = os.getenv("SNIPER_LOCAL_DASHBOARD_URL") or f"http://127.0.0.1:{default_signals_port}/dashboard"
     parser = argparse.ArgumentParser(description="Publish local live dashboard to sniperbo.com.")
     parser.add_argument("--env-file", type=Path, required=True)
-    parser.add_argument("--local-url", default="http://127.0.0.1:8787/dashboard")
+    parser.add_argument("--local-url", default=default_local_url)
     parser.add_argument("--remote-base-url", default="https://sniperbo.com")
     parser.add_argument("--remote-url", default="https://sniperbo.com/dashboard")
     parser.add_argument("--interval", type=float, default=0.7)
@@ -111,19 +122,43 @@ def main() -> int:
     env = load_env_file(args.env_file)
     admin_email = env_value(env, "SNIPER_ADMIN_EMAIL") or env_value(env, "SNIPER_ADMIN_EMAILS").split(",", 1)[0].strip()
     admin_password = env_value(env, "SNIPER_ADMIN_PASSWORD")
-    local_token = env_value(env, "SNIPER_ADMIN_TOKEN") or env_value(env, "SNIPER_DASHBOARD_TOKEN")
-    if not admin_email or not admin_password or not local_token:
-        logging.error("Missing admin email/password or local token in env file.")
+    local_token = (
+        env_value(env, "SNIPER_LOCAL_DASHBOARD_TOKEN")
+        or env_value(env, "SNIPER_ADMIN_TOKEN")
+        or env_value(env, "SNIPER_DASHBOARD_TOKEN")
+    )
+    remote_tokens = unique_tokens(
+        env_value(env, "SNIPER_REMOTE_DASHBOARD_TOKEN"),
+        env_value(env, "SNIPER_PUBLISHER_TOKEN"),
+        env_value(env, "SNIPER_DASHBOARD_TOKEN"),
+        env_value(env, "SNIPER_ADMIN_TOKEN"),
+    )
+    if not local_token:
+        logging.error("Missing local dashboard token in env file.")
         return 2
 
     token = ""
+    token_index = 0
+    using_admin_session = False
     logging.info("Official dashboard publisher started: %s -> %s", args.local_url, args.remote_url)
     while True:
         try:
             if not token:
-                token = admin_login(args.remote_base_url, admin_email, admin_password, args.remote_timeout)
-                logging.info("Admin session created.")
+                if token_index < len(remote_tokens):
+                    token = remote_tokens[token_index]
+                    token_index += 1
+                    using_admin_session = False
+                    logging.info("Using dashboard publisher token candidate %s/%s.", token_index, len(remote_tokens))
+                else:
+                    if not admin_email or not admin_password:
+                        logging.error("Missing admin email/password and no valid remote dashboard token is configured.")
+                        time.sleep(max(1.0, args.interval))
+                        continue
+                    token = admin_login(args.remote_base_url, admin_email, admin_password, args.remote_timeout)
+                    using_admin_session = True
+                    logging.info("Admin session created.")
             response = publish_once(args, token, local_token)
+            token_index = 0
             dashboard = response.get("dashboard") if isinstance(response, dict) else {}
             rounds = len((dashboard or {}).get("rounds") or [])
             signal = (dashboard or {}).get("currentSignal") or {}
@@ -137,7 +172,10 @@ def main() -> int:
             body = exc.read().decode("utf-8", errors="replace")[:180]
             logging.warning("Publish HTTP %s: %s", exc.code, body)
             if exc.code in {401, 403}:
+                if using_admin_session:
+                    token_index = 0
                 token = ""
+                using_admin_session = False
         except (TimeoutError, URLError, OSError, RuntimeError) as exc:
             logging.warning("Publish failed: %s", exc)
 

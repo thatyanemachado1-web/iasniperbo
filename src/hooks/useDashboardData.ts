@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
+import { LOCAL_SIGNALS_API_BASE_URL } from "@/lib/runtimePorts";
 import { readUserSession } from "@/lib/userSession";
 import { useEffect, useMemo, useState } from "react";
 import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } from "@/types/dashboard";
@@ -12,7 +13,6 @@ const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
 const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v2";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
-const LOCAL_LIVE_API_BASE_URL = "http://127.0.0.1:8787";
 const PUBLIC_LIVE_API_BASE_URL = "https://sniperbo.com";
 const DASHBOARD_SOURCE_STORAGE_KEY = "sniper_admin_api_url";
 const DEFAULT_MODULE_TOGGLES: ModuleToggles = {
@@ -106,7 +106,7 @@ function stripDashboardPath(url: string) {
 function defaultDashboardUrl() {
   if (typeof window === "undefined") return "";
   if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
-    return ensureDashboardPath(LOCAL_LIVE_API_BASE_URL);
+    return ensureDashboardPath(LOCAL_SIGNALS_API_BASE_URL);
   }
   return ensureDashboardPath(PUBLIC_LIVE_API_BASE_URL);
 }

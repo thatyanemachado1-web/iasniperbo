@@ -15,6 +15,7 @@ import type {
 import type { CrmClient, CrmDeal, CrmInvoice, CrmResponse } from "@/types/crm";
 import type { ModuleToggles } from "@/types/dashboard";
 import type { SalesSettings } from "@/lib/accessApi";
+import { LOCAL_SIGNALS_API_BASE_URL } from "@/lib/runtimePorts";
 import type { AnnouncementTone, SiteContentSettings } from "@/lib/siteContent";
 
 export interface LocalAiAdminSettings {
@@ -56,7 +57,7 @@ export interface LocalAiAdminLog {
 
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
-export const LOCAL_ADMIN_API_URL = "http://127.0.0.1:8787";
+export const LOCAL_ADMIN_API_URL = LOCAL_SIGNALS_API_BASE_URL;
 export const PUBLIC_ADMIN_API_URL = "https://sniperbo.com";
 const ALLOWED_REMOTE_API_HOSTS = new Set(["sniperbo.com", "www.sniperbo.com"]);
 
