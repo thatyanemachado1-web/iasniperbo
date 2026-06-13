@@ -3028,7 +3028,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
   }
 
   if (request.method === "POST" && url.pathname === "/validator/round-history") {
-    if (!(await isDashboardAuthorized(request, url, env))) {
+    if (!(await isDashboardWriteAuthorized(request, url, env))) {
       return json({ error: "NÃ£o autorizado." }, 401);
     }
 
@@ -3089,7 +3089,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     request.method === "POST" &&
     (url.pathname === "/dashboard" || url.pathname === "/dashboard/signal")
   ) {
-    if (!(await isDashboardAuthorized(request, url, env))) {
+    if (!(await isDashboardWriteAuthorized(request, url, env))) {
       return json({ error: "Não autorizado." }, 401);
     }
 
@@ -8713,6 +8713,26 @@ async function isDashboardAuthorized(request: Request, _url: URL, env: unknown) 
   if (!session) return false;
   if (session.scope !== "owner" && session.scope !== "admin_approver") return false;
   return sessionMatchesRequestBinding(env, request, session);
+}
+
+async function isDashboardWriteAuthorized(request: Request, url: URL, env: unknown) {
+  if (await isDashboardAuthorized(request, url, env)) return true;
+
+  const token = getBearerToken(request);
+  if (!token) return false;
+
+  const session = await verifySessionToken(env, token);
+  if (!session) return false;
+  if (session.scope !== "owner" && session.scope !== "admin_approver") return false;
+
+  if (await sessionMatchesRequestBinding(env, request, session)) return true;
+  return isOfficialDashboardPublisherRequest(request);
+}
+
+function isOfficialDashboardPublisherRequest(request: Request) {
+  return (request.headers.get("user-agent") || "")
+    .toLowerCase()
+    .includes("sniperbo-official-publisher");
 }
 
 function isLocalDevelopmentRequest(request: Request) {
