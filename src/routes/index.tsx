@@ -394,10 +394,10 @@ function LoginPage() {
                 </div>
 
                 <h1 className="landing-title mt-5 max-w-3xl font-black uppercase leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
-                  Chega de entrar no escuro.
+                  NÃO É SORTE. É MÉTODO.
                 </h1>
                 <p className="landing-subtitle mt-4 max-w-2xl font-black uppercase leading-tight text-gradient-brand sm:text-3xl">
-                  O Sniper BO IA lê a mesa antes da maioria.
+                  Crie suas próprias estratégias, valide no histórico e leia a mesa em tempo real com o Sniper BO IA.
                 </p>
                 <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
                   Enquanto a maioria aposta no impulso, o SNIPER BO IA cruza leitura neural, tendência, surf e risco para entregar contexto operacional em tempo real.
