@@ -1,4 +1,5 @@
 import { getInitialApiUrl } from "@/lib/adminApi";
+import { buildLocalNeuralCalendar, localCalendarTotalRounds } from "@/lib/neuralCalendarLocalFallback";
 import { readUserSession } from "@/lib/userSession";
 import type { NeuralCalendarPayload } from "@/types/neuralCalendar";
 
@@ -16,18 +17,28 @@ export async function fetchNeuralCalendar(params: {
   if (params.date) search.set("date", params.date);
 
   const token = readUserSession().clientToken || "";
-  const response = await fetch(`${publicApiBaseUrl()}/calendar/neural?${search.toString()}`, {
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(readApiError(text) || "Nao foi possivel carregar o Calendario Neural.");
+  const localCalendar = buildLocalNeuralCalendar(params);
+  try {
+    const response = await fetch(`${publicApiBaseUrl()}/calendar/neural?${search.toString()}`, {
+      headers: {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      if (localCalendar) return localCalendar;
+      throw new Error(readApiError(text) || "Nao foi possivel carregar o Calendario Neural.");
+    }
+    const data = (await response.json()) as { calendar: NeuralCalendarPayload };
+    const serverCalendar = data.calendar;
+    return localCalendarTotalRounds(localCalendar) > localCalendarTotalRounds(serverCalendar)
+      ? localCalendar
+      : serverCalendar;
+  } catch (error) {
+    if (localCalendar) return localCalendar;
+    throw error;
   }
-  const data = (await response.json()) as { calendar: NeuralCalendarPayload };
-  return data.calendar;
 }
 
 function readApiError(text: string) {

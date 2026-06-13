@@ -174,7 +174,9 @@ function NeuralCalendarPage() {
                 <div className="text-xl font-black">
                   {calendar?.month.label || `${monthLabels[month - 1]} ${year}`}
                 </div>
-                <div className="text-xs text-muted-foreground">Coleta real desde 10/06/2026</div>
+                <div className="text-xs text-muted-foreground">
+                  Coleta real desde {calendar ? formatDateShort(calendar.startDate) : "--/--"}
+                </div>
               </div>
               <button
                 type="button"
