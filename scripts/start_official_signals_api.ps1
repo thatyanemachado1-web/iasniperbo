@@ -10,12 +10,29 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 $LogDir = Join-Path $ProjectRoot "logs"
 $StartupLog = Join-Path $LogDir "signals_api_startup.log"
 $RuntimeLog = Join-Path $LogDir "signals_api_runtime.log"
+$EnvPath = Join-Path $ProjectRoot ".env"
 
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
 function Write-StartupLog($Message) {
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
   Add-Content -LiteralPath $StartupLog -Value "$timestamp $Message"
+}
+
+function Read-EnvFile($Path) {
+  $values = @{}
+  if (-not (Test-Path -LiteralPath $Path)) { return $values }
+
+  Get-Content -LiteralPath $Path | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { return }
+    $parts = $line.Split("=", 2)
+    $name = $parts[0].Trim()
+    $value = $parts[1].Trim().Trim('"').Trim("'")
+    if ($name) { $values[$name] = $value }
+  }
+
+  return $values
 }
 
 function Test-SignalsHealth {
@@ -71,6 +88,11 @@ function Set-ProcessEnv($ProcessInfo, $Name, $Value) {
   } else {
     $ProcessInfo.EnvironmentVariables.Add($Name, [string]$Value)
   }
+}
+
+$localEnv = Read-EnvFile $EnvPath
+foreach ($name in $localEnv.Keys) {
+  Set-ProcessEnv $processInfo $name $localEnv[$name]
 }
 
 Set-ProcessEnv $processInfo "PORT" $SignalsApiPort

@@ -3237,14 +3237,8 @@ async function handleNeuralCalendarBackfillRequest(request: Request, url: URL, e
     return json({ error: "Backfill permitido apenas para administrador." }, 403);
   }
 
-  return json(
-    {
-      ok: false,
-      disabled: true,
-      error: "Backfill do Calendario Neural desativado. O calendario agora registra somente resultados reais novos.",
-    },
-    409,
-  );
+  const backfill = await runEngineCalendarBackfill(env);
+  return json({ ok: backfill.ok, backfill }, backfill.ok ? 200 : 500);
 }
 
 async function resetEngineCalendarAggregates(env: unknown) {
@@ -3256,27 +3250,35 @@ async function resetEngineCalendarAggregates(env: unknown) {
     ENGINE_YEARLY_STATS_TABLE,
   ];
   const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
-  const tableResults = durableConfigured
-    ? await Promise.all(tables.map((table) => deleteSupabaseRowsForReset(env, table)))
-    : tables.map((table) => ({ table, ok: true, status: 0, skipped: "supabase_not_configured" }));
-  const ok = tableResults.every((result) => result.ok);
+  const tableResults = tables.map((table) => ({
+    table,
+    ok: true,
+    status: 0,
+    preserved: true,
+    action: "not_deleted",
+  }));
 
-  if (ok) {
-    liveEngineHourlyStats = [];
-    liveEngineDailyStats = [];
-    liveEngineWeeklyStats = [];
-    liveEngineMonthlyStats = [];
-    liveEngineYearlyStats = [];
-    liveEngineCalendarBackfillKeys = {};
-    neuralCalendarHydratedFromTables = true;
-    await saveLiveState(env);
-  }
+  liveEngineHourlyStats = [];
+  liveEngineDailyStats = [];
+  liveEngineWeeklyStats = [];
+  liveEngineMonthlyStats = [];
+  liveEngineYearlyStats = [];
+  neuralCalendarHydratedFromTables = false;
+  await hydrateNeuralCalendarStatsFromTables(env);
+  await saveLiveState(env);
 
   return {
-    ok,
+    ok: true,
     durableConfigured,
-    clearedTables: tables,
+    clearedTables: [],
+    preservedTables: tables,
+    mode: "non_destructive_cache_reload",
     preserved: [
+      "engine_hourly_stats",
+      "engine_daily_stats",
+      "engine_weekly_stats",
+      "engine_monthly_stats",
+      "engine_yearly_stats",
       "validator_rounds",
       "raw_round_history",
       "users",
