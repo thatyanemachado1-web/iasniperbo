@@ -2913,6 +2913,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/dashboard/round-history" ||
       url.pathname === "/calendar/neural" ||
       url.pathname === "/calendar/neural/backfill" ||
+      url.pathname === "/calendar/neural/reset" ||
       url.pathname === "/validator/validate" ||
       url.pathname === "/validator/round-history" ||
       url.pathname === "/validator/patterns" ||
@@ -2927,6 +2928,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
   ) {
     return json(null, 204);
   }
+
+  const neuralCalendarResetResponse = await handleNeuralCalendarResetRequest(request, url, env);
+  if (neuralCalendarResetResponse) return neuralCalendarResetResponse;
 
   const neuralCalendarBackfillResponse = await handleNeuralCalendarBackfillRequest(request, url, env);
   if (neuralCalendarBackfillResponse) return neuralCalendarBackfillResponse;
@@ -3188,6 +3192,19 @@ async function handleNeuralCalendarRequest(request: Request, url: URL, env: unkn
   });
 }
 
+async function handleNeuralCalendarResetRequest(request: Request, url: URL, env: unknown) {
+  if (url.pathname !== "/calendar/neural/reset") return null;
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
+
+  if (!(await isDashboardAuthorized(request, url, env))) {
+    return json({ error: "Reset permitido apenas para administrador." }, 403);
+  }
+
+  const reset = await resetEngineCalendarAggregates(env);
+  return json({ ok: reset.ok, reset }, reset.ok ? 200 : 500);
+}
+
 async function handleNeuralCalendarBackfillRequest(request: Request, url: URL, env: unknown) {
   if (url.pathname !== "/calendar/neural/backfill") return null;
   if (request.method === "OPTIONS") return json(null, 204);
@@ -3197,8 +3214,57 @@ async function handleNeuralCalendarBackfillRequest(request: Request, url: URL, e
     return json({ error: "Backfill permitido apenas para administrador." }, 403);
   }
 
-  const report = await runEngineCalendarBackfill(env);
-  return json({ ok: report.ok, backfill: report }, report.ok ? 200 : 500);
+  return json(
+    {
+      ok: false,
+      disabled: true,
+      error: "Backfill do Calendario Neural desativado. O calendario agora registra somente resultados reais novos.",
+    },
+    409,
+  );
+}
+
+async function resetEngineCalendarAggregates(env: unknown) {
+  const tables = [
+    ENGINE_HOURLY_STATS_TABLE,
+    ENGINE_DAILY_STATS_TABLE,
+    ENGINE_WEEKLY_STATS_TABLE,
+    ENGINE_MONTHLY_STATS_TABLE,
+    ENGINE_YEARLY_STATS_TABLE,
+  ];
+  const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
+  const tableResults = durableConfigured
+    ? await Promise.all(tables.map((table) => deleteSupabaseRowsForReset(env, table)))
+    : tables.map((table) => ({ table, ok: true, status: 0, skipped: "supabase_not_configured" }));
+  const ok = tableResults.every((result) => result.ok);
+
+  if (ok) {
+    liveEngineHourlyStats = [];
+    liveEngineDailyStats = [];
+    liveEngineWeeklyStats = [];
+    liveEngineMonthlyStats = [];
+    liveEngineYearlyStats = [];
+    liveEngineCalendarBackfillKeys = {};
+    neuralCalendarHydratedFromTables = true;
+    await saveLiveState(env);
+  }
+
+  return {
+    ok,
+    durableConfigured,
+    clearedTables: tables,
+    preserved: [
+      "validator_rounds",
+      "raw_round_history",
+      "users",
+      "clients",
+      "subscriptions",
+      "payments",
+      "original_engines",
+    ],
+    tableResults,
+    resetAt: new Date().toISOString(),
+  };
 }
 
 async function runEngineCalendarBackfill(env: unknown): Promise<EngineCalendarBackfillReport> {
@@ -10066,6 +10132,31 @@ async function deleteSupabaseRows(env: unknown, table: string, query: string) {
     }
   } catch (error) {
     console.warn(`Não foi possível apagar ${table}.`, error);
+  }
+}
+
+async function deleteSupabaseRowsForReset(env: unknown, table: string) {
+  const config = getSupabasePersistenceConfig(env);
+  if (!config) return { table, ok: false, status: 0, error: "Supabase nao configurado." };
+
+  try {
+    const response = await fetch(`${config.url}/rest/v1/${table}?id=not.is.null`, {
+      method: "DELETE",
+      headers: {
+        ...supabasePersistenceHeaders(config.key),
+        Prefer: "return=minimal",
+      },
+    });
+    const ok = response.ok || response.status === 404 || response.status === 406;
+    if (!ok) {
+      const error = await response.text().catch(() => "");
+      console.warn(`Nao foi possivel resetar ${table} (${response.status}).`);
+      return { table, ok: false, status: response.status, error };
+    }
+    return { table, ok: true, status: response.status };
+  } catch (error) {
+    console.warn(`Nao foi possivel resetar ${table}.`, error);
+    return { table, ok: false, status: 0, error: errorMessage(error) };
   }
 }
 
