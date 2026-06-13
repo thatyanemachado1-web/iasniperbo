@@ -1,11 +1,10 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import {
   BarChart3,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Crown,
   Download,
   ShieldCheck,
 } from "lucide-react";
@@ -15,7 +14,6 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { Button } from "@/components/ui/button";
 import { fetchNeuralCalendar } from "@/lib/neuralCalendarApi";
-import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import type {
   NeuralCalendarClassification,
   NeuralCalendarDailyStat,
@@ -40,8 +38,6 @@ const rangeOptions = [
 ] as const;
 
 function NeuralCalendarPage() {
-  const session = readUserSession();
-  const fullAccess = hasFullAccess(session);
   const now = new Date();
   const [range, setRange] = useState("este_mes");
   const [year, setYear] = useState(now.getFullYear());
@@ -53,7 +49,6 @@ function NeuralCalendarPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!fullAccess) return;
     let active = true;
     setStatus("loading");
     fetchNeuralCalendar({ year, month, date: selectedDate, range })
@@ -72,37 +67,12 @@ function NeuralCalendarPage() {
     return () => {
       active = false;
     };
-  }, [fullAccess, month, range, selectedDate, year]);
+  }, [month, range, selectedDate, year]);
 
   const selectedHourStat = useMemo(() => {
     if (!calendar || selectedHour === null) return null;
     return calendar.selectedHours.find((hour) => hour.hour === selectedHour) || null;
   }, [calendar, selectedHour]);
-
-  if (!fullAccess) {
-    return (
-      <div className="space-y-4">
-        <ModuleHeader />
-        <GlassCard className="p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-lg font-black">Calendario Neural premium</div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Disponivel para usuarios Premium e VIP com historico real coletado.
-              </p>
-            </div>
-            <Link
-              to="/app/planos"
-              className="inline-flex items-center justify-center gap-2 rounded-xl btn-gold-grad px-4 py-3 text-sm font-black"
-            >
-              <Crown className="size-4" />
-              Liberar Premium
-            </Link>
-          </div>
-        </GlassCard>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4">

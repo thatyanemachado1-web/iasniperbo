@@ -32,9 +32,7 @@ export async function fetchNeuralCalendar(params: {
     }
     const data = (await response.json()) as { calendar: NeuralCalendarPayload };
     const serverCalendar = data.calendar;
-    return localCalendarTotalRounds(localCalendar) > localCalendarTotalRounds(serverCalendar)
-      ? localCalendar
-      : serverCalendar;
+    return localCalendarTotalRounds(serverCalendar) > 0 || !localCalendar ? serverCalendar : localCalendar;
   } catch (error) {
     if (localCalendar) return localCalendar;
     throw error;

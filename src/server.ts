@@ -3048,17 +3048,7 @@ async function isNeuralCalendarAuthorized(request: Request, url: URL, env: unkno
   const session = await verifySessionToken(env, token);
   if (!session) return false;
   if (!sessionMatchesRequestBinding(env, request, session)) return false;
-  if (session.scope === "owner") return true;
-  if (session.scope !== "client") return false;
-  if (session.approved && (session.plan === "premium" || session.plan === "vip")) return true;
-
-  const client = findClientByEmail(session.email);
-  const overview = client ? buildBillingOverview(client) : null;
-  return Boolean(
-    overview?.approved &&
-      overview.accessMode === "full" &&
-      (overview.plan === "premium" || overview.plan === "vip"),
-  );
+  return session.scope === "owner" || session.scope === "admin_approver" || session.scope === "client";
 }
 
 function trackNeuralCalendarRounds(rounds: Round[]): NeuralCalendarChangeSet {
