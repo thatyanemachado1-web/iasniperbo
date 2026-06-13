@@ -7,6 +7,7 @@ import {
   Clock3,
   Download,
   ShieldCheck,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -17,6 +18,7 @@ import { fetchNeuralCalendar } from "@/lib/neuralCalendarApi";
 import type {
   NeuralCalendarClassification,
   NeuralCalendarDailyStat,
+  NeuralCalendarEngineKey,
   NeuralCalendarHourlyStat,
   NeuralCalendarPayload,
 } from "@/types/neuralCalendar";
@@ -25,215 +27,195 @@ export const Route = createFileRoute("/app/calendario")({
   component: NeuralCalendarPage,
 });
 
-const rangeOptions = [
-  { id: "hoje", label: "Hoje" },
-  { id: "ontem", label: "Ontem" },
-  { id: "7_dias", label: "7 dias" },
-  { id: "30_dias", label: "30 dias" },
-  { id: "90_dias", label: "90 dias" },
-  { id: "este_mes", label: "Este mes" },
-  { id: "mes_passado", label: "Mes passado" },
-  { id: "este_ano", label: "Este ano" },
-  { id: "ano_passado", label: "Ano passado" },
-] as const;
+const CALENDAR_START_DATE = "2026-06-10";
+const CALENDAR_TIMEZONE = "America/Sao_Paulo";
+
+const engineOptions: Array<{ id: NeuralCalendarEngineKey; label: string }> = [
+  { id: "todos", label: "Todos os motores" },
+  { id: "neural_pagante", label: "Neural Pagante" },
+  { id: "padroes_quentes_ia", label: "Padroes Quentes IA" },
+  { id: "surf_analyzer", label: "Surf Analyzer" },
+  { id: "radar_empates", label: "Radar de Empates" },
+  { id: "tendencia", label: "Tendencia" },
+  { id: "personalizado", label: "Personalizado" },
+];
+
+const selectableEngineOptions = engineOptions.filter(
+  (option) => option.id !== "todos" && option.id !== "personalizado",
+);
 
 function NeuralCalendarPage() {
-  const now = new Date();
-  const [range, setRange] = useState("este_mes");
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  const today = useMemo(() => saoPauloTodayParts(), []);
+  const allowedYears = useMemo(() => [today.year - 1, today.year, today.year + 1], [today.year]);
+  const [engineMode, setEngineMode] = useState<NeuralCalendarEngineKey>("todos");
+  const [customEngines, setCustomEngines] = useState<NeuralCalendarEngineKey[]>(
+    selectableEngineOptions.map((option) => option.id),
+  );
+  const [year, setYear] = useState(today.year);
+  const [month, setMonth] = useState(today.month);
   const [selectedDate, setSelectedDate] = useState("");
-  const [calendar, setCalendar] = useState<NeuralCalendarPayload | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
+  const [calendar, setCalendar] = useState<NeuralCalendarPayload | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
+
+  const selectedEngineKeys = useMemo(
+    () =>
+      engineMode === "personalizado"
+        ? customEngines
+        : engineMode === "todos"
+          ? selectableEngineOptions.map((option) => option.id)
+          : [engineMode],
+    [customEngines, engineMode],
+  );
+  const engineParam = selectedEngineKeys.join(",");
+  const engineLabel = useMemo(
+    () =>
+      engineMode === "personalizado"
+        ? `Personalizado (${customEngines.length})`
+        : engineOptions.find((option) => option.id === engineMode)?.label || "Todos os motores",
+    [customEngines.length, engineMode],
+  );
 
   useEffect(() => {
     let active = true;
     setStatus("loading");
-    fetchNeuralCalendar({ year, month, date: selectedDate, range })
+    fetchNeuralCalendar({
+      year,
+      month,
+      date: selectedDate || undefined,
+      range: "este_mes",
+      engine: engineMode,
+      engines: selectedEngineKeys,
+    })
       .then((payload) => {
         if (!active) return;
         setCalendar(payload);
-        setSelectedDate(payload.selected.date);
         setSelectedHour(null);
         setStatus("ready");
       })
       .catch((err) => {
         if (!active) return;
-        setError(err instanceof Error ? err.message : "Falha ao carregar Calendario Neural.");
+        setError(err instanceof Error ? err.message : "Nao foi possivel carregar o Calendario Neural agora.");
         setStatus("error");
       });
     return () => {
       active = false;
     };
-  }, [month, range, selectedDate, year]);
+  }, [engineMode, engineParam, month, selectedDate, selectedEngineKeys, year]);
+
+  const selectedDay = useMemo(() => {
+    if (!calendar || !selectedDate) return null;
+    return calendar.month.days.find((day) => day.date === selectedDate) || null;
+  }, [calendar, selectedDate]);
 
   const selectedHourStat = useMemo(() => {
-    if (!calendar || selectedHour === null) return null;
+    if (!calendar || selectedHour === null || !selectedDate) return null;
     return calendar.selectedHours.find((hour) => hour.hour === selectedHour) || null;
-  }, [calendar, selectedHour]);
+  }, [calendar, selectedDate, selectedHour]);
+
+  const canMovePrevious = canMoveMonth(-1, year, month, allowedYears);
+  const canMoveNext = canMoveMonth(1, year, month, allowedYears);
+
+  function clearDetailSelection() {
+    setSelectedDate("");
+    setSelectedHour(null);
+  }
+
+  function selectMonth(nextMonth: number) {
+    setMonth(nextMonth);
+    clearDetailSelection();
+  }
+
+  function selectYear(nextYear: number) {
+    if (!allowedYears.includes(nextYear)) return;
+    setYear(nextYear);
+    clearDetailSelection();
+  }
+
+  function goToday() {
+    setYear(today.year);
+    setMonth(today.month);
+    setSelectedDate(today.date);
+    setSelectedHour(null);
+  }
+
+  function moveByMonth(delta: number) {
+    if (!canMoveMonth(delta, year, month, allowedYears)) return;
+    const next = new Date(Date.UTC(year, month - 1 + delta, 1));
+    setYear(next.getUTCFullYear());
+    setMonth(next.getUTCMonth() + 1);
+    clearDetailSelection();
+  }
 
   return (
     <div className="space-y-4">
       <ModuleHeader />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(330px,0.65fr)]">
-        <div className="space-y-4">
-          <GlassCard className="p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap gap-2">
-                {rangeOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setRange(option.id)}
-                    className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
-                      range === option.id
-                        ? "border-neon-cyan/60 bg-neon-cyan/15 text-neon-cyan"
-                        : "border-border/70 bg-secondary/20 text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <select
-                  value={month}
-                  onChange={(event) => {
-                    setSelectedDate("");
-                    setMonth(Number(event.target.value));
-                  }}
-                  className="h-10 rounded-xl border border-border/70 bg-background px-3 text-sm font-bold"
-                >
-                  {monthLabels.map((label, index) => (
-                    <option key={label} value={index + 1}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={year}
-                  onChange={(event) => {
-                    setSelectedDate("");
-                    setYear(Number(event.target.value));
-                  }}
-                  className="h-10 rounded-xl border border-border/70 bg-background px-3 text-sm font-bold"
-                >
-                  {(calendar?.years.length ? calendar.years : [year]).map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </GlassCard>
+      <CalendarToolbar
+        allowedYears={allowedYears}
+        year={year}
+        month={month}
+        engineMode={engineMode}
+        customEngines={customEngines}
+        canMovePrevious={canMovePrevious}
+        canMoveNext={canMoveNext}
+        onMoveMonth={moveByMonth}
+        onSelectYear={selectYear}
+        onSelectMonth={selectMonth}
+        onToday={goToday}
+        onEngineModeChange={(value) => {
+          setEngineMode(value);
+          clearDetailSelection();
+        }}
+        onCustomEnginesChange={(value) => {
+          setCustomEngines(value);
+          clearDetailSelection();
+        }}
+      />
 
-          <GlassCard className="p-4">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => moveMonth(-1, year, month, setYear, setMonth, setSelectedDate)}
-                className="flex size-10 items-center justify-center rounded-xl border border-border/70 bg-secondary/20 text-muted-foreground hover:text-foreground"
-              >
-                <ChevronLeft className="size-4" />
-              </button>
-              <div className="text-center">
-                <div className="text-xl font-black">
-                  {calendar?.month.label || `${monthLabels[month - 1]} ${year}`}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  Coleta real desde {calendar ? formatDateShort(calendar.startDate) : "--/--"}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => moveMonth(1, year, month, setYear, setMonth, setSelectedDate)}
-                className="flex size-10 items-center justify-center rounded-xl border border-border/70 bg-secondary/20 text-muted-foreground hover:text-foreground"
-              >
-                <ChevronRight className="size-4" />
-              </button>
-            </div>
+      {status === "error" && (
+        <GlassCard className="border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+          {error || "Nao foi possivel carregar o Calendario Neural agora."}
+        </GlassCard>
+      )}
 
-            {status === "loading" && <CalendarSkeleton />}
-            {status === "error" && (
-              <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-                {error}
-              </div>
-            )}
-            {calendar && status !== "loading" && (
-              <>
-                <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] font-black uppercase text-muted-foreground sm:gap-2">
-                  {["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB"].map((day) => (
-                    <div key={day}>{day}</div>
-                  ))}
-                </div>
-                <div className="mt-2 grid grid-cols-7 gap-1.5 sm:gap-2">
-                  {Array.from({ length: calendar.month.firstWeekday }).map((_, index) => (
-                    <div key={`blank-${index}`} className="min-h-[70px] rounded-xl border border-transparent" />
-                  ))}
-                  {calendar.month.days.map((day) => (
-                    <button
-                      key={day.date}
-                      type="button"
-                      onClick={() => setSelectedDate(day.date)}
-                      className={`min-h-[72px] rounded-xl border p-2 text-left transition sm:min-h-[88px] ${
-                        day.date === calendar.selected.date
-                          ? "border-neon-cyan bg-neon-cyan/15 shadow-[0_0_22px_rgba(0,229,255,0.22)]"
-                          : `${classificationCardClass(day.classification)} hover:border-neon-cyan/50`
-                      }`}
-                    >
-                      <div className="text-xs font-bold text-muted-foreground">{day.day}</div>
-                      <div className="mt-1 flex items-center justify-center">
-                        <span
-                          className={`flex size-9 items-center justify-center rounded-full text-sm font-black sm:size-10 ${classificationBubbleClass(
-                            day.classification,
-                          )}`}
-                        >
-                          {day.classification === "sem_amostra" ? "-" : Math.round(day.score)}
-                        </span>
-                      </div>
-                      <div className="mt-1 truncate text-center text-[9px] font-bold sm:text-[10px]">
-                        {classificationLabel(day.classification)}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-                <ClassificationLegend />
-              </>
-            )}
-          </GlassCard>
+      {calendar && status !== "loading" && (
+        <BentoStatsGrid calendar={calendar} engineLabel={engineLabel} />
+      )}
 
-          {calendar && <MonthSummary calendar={calendar} />}
-        </div>
-
-        <div className="space-y-4 xl:sticky xl:top-20">
-          {calendar ? (
-            <>
-              <DayPanel day={calendar.selectedDay} />
-              <HourGrid
-                hours={calendar.selectedHours}
-                selectedHour={selectedHour}
-                onSelectHour={setSelectedHour}
-              />
-              <HourPanel hour={selectedHourStat} />
-            </>
-          ) : (
-            <GlassCard className="p-4">
-              <div className="text-sm text-muted-foreground">Carregando inteligencia historica...</div>
-            </GlassCard>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <GlassCard className="p-4">
+          <CalendarPanelHeader
+            title={calendar?.month.label || `${monthLabels[month - 1]} ${year}`}
+            subtitle={`Consulta leve por agregados - ${CALENDAR_TIMEZONE}`}
+          />
+          {status === "loading" && <CalendarSkeleton />}
+          {calendar && status !== "loading" && (
+            <CalendarMonthGrid
+              calendar={calendar}
+              selectedDate={selectedDate}
+              onSelectDate={(date) => {
+                setSelectedDate(date);
+                setSelectedHour(null);
+              }}
+            />
           )}
-        </div>
+        </GlassCard>
+
+        <CalendarDetailsPanel
+          calendar={calendar}
+          selectedDay={selectedDay}
+          selectedDate={selectedDate}
+          selectedHour={selectedHour}
+          selectedHourStat={selectedHourStat}
+          engineLabel={engineLabel}
+          onSelectHour={setSelectedHour}
+          onClear={clearDetailSelection}
+        />
       </div>
 
-      {calendar && (
-        <div className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
-          <Rankings calendar={calendar} />
-          <Heatmap calendar={calendar} />
-        </div>
-      )}
+      {calendar && status !== "loading" && <Rankings calendar={calendar} />}
     </div>
   );
 }
@@ -245,10 +227,10 @@ function ModuleHeader() {
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-black tracking-wide">CALENDARIO NEURAL</h1>
           <AppBadge tone="blue">MODULO PREMIUM</AppBadge>
-          <AppBadge tone="green">DADOS REAIS</AppBadge>
+          <AppBadge tone="green">DADOS AGREGADOS</AppBadge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Mapa historico de dias e horarios pagantes em horario de Brasilia.
+          Ano, mes, dia e hora por motor, sem carregar rodadas brutas no navegador.
         </p>
       </div>
       <Button type="button" variant="outline" className="gap-2 rounded-xl border-border/70">
@@ -259,73 +241,498 @@ function ModuleHeader() {
   );
 }
 
-function MonthSummary({ calendar }: { calendar: NeuralCalendarPayload }) {
-  const summary = calendar.month.summary;
-  const cards = [
-    {
-      label: "Media do mes",
-      value: summary.averageScore ? `${formatPercent(summary.averageScore)}` : "Sem amostra",
-      detail: "Somente dias com amostra real",
-    },
-    {
-      label: "Melhor dia",
-      value: summary.bestDay ? formatDateShort(summary.bestDay.date) : "-",
-      detail: summary.bestDay ? `${Math.round(summary.bestDay.score)}/100` : "Sem amostra",
-    },
-    {
-      label: "Pior dia",
-      value: summary.worstDay ? formatDateShort(summary.worstDay.date) : "-",
-      detail: summary.worstDay ? `${Math.round(summary.worstDay.score)}/100` : "Sem amostra",
-    },
-    {
-      label: "Melhor horario",
-      value: summary.bestHour ? `${String(summary.bestHour.hour).padStart(2, "0")}:00` : "-",
-      detail: summary.bestHour ? `${Math.round(summary.bestHour.score)}/100` : "Sem amostra",
-    },
-  ];
+function CalendarToolbar({
+  allowedYears,
+  year,
+  month,
+  engineMode,
+  customEngines,
+  canMovePrevious,
+  canMoveNext,
+  onMoveMonth,
+  onSelectYear,
+  onSelectMonth,
+  onToday,
+  onEngineModeChange,
+  onCustomEnginesChange,
+}: {
+  allowedYears: number[];
+  year: number;
+  month: number;
+  engineMode: NeuralCalendarEngineKey;
+  customEngines: NeuralCalendarEngineKey[];
+  canMovePrevious: boolean;
+  canMoveNext: boolean;
+  onMoveMonth: (delta: number) => void;
+  onSelectYear: (year: number) => void;
+  onSelectMonth: (month: number) => void;
+  onToday: () => void;
+  onEngineModeChange: (value: NeuralCalendarEngineKey) => void;
+  onCustomEnginesChange: (value: NeuralCalendarEngineKey[]) => void;
+}) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {cards.map((card) => (
-        <GlassCard key={card.label} className="p-4">
-          <div className="text-xs font-bold uppercase text-muted-foreground">{card.label}</div>
-          <div className="mt-2 text-2xl font-black">{card.value}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{card.detail}</div>
-        </GlassCard>
-      ))}
+    <GlassCard className="p-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+        <EngineFilter
+          engineMode={engineMode}
+          customEngines={customEngines}
+          onEngineModeChange={onEngineModeChange}
+          onCustomEnginesChange={onCustomEnginesChange}
+        />
+        <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[430px] xl:grid-cols-1">
+          <div className="flex flex-wrap gap-2">
+            {allowedYears.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => onSelectYear(item)}
+                className={`rounded-lg border px-3 py-2 text-xs font-black transition ${
+                  year === item
+                    ? "border-neon-cyan/60 bg-neon-cyan/15 text-neon-cyan"
+                    : "border-border/70 bg-secondary/20 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={!canMovePrevious}
+              onClick={() => onMoveMonth(-1)}
+              className="flex size-10 items-center justify-center rounded-xl border border-border/70 bg-secondary/20 text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Mes anterior"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <select
+              value={month}
+              onChange={(event) => onSelectMonth(Number(event.target.value))}
+              className="h-10 min-w-[150px] rounded-xl border border-border/70 bg-background px-3 text-sm font-bold"
+            >
+              {monthLabels.map((label, index) => (
+                <option key={label} value={index + 1}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={!canMoveNext}
+              onClick={() => onMoveMonth(1)}
+              className="flex size-10 items-center justify-center rounded-xl border border-border/70 bg-secondary/20 text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Proximo mes"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onToday}
+              className="h-10 rounded-xl border border-neon-cyan/40 bg-neon-cyan/10 px-4 text-xs font-black text-neon-cyan transition hover:bg-neon-cyan/15"
+            >
+              Hoje
+            </button>
+          </div>
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
+
+function EngineFilter({
+  engineMode,
+  customEngines,
+  onEngineModeChange,
+  onCustomEnginesChange,
+}: {
+  engineMode: NeuralCalendarEngineKey;
+  customEngines: NeuralCalendarEngineKey[];
+  onEngineModeChange: (value: NeuralCalendarEngineKey) => void;
+  onCustomEnginesChange: (value: NeuralCalendarEngineKey[]) => void;
+}) {
+  function toggleCustomEngine(engine: NeuralCalendarEngineKey) {
+    const exists = customEngines.includes(engine);
+    if (exists && customEngines.length === 1) return;
+    onCustomEnginesChange(
+      exists ? customEngines.filter((item) => item !== engine) : [...customEngines, engine],
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan">
+          Motor
+        </span>
+        {engineOptions.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => onEngineModeChange(option.id)}
+            className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
+              engineMode === option.id
+                ? "border-neon-cyan/60 bg-neon-cyan/15 text-neon-cyan"
+                : "border-border/70 bg-secondary/20 text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {engineMode === "personalizado" && (
+        <div className="grid gap-2 rounded-xl border border-border/70 bg-background/40 p-3 sm:grid-cols-2 lg:grid-cols-3">
+          {selectableEngineOptions.map((option) => {
+            const checked = customEngines.includes(option.id);
+            return (
+              <label
+                key={option.id}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold transition ${
+                  checked
+                    ? "border-neon-cyan/50 bg-neon-cyan/10 text-foreground"
+                    : "border-border/60 bg-secondary/20 text-muted-foreground"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleCustomEngine(option.id)}
+                  className="size-4 accent-cyan-400"
+                />
+                {option.label}
+              </label>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-function DayPanel({ day }: { day: NeuralCalendarDailyStat }) {
+function BentoStatsGrid({
+  calendar,
+  engineLabel,
+}: {
+  calendar: NeuralCalendarPayload;
+  engineLabel: string;
+}) {
+  const summary = calendar.month.summary;
+  const totalSignals = monthTotalSignals(calendar);
+  const bestHour = calendar.rankings.topHours[0];
+  const bestEngine = calendar.rankings.topEngines?.[0];
+  const sampleDays = calendar.month.days.filter((day) => day.classification !== "sem_amostra").length;
+  const cards: Array<{
+    label: string;
+    title: string;
+    detail: string;
+    score?: number;
+    total?: number;
+  }> = [
+    {
+      label: "Media do periodo",
+      title: sampleDays ? formatPercent(summary.averageScore) : "Sem amostra",
+      detail: `${sampleDays} dias com dados`,
+      score: summary.averageScore,
+      total: sampleDays,
+    },
+    {
+      label: "Melhor hora",
+      title: bestHour ? bestHour.label : "-",
+      detail: bestHour ? `${formatPercent(bestHour.score)} / ${formatNumber(bestHour.totalRounds)} sinais` : "Sem amostra",
+      score: bestHour?.score,
+      total: bestHour?.totalRounds,
+    },
+    {
+      label: "Melhor dia",
+      title: summary.bestDay ? formatDateShort(summary.bestDay.date) : "-",
+      detail: summary.bestDay ? `${formatPercent(summary.bestDay.score)} / ${summary.bestDay.weekday}` : "Sem amostra",
+      score: summary.bestDay?.score,
+      total: summary.bestDay?.totalRounds,
+    },
+    {
+      label: "Motor / filtro",
+      title: bestEngine ? bestEngine.label : engineLabel,
+      detail: bestEngine ? `${formatPercent(bestEngine.score)} no mes` : "Filtro atual",
+      score: bestEngine?.score,
+      total: bestEngine?.totalSignals,
+    },
+    {
+      label: "Total de sinais",
+      title: formatNumber(totalSignals),
+      detail: "Somente agregados do periodo",
+    },
+  ];
+
   return (
-    <GlassCard className="p-4">
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      {cards.map((card) => (
+        <StatCard key={card.label} {...card} />
+      ))}
+    </section>
+  );
+}
+
+function StatCard({
+  label,
+  title,
+  detail,
+  score,
+  total,
+}: {
+  label: string;
+  title: string;
+  detail: string;
+  score?: number;
+  total?: number;
+}) {
+  const hasScore = typeof score === "number";
+  const visualClass = hasScore ? classifyScore(score || 0, total || 0) : total ? "operavel" : "sem_amostra";
+  return (
+    <GlassCard className="min-h-[118px] p-3 sm:p-4">
+      <div className="text-[9px] font-black uppercase tracking-[0.18em] text-muted-foreground sm:text-[10px]">
+        {label}
+      </div>
+      <div className={`mt-2 truncate text-xl font-black sm:text-2xl ${classificationTextClass(visualClass)}`}>
+        {title}
+      </div>
+      {hasScore && (
+        <div className="mt-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className={`text-xs font-black ${classificationTextClass(visualClass)}`}>
+              {scoreLabel(score || 0, total || 0)}
+            </span>
+            <ClassificationBadge classification={visualClass} compact />
+          </div>
+          <ScoreMeter score={score || 0} total={total || 0} className="mt-2" />
+        </div>
+      )}
+      <div className="mt-2 line-clamp-2 text-[11px] text-muted-foreground">{detail}</div>
+    </GlassCard>
+  );
+}
+
+function CalendarPanelHeader({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <div className="text-lg font-black">{title}</div>
+        <div className="text-xs text-muted-foreground">{subtitle}</div>
+      </div>
+      <AppBadge tone="blue">HEATMAP NEURAL</AppBadge>
+    </div>
+  );
+}
+
+function CalendarMonthGrid({
+  calendar,
+  selectedDate,
+  onSelectDate,
+}: {
+  calendar: NeuralCalendarPayload;
+  selectedDate: string;
+  onSelectDate: (date: string) => void;
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] font-black uppercase text-muted-foreground sm:gap-2">
+        {["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB"].map((day) => (
+          <div key={day}>{day}</div>
+        ))}
+      </div>
+      <div className="mt-2 grid grid-cols-7 gap-1.5 sm:gap-2">
+        {Array.from({ length: calendar.month.firstWeekday }).map((_, index) => (
+          <div key={`blank-${index}`} className="min-h-[66px] rounded-xl border border-transparent" />
+        ))}
+        {calendar.month.days.map((day) => {
+          const beforeStart = day.date < CALENDAR_START_DATE;
+          const visualClass = classifyScore(day.score, beforeStart ? 0 : day.totalRounds);
+          return (
+            <button
+              key={day.date}
+              type="button"
+              onClick={() => onSelectDate(day.date)}
+              className={`min-h-[62px] rounded-xl border p-1.5 text-left transition sm:min-h-[90px] sm:p-2 ${
+                day.date === selectedDate
+                  ? `${classificationCardClass(visualClass)} border-violet-300 ring-2 ring-neon-cyan/40 shadow-[0_0_24px_rgba(124,92,255,0.34)]`
+                  : `${classificationCardClass(visualClass)} hover:border-neon-cyan/50`
+              }`}
+            >
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-xs font-bold text-muted-foreground">{day.day}</span>
+                {day.totalRounds > 0 && (
+                  <span className="text-[9px] font-bold text-muted-foreground">
+                    {formatCompactNumber(day.totalRounds)}
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 flex items-center justify-center">
+                <span
+                  className={`flex h-8 min-w-8 items-center justify-center rounded-full px-1.5 text-[11px] font-black sm:size-10 sm:text-sm ${classificationBubbleClass(
+                    visualClass,
+                  )}`}
+                >
+                  {scoreShortLabel(day.score, beforeStart ? 0 : day.totalRounds)}
+                </span>
+              </div>
+              <div className="mt-1 flex justify-center sm:hidden">
+                <ClassificationDot classification={visualClass} />
+              </div>
+              <div className="mt-1 hidden truncate text-center text-[9px] font-bold sm:block sm:text-[10px]">
+                {beforeStart ? "Sem amostra" : classificationLabel(visualClass)}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <ClassificationLegend />
+    </>
+  );
+}
+
+function CalendarDetailsPanel({
+  calendar,
+  selectedDay,
+  selectedDate,
+  selectedHour,
+  selectedHourStat,
+  engineLabel,
+  onSelectHour,
+  onClear,
+}: {
+  calendar: NeuralCalendarPayload | null;
+  selectedDay: NeuralCalendarDailyStat | null;
+  selectedDate: string;
+  selectedHour: number | null;
+  selectedHourStat: NeuralCalendarHourlyStat | null;
+  engineLabel: string;
+  onSelectHour: (hour: number) => void;
+  onClear: () => void;
+}) {
+  const floatingClass = selectedDate
+    ? "fixed inset-x-3 bottom-20 z-40 max-h-[72vh] overflow-y-auto xl:static xl:max-h-none xl:overflow-visible"
+    : "";
+
+  return (
+    <div className={`space-y-4 ${floatingClass}`}>
+      <GlassCard className="p-4">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-black">
+              {selectedHourStat
+                ? `Detalhe da hora`
+                : selectedDay
+                  ? `Detalhe do dia`
+                  : "Resumo do mes"}
+            </div>
+            <div className="text-xs text-muted-foreground">{engineLabel}</div>
+          </div>
+          {selectedDate && (
+            <button
+              type="button"
+              onClick={onClear}
+              className="flex size-8 items-center justify-center rounded-lg border border-border/70 bg-secondary/20 text-muted-foreground hover:text-foreground"
+              aria-label="Fechar detalhes"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+
+        {!calendar ? (
+          <div className="text-sm text-muted-foreground">Carregando inteligencia historica...</div>
+        ) : selectedHourStat ? (
+          <HourPanelContent hour={selectedHourStat} />
+        ) : selectedDay ? (
+          <DayPanelContent day={selectedDay} />
+        ) : (
+          <MonthOverview calendar={calendar} engineLabel={engineLabel} />
+        )}
+      </GlassCard>
+
+      {calendar && selectedDay && !selectedHourStat && (
+        <HourGrid
+          hours={calendar.selectedHours}
+          selectedHour={selectedHour}
+          onSelectHour={onSelectHour}
+        />
+      )}
+    </div>
+  );
+}
+
+function MonthOverview({ calendar, engineLabel }: { calendar: NeuralCalendarPayload; engineLabel: string }) {
+  const summary = calendar.month.summary;
+  const totalSignals = monthTotalSignals(calendar);
+  const bestHour = calendar.rankings.topHours[0];
+  const counts = visualMonthCounts(calendar);
+  return (
+    <div className="space-y-3">
+      <Metric label="Periodo" value={calendar.month.label} />
+      <Metric label="Motor/filtro" value={engineLabel} />
+      <Metric label="Total de sinais" value={formatNumber(totalSignals)} />
+      <Metric
+        label="Media"
+        value={summary.averageScore ? formatPercent(summary.averageScore) : "Sem amostra"}
+        tone={summary.averageScore >= 87 ? "green" : summary.averageScore >= 67 ? "amber" : undefined}
+      />
+      <Metric
+        label="Melhor dia"
+        value={summary.bestDay ? `${formatDateShort(summary.bestDay.date)} (${formatPercent(summary.bestDay.score)})` : "Sem amostra"}
+      />
+      <Metric
+        label="Melhor hora"
+        value={bestHour ? `${bestHour.label} (${formatPercent(bestHour.score)})` : "Sem amostra"}
+      />
+      <div className="rounded-xl border border-border/60 bg-background/40 p-3">
+        <div className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground">
+          Resumo do mes
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <CountPill classification="muito_pagante" label="Dias otimos" value={counts.muito_pagante} />
+          <CountPill classification="operavel" label="Dias operaveis" value={counts.operavel} />
+          <CountPill classification="perigoso" label="Dias criticos" value={counts.perigoso} />
+          <CountPill classification="sem_amostra" label="Sem amostra" value={counts.sem_amostra} />
+        </div>
+      </div>
+      <div className="rounded-xl border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground">
+        Selecione um dia no calendario para abrir as 24 horas. Clique em uma hora para ver o detalhe fino.
+      </div>
+    </div>
+  );
+}
+
+function DayPanelContent({ day }: { day: NeuralCalendarDailyStat }) {
+  const visualClass = classifyScore(day.score, day.totalRounds);
+  const hasSample = visualClass !== "sem_amostra";
+  return (
+    <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-xs font-bold uppercase text-muted-foreground">Score do dia</div>
-          <div className={`mt-2 text-5xl font-black ${classificationTextClass(day.classification)}`}>
-            {day.classification === "sem_amostra" ? "--" : Math.round(day.score)}
-            <span className="text-xl text-muted-foreground">/100</span>
+          <div className="text-xs font-bold uppercase text-muted-foreground">{formatDateLong(day.date)}</div>
+          <div className={`mt-2 text-4xl font-black sm:text-5xl ${classificationTextClass(visualClass)}`}>
+            {hasSample ? formatPercent(day.score) : "--"}
           </div>
-          <div className={`mt-1 text-sm font-black ${classificationTextClass(day.classification)}`}>
-            {classificationLabel(day.classification)}
-          </div>
+          <ClassificationBadge classification={visualClass} className="mt-2" />
+          <ScoreMeter score={day.score} total={day.totalRounds} className="mt-3" />
         </div>
-        <AppBadge tone={day.classification === "perigoso" ? "red" : day.classification === "sem_amostra" ? "amber" : "green"}>
-          {formatDateLong(day.date)}
+        <AppBadge tone={visualClass === "perigoso" ? "red" : hasSample ? "green" : "amber"}>
+          {day.weekday}
         </AppBadge>
       </div>
-      <div className="mt-4 grid gap-2 text-sm">
-        <Metric label="Total de rodadas" value={formatNumber(day.totalRounds)} />
+      <div className="grid gap-2 text-sm">
+        <Metric label="Total de sinais" value={formatNumber(day.totalRounds)} />
         <Metric label="Greens" value={formatNumber(day.greens)} tone="green" />
         <Metric label="Reds" value={formatNumber(day.reds)} tone="red" />
         <Metric label="Empates" value={formatNumber(day.ties)} tone="amber" />
         <Metric label="Assertividade" value={day.totalRounds ? formatPercent(day.accuracy) : "Sem amostra"} />
+        <Metric label="Melhor hora" value={day.bestHour || "Sem dados"} />
+        <Metric label="Pior hora" value={day.worstHour || "Sem dados"} />
         <Metric label="Melhor forca" value={forceLabel(day.bestForce)} />
       </div>
-      <div className="mt-4 rounded-xl border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground">
+      <div className="rounded-xl border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground">
         {day.observation}
       </div>
-    </GlassCard>
+    </div>
   );
 }
 
@@ -342,7 +749,7 @@ function HourGrid({
     <GlassCard className="p-4">
       <div className="mb-3 flex items-center gap-2 text-sm font-black">
         <Clock3 className="size-4 text-neon-cyan" />
-        Desempenho por horario
+        Horarios do dia
       </div>
       <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 xl:grid-cols-4">
         {hours.map((hour) => (
@@ -352,17 +759,22 @@ function HourGrid({
             onClick={() => onSelectHour(hour.hour)}
             className={`rounded-xl border p-2 text-center transition ${
               selectedHour === hour.hour
-                ? "border-neon-cyan bg-neon-cyan/15"
-                : classificationCardClass(hour.classification)
+                ? `${classificationCardClass(classifyScore(hour.score, hour.totalRounds))} border-violet-300 ring-2 ring-neon-cyan/35`
+                : classificationCardClass(classifyScore(hour.score, hour.totalRounds))
             }`}
           >
             <div className="text-[10px] text-muted-foreground">
               {String(hour.hour).padStart(2, "0")}:00
             </div>
-            <div className={`mt-1 text-lg font-black ${classificationTextClass(hour.classification)}`}>
-              {hour.classification === "sem_amostra" ? "-" : Math.round(hour.score)}
+            <div className={`mt-1 text-base font-black ${classificationTextClass(classifyScore(hour.score, hour.totalRounds))}`}>
+              {scoreShortLabel(hour.score, hour.totalRounds)}
             </div>
-            <div className="truncate text-[9px] font-bold">{classificationLabel(hour.classification)}</div>
+            <div className="mt-1 flex justify-center">
+              <ClassificationDot classification={classifyScore(hour.score, hour.totalRounds)} />
+            </div>
+            <div className="hidden truncate text-[9px] font-bold sm:block">
+              {classificationLabel(classifyScore(hour.score, hour.totalRounds))}
+            </div>
           </button>
         ))}
       </div>
@@ -370,44 +782,43 @@ function HourGrid({
   );
 }
 
-function HourPanel({ hour }: { hour: NeuralCalendarHourlyStat | null }) {
-  if (!hour) {
-    return (
-      <GlassCard className="p-4">
-        <div className="text-sm font-bold">Detalhe do horario</div>
-        <p className="mt-1 text-xs text-muted-foreground">Selecione um horario para ver a leitura completa.</p>
-      </GlassCard>
-    );
-  }
-
+function HourPanelContent({ hour }: { hour: NeuralCalendarHourlyStat }) {
+  const visualClass = classifyScore(hour.score, hour.totalRounds);
+  const hasSample = visualClass !== "sem_amostra";
   return (
-    <GlassCard className="p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="text-sm font-black">
-          {formatDateShort(hour.date)} - {String(hour.hour).padStart(2, "0")}:00
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold uppercase text-muted-foreground">
+            {formatDateShort(hour.date)} - {String(hour.hour).padStart(2, "0")}:00
+          </div>
+          <div className={`mt-2 text-4xl font-black sm:text-5xl ${classificationTextClass(visualClass)}`}>
+            {hasSample ? formatPercent(hour.score) : "--"}
+          </div>
+          <ClassificationBadge classification={visualClass} className="mt-2" />
+          <ScoreMeter score={hour.score} total={hour.totalRounds} className="mt-3" />
         </div>
-        <div className={`text-2xl font-black ${classificationTextClass(hour.classification)}`}>
-          {hour.classification === "sem_amostra" ? "--" : Math.round(hour.score)}
-          <span className="text-sm text-muted-foreground">/100</span>
-        </div>
+        <AppBadge tone={visualClass === "perigoso" ? "red" : hasSample ? "green" : "amber"}>
+          {hasSample ? "Com amostra" : "Sem amostra"}
+        </AppBadge>
       </div>
       <div className="grid gap-2 text-sm">
-        <Metric label="Rodadas" value={formatNumber(hour.totalRounds)} />
+        <Metric label="Total de sinais" value={formatNumber(hour.totalRounds)} />
         <Metric label="Greens" value={formatNumber(hour.greens)} tone="green" />
         <Metric label="Reds" value={formatNumber(hour.reds)} tone="red" />
         <Metric label="Empates" value={formatNumber(hour.ties)} tone="amber" />
         <Metric label="Assertividade" value={hour.totalRounds ? formatPercent(hour.accuracy) : "Sem amostra"} />
       </div>
-      <div className="mt-4 space-y-3 rounded-xl border border-border/60 bg-background/40 p-3">
+      <div className="space-y-3 rounded-xl border border-border/60 bg-background/40 p-3">
         <ForceBar label="Banker" value={hour.bankerPercent} className="bg-red-400" />
         <ForceBar label="Player" value={hour.playerPercent} className="bg-blue-400" />
         <ForceBar label="Tie" value={hour.tiePercent} className="bg-yellow-400" />
       </div>
-      <div className="mt-4 grid gap-2 text-xs">
-        <InfoLine icon={<ShieldCheck className="size-4" />} label="Melhor modulo" value={hour.bestModule} />
-        <InfoLine icon={<BarChart3 className="size-4" />} label="Melhor leitura" value={hour.bestReading} />
+      <div className="grid gap-2 text-xs">
+        <InfoLine icon={<ShieldCheck className="size-4" />} label="Melhor modulo" value={hour.bestModule || "Sem dados"} />
+        <InfoLine icon={<BarChart3 className="size-4" />} label="Melhor leitura" value={hour.bestReading || "Sem dados"} />
       </div>
-    </GlassCard>
+    </div>
   );
 }
 
@@ -416,31 +827,39 @@ function Rankings({ calendar }: { calendar: NeuralCalendarPayload }) {
     <GlassCard className="p-4">
       <div className="mb-3 flex items-center gap-2 text-sm font-black">
         <BarChart3 className="size-4 text-neon-cyan" />
-        Rankings automaticos
+        Rankings do periodo
       </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        <RankingList
-          title="Top horarios"
-          rows={calendar.rankings.topHours.map((item) => ({
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <VisualRankingList
+          title="Top 5 horarios"
+          rows={calendar.rankings.topHours.slice(0, 5).map((item) => ({
             label: item.label,
             value: formatPercent(item.score),
-            detail: `${formatNumber(item.totalRounds)} rodadas`,
+            detail: `${formatNumber(item.totalRounds)} sinais`,
           }))}
         />
-        <RankingList
-          title="Top dias da semana"
-          rows={calendar.rankings.topWeekdays.map((item) => ({
+        <VisualRankingList
+          title="Top 5 dias da semana"
+          rows={calendar.rankings.topWeekdays.slice(0, 5).map((item) => ({
             label: item.weekday,
             value: formatPercent(item.score),
             detail: `${item.total} dias`,
           }))}
         />
-        <RankingList
-          title="Top dias do mes"
-          rows={calendar.rankings.topMonthDays.map((item) => ({
+        <VisualRankingList
+          title="Top 5 dias do mes"
+          rows={calendar.rankings.topMonthDays.slice(0, 5).map((item) => ({
             label: item.label,
             value: formatPercent(item.score),
-            detail: `${formatNumber(item.totalRounds)} rodadas`,
+            detail: `${formatNumber(item.totalRounds)} sinais`,
+          }))}
+        />
+        <VisualRankingList
+          title="Top motores"
+          rows={(calendar.rankings.topEngines || []).map((item) => ({
+            label: item.label,
+            value: formatPercent(item.score),
+            detail: `${formatNumber(item.totalSignals)} sinais`,
           }))}
         />
       </div>
@@ -484,54 +903,52 @@ function RankingList({
   );
 }
 
-function Heatmap({ calendar }: { calendar: NeuralCalendarPayload }) {
-  const buckets = ["00-04h", "04-08h", "08-12h", "12-16h", "16-20h", "20-24h"];
-  const days = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB"];
+function VisualRankingList({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<{ label: string; value: string; detail: string }>;
+}) {
   return (
-    <GlassCard className="p-4">
-      <div className="mb-3 flex items-center gap-2 text-sm font-black">
-        <CalendarDays className="size-4 text-neon-cyan" />
-        Mapa de calor dias x horas
-      </div>
+    <div>
+      <div className="mb-2 text-xs font-black uppercase text-muted-foreground">{title}</div>
       <div className="space-y-2">
-        {buckets.map((bucket, bucketIndex) => (
-          <div key={bucket} className="grid grid-cols-[58px_repeat(7,1fr)] items-center gap-1.5">
-            <div className="text-[10px] text-muted-foreground">{bucket}</div>
-            {days.map((day, dayIndex) => {
-              const cell = heatmapCell(calendar, bucketIndex, dayIndex);
-              return (
-                <div
-                  key={`${bucket}-${day}`}
-                  title={`${day} ${bucket}: ${cell ? Math.round(cell.score) : "sem dados"}`}
-                  className={`h-7 rounded-md border ${classificationCardClass(
-                    cell?.classification || "sem_amostra",
-                  )}`}
-                />
-              );
-            })}
+        {rows.length ? (
+          rows.map((row, index) => {
+            const score = percentStringToNumber(row.value);
+            const visualClass = classifyScore(score, Number.isFinite(score) ? 1 : 0);
+            return (
+              <div
+                key={`${row.label}-${index}`}
+                className="rounded-xl border border-border/60 bg-background/40 px-3 py-2"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-bold">
+                      {index + 1}º {row.label}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">{row.detail}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className={`text-sm font-black ${classificationTextClass(visualClass)}`}>
+                      {formatPercent(score)}
+                    </div>
+                    <ClassificationBadge classification={visualClass} compact />
+                  </div>
+                </div>
+                <ScoreMeter score={score} total={Number.isFinite(score) ? 1 : 0} className="mt-2" />
+              </div>
+            );
+          })
+        ) : (
+          <div className="rounded-xl border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground">
+            Sem amostra real.
           </div>
-        ))}
+        )}
       </div>
-      <div className="mt-3 flex justify-between text-[10px] text-muted-foreground">
-        <span>Perigoso</span>
-        <span>Muito pagante</span>
-      </div>
-    </GlassCard>
+    </div>
   );
-}
-
-function heatmapCell(calendar: NeuralCalendarPayload, bucketIndex: number, weekdayIndex: number) {
-  const startHour = bucketIndex * 4;
-  const rows = calendar.month.heatmap.filter((item) => {
-    const date = new Date(`${item.date}T12:00:00Z`);
-    return date.getUTCDay() === weekdayIndex && item.hour >= startHour && item.hour < startHour + 4;
-  });
-  if (!rows.length) return null;
-  const score = rows.reduce((sum, item) => sum + item.score, 0) / rows.length;
-  return {
-    score,
-    classification: classifyScore(score, rows.length),
-  };
 }
 
 function CalendarSkeleton() {
@@ -547,9 +964,9 @@ function CalendarSkeleton() {
 function ClassificationLegend() {
   return (
     <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground">
-      <LegendDot className="bg-green-400" label="87-100 Muito Pagante" />
-      <LegendDot className="bg-yellow-400" label="56-86 Operavel" />
-      <LegendDot className="bg-red-400" label="0-55 Perigoso" />
+      <LegendDot className="bg-emerald-400" label="87-100 Otimo para operar" />
+      <LegendDot className="bg-yellow-400" label="67-86 Operavel" />
+      <LegendDot className="bg-red-400" label="0-66 Critico" />
       <LegendDot className="bg-slate-500" label="Sem amostra" />
     </div>
   );
@@ -564,12 +981,70 @@ function LegendDot({ className, label }: { className: string; label: string }) {
   );
 }
 
+function ClassificationBadge({
+  classification,
+  compact = false,
+  className = "",
+}: {
+  classification: NeuralCalendarClassification;
+  compact?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-black uppercase ${
+        compact ? "text-[8px]" : "text-[10px] tracking-[0.12em]"
+      } ${classificationPillClass(classification)} ${className}`}
+    >
+      <ClassificationDot classification={classification} />
+      <span>{classificationLabel(classification)}</span>
+    </div>
+  );
+}
+
+function ClassificationDot({ classification }: { classification: NeuralCalendarClassification }) {
+  return <span className={`inline-block size-2 rounded-full ${classificationDotClass(classification)}`} />;
+}
+
+function CountPill({
+  classification,
+  label,
+  value,
+}: {
+  classification: NeuralCalendarClassification;
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className={`rounded-lg border px-2 py-1.5 ${classificationCardClass(classification)}`}>
+      <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground">
+        <ClassificationDot classification={classification} />
+        {label}
+      </div>
+      <div className={`mt-1 text-lg font-black ${classificationTextClass(classification)}`}>{value}</div>
+    </div>
+  );
+}
+
+function ScoreMeter({ score, total, className = "" }: { score: number; total: number; className?: string }) {
+  const visualClass = classifyScore(score, total);
+  const width = visualClass === "sem_amostra" ? 0 : Math.max(2, Math.min(100, Number(score) || 0));
+  return (
+    <div className={`h-1.5 overflow-hidden rounded-full bg-secondary/60 ${className}`}>
+      <div
+        className={`h-full rounded-full transition-all ${classificationFillClass(visualClass)}`}
+        style={{ width: `${width}%` }}
+      />
+    </div>
+  );
+}
+
 function Metric({ label, value, tone }: { label: string; value: string; tone?: "green" | "red" | "amber" }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-muted-foreground">{label}</span>
       <span
-        className={`font-black ${
+        className={`text-right font-black ${
           tone === "green"
             ? "text-emerald-300"
             : tone === "red"
@@ -609,24 +1084,20 @@ function InfoLine({ icon, label, value }: { icon: ReactNode; label: string; valu
   );
 }
 
-function moveMonth(
-  delta: number,
-  year: number,
-  month: number,
-  setYear: (year: number) => void,
-  setMonth: (month: number) => void,
-  setSelectedDate: (date: string) => void,
-) {
+function canMoveMonth(delta: number, year: number, month: number, allowedYears: number[]) {
   const next = new Date(Date.UTC(year, month - 1 + delta, 1));
-  setYear(next.getUTCFullYear());
-  setMonth(next.getUTCMonth() + 1);
-  setSelectedDate("");
+  const nextYear = next.getUTCFullYear();
+  return allowedYears.includes(nextYear);
+}
+
+function monthTotalSignals(calendar: NeuralCalendarPayload) {
+  return calendar.month.days.reduce((sum, day) => sum + day.totalRounds, 0);
 }
 
 function classificationLabel(value: NeuralCalendarClassification) {
-  if (value === "muito_pagante") return "Muito Pagante";
+  if (value === "muito_pagante") return "Otimo para operar";
   if (value === "operavel") return "Operavel";
-  if (value === "perigoso") return "Perigoso";
+  if (value === "perigoso") return "Critico - nao operar";
   return "Sem amostra";
 }
 
@@ -651,11 +1122,62 @@ function classificationTextClass(value: NeuralCalendarClassification) {
   return "text-muted-foreground";
 }
 
+function classificationDotClass(value: NeuralCalendarClassification) {
+  if (value === "muito_pagante") return "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.55)]";
+  if (value === "operavel") return "bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.5)]";
+  if (value === "perigoso") return "bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.5)]";
+  return "bg-slate-500";
+}
+
+function classificationFillClass(value: NeuralCalendarClassification) {
+  if (value === "muito_pagante") return "bg-emerald-400";
+  if (value === "operavel") return "bg-yellow-400";
+  if (value === "perigoso") return "bg-red-400";
+  return "bg-slate-500";
+}
+
+function classificationPillClass(value: NeuralCalendarClassification) {
+  if (value === "muito_pagante") return "border-emerald-400/30 bg-emerald-500/10 text-emerald-200";
+  if (value === "operavel") return "border-yellow-400/30 bg-yellow-500/10 text-yellow-200";
+  if (value === "perigoso") return "border-red-400/30 bg-red-500/10 text-red-200";
+  return "border-border/60 bg-secondary/30 text-slate-300";
+}
+
 function classifyScore(score: number, total: number): NeuralCalendarClassification {
   if (!total) return "sem_amostra";
   if (score >= 87) return "muito_pagante";
-  if (score >= 56) return "operavel";
+  if (score >= 67) return "operavel";
   return "perigoso";
+}
+
+function scoreLabel(score: number, total: number) {
+  return total ? formatPercent(score) : "Sem amostra";
+}
+
+function scoreShortLabel(score: number, total: number) {
+  return total ? `${Math.round(Number(score) || 0)}%` : "-";
+}
+
+function percentStringToNumber(value: string) {
+  const normalized = value.replace("%", "").replace(/\./g, "").replace(",", ".").trim();
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function visualMonthCounts(calendar: NeuralCalendarPayload) {
+  return calendar.month.days.reduce(
+    (counts, day) => {
+      const classification = classifyScore(day.score, day.totalRounds);
+      counts[classification] += 1;
+      return counts;
+    },
+    {
+      muito_pagante: 0,
+      operavel: 0,
+      perigoso: 0,
+      sem_amostra: 0,
+    } as Record<NeuralCalendarClassification, number>,
+  );
 }
 
 function formatPercent(value: number) {
@@ -667,6 +1189,12 @@ function formatPercent(value: number) {
 
 function formatNumber(value: number) {
   return Math.max(0, Math.floor(Number(value) || 0)).toLocaleString("pt-BR");
+}
+
+function formatCompactNumber(value: number) {
+  const safe = Math.max(0, Math.floor(Number(value) || 0));
+  if (safe >= 1000) return `${Math.floor(safe / 1000)}k`;
+  return String(safe);
 }
 
 function formatDateShort(date: string) {
@@ -684,6 +1212,25 @@ function forceLabel(value: string) {
   if (value === "PLAYER") return "Player";
   if (value === "TIE") return "Tie";
   return "Sem leitura";
+}
+
+function saoPauloTodayParts() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: CALENDAR_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const year = Number(byType.year);
+  const month = Number(byType.month);
+  const day = Number(byType.day);
+  return {
+    year,
+    month,
+    day,
+    date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+  };
 }
 
 const monthLabels = [

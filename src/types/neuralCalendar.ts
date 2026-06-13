@@ -5,6 +5,14 @@ export type NeuralCalendarClassification =
   | "sem_amostra";
 
 export type NeuralCalendarForce = "BANKER" | "PLAYER" | "TIE" | "NONE";
+export type NeuralCalendarEngineKey =
+  | "todos"
+  | "neural_pagante"
+  | "padroes_quentes_ia"
+  | "surf_analyzer"
+  | "radar_empates"
+  | "tendencia"
+  | "personalizado";
 
 export interface NeuralCalendarDailyStat {
   id: string;
@@ -33,6 +41,8 @@ export interface NeuralCalendarDailyStat {
 }
 
 export interface NeuralCalendarHourlyStat extends NeuralCalendarDailyStat {
+  engineKey?: NeuralCalendarEngineKey;
+  totalSignals?: number;
   hour: number;
   bankerPercent: number;
   playerPercent: number;
@@ -45,6 +55,11 @@ export interface NeuralCalendarPayload {
   startDate: string;
   updatedAt: string;
   range: string;
+  engineFilter?: {
+    mode: NeuralCalendarEngineKey;
+    selected: NeuralCalendarEngineKey[];
+    available: NeuralCalendarEngineKey[];
+  };
   years: number[];
   selected: {
     year: number;
@@ -98,5 +113,17 @@ export interface NeuralCalendarPayload {
       totalRounds: number;
       classification: NeuralCalendarClassification;
     }>;
+    topEngines?: Array<{
+      engineKey: NeuralCalendarEngineKey;
+      label: string;
+      score: number;
+      totalSignals: number;
+      classification: NeuralCalendarClassification;
+    }>;
+    bestHour?: NeuralCalendarHourlyStat | null;
+    bestDay?: NeuralCalendarDailyStat | null;
+    bestWeek?: NeuralCalendarDailyStat | null;
+    bestMonth?: NeuralCalendarDailyStat | null;
+    bestYear?: NeuralCalendarDailyStat | null;
   };
 }

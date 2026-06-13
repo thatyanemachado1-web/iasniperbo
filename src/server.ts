@@ -70,6 +70,77 @@ type NeuralCalendarClassification =
   | "operavel"
   | "perigoso"
   | "sem_amostra";
+type CalendarEngineKey =
+  | "todos"
+  | "neural_pagante"
+  | "padroes_quentes_ia"
+  | "surf_analyzer"
+  | "radar_empates"
+  | "tendencia"
+  | "personalizado";
+type CalendarHourlyOutcome = "green" | "red" | "tie";
+type CalendarHourlyStatsScope = "day" | "week" | "month" | "year" | "all";
+type CalendarEngineCounterSnapshot = {
+  greens: number;
+  reds: number;
+  ties: number;
+};
+type EngineCalendarAggregateKind = "hourly" | "daily" | "weekly" | "monthly" | "yearly";
+type EngineCalendarAggregateStat = {
+  id: string;
+  engineKey: CalendarEngineKey;
+  periodKind: EngineCalendarAggregateKind;
+  periodStart: string;
+  periodEnd: string;
+  date: string;
+  hour: number | null;
+  week: number | null;
+  month: number;
+  year: number;
+  greens: number;
+  reds: number;
+  ties: number;
+  totalSignals: number;
+  accuracy: number;
+  score: number;
+  classification: NeuralCalendarClassification;
+  createdAt: string;
+  updatedAt: string;
+};
+type EngineCalendarAggregateChangeSet = {
+  changed: boolean;
+  hourlyIds: Set<string>;
+  dailyIds: Set<string>;
+  weeklyIds: Set<string>;
+  monthlyIds: Set<string>;
+  yearlyIds: Set<string>;
+};
+type EngineCalendarBackfillSourceReport = {
+  source: string;
+  table: string;
+  rowsRead: number;
+  snapshotsRead: number;
+  countersFound: number;
+  countersApplied: number;
+  skipped: Record<string, number>;
+  error?: string;
+};
+type EngineCalendarBackfillReport = {
+  ok: boolean;
+  mode: "real_history_only";
+  preservedExistingHistory: true;
+  sources: EngineCalendarBackfillSourceReport[];
+  appliedCounters: CalendarEngineCounterSnapshot;
+  changedRows: Record<EngineCalendarAggregateKind, number>;
+  keysStored: number;
+  updatedAt: string;
+  error?: string;
+};
+type EngineCalendarBackfillDashboardSnapshot = {
+  key: string;
+  occurredAt: Date;
+  data: Record<string, unknown>;
+};
 type NeuralCalendarForce = "BANKER" | "PLAYER" | "TIE" | "NONE";
 type NeuralCalendarModule = "Neural Pagante" | "Surf Analyzer" | "Tendencia" | "Validador";
 type NeuralCalendarDailyStat = {
@@ -98,6 +169,8 @@ type NeuralCalendarDailyStat = {
   updatedAt: string;
 };
 type NeuralCalendarHourlyStat = NeuralCalendarDailyStat & {
+  engineKey: CalendarEngineKey;
+  totalSignals: number;
   hour: number;
   bankerPercent: number;
   playerPercent: number;
@@ -203,9 +276,36 @@ const VALIDATOR_ROUNDS_TABLE = "validator_rounds";
 const VALIDATOR_PATTERNS_TABLE = "validator_saved_patterns";
 const VALIDATOR_CHANNELS_TABLE = "validator_channels";
 const VALIDATOR_NOTIFICATIONS_TABLE = "validator_notifications";
+const LEGACY_PATTERN_LIVE_HITS_TABLE = "pattern_live_hits";
 const CALENDAR_DAILY_STATS_TABLE = "calendar_daily_stats";
 const CALENDAR_HOURLY_STATS_TABLE = "calendar_hourly_stats";
+const ENGINE_HOURLY_STATS_TABLE = "engine_hourly_stats";
+const ENGINE_DAILY_STATS_TABLE = "engine_daily_stats";
+const ENGINE_WEEKLY_STATS_TABLE = "engine_weekly_stats";
+const ENGINE_MONTHLY_STATS_TABLE = "engine_monthly_stats";
+const ENGINE_YEARLY_STATS_TABLE = "engine_yearly_stats";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
+const DEFAULT_CALENDAR_ENGINE_KEY: CalendarEngineKey = "todos";
+const CALENDAR_ENGINE_KEYS: CalendarEngineKey[] = [
+  "todos",
+  "neural_pagante",
+  "padroes_quentes_ia",
+  "surf_analyzer",
+  "radar_empates",
+  "tendencia",
+  "personalizado",
+];
+const CALENDAR_SIGNAL_ENGINE_KEYS: CalendarEngineKey[] = [
+  "neural_pagante",
+  "padroes_quentes_ia",
+  "surf_analyzer",
+  "radar_empates",
+  "tendencia",
+  "personalizado",
+];
+const CALENDAR_BACKFILL_ENGINE_KEYS: CalendarEngineKey[] = CALENDAR_SIGNAL_ENGINE_KEYS.filter(
+  (key) => key !== "personalizado",
+);
 const NEURAL_CALENDAR_START_DATE = "2026-06-10";
 const NEURAL_CALENDAR_AGGREGATE_VERSION = "2026-06-10-time-v2";
 const NEURAL_CALENDAR_MIN_DAILY_SAMPLE = 5;
@@ -213,6 +313,7 @@ const NEURAL_CALENDAR_MIN_HOURLY_SAMPLE = 2;
 const NEURAL_CALENDAR_CATCHUP_ROUND_LIMIT = 20_000;
 const NEURAL_CALENDAR_CATCHUP_TIMEOUT_MS = 8_000;
 const MAX_NEURAL_CALENDAR_COUNTED_KEYS = 120_000;
+const MAX_ENGINE_CALENDAR_BACKFILL_KEYS = 200_000;
 const MERCADOPAGO_PREFERENCE_URL = "https://api.mercadopago.com/checkout/preferences";
 const MERCADOPAGO_PAYMENT_URL = "https://api.mercadopago.com/v1/payments";
 const ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech";
@@ -286,6 +387,12 @@ let liveNeuralCalendarHourlyStats: NeuralCalendarHourlyStat[] = [];
 let liveNeuralCalendarCountedRoundKeys: Record<string, true> = {};
 let liveNeuralCalendarStorageVersion = "";
 let neuralCalendarHydratedFromTables = false;
+let liveEngineHourlyStats: EngineCalendarAggregateStat[] = [];
+let liveEngineDailyStats: EngineCalendarAggregateStat[] = [];
+let liveEngineWeeklyStats: EngineCalendarAggregateStat[] = [];
+let liveEngineMonthlyStats: EngineCalendarAggregateStat[] = [];
+let liveEngineYearlyStats: EngineCalendarAggregateStat[] = [];
+let liveEngineCalendarBackfillKeys: Record<string, true> = {};
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
 let liveAccessEvents: Array<Record<string, unknown>> = [];
@@ -2805,6 +2912,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/dashboard/signal" ||
       url.pathname === "/dashboard/round-history" ||
       url.pathname === "/calendar/neural" ||
+      url.pathname === "/calendar/neural/backfill" ||
       url.pathname === "/validator/validate" ||
       url.pathname === "/validator/round-history" ||
       url.pathname === "/validator/patterns" ||
@@ -2819,6 +2927,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
   ) {
     return json(null, 204);
   }
+
+  const neuralCalendarBackfillResponse = await handleNeuralCalendarBackfillRequest(request, url, env);
+  if (neuralCalendarBackfillResponse) return neuralCalendarBackfillResponse;
 
   const neuralCalendarResponse = await handleNeuralCalendarRequest(request, url, env);
   if (neuralCalendarResponse) return neuralCalendarResponse;
@@ -2913,9 +3024,19 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
         dashboardBeforeTieScoreboard,
         incomingRounds,
       );
+      const engineCalendarChange = trackEngineCalendarAggregates(
+        dashboardBeforeTieScoreboard,
+        liveDashboardData,
+      );
       runBackgroundTask(
         ctx,
-        persistDashboardRoundIngestion(env, incomingRounds, calendarChange, isLocalDevelopmentRequest(request)),
+        persistDashboardRoundIngestion(
+          env,
+          incomingRounds,
+          calendarChange,
+          engineCalendarChange,
+          isLocalDevelopmentRequest(request),
+        ),
         "persistir historico e monitorar Validador",
       );
     }
@@ -2953,13 +3074,23 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     if (incomingRounds.length) {
       liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
     }
+    const dashboardBeforeUpdate = liveDashboardData;
     liveDashboardData = updateDashboardData(liveDashboardData, body);
-    if (incomingRounds.length) {
-      const calendarChange = trackNeuralCalendarRounds(incomingRounds);
+    const engineCalendarChange = trackEngineCalendarAggregates(dashboardBeforeUpdate, liveDashboardData);
+    const calendarChange = incomingRounds.length
+      ? trackNeuralCalendarRounds(incomingRounds)
+      : emptyNeuralCalendarChangeSet();
+    if (incomingRounds.length || engineCalendarChange.changed) {
       const saveStatus = await saveLiveState(env);
       runBackgroundTask(
         ctx,
-        persistDashboardRoundIngestion(env, incomingRounds, calendarChange, isLocalDevelopmentRequest(request)),
+        persistDashboardRoundIngestion(
+          env,
+          incomingRounds,
+          calendarChange,
+          engineCalendarChange,
+          isLocalDevelopmentRequest(request),
+        ),
         "persistir rodada e monitorar sinais",
       );
       return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
@@ -2988,6 +3119,7 @@ async function persistDashboardRoundIngestion(
   env: unknown,
   incomingRounds: Round[],
   calendarChange: NeuralCalendarChangeSet,
+  engineCalendarChange: EngineCalendarAggregateChangeSet,
   allowInsecureTelegramFallback: boolean,
 ) {
   const writes = [
@@ -3008,8 +3140,20 @@ async function persistDashboardRoundIngestion(
       ),
     );
   }
+  if (engineCalendarChange.changed) {
+    writes.push(
+      withTimeout(
+        persistEngineCalendarAggregateStats(env, engineCalendarChange),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "salvar agregados do Calendario por motor",
+        false,
+      ),
+    );
+  }
   await Promise.all(writes);
-  await processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback });
+  if (incomingRounds.length) {
+    await processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback });
+  }
   await saveLiveState(env);
 }
 
@@ -3025,18 +3169,518 @@ async function handleNeuralCalendarRequest(request: Request, url: URL, env: unkn
   await hydrateNeuralCalendarStatsFromTables(env);
 
   const now = saoPauloDateParts();
-  const year = clampCalendarYear(url.searchParams.get("year"), now.year);
+  const requestedYear = clampCalendarYear(url.searchParams.get("year"), now.year);
+  const allowedYears = new Set([now.year - 1, now.year, now.year + 1]);
+  const year = allowedYears.has(requestedYear) ? requestedYear : now.year;
   const month = clampCalendarMonth(url.searchParams.get("month"), now.month);
   const selectedDate = normalizeCalendarDateParam(url.searchParams.get("date"));
+  const engineSelection = calendarEngineSelectionFromUrl(url);
 
   return json({
-    calendar: buildNeuralCalendarPayload({
+    calendar: buildEngineNeuralCalendarPayload({
       year,
       month,
       selectedDate,
       range: readString({ range: url.searchParams.get("range") }, "range") || "este_mes",
+      engineMode: engineSelection.mode,
+      engineKeys: engineSelection.engineKeys,
     }),
   });
+}
+
+async function handleNeuralCalendarBackfillRequest(request: Request, url: URL, env: unknown) {
+  if (url.pathname !== "/calendar/neural/backfill") return null;
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
+
+  if (!(await isDashboardAuthorized(request, url, env))) {
+    return json({ error: "Backfill permitido apenas para administrador." }, 403);
+  }
+
+  const report = await runEngineCalendarBackfill(env);
+  return json({ ok: report.ok, backfill: report }, report.ok ? 200 : 500);
+}
+
+async function runEngineCalendarBackfill(env: unknown): Promise<EngineCalendarBackfillReport> {
+  const report = emptyEngineCalendarBackfillReport();
+  if (!getSupabasePersistenceConfig(env)) {
+    report.ok = false;
+    report.error = "Supabase nao configurado para persistencia.";
+    return report;
+  }
+
+  await hydrateNeuralCalendarStatsFromTables(env);
+
+  const change = emptyEngineCalendarAggregateChangeSet();
+  await backfillEngineCalendarFromValidatorRounds(env, change, report);
+  await backfillEngineCalendarFromLegacyPatternLiveHits(env, change, report);
+  await backfillEngineCalendarFromLiveStateSnapshots(env, change, report);
+
+  if (change.changed) {
+    await persistEngineCalendarAggregateStats(env, change);
+  }
+  liveEngineCalendarBackfillKeys = pruneEngineCalendarBackfillKeys(liveEngineCalendarBackfillKeys);
+  await saveLiveState(env);
+
+  report.changedRows = engineCalendarChangedRows(change);
+  report.keysStored = Object.keys(liveEngineCalendarBackfillKeys).length;
+  report.updatedAt = new Date().toISOString();
+  return report;
+}
+
+function emptyEngineCalendarBackfillReport(): EngineCalendarBackfillReport {
+  return {
+    ok: true,
+    mode: "real_history_only",
+    preservedExistingHistory: true,
+    sources: [],
+    appliedCounters: { greens: 0, reds: 0, ties: 0 },
+    changedRows: { hourly: 0, daily: 0, weekly: 0, monthly: 0, yearly: 0 },
+    keysStored: Object.keys(liveEngineCalendarBackfillKeys).length,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function engineCalendarChangedRows(change: EngineCalendarAggregateChangeSet): Record<EngineCalendarAggregateKind, number> {
+  return {
+    hourly: change.hourlyIds.size,
+    daily: change.dailyIds.size,
+    weekly: change.weeklyIds.size,
+    monthly: change.monthlyIds.size,
+    yearly: change.yearlyIds.size,
+  };
+}
+
+function createEngineCalendarBackfillSourceReport(
+  source: string,
+  table: string,
+): EngineCalendarBackfillSourceReport {
+  return {
+    source,
+    table,
+    rowsRead: 0,
+    snapshotsRead: 0,
+    countersFound: 0,
+    countersApplied: 0,
+    skipped: {},
+  };
+}
+
+function addEngineCalendarBackfillSkip(
+  source: EngineCalendarBackfillSourceReport,
+  reason: string,
+  count = 1,
+) {
+  source.skipped[reason] = (source.skipped[reason] || 0) + count;
+}
+
+async function backfillEngineCalendarFromValidatorRounds(
+  env: unknown,
+  change: EngineCalendarAggregateChangeSet,
+  report: EngineCalendarBackfillReport,
+) {
+  const source = createEngineCalendarBackfillSourceReport("validator_rounds_explicit_engine_results", VALIDATOR_ROUNDS_TABLE);
+  report.sources.push(source);
+
+  try {
+    const rows = await fetchSupabaseRowsPaged(env, VALIDATOR_ROUNDS_TABLE, "select=*&order=created_at.asc");
+    source.rowsRead = rows.length;
+
+    rows.forEach((row, index) => {
+      const engineKey = normalizeBackfillEngineKey(
+        row.engine_key ?? row.engineKey ?? row.module ?? row.motor ?? row.source ?? row.engine,
+      );
+      if (!engineKey) {
+        addEngineCalendarBackfillSkip(source, "raw_round_without_engine_key");
+        return;
+      }
+
+      const counters = readBackfillCountersFromRow(row) || backfillCountersFromOutcome(row);
+      if (!counters || !calendarCountersTotal(counters)) {
+        addEngineCalendarBackfillSkip(source, "engine_row_without_green_red_tie_result");
+        return;
+      }
+
+      const occurredAt = readBackfillOccurredAt(row);
+      if (!occurredAt) {
+        addEngineCalendarBackfillSkip(source, "missing_valid_timestamp");
+        return;
+      }
+
+      const rowKey =
+        readString(row, "id") ||
+        readString(row, "round_id") ||
+        readString(row, "roundId") ||
+        `${occurredAt.toISOString()}:${index}`;
+      applyEngineCalendarBackfillCounters({
+        key: `validator_rounds:${safeBackfillKey(rowKey)}:${engineKey}`,
+        engineKey,
+        counters,
+        occurredAt,
+        change,
+        source,
+        report,
+      });
+    });
+  } catch (error) {
+    source.error = errorMessage(error);
+  }
+}
+
+async function backfillEngineCalendarFromLegacyPatternLiveHits(
+  env: unknown,
+  change: EngineCalendarAggregateChangeSet,
+  report: EngineCalendarBackfillReport,
+) {
+  const source = createEngineCalendarBackfillSourceReport(
+    "pattern_live_hits_explicit_results",
+    LEGACY_PATTERN_LIVE_HITS_TABLE,
+  );
+  report.sources.push(source);
+
+  try {
+    const rows = await fetchSupabaseRowsPaged(
+      env,
+      LEGACY_PATTERN_LIVE_HITS_TABLE,
+      "select=*&order=created_at.asc",
+    );
+    source.rowsRead = rows.length;
+
+    rows.forEach((row, index) => {
+      const counters = backfillCountersFromOutcome(row);
+      if (!counters || !calendarCountersTotal(counters)) {
+        addEngineCalendarBackfillSkip(source, "pattern_hit_without_final_green_red_tie_result");
+        return;
+      }
+
+      const occurredAt = readBackfillOccurredAt(row);
+      if (!occurredAt) {
+        addEngineCalendarBackfillSkip(source, "missing_valid_timestamp");
+        return;
+      }
+
+      const rowKey =
+        readString(row, "id") ||
+        readString(row, "detected_round_id") ||
+        readString(row, "entry_round_id") ||
+        `${occurredAt.toISOString()}:${index}`;
+      applyEngineCalendarBackfillCounters({
+        key: `pattern_live_hits:${safeBackfillKey(rowKey)}:padroes_quentes_ia`,
+        engineKey: "padroes_quentes_ia",
+        counters,
+        occurredAt,
+        change,
+        source,
+        report,
+      });
+    });
+  } catch (error) {
+    source.error = errorMessage(error);
+  }
+}
+
+async function backfillEngineCalendarFromLiveStateSnapshots(
+  env: unknown,
+  change: EngineCalendarAggregateChangeSet,
+  report: EngineCalendarBackfillReport,
+) {
+  const source = createEngineCalendarBackfillSourceReport("sniper_live_state_dashboard_snapshots", LIVE_STATE_TABLE);
+  report.sources.push(source);
+
+  try {
+    const rows = await fetchSupabaseRowsPaged(
+      env,
+      LIVE_STATE_TABLE,
+      "select=id,state,updated_at&order=updated_at.asc",
+    );
+    source.rowsRead = rows.length;
+
+    const snapshots = rows
+      .flatMap((row, index) => collectEngineCalendarBackfillSnapshots(row, index, source))
+      .sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+    source.snapshotsRead = snapshots.length;
+
+    if (snapshots.length < 2) {
+      addEngineCalendarBackfillSkip(source, "insufficient_dashboard_snapshots_for_delta", Math.max(1, snapshots.length));
+      return;
+    }
+
+    let previousCounters: Partial<Record<CalendarEngineKey, CalendarEngineCounterSnapshot>> | null = null;
+    for (const snapshot of snapshots) {
+      const nextCounters = readEngineCalendarCounterSnapshots(snapshot.data);
+      if (!engineSnapshotHasCounters(nextCounters)) {
+        addEngineCalendarBackfillSkip(source, "snapshot_without_engine_counters");
+        continue;
+      }
+      if (!previousCounters) {
+        previousCounters = nextCounters;
+        continue;
+      }
+
+      for (const engineKey of CALENDAR_BACKFILL_ENGINE_KEYS) {
+        const delta = diffEngineCalendarCounters(previousCounters[engineKey], nextCounters[engineKey]);
+        if (!calendarCountersTotal(delta)) continue;
+        applyEngineCalendarBackfillCounters({
+          key: `sniper_live_state:${safeBackfillKey(snapshot.key)}:${engineKey}`,
+          engineKey,
+          counters: delta,
+          occurredAt: snapshot.occurredAt,
+          change,
+          source,
+          report,
+        });
+      }
+      previousCounters = nextCounters;
+    }
+  } catch (error) {
+    source.error = errorMessage(error);
+  }
+}
+
+function collectEngineCalendarBackfillSnapshots(
+  row: Record<string, unknown>,
+  rowIndex: number,
+  source: EngineCalendarBackfillSourceReport,
+): EngineCalendarBackfillDashboardSnapshot[] {
+  const rowId = readString(row, "id") || `row-${rowIndex}`;
+  const fallbackDate = readBackfillOccurredAt(row) || new Date();
+  const state = readBackfillRecord(row.state);
+  const snapshots: EngineCalendarBackfillDashboardSnapshot[] = [];
+
+  addEngineCalendarBackfillSnapshot(snapshots, {
+    key: `${rowId}:state`,
+    occurredAt: fallbackDate,
+    data: state,
+  });
+
+  for (const key of [
+    "dashboardSnapshots",
+    "engineSnapshots",
+    "calendarSnapshots",
+    "signalSnapshots",
+    "snapshots",
+    "history",
+    "events",
+  ]) {
+    const items = Array.isArray(state[key]) ? state[key] : [];
+    items.forEach((item, index) => {
+      const itemRecord = readBackfillRecord(item);
+      const data = firstBackfillRecord([
+        itemRecord.dashboard,
+        itemRecord.data,
+        itemRecord.state,
+        itemRecord,
+      ]);
+      if (!Object.keys(data).length) {
+        addEngineCalendarBackfillSkip(source, "snapshot_item_without_data");
+        return;
+      }
+      const occurredAt = readBackfillOccurredAt(itemRecord) || fallbackDate;
+      addEngineCalendarBackfillSnapshot(snapshots, {
+        key: `${rowId}:${key}:${index}:${occurredAt.toISOString()}`,
+        occurredAt,
+        data,
+      });
+    });
+  }
+
+  return snapshots;
+}
+
+function addEngineCalendarBackfillSnapshot(
+  snapshots: EngineCalendarBackfillDashboardSnapshot[],
+  snapshot: EngineCalendarBackfillDashboardSnapshot,
+) {
+  if (!Object.keys(snapshot.data).length) return;
+  if (!engineSnapshotHasCounters(readEngineCalendarCounterSnapshots(snapshot.data))) return;
+  snapshots.push(snapshot);
+}
+
+function applyEngineCalendarBackfillCounters(input: {
+  key: string;
+  engineKey: CalendarEngineKey;
+  counters: CalendarEngineCounterSnapshot;
+  occurredAt: Date;
+  change: EngineCalendarAggregateChangeSet;
+  source: EngineCalendarBackfillSourceReport;
+  report: EngineCalendarBackfillReport;
+}) {
+  const counters = normalizeCalendarCounterSnapshot(input.counters);
+  const total = calendarCountersTotal(counters);
+  if (!total) {
+    addEngineCalendarBackfillSkip(input.source, "empty_counter_delta");
+    return;
+  }
+
+  input.source.countersFound += total;
+  const safeKey = safeBackfillKey(input.key);
+  if (liveEngineCalendarBackfillKeys[safeKey]) {
+    addEngineCalendarBackfillSkip(input.source, "already_backfilled", total);
+    return;
+  }
+
+  liveEngineCalendarBackfillKeys[safeKey] = true;
+  mergeEngineCalendarAggregateChange(
+    input.change,
+    incrementEngineCalendarAggregates(input.engineKey, counters, input.occurredAt),
+  );
+  input.source.countersApplied += total;
+  input.report.appliedCounters.greens += counters.greens;
+  input.report.appliedCounters.reds += counters.reds;
+  input.report.appliedCounters.ties += counters.ties;
+}
+
+function normalizeCalendarCounterSnapshot(counters: CalendarEngineCounterSnapshot): CalendarEngineCounterSnapshot {
+  return {
+    greens: Math.max(0, Math.floor(Number(counters.greens) || 0)),
+    reds: Math.max(0, Math.floor(Number(counters.reds) || 0)),
+    ties: Math.max(0, Math.floor(Number(counters.ties) || 0)),
+  };
+}
+
+function readBackfillCountersFromRow(row: Record<string, unknown>): CalendarEngineCounterSnapshot | null {
+  const counters = normalizeCalendarCounterSnapshot({
+    greens: firstCalendarNumber(row, ["greens", "green", "wins", "acertos", "sg_wins", "sgWins"]),
+    reds: firstCalendarNumber(row, ["reds", "red", "losses", "loss", "erros", "losses_count"]),
+    ties: firstCalendarNumber(row, ["ties", "tie", "empates", "emp", "tie_wins", "tieWins"]),
+  });
+  return calendarCountersTotal(counters) ? counters : null;
+}
+
+function backfillCountersFromOutcome(row: Record<string, unknown>): CalendarEngineCounterSnapshot | null {
+  const payload = readBackfillRecord(row.payload_json ?? row.payloadJson ?? row.payload);
+  const outcome = normalizeBackfillOutcome(
+    row.outcome ??
+      row.signal_outcome ??
+      row.signalOutcome ??
+      row.status ??
+      row.result_status ??
+      row.resultStatus ??
+      row.resultado ??
+      row.result ??
+      payload.outcome ??
+      payload.status ??
+      payload.result,
+  );
+  if (outcome === "green") return { greens: 1, reds: 0, ties: 0 };
+  if (outcome === "red") return { greens: 0, reds: 1, ties: 0 };
+  if (outcome === "tie") return { greens: 0, reds: 0, ties: 1 };
+  return null;
+}
+
+function normalizeBackfillOutcome(value: unknown): CalendarHourlyOutcome | null {
+  const text = String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (!text) return null;
+  if (
+    ["green", "win", "winner", "sg", "g1", "g2", "acerto", "batido", "gain"].includes(text) ||
+    text.includes("green") ||
+    text.includes("win") ||
+    text.includes("acerto")
+  ) {
+    return "green";
+  }
+  if (
+    ["red", "loss", "lose", "lost", "erro", "rd"].includes(text) ||
+    text.includes("red") ||
+    text.includes("loss") ||
+    text.includes("erro")
+  ) {
+    return "red";
+  }
+  if (
+    ["tie", "empate", "emp", "tie_win", "tie_result"].includes(text) ||
+    text.includes("tie") ||
+    text.includes("empate")
+  ) {
+    return "tie";
+  }
+  return null;
+}
+
+function normalizeBackfillEngineKey(value: unknown): CalendarEngineKey | null {
+  const text = String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (!text || text === "todos" || text === "personalizado") return null;
+  if (text.includes("neural") || text.includes("numero_pagante") || text.includes("pagante")) {
+    return "neural_pagante";
+  }
+  if (text.includes("padroes") || text.includes("pattern") || text.includes("miner") || text.includes("quente")) {
+    return "padroes_quentes_ia";
+  }
+  if (text.includes("surf")) return "surf_analyzer";
+  if (text.includes("empate") || text.includes("tie") || text.includes("radar")) return "radar_empates";
+  if (text.includes("tendencia") || text.includes("entrada_principal") || text.includes("main")) return "tendencia";
+  return CALENDAR_BACKFILL_ENGINE_KEYS.includes(text as CalendarEngineKey)
+    ? (text as CalendarEngineKey)
+    : null;
+}
+
+function readBackfillOccurredAt(row: Record<string, unknown>): Date | null {
+  for (const key of [
+    "resolved_at",
+    "resolvedAt",
+    "sent_at",
+    "sentAt",
+    "detected_at",
+    "detectedAt",
+    "created_at",
+    "createdAt",
+    "updated_at",
+    "updatedAt",
+    "timestamp",
+    "recordedAt",
+    "recorded_at",
+  ]) {
+    const value = readString(row, key);
+    if (!value) continue;
+    const parsed = new Date(value);
+    if (Number.isFinite(parsed.getTime())) return parsed;
+  }
+  return null;
+}
+
+function readBackfillRecord(value: unknown): Record<string, unknown> {
+  const direct = readRecord(value);
+  if (Object.keys(direct).length) return direct;
+  if (typeof value === "string") return readRecord(parseJsonSafe(value));
+  return {};
+}
+
+function firstBackfillRecord(values: unknown[]) {
+  for (const value of values) {
+    const record = readBackfillRecord(value);
+    if (Object.keys(record).length) return record;
+  }
+  return {};
+}
+
+function engineSnapshotHasCounters(snapshot: Partial<Record<CalendarEngineKey, CalendarEngineCounterSnapshot>>) {
+  return CALENDAR_BACKFILL_ENGINE_KEYS.some((engineKey) => calendarCountersTotal(snapshot[engineKey]));
+}
+
+function calendarCountersTotal(counters: CalendarEngineCounterSnapshot | undefined) {
+  if (!counters) return 0;
+  return (
+    Math.max(0, Math.floor(Number(counters.greens) || 0)) +
+    Math.max(0, Math.floor(Number(counters.reds) || 0)) +
+    Math.max(0, Math.floor(Number(counters.ties) || 0))
+  );
+}
+
+function safeBackfillKey(value: unknown) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-z0-9:._-]+/gi, "_")
+    .slice(0, 220);
 }
 
 async function isNeuralCalendarAuthorized(request: Request, url: URL, env: unknown) {
@@ -3052,11 +3696,7 @@ async function isNeuralCalendarAuthorized(request: Request, url: URL, env: unkno
 }
 
 function trackNeuralCalendarRounds(rounds: Round[]): NeuralCalendarChangeSet {
-  const change: NeuralCalendarChangeSet = {
-    changed: false,
-    dailyIds: new Set(),
-    hourlyIds: new Set(),
-  };
+  const change = emptyNeuralCalendarChangeSet();
   if (!rounds.length) return change;
 
   const dailyById = new Map(liveNeuralCalendarDailyStats.map((row) => [row.id, row]));
@@ -3093,7 +3733,7 @@ function trackNeuralCalendarRounds(rounds: Round[]): NeuralCalendarChangeSet {
   for (const dailyId of change.dailyIds) {
     const daily = dailyById.get(dailyId);
     if (!daily) continue;
-    refreshNeuralCalendarDailyExtremes(daily, [...hourlyById.values()]);
+    refreshNeuralCalendarDailyExtremes(daily, defaultCalendarHourlyStats([...hourlyById.values()]));
     dailyById.set(dailyId, daily);
   }
 
@@ -3101,6 +3741,14 @@ function trackNeuralCalendarRounds(rounds: Round[]): NeuralCalendarChangeSet {
   liveNeuralCalendarHourlyStats = [...hourlyById.values()].sort((a, b) => a.id.localeCompare(b.id));
   liveNeuralCalendarCountedRoundKeys = pruneNeuralCalendarCountedKeys(counted);
   return change;
+}
+
+function emptyNeuralCalendarChangeSet(): NeuralCalendarChangeSet {
+  return {
+    changed: false,
+    dailyIds: new Set(),
+    hourlyIds: new Set(),
+  };
 }
 
 function emptyNeuralCalendarDailyStat(parts: NeuralCalendarDateParts): NeuralCalendarDailyStat {
@@ -3136,6 +3784,8 @@ function emptyNeuralCalendarHourlyStat(parts: NeuralCalendarDateParts): NeuralCa
   return {
     ...emptyNeuralCalendarDailyStat(parts),
     id: `${parts.date}:${String(parts.hour).padStart(2, "0")}`,
+    engineKey: DEFAULT_CALENDAR_ENGINE_KEY,
+    totalSignals: 0,
     hour: parts.hour,
     bankerPercent: 0,
     playerPercent: 0,
@@ -3250,7 +3900,8 @@ function buildNeuralCalendarPayload({
   const now = saoPauloDateParts();
   const years = neuralCalendarAvailableYears(now.year);
   const dailyByDate = new Map(liveNeuralCalendarDailyStats.map((row) => [row.date, row]));
-  const hourlyById = new Map(liveNeuralCalendarHourlyStats.map((row) => [row.id, row]));
+  const baseHourlyStats = defaultCalendarHourlyStats();
+  const hourlyById = new Map(baseHourlyStats.map((row) => [row.id, row]));
   const daysInMonth = calendarDaysInMonth(year, month);
   const monthDays = Array.from({ length: daysInMonth }, (_, index) => {
     const date = calendarDateString(year, month, index + 1);
@@ -3299,12 +3950,12 @@ function buildNeuralCalendarPayload({
       summary: neuralCalendarMonthSummary(monthDays, selectedHours),
       distribution: neuralCalendarDistribution(monthDays),
       weekdayAverages: neuralCalendarWeekdayAverages(monthDays),
-      heatmap: neuralCalendarHeatmap(year, month),
+      heatmap: neuralCalendarHeatmap(year, month, baseHourlyStats),
     },
     selectedDay,
     selectedHours,
     rankings: {
-      topHours: neuralCalendarTopHours(),
+      topHours: neuralCalendarTopHours(baseHourlyStats),
       topWeekdays: neuralCalendarTopWeekdays(),
       topMonthDays: neuralCalendarTopMonthDays(),
     },
@@ -3367,8 +4018,8 @@ function neuralCalendarWeekdayAverages(days: NeuralCalendarDailyStat[]) {
   });
 }
 
-function neuralCalendarHeatmap(year: number, month: number) {
-  return liveNeuralCalendarHourlyStats
+function neuralCalendarHeatmap(year: number, month: number, rows = defaultCalendarHourlyStats()) {
+  return rows
     .filter((hour) => hour.year === year && hour.month === month)
     .map((hour) => ({
       date: hour.date,
@@ -3380,9 +4031,9 @@ function neuralCalendarHeatmap(year: number, month: number) {
     }));
 }
 
-function neuralCalendarTopHours() {
+function neuralCalendarTopHours(rows = defaultCalendarHourlyStats()) {
   const byHour = new Map<number, { totalScore: number; count: number; totalRounds: number }>();
-  for (const hour of liveNeuralCalendarHourlyStats) {
+  for (const hour of rows) {
     if (hour.classification === "sem_amostra") continue;
     const current = byHour.get(hour.hour) || { totalScore: 0, count: 0, totalRounds: 0 };
     current.totalScore += hour.score;
@@ -3426,9 +4077,22 @@ async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
   if (!getSupabasePersistenceConfig(env) || neuralCalendarHydratedFromTables) return;
   neuralCalendarHydratedFromTables = true;
 
-  const [storedDailyStats, storedHourlyStats] = await Promise.all([
+  const [
+    storedDailyStats,
+    storedHourlyStats,
+    storedEngineHourlyStats,
+    storedEngineDailyStats,
+    storedEngineWeeklyStats,
+    storedEngineMonthlyStats,
+    storedEngineYearlyStats,
+  ] = await Promise.all([
     fetchStoredNeuralCalendarDailyStats(env),
     fetchStoredNeuralCalendarHourlyStats(env),
+    fetchStoredEngineCalendarAggregateStats(env, "hourly"),
+    fetchStoredEngineCalendarAggregateStats(env, "daily"),
+    fetchStoredEngineCalendarAggregateStats(env, "weekly"),
+    fetchStoredEngineCalendarAggregateStats(env, "monthly"),
+    fetchStoredEngineCalendarAggregateStats(env, "yearly"),
   ]);
   if (storedDailyStats.length) {
     liveNeuralCalendarDailyStats = mergeNeuralCalendarDailyStats([
@@ -3442,28 +4106,41 @@ async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
       ...storedHourlyStats,
     ]);
   }
+  if (storedEngineHourlyStats.length) {
+    liveEngineHourlyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineHourlyStats,
+      ...storedEngineHourlyStats,
+    ]);
+  }
+  if (storedEngineDailyStats.length) {
+    liveEngineDailyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineDailyStats,
+      ...storedEngineDailyStats,
+    ]);
+  }
+  if (storedEngineWeeklyStats.length) {
+    liveEngineWeeklyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineWeeklyStats,
+      ...storedEngineWeeklyStats,
+    ]);
+  }
+  if (storedEngineMonthlyStats.length) {
+    liveEngineMonthlyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineMonthlyStats,
+      ...storedEngineMonthlyStats,
+    ]);
+  }
+  if (storedEngineYearlyStats.length) {
+    liveEngineYearlyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineYearlyStats,
+      ...storedEngineYearlyStats,
+    ]);
+  }
   if (storedDailyStats.length || storedHourlyStats.length) {
     liveNeuralCalendarDailyStats = liveNeuralCalendarDailyStats.map((daily) => {
-      refreshNeuralCalendarDailyExtremes(daily, liveNeuralCalendarHourlyStats);
+      refreshNeuralCalendarDailyExtremes(daily, defaultCalendarHourlyStats());
       return daily;
     });
-  }
-
-  const storedRounds = await withTimeout(
-    fetchStoredValidatorRounds(env, NEURAL_CALENDAR_CATCHUP_ROUND_LIMIT, "bac-bo"),
-    NEURAL_CALENDAR_CATCHUP_TIMEOUT_MS,
-    "carregar rodadas reais para Calendario Neural",
-    [] as Round[],
-  );
-  const change = trackNeuralCalendarRounds(storedRounds);
-  if (change.changed) {
-    await withTimeout(
-      persistNeuralCalendarStats(env, change),
-      LIVE_STATE_IO_TIMEOUT_MS,
-      "salvar catch-up do Calendario Neural",
-      false,
-    );
-    await saveLiveState(env);
   }
 }
 
@@ -3489,6 +4166,20 @@ async function fetchStoredNeuralCalendarHourlyStats(env: unknown) {
     .filter((row): row is NeuralCalendarHourlyStat => Boolean(row));
 }
 
+async function fetchStoredEngineCalendarAggregateStats(
+  env: unknown,
+  kind: EngineCalendarAggregateKind,
+) {
+  const rows = await fetchSupabaseRowsPaged(
+    env,
+    engineCalendarAggregateTable(kind),
+    "select=*&order=period_start.asc",
+  );
+  return rows
+    .map((row) => engineCalendarAggregateFromRow(row, kind))
+    .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
+}
+
 async function persistNeuralCalendarStats(env: unknown, change: NeuralCalendarChangeSet) {
   if (!getSupabasePersistenceConfig(env) || !change.changed) return false;
   const dailyRows = liveNeuralCalendarDailyStats
@@ -3502,6 +4193,56 @@ async function persistNeuralCalendarStats(env: unknown, change: NeuralCalendarCh
     persistSupabaseRows(env, CALENDAR_HOURLY_STATS_TABLE, hourlyRows, "id"),
   ]);
   return dailySaved || hourlySaved;
+}
+
+async function persistEngineCalendarAggregateStats(
+  env: unknown,
+  change: EngineCalendarAggregateChangeSet,
+) {
+  if (!getSupabasePersistenceConfig(env) || !change.changed) return false;
+  const [hourlySaved, dailySaved, weeklySaved, monthlySaved, yearlySaved] = await Promise.all([
+    persistSupabaseRows(
+      env,
+      ENGINE_HOURLY_STATS_TABLE,
+      liveEngineHourlyStats
+        .filter((row) => change.hourlyIds.has(row.id))
+        .map(engineCalendarAggregateToRow),
+      "id",
+    ),
+    persistSupabaseRows(
+      env,
+      ENGINE_DAILY_STATS_TABLE,
+      liveEngineDailyStats
+        .filter((row) => change.dailyIds.has(row.id))
+        .map(engineCalendarAggregateToRow),
+      "id",
+    ),
+    persistSupabaseRows(
+      env,
+      ENGINE_WEEKLY_STATS_TABLE,
+      liveEngineWeeklyStats
+        .filter((row) => change.weeklyIds.has(row.id))
+        .map(engineCalendarAggregateToRow),
+      "id",
+    ),
+    persistSupabaseRows(
+      env,
+      ENGINE_MONTHLY_STATS_TABLE,
+      liveEngineMonthlyStats
+        .filter((row) => change.monthlyIds.has(row.id))
+        .map(engineCalendarAggregateToRow),
+      "id",
+    ),
+    persistSupabaseRows(
+      env,
+      ENGINE_YEARLY_STATS_TABLE,
+      liveEngineYearlyStats
+        .filter((row) => change.yearlyIds.has(row.id))
+        .map(engineCalendarAggregateToRow),
+      "id",
+    ),
+  ]);
+  return hourlySaved || dailySaved || weeklySaved || monthlySaved || yearlySaved;
 }
 
 function mergeNeuralCalendarDailyStats(rows: NeuralCalendarDailyStat[]) {
@@ -3524,6 +4265,364 @@ function mergeNeuralCalendarHourlyStats(rows: NeuralCalendarHourlyStat[]) {
     }
   }
   return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function mergeEngineCalendarAggregateStats(rows: EngineCalendarAggregateStat[]) {
+  const byId = new Map<string, EngineCalendarAggregateStat>();
+  for (const row of rows) {
+    const existing = byId.get(row.id);
+    if (!existing || stateEntityUpdatedAtMs(engineCalendarAggregateToRow(row)) >= stateEntityUpdatedAtMs(engineCalendarAggregateToRow(existing))) {
+      byId.set(row.id, row);
+    }
+  }
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function engineCalendarAggregateToRow(stat: EngineCalendarAggregateStat) {
+  return {
+    id: stat.id,
+    engine_key: stat.engineKey,
+    period_start: stat.periodStart,
+    period_end: stat.periodEnd,
+    date: stat.date,
+    hour: stat.hour,
+    week: stat.week,
+    month: stat.month,
+    year: stat.year,
+    greens: stat.greens,
+    reds: stat.reds,
+    ties: stat.ties,
+    total_signals: stat.totalSignals,
+    accuracy: stat.accuracy,
+    score: stat.score,
+    classification: stat.classification,
+    created_at: stat.createdAt,
+    updated_at: stat.updatedAt,
+  };
+}
+
+function buildEngineNeuralCalendarPayload({
+  year,
+  month,
+  selectedDate,
+  range,
+  engineMode,
+  engineKeys,
+}: {
+  year: number;
+  month: number;
+  selectedDate: string;
+  range: string;
+  engineMode: CalendarEngineKey;
+  engineKeys: CalendarEngineKey[];
+}) {
+  const now = saoPauloDateParts();
+  const availableYears = [now.year - 1, now.year, now.year + 1];
+  const monthDailyRows = combineEngineCalendarRowsForPayload("daily", engineKeys)
+    .filter((row) => row.year === year && row.month === month)
+    .map(engineAggregateToCalendarDailyStat);
+  const dailyByDate = new Map(monthDailyRows.map((row) => [row.date, row]));
+  const daysInMonth = calendarDaysInMonth(year, month);
+  const monthDays = Array.from({ length: daysInMonth }, (_, index) => {
+    const date = calendarDateString(year, month, index + 1);
+    return dailyByDate.get(date) || emptyEngineCalendarDailyStat(date, engineKeys);
+  });
+  const fallbackSelectedDate =
+    [...monthDays]
+      .filter((day) => day.classification !== "sem_amostra")
+      .sort((a, b) => b.date.localeCompare(a.date))[0]?.date ||
+    (now.year === year && now.month === month ? now.date : calendarDateString(year, month, 1));
+  const cleanSelectedDate =
+    selectedDate && selectedDate.startsWith(`${year}-${String(month).padStart(2, "0")}`)
+      ? selectedDate
+      : fallbackSelectedDate;
+  const selectedDay = dailyByDate.get(cleanSelectedDate) || emptyEngineCalendarDailyStat(cleanSelectedDate, engineKeys);
+  const selectedHourlyRows = combineEngineCalendarRowsForPayload("hourly", engineKeys)
+    .filter((row) => row.date === cleanSelectedDate)
+    .map(engineAggregateToCalendarHourlyStat);
+  const hourlyByHour = new Map(selectedHourlyRows.map((row) => [row.hour, row]));
+  const selectedHours = Array.from({ length: 24 }, (_, hour) => {
+    return hourlyByHour.get(hour) || emptyEngineCalendarHourlyStat(cleanSelectedDate, hour, engineKeys);
+  });
+
+  return {
+    timezone: DASHBOARD_CYCLE_TIME_ZONE,
+    startDate: engineCalendarStartDate(engineKeys),
+    updatedAt: new Date().toISOString(),
+    range,
+    engineFilter: {
+      mode: engineMode,
+      selected: engineKeys,
+      available: CALENDAR_SIGNAL_ENGINE_KEYS,
+    },
+    years: availableYears.length ? availableYears : neuralCalendarAvailableYears(now.year),
+    selected: {
+      year,
+      month,
+      date: cleanSelectedDate,
+    },
+    month: {
+      year,
+      month,
+      label: neuralCalendarMonthLabel(year, month),
+      days: monthDays,
+      firstWeekday: calendarFirstWeekday(year, month),
+      summary: neuralCalendarMonthSummary(monthDays, selectedHours),
+      distribution: neuralCalendarDistribution(monthDays),
+      weekdayAverages: neuralCalendarWeekdayAverages(monthDays),
+      heatmap: engineCalendarHeatmap(year, month, engineKeys),
+    },
+    selectedDay,
+    selectedHours,
+    rankings: {
+      topHours: engineCalendarTopHours(year, month, engineKeys),
+      topWeekdays: engineCalendarTopWeekdays(year, month, engineKeys),
+      topMonthDays: engineCalendarTopMonthDays(year, month, engineKeys),
+      topEngines: engineCalendarTopEngines(year, month, engineKeys),
+      bestHour: bestEngineHourOverall(engineKeys),
+      bestDay: bestEngineDay(engineKeys),
+      bestWeek: bestEngineWeek(engineKeys),
+      bestMonth: bestEngineMonth(engineKeys),
+      bestYear: bestEngineYear(engineKeys),
+    },
+  };
+}
+
+function combineEngineCalendarRowsForPayload(
+  kind: EngineCalendarAggregateKind,
+  engineKeys: CalendarEngineKey[],
+) {
+  const selected = normalizeCalendarEngineSelection(engineKeys);
+  return combineEngineCalendarAggregateRows(
+    engineCalendarAggregateRows(kind).filter((row) => selected.includes(row.engineKey)),
+  );
+}
+
+function engineAggregateToCalendarDailyStat(row: EngineCalendarAggregateStat): NeuralCalendarDailyStat {
+  const parts = calendarPartsFromDateString(row.date);
+  return {
+    id: `engine:${row.periodKind}:${row.date}`,
+    date: row.date,
+    year: row.year || parts.year,
+    month: row.month || parts.month,
+    day: parts.day,
+    weekday: parts.weekday,
+    totalRounds: row.totalSignals,
+    greens: row.greens,
+    reds: row.reds,
+    ties: row.ties,
+    bankerCount: 0,
+    playerCount: 0,
+    tieCount: row.ties,
+    accuracy: row.accuracy,
+    score: row.score,
+    classification: row.classification,
+    bestHour: "",
+    worstHour: "",
+    bestModule: calendarEngineLabel(row.engineKey),
+    bestForce: "NONE",
+    observation: engineCalendarObservation(row),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function engineAggregateToCalendarHourlyStat(row: EngineCalendarAggregateStat): NeuralCalendarHourlyStat {
+  return {
+    ...engineAggregateToCalendarDailyStat(row),
+    id: `engine:hourly:${row.date}:${String(row.hour ?? 0).padStart(2, "0")}`,
+    engineKey: row.engineKey,
+    totalSignals: row.totalSignals,
+    hour: Math.max(0, Math.min(23, Math.floor(Number(row.hour) || 0))),
+    bankerPercent: 0,
+    playerPercent: 0,
+    tiePercent: row.totalSignals ? roundCalendarPercent((row.ties / row.totalSignals) * 100) : 0,
+    bestReading: "Historico agregado por motor.",
+  };
+}
+
+function emptyEngineCalendarDailyStat(date: string, engineKeys: CalendarEngineKey[]): NeuralCalendarDailyStat {
+  const stat = emptyNeuralCalendarDailyStat(calendarPartsFromDateString(date));
+  stat.bestModule = engineKeys.length === 1 ? calendarEngineLabel(engineKeys[0]) : "Todos os motores";
+  stat.observation = "Sem amostra agregada para o filtro selecionado.";
+  return stat;
+}
+
+function emptyEngineCalendarHourlyStat(
+  date: string,
+  hour: number,
+  engineKeys: CalendarEngineKey[],
+): NeuralCalendarHourlyStat {
+  return {
+    ...emptyEngineCalendarDailyStat(date, engineKeys),
+    id: `engine:empty:${date}:${String(hour).padStart(2, "0")}`,
+    engineKey: engineKeys[0] || DEFAULT_CALENDAR_ENGINE_KEY,
+    totalSignals: 0,
+    hour,
+    bankerPercent: 0,
+    playerPercent: 0,
+    tiePercent: 0,
+    bestReading: "Aguardando amostra agregada.",
+  };
+}
+
+function engineCalendarHeatmap(year: number, month: number, engineKeys: CalendarEngineKey[]) {
+  return combineEngineCalendarRowsForPayload("hourly", engineKeys)
+    .filter((row) => row.year === year && row.month === month)
+    .map((row) => ({
+      date: row.date,
+      day: calendarPartsFromDateString(row.date).day,
+      hour: row.hour || 0,
+      score: row.score,
+      classification: row.classification,
+      totalRounds: row.totalSignals,
+    }));
+}
+
+function engineCalendarTopHours(year: number, month: number, engineKeys: CalendarEngineKey[]) {
+  const byHour = new Map<number, EngineCalendarAggregateStat>();
+  for (const row of combineEngineCalendarRowsForPayload("hourly", engineKeys).filter(
+    (item) => item.year === year && item.month === month,
+  )) {
+    const hour = row.hour || 0;
+    const current = byHour.get(hour);
+    if (!current) {
+      byHour.set(hour, { ...row });
+      continue;
+    }
+    current.greens += row.greens;
+    current.reds += row.reds;
+    current.ties += row.ties;
+    current.totalSignals = current.greens + current.reds + current.ties;
+    recomputeEngineCalendarAggregate(current);
+  }
+  return [...byHour.values()]
+    .filter((row) => row.totalSignals > 0)
+    .map((row) => ({
+      hour: row.hour || 0,
+      label: `${String(row.hour || 0).padStart(2, "0")}:00`,
+      score: row.score,
+      totalRounds: row.totalSignals,
+    }))
+    .sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)
+    .slice(0, 8);
+}
+
+function engineCalendarTopWeekdays(year: number, month: number, engineKeys: CalendarEngineKey[]) {
+  const byWeekday = new Map<string, EngineCalendarAggregateStat & { days: number }>();
+  for (const row of combineEngineCalendarRowsForPayload("daily", engineKeys).filter(
+    (item) => item.year === year && item.month === month,
+  )) {
+    const weekday = calendarPartsFromDateString(row.date).weekday;
+    const current = byWeekday.get(weekday);
+    if (!current) {
+      byWeekday.set(weekday, { ...row, days: 1 });
+      continue;
+    }
+    current.days += 1;
+    current.greens += row.greens;
+    current.reds += row.reds;
+    current.ties += row.ties;
+    current.totalSignals = current.greens + current.reds + current.ties;
+    recomputeEngineCalendarAggregate(current);
+  }
+  return [...byWeekday.entries()]
+    .map(([weekday, row]) => ({
+      weekday,
+      score: row.score,
+      total: row.days,
+      classification: row.classification,
+    }))
+    .sort((a, b) => b.score - a.score || b.total - a.total)
+    .slice(0, 7);
+}
+
+function engineCalendarTopMonthDays(year: number, month: number, engineKeys: CalendarEngineKey[]) {
+  return combineEngineCalendarRowsForPayload("daily", engineKeys)
+    .filter((row) => row.year === year && row.month === month && row.classification !== "sem_amostra")
+    .map((row) => {
+      const parts = calendarPartsFromDateString(row.date);
+      return {
+        date: row.date,
+        label: `${String(parts.day).padStart(2, "0")}/${String(parts.month).padStart(2, "0")}`,
+        score: row.score,
+        totalRounds: row.totalSignals,
+        classification: row.classification,
+      };
+    })
+    .sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)
+    .slice(0, 8);
+}
+
+function engineCalendarTopEngines(year: number, month: number, engineKeys: CalendarEngineKey[]) {
+  const selected = normalizeCalendarEngineSelection(engineKeys);
+  return liveEngineMonthlyStats
+    .filter((row) => selected.includes(row.engineKey) && row.year === year && row.month === month)
+    .filter((row) => row.totalSignals > 0)
+    .map((row) => ({
+      engineKey: row.engineKey,
+      label: calendarEngineLabel(row.engineKey),
+      score: row.score,
+      totalSignals: row.totalSignals,
+      classification: row.classification,
+    }))
+    .sort((a, b) => b.score - a.score || b.totalSignals - a.totalSignals)
+    .slice(0, 5);
+}
+
+function engineCalendarStartDate(engineKeys: CalendarEngineKey[]) {
+  return (
+    combineEngineCalendarRowsForPayload("daily", engineKeys)
+      .map((row) => row.date)
+      .sort()[0] || NEURAL_CALENDAR_START_DATE
+  );
+}
+
+function engineCalendarObservation(row: EngineCalendarAggregateStat) {
+  if (row.classification === "sem_amostra") return "Sem amostra agregada para o filtro selecionado.";
+  if (row.classification === "muito_pagante") return "Periodo muito pagante neste filtro de motor.";
+  if (row.classification === "operavel") return "Periodo operavel neste filtro de motor.";
+  return "Periodo perigoso neste filtro de motor.";
+}
+
+function engineCalendarAggregateFromRow(
+  row: Record<string, unknown>,
+  periodKind: EngineCalendarAggregateKind,
+): EngineCalendarAggregateStat | null {
+  const engineKey = normalizeCalendarEngineKey(row.engine_key ?? row.engineKey);
+  if (engineKey === DEFAULT_CALENDAR_ENGINE_KEY) return null;
+  const date = readString(row, "date");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const parts = calendarPartsFromDateString(date);
+  const stat: EngineCalendarAggregateStat = {
+    id: readString(row, "id") || `${engineKey}:${periodKind}:${date}`,
+    engineKey,
+    periodKind,
+    periodStart: readString(row, "period_start") || readString(row, "periodStart") || saoPauloLocalIso(date, 0),
+    periodEnd: readString(row, "period_end") || readString(row, "periodEnd") || saoPauloLocalIso(date, 23),
+    date,
+    hour:
+      row.hour === null || row.hour === undefined
+        ? null
+        : Math.max(0, Math.min(23, Math.floor(Number(row.hour) || 0))),
+    week:
+      row.week === null || row.week === undefined
+        ? null
+        : Math.max(1, Math.floor(Number(row.week) || saoPauloWeekNumber(date))),
+    month: Math.max(1, Math.min(12, Math.floor(Number(row.month) || parts.month))),
+    year: Math.max(2000, Math.floor(Number(row.year) || parts.year)),
+    greens: Math.max(0, Math.floor(Number(row.greens) || 0)),
+    reds: Math.max(0, Math.floor(Number(row.reds) || 0)),
+    ties: Math.max(0, Math.floor(Number(row.ties) || 0)),
+    totalSignals: Math.max(0, Math.floor(Number(row.total_signals ?? row.totalSignals) || 0)),
+    accuracy: roundCalendarPercent(Number(row.accuracy) || 0),
+    score: roundCalendarPercent(Number(row.score) || 0),
+    classification: normalizeNeuralCalendarClassification(row.classification),
+    createdAt: readString(row, "created_at") || readString(row, "createdAt") || new Date().toISOString(),
+    updatedAt: readString(row, "updated_at") || readString(row, "updatedAt") || new Date().toISOString(),
+  };
+  recomputeEngineCalendarAggregate(stat);
+  return stat;
 }
 
 function neuralCalendarDailyToRow(stat: NeuralCalendarDailyStat) {
@@ -3557,6 +4656,8 @@ function neuralCalendarDailyToRow(stat: NeuralCalendarDailyStat) {
 function neuralCalendarHourlyToRow(stat: NeuralCalendarHourlyStat) {
   return {
     ...neuralCalendarDailyToRow(stat),
+    engine_key: stat.engineKey || DEFAULT_CALENDAR_ENGINE_KEY,
+    total_signals: stat.totalSignals ?? stat.totalRounds,
     hour: stat.hour,
     banker_percent: stat.bankerPercent,
     player_percent: stat.playerPercent,
@@ -3603,16 +4704,31 @@ function neuralCalendarHourlyFromRow(row: Record<string, unknown>): NeuralCalend
   const daily = neuralCalendarDailyFromRow(row);
   if (!daily) return null;
   const hour = Math.max(0, Math.min(23, Math.floor(Number(row.hour) || 0)));
+  const engineKey = normalizeCalendarEngineKey(row.engine_key ?? row.engineKey);
+  const totalSignals = Math.max(
+    0,
+    Math.floor(Number(row.total_signals ?? row.totalSignals ?? row.total_rounds ?? row.totalRounds) || 0),
+  );
   const stat: NeuralCalendarHourlyStat = {
     ...daily,
     id: readString(row, "id") || `${daily.date}:${String(hour).padStart(2, "0")}`,
+    engineKey,
+    totalSignals,
+    totalRounds: engineKey === DEFAULT_CALENDAR_ENGINE_KEY ? daily.totalRounds : totalSignals,
+    greens: Math.max(0, Math.floor(Number(row.greens) || 0)),
+    reds: Math.max(0, Math.floor(Number(row.reds) || 0)),
+    ties: Math.max(0, Math.floor(Number(row.ties) || 0)),
     hour,
     bankerPercent: roundCalendarPercent(Number(row.banker_percent ?? row.bankerPercent) || 0),
     playerPercent: roundCalendarPercent(Number(row.player_percent ?? row.playerPercent) || 0),
     tiePercent: roundCalendarPercent(Number(row.tie_percent ?? row.tiePercent) || 0),
     bestReading: readString(row, "best_reading") || readString(row, "bestReading") || "Aguardando amostra real.",
   };
-  recomputeNeuralCalendarStat(stat, NEURAL_CALENDAR_MIN_HOURLY_SAMPLE);
+  if (engineKey === DEFAULT_CALENDAR_ENGINE_KEY) {
+    recomputeNeuralCalendarStat(stat, NEURAL_CALENDAR_MIN_HOURLY_SAMPLE);
+  } else {
+    recomputeCalendarHourlySignalStat(stat);
+  }
   return stat;
 }
 
@@ -3620,6 +4736,15 @@ function pruneNeuralCalendarCountedKeys(keys: Record<string, true>) {
   const entries = Object.keys(keys).sort();
   if (entries.length <= MAX_NEURAL_CALENDAR_COUNTED_KEYS) return keys;
   return entries.slice(-MAX_NEURAL_CALENDAR_COUNTED_KEYS).reduce<Record<string, true>>((acc, key) => {
+    acc[key] = true;
+    return acc;
+  }, {});
+}
+
+function pruneEngineCalendarBackfillKeys(keys: Record<string, true>) {
+  const entries = Object.keys(keys).sort();
+  if (entries.length <= MAX_ENGINE_CALENDAR_BACKFILL_KEYS) return keys;
+  return entries.slice(-MAX_ENGINE_CALENDAR_BACKFILL_KEYS).reduce<Record<string, true>>((acc, key) => {
     acc[key] = true;
     return acc;
   }, {});
@@ -3857,6 +4982,504 @@ function normalizeNeuralCalendarModule(value: unknown): NeuralCalendarModule {
   return "Tendencia";
 }
 
+function normalizeCalendarEngineKey(value: unknown): CalendarEngineKey {
+  const text = String(value || "").trim().toLowerCase();
+  return CALENDAR_ENGINE_KEYS.includes(text as CalendarEngineKey)
+    ? (text as CalendarEngineKey)
+    : DEFAULT_CALENDAR_ENGINE_KEY;
+}
+
+function emptyEngineCalendarAggregateChangeSet(): EngineCalendarAggregateChangeSet {
+  return {
+    changed: false,
+    hourlyIds: new Set(),
+    dailyIds: new Set(),
+    weeklyIds: new Set(),
+    monthlyIds: new Set(),
+    yearlyIds: new Set(),
+  };
+}
+
+function trackEngineCalendarAggregates(
+  previous: DashboardData,
+  next: DashboardData,
+  occurredAt = new Date(),
+) {
+  const change = emptyEngineCalendarAggregateChangeSet();
+  const previousCounters = readEngineCalendarCounterSnapshots(previous);
+  const nextCounters = readEngineCalendarCounterSnapshots(next);
+
+  for (const engineKey of CALENDAR_SIGNAL_ENGINE_KEYS) {
+    const delta = diffEngineCalendarCounters(previousCounters[engineKey], nextCounters[engineKey]);
+    if (!delta.greens && !delta.reds && !delta.ties) continue;
+    mergeEngineCalendarAggregateChange(change, incrementEngineCalendarAggregates(engineKey, delta, occurredAt));
+  }
+
+  return change;
+}
+
+function readEngineCalendarCounterSnapshots(
+  data: unknown,
+): Partial<Record<CalendarEngineKey, CalendarEngineCounterSnapshot>> {
+  const root = readRecord(data);
+  const mainScoreboard = readRecord(root.mainScoreboard);
+  const neuralScoreboard = readRecord(root.neuralScoreboard);
+  const neuralReading = readRecord(root.neuralReading);
+  const surfScoreboard = readRecord(root.surfAnalyzerScoreboard);
+  const tieScoreboard = readRecord(root.tieAlertScoreboard);
+  const patternMiner = readRecord(root.patternMinerSnapshot || root.patternMiner);
+  const patternScoreboard = readRecord(patternMiner.scoreboard);
+
+  return {
+    tendencia: {
+      greens: firstCalendarNumber(mainScoreboard, ["totalGreens", "greens"]) ||
+        firstCalendarNumber(mainScoreboard, ["greenSemGale", "sg"]) +
+          firstCalendarNumber(mainScoreboard, ["greensG1", "greenG1"]),
+      reds: firstCalendarNumber(mainScoreboard, ["reds"]),
+      ties: firstCalendarNumber(mainScoreboard, ["ties", "emp"]),
+    },
+    neural_pagante: {
+      greens: firstCalendarNumber(neuralScoreboard, ["greens", "acertos"]) ||
+        firstCalendarNumber(neuralScoreboard, ["greenSemGale", "sg"]) +
+          firstCalendarNumber(neuralScoreboard, ["greenG1"]) ||
+        firstCalendarNumber(neuralReading, ["acertos"]),
+      reds: firstCalendarNumber(neuralScoreboard, ["reds", "erros"]) ||
+        firstCalendarNumber(neuralReading, ["reds", "erros"]),
+      ties: firstCalendarNumber(neuralScoreboard, ["ties", "emp"]),
+    },
+    surf_analyzer: {
+      greens: firstCalendarNumber(surfScoreboard, ["hits", "greens"]) ||
+        firstCalendarNumber(surfScoreboard, ["greenSemGale", "sg"]) +
+          firstCalendarNumber(surfScoreboard, ["greenG1"]),
+      reds: firstCalendarNumber(surfScoreboard, ["reds"]) ||
+        firstCalendarNumber(surfScoreboard, ["fails"]) +
+          firstCalendarNumber(surfScoreboard, ["expired"]),
+      ties: firstCalendarNumber(surfScoreboard, ["ties", "emp"]),
+    },
+    radar_empates: {
+      greens: 0,
+      reds: firstCalendarNumber(tieScoreboard, ["expired", "reds"]),
+      ties: firstCalendarNumber(tieScoreboard, ["greenTieAlerts", "greens", "ties"]),
+    },
+    padroes_quentes_ia: {
+      greens: firstCalendarNumber(patternScoreboard, ["greens", "totalGreens"]) ||
+        firstCalendarNumber(patternScoreboard, ["sg"]) + firstCalendarNumber(patternScoreboard, ["g1"]),
+      reds: firstCalendarNumber(patternScoreboard, ["red", "reds"]),
+      ties: firstCalendarNumber(patternScoreboard, ["tie", "ties"]),
+    },
+  };
+}
+
+function firstCalendarNumber(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = Number(record[key]);
+    if (Number.isFinite(value)) return Math.max(0, Math.floor(value));
+  }
+  return 0;
+}
+
+function diffEngineCalendarCounters(
+  previous: CalendarEngineCounterSnapshot | undefined,
+  next: CalendarEngineCounterSnapshot | undefined,
+): CalendarEngineCounterSnapshot {
+  return {
+    greens: diffCalendarCounter(previous?.greens, next?.greens),
+    reds: diffCalendarCounter(previous?.reds, next?.reds),
+    ties: diffCalendarCounter(previous?.ties, next?.ties),
+  };
+}
+
+function diffCalendarCounter(previous = 0, next = 0) {
+  const cleanPrevious = Math.max(0, Math.floor(Number(previous) || 0));
+  const cleanNext = Math.max(0, Math.floor(Number(next) || 0));
+  if (cleanNext > cleanPrevious) return cleanNext - cleanPrevious;
+  if (cleanNext < cleanPrevious) return cleanNext;
+  return 0;
+}
+
+function incrementEngineCalendarAggregates(
+  engineKey: CalendarEngineKey,
+  counters: CalendarEngineCounterSnapshot,
+  occurredAt = new Date(),
+) {
+  const change = emptyEngineCalendarAggregateChangeSet();
+  if (engineKey === DEFAULT_CALENDAR_ENGINE_KEY) return change;
+  if (!counters.greens && !counters.reds && !counters.ties) return change;
+
+  for (const kind of ["hourly", "daily", "weekly", "monthly", "yearly"] as const) {
+    const stat = upsertEngineCalendarAggregate(kind, engineKey, counters, occurredAt);
+    change.changed = true;
+    if (kind === "hourly") change.hourlyIds.add(stat.id);
+    if (kind === "daily") change.dailyIds.add(stat.id);
+    if (kind === "weekly") change.weeklyIds.add(stat.id);
+    if (kind === "monthly") change.monthlyIds.add(stat.id);
+    if (kind === "yearly") change.yearlyIds.add(stat.id);
+  }
+
+  return change;
+}
+
+function upsertEngineCalendarAggregate(
+  kind: EngineCalendarAggregateKind,
+  engineKey: CalendarEngineKey,
+  counters: CalendarEngineCounterSnapshot,
+  occurredAt: Date,
+) {
+  const stat = findEngineCalendarAggregate(kind, engineKey, occurredAt) ||
+    emptyEngineCalendarAggregateStat(kind, engineKey, occurredAt);
+  stat.greens += counters.greens;
+  stat.reds += counters.reds;
+  stat.ties += counters.ties;
+  stat.totalSignals = stat.greens + stat.reds + stat.ties;
+  recomputeEngineCalendarAggregate(stat);
+  writeEngineCalendarAggregate(kind, stat);
+  return stat;
+}
+
+function findEngineCalendarAggregate(
+  kind: EngineCalendarAggregateKind,
+  engineKey: CalendarEngineKey,
+  occurredAt: Date,
+) {
+  const id = engineCalendarAggregateId(kind, engineKey, occurredAt);
+  return engineCalendarAggregateRows(kind).find((row) => row.id === id) || null;
+}
+
+function emptyEngineCalendarAggregateStat(
+  kind: EngineCalendarAggregateKind,
+  engineKey: CalendarEngineKey,
+  occurredAt: Date,
+): EngineCalendarAggregateStat {
+  const now = new Date().toISOString();
+  const period = engineCalendarPeriod(kind, occurredAt);
+  return {
+    id: engineCalendarAggregateId(kind, engineKey, occurredAt),
+    engineKey,
+    periodKind: kind,
+    periodStart: period.start,
+    periodEnd: period.end,
+    date: period.date,
+    hour: period.hour,
+    week: period.week,
+    month: period.month,
+    year: period.year,
+    greens: 0,
+    reds: 0,
+    ties: 0,
+    totalSignals: 0,
+    accuracy: 0,
+    score: 0,
+    classification: "sem_amostra",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function recomputeEngineCalendarAggregate(stat: EngineCalendarAggregateStat) {
+  const validated = stat.greens + stat.reds;
+  stat.accuracy = validated ? roundCalendarPercent((stat.greens / validated) * 100) : 0;
+  stat.score = stat.accuracy;
+  stat.classification = classifyNeuralCalendarScore(stat.score, validated, 1);
+  stat.totalSignals = stat.greens + stat.reds + stat.ties;
+  stat.updatedAt = new Date().toISOString();
+}
+
+function recomputeCalendarHourlySignalStat(stat: NeuralCalendarHourlyStat) {
+  stat.totalSignals = stat.greens + stat.reds + stat.ties;
+  stat.totalRounds = stat.totalSignals;
+  const validated = stat.greens + stat.reds;
+  stat.accuracy = validated ? roundCalendarPercent((stat.greens / validated) * 100) : 0;
+  stat.score = stat.accuracy;
+  stat.classification = classifyNeuralCalendarScore(stat.score, validated, 1);
+  stat.updatedAt = new Date().toISOString();
+}
+
+function mergeEngineCalendarAggregateChange(
+  target: EngineCalendarAggregateChangeSet,
+  source: EngineCalendarAggregateChangeSet,
+) {
+  if (!source.changed) return target;
+  target.changed = true;
+  source.hourlyIds.forEach((id) => target.hourlyIds.add(id));
+  source.dailyIds.forEach((id) => target.dailyIds.add(id));
+  source.weeklyIds.forEach((id) => target.weeklyIds.add(id));
+  source.monthlyIds.forEach((id) => target.monthlyIds.add(id));
+  source.yearlyIds.forEach((id) => target.yearlyIds.add(id));
+  return target;
+}
+
+function engineCalendarAggregateRows(kind: EngineCalendarAggregateKind) {
+  if (kind === "hourly") return liveEngineHourlyStats;
+  if (kind === "daily") return liveEngineDailyStats;
+  if (kind === "weekly") return liveEngineWeeklyStats;
+  if (kind === "monthly") return liveEngineMonthlyStats;
+  return liveEngineYearlyStats;
+}
+
+function engineCalendarAggregateTable(kind: EngineCalendarAggregateKind) {
+  if (kind === "hourly") return ENGINE_HOURLY_STATS_TABLE;
+  if (kind === "daily") return ENGINE_DAILY_STATS_TABLE;
+  if (kind === "weekly") return ENGINE_WEEKLY_STATS_TABLE;
+  if (kind === "monthly") return ENGINE_MONTHLY_STATS_TABLE;
+  return ENGINE_YEARLY_STATS_TABLE;
+}
+
+function writeEngineCalendarAggregate(kind: EngineCalendarAggregateKind, stat: EngineCalendarAggregateStat) {
+  const rows = mergeEngineCalendarAggregateStats([...engineCalendarAggregateRows(kind), stat]);
+  if (kind === "hourly") liveEngineHourlyStats = rows;
+  if (kind === "daily") liveEngineDailyStats = rows;
+  if (kind === "weekly") liveEngineWeeklyStats = rows;
+  if (kind === "monthly") liveEngineMonthlyStats = rows;
+  if (kind === "yearly") liveEngineYearlyStats = rows;
+}
+
+function engineCalendarAggregateId(
+  kind: EngineCalendarAggregateKind,
+  engineKey: CalendarEngineKey,
+  occurredAt: Date,
+) {
+  const period = engineCalendarPeriod(kind, occurredAt);
+  if (kind === "hourly") return `${engineKey}:${kind}:${period.date}:${String(period.hour ?? 0).padStart(2, "0")}`;
+  if (kind === "daily") return `${engineKey}:${kind}:${period.date}`;
+  if (kind === "weekly") return `${engineKey}:${kind}:${period.year}:W${String(period.week ?? 0).padStart(2, "0")}`;
+  if (kind === "monthly") return `${engineKey}:${kind}:${period.year}-${String(period.month).padStart(2, "0")}`;
+  return `${engineKey}:${kind}:${period.year}`;
+}
+
+function engineCalendarPeriod(kind: EngineCalendarAggregateKind, occurredAt: Date) {
+  const parts = saoPauloDateParts(occurredAt);
+  const week = saoPauloWeekNumber(parts.date);
+
+  if (kind === "hourly") {
+    const start = saoPauloLocalIso(parts.date, parts.hour);
+    return {
+      start,
+      end: addMillisecondsIso(start, 60 * 60 * 1000),
+      date: parts.date,
+      hour: parts.hour,
+      week,
+      month: parts.month,
+      year: parts.year,
+    };
+  }
+
+  if (kind === "daily") {
+    const start = saoPauloLocalIso(parts.date, 0);
+    return {
+      start,
+      end: addMillisecondsIso(start, 24 * 60 * 60 * 1000),
+      date: parts.date,
+      hour: null,
+      week,
+      month: parts.month,
+      year: parts.year,
+    };
+  }
+
+  if (kind === "weekly") {
+    const weekDate = saoPauloWeekStartDate(parts.date);
+    const start = saoPauloLocalIso(weekDate, 0);
+    const weekParts = calendarPartsFromDateString(weekDate);
+    return {
+      start,
+      end: addMillisecondsIso(start, 7 * 24 * 60 * 60 * 1000),
+      date: weekDate,
+      hour: null,
+      week: saoPauloWeekNumber(weekDate),
+      month: weekParts.month,
+      year: weekParts.year,
+    };
+  }
+
+  if (kind === "monthly") {
+    const date = `${parts.year}-${String(parts.month).padStart(2, "0")}-01`;
+    const start = saoPauloLocalIso(date, 0);
+    const nextMonth = parts.month === 12 ? 1 : parts.month + 1;
+    const nextYear = parts.month === 12 ? parts.year + 1 : parts.year;
+    const end = saoPauloLocalIso(`${nextYear}-${String(nextMonth).padStart(2, "0")}-01`, 0);
+    return {
+      start,
+      end,
+      date,
+      hour: null,
+      week: saoPauloWeekNumber(date),
+      month: parts.month,
+      year: parts.year,
+    };
+  }
+
+  const date = `${parts.year}-01-01`;
+  return {
+    start: saoPauloLocalIso(date, 0),
+    end: saoPauloLocalIso(`${parts.year + 1}-01-01`, 0),
+    date,
+    hour: null,
+    week: saoPauloWeekNumber(date),
+    month: 1,
+    year: parts.year,
+  };
+}
+
+function saoPauloLocalIso(date: string, hour: number) {
+  const safeHour = Math.max(0, Math.min(23, Math.floor(Number(hour) || 0)));
+  return new Date(`${date}T${String(safeHour).padStart(2, "0")}:00:00-03:00`).toISOString();
+}
+
+function addMillisecondsIso(iso: string, milliseconds: number) {
+  return new Date(new Date(iso).getTime() + milliseconds).toISOString();
+}
+
+function saoPauloWeekStartDate(date: string) {
+  const local = new Date(`${date}T00:00:00-03:00`);
+  const day = local.getUTCDay();
+  const offset = (day + 6) % 7;
+  local.setUTCDate(local.getUTCDate() - offset);
+  return local.toISOString().slice(0, 10);
+}
+
+function saoPauloWeekNumber(date: string) {
+  const parts = calendarPartsFromDateString(date);
+  const currentStart = new Date(`${saoPauloWeekStartDate(date)}T00:00:00-03:00`).getTime();
+  const yearStart = new Date(`${saoPauloWeekStartDate(`${parts.year}-01-01`)}T00:00:00-03:00`).getTime();
+  return Math.max(1, Math.floor((currentStart - yearStart) / (7 * 24 * 60 * 60 * 1000)) + 1);
+}
+
+function bestEngineHourOfDay(date: string, engineKeys: CalendarEngineKey[] | "todos" = "todos") {
+  return queryBestEngineCalendarStats("hourly", { date, engineKeys, limit: 1 })[0] || null;
+}
+
+function bestEngineHourOfWeek(
+  year: number,
+  week: number,
+  engineKeys: CalendarEngineKey[] | "todos" = "todos",
+) {
+  return queryBestEngineCalendarStats("hourly", { year, week, engineKeys, limit: 1 })[0] || null;
+}
+
+function bestEngineHourOfMonth(
+  year: number,
+  month: number,
+  engineKeys: CalendarEngineKey[] | "todos" = "todos",
+) {
+  return queryBestEngineCalendarStats("hourly", { year, month, engineKeys, limit: 1 })[0] || null;
+}
+
+function bestEngineHourOfYear(year: number, engineKeys: CalendarEngineKey[] | "todos" = "todos") {
+  return queryBestEngineCalendarStats("hourly", { year, engineKeys, limit: 1 })[0] || null;
+}
+
+function bestEngineHourOverall(engineKeys: CalendarEngineKey[] | "todos" = "todos") {
+  return queryBestEngineCalendarStats("hourly", { engineKeys, limit: 1 })[0] || null;
+}
+
+function bestEngineDay(engineKeys: CalendarEngineKey[] | "todos" = "todos") {
+  return queryBestEngineCalendarStats("daily", { engineKeys, limit: 1 })[0] || null;
+}
+
+function bestEngineWeek(engineKeys: CalendarEngineKey[] | "todos" = "todos") {
+  return queryBestEngineCalendarStats("weekly", { engineKeys, limit: 1 })[0] || null;
+}
+
+function bestEngineMonth(engineKeys: CalendarEngineKey[] | "todos" = "todos") {
+  return queryBestEngineCalendarStats("monthly", { engineKeys, limit: 1 })[0] || null;
+}
+
+function bestEngineYear(engineKeys: CalendarEngineKey[] | "todos" = "todos") {
+  return queryBestEngineCalendarStats("yearly", { engineKeys, limit: 1 })[0] || null;
+}
+
+function queryBestEngineCalendarStats(
+  kind: EngineCalendarAggregateKind,
+  options: {
+    engineKeys?: CalendarEngineKey[] | "todos";
+    date?: string;
+    year?: number;
+    month?: number;
+    week?: number;
+    limit?: number;
+  } = {},
+) {
+  const engines = normalizeCalendarEngineSelection(options.engineKeys);
+  const rows = engineCalendarAggregateRows(kind).filter((row) => {
+    if (!engines.includes(row.engineKey)) return false;
+    if (options.date && row.date !== options.date) return false;
+    if (options.year && row.year !== options.year) return false;
+    if (options.month && row.month !== options.month) return false;
+    if (options.week && row.week !== options.week) return false;
+    return true;
+  });
+
+  return combineEngineCalendarAggregateRows(rows)
+    .filter((row) => row.totalSignals > 0)
+    .sort((a, b) => b.score - a.score || b.totalSignals - a.totalSignals)
+    .slice(0, Math.max(1, Math.floor(Number(options.limit) || 1)));
+}
+
+function combineEngineCalendarAggregateRows(rows: EngineCalendarAggregateStat[]) {
+  const byPeriod = new Map<string, EngineCalendarAggregateStat>();
+  for (const row of rows) {
+    const key = `${row.periodKind}:${row.periodStart}:${row.hour ?? "all"}`;
+    const current = byPeriod.get(key);
+    if (!current) {
+      byPeriod.set(key, { ...row });
+      continue;
+    }
+    current.greens += row.greens;
+    current.reds += row.reds;
+    current.ties += row.ties;
+    current.totalSignals = current.greens + current.reds + current.ties;
+    recomputeEngineCalendarAggregate(current);
+  }
+  return [...byPeriod.values()];
+}
+
+function normalizeCalendarEngineSelection(value: CalendarEngineKey[] | "todos" | undefined) {
+  if (!value || value === "todos") return [...CALENDAR_SIGNAL_ENGINE_KEYS];
+  const selected = value
+    .map(normalizeCalendarEngineKey)
+    .filter((engine): engine is CalendarEngineKey => engine !== DEFAULT_CALENDAR_ENGINE_KEY);
+  return selected.length ? Array.from(new Set(selected)) : [...CALENDAR_SIGNAL_ENGINE_KEYS];
+}
+
+function calendarEngineSelectionFromUrl(url: URL) {
+  const rawMode = readString({ engine: url.searchParams.get("engine") }, "engine") || DEFAULT_CALENDAR_ENGINE_KEY;
+  const mode = normalizeCalendarEngineKey(rawMode);
+  const enginesParam = readString({ engines: url.searchParams.get("engines") }, "engines");
+  const customEngines = enginesParam
+    .split(",")
+    .map((item) => normalizeCalendarEngineKey(item))
+    .filter((engine): engine is CalendarEngineKey => engine !== DEFAULT_CALENDAR_ENGINE_KEY && engine !== "personalizado");
+
+  if (mode === "personalizado") {
+    return {
+      mode,
+      engineKeys: customEngines.length ? Array.from(new Set(customEngines)) : [...CALENDAR_SIGNAL_ENGINE_KEYS],
+    };
+  }
+
+  if (mode !== DEFAULT_CALENDAR_ENGINE_KEY) {
+    return {
+      mode,
+      engineKeys: [mode],
+    };
+  }
+
+  return {
+    mode: DEFAULT_CALENDAR_ENGINE_KEY,
+    engineKeys: [...CALENDAR_SIGNAL_ENGINE_KEYS],
+  };
+}
+
+function calendarEngineLabel(engineKey: CalendarEngineKey) {
+  if (engineKey === "neural_pagante") return "Neural Pagante";
+  if (engineKey === "padroes_quentes_ia") return "Padroes Quentes IA";
+  if (engineKey === "surf_analyzer") return "Surf Analyzer";
+  if (engineKey === "radar_empates") return "Radar de Empates";
+  if (engineKey === "tendencia") return "Tendencia";
+  if (engineKey === "personalizado") return "Personalizado";
+  return "Todos os motores";
+}
+
 async function handleValidatorValidationRequest(request: Request, url: URL, env: unknown) {
   if (url.pathname !== "/validator/validate") return null;
   if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
@@ -3900,6 +5523,14 @@ function summarizeValidatorResultForResponse(result: ValidatorResult): Validator
     ...result,
     details: result.details.slice(-MAX_VALIDATOR_DETAIL_RESPONSE),
   };
+}
+
+function isDefaultCalendarHourlyStat(row: NeuralCalendarHourlyStat) {
+  return !row.engineKey || row.engineKey === DEFAULT_CALENDAR_ENGINE_KEY;
+}
+
+function defaultCalendarHourlyStats(rows = liveNeuralCalendarHourlyStats) {
+  return rows.filter(isDefaultCalendarHourlyStat);
 }
 
 async function handleValidatorStorageRequest(request: Request, url: URL, env: unknown) {
@@ -10219,6 +11850,36 @@ function applyLiveState(state: Record<string, unknown>) {
         .filter((row): row is NeuralCalendarHourlyStat => Boolean(row));
     }
 
+    if (Array.isArray(state.engineHourlyStats)) {
+      liveEngineHourlyStats = state.engineHourlyStats
+        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "hourly"))
+        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
+    }
+
+    if (Array.isArray(state.engineDailyStats)) {
+      liveEngineDailyStats = state.engineDailyStats
+        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "daily"))
+        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
+    }
+
+    if (Array.isArray(state.engineWeeklyStats)) {
+      liveEngineWeeklyStats = state.engineWeeklyStats
+        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "weekly"))
+        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
+    }
+
+    if (Array.isArray(state.engineMonthlyStats)) {
+      liveEngineMonthlyStats = state.engineMonthlyStats
+        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "monthly"))
+        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
+    }
+
+    if (Array.isArray(state.engineYearlyStats)) {
+      liveEngineYearlyStats = state.engineYearlyStats
+        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "yearly"))
+        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
+    }
+
     const calendarKeys = readRecord(state.neuralCalendarCountedRoundKeys);
     if (Object.keys(calendarKeys).length > 0) {
       liveNeuralCalendarCountedRoundKeys = pruneNeuralCalendarCountedKeys(
@@ -10228,10 +11889,26 @@ function applyLiveState(state: Record<string, unknown>) {
         }, {}),
       );
     }
+
+    const engineBackfillKeys = readRecord(state.engineCalendarBackfillKeys);
+    if (Object.keys(engineBackfillKeys).length > 0) {
+      liveEngineCalendarBackfillKeys = pruneEngineCalendarBackfillKeys(
+        Object.keys(engineBackfillKeys).reduce<Record<string, true>>((acc, key) => {
+          if (engineBackfillKeys[key]) acc[key] = true;
+          return acc;
+        }, {}),
+      );
+    }
   } else {
     liveNeuralCalendarDailyStats = [];
     liveNeuralCalendarHourlyStats = [];
     liveNeuralCalendarCountedRoundKeys = {};
+    liveEngineHourlyStats = [];
+    liveEngineDailyStats = [];
+    liveEngineWeeklyStats = [];
+    liveEngineMonthlyStats = [];
+    liveEngineYearlyStats = [];
+    liveEngineCalendarBackfillKeys = {};
     neuralCalendarHydratedFromTables = false;
   }
 
@@ -10364,6 +12041,11 @@ function mergeLiveStates(
       durable.neuralCalendarHourlyStats,
       cache.neuralCalendarHourlyStats,
     ),
+    engineHourlyStats: mergeStateArrays(durable.engineHourlyStats, cache.engineHourlyStats),
+    engineDailyStats: mergeStateArrays(durable.engineDailyStats, cache.engineDailyStats),
+    engineWeeklyStats: mergeStateArrays(durable.engineWeeklyStats, cache.engineWeeklyStats),
+    engineMonthlyStats: mergeStateArrays(durable.engineMonthlyStats, cache.engineMonthlyStats),
+    engineYearlyStats: mergeStateArrays(durable.engineYearlyStats, cache.engineYearlyStats),
     neuralCalendarCountedRoundKeys: {
       ...readRecord(cache.neuralCalendarCountedRoundKeys),
       ...readRecord(durable.neuralCalendarCountedRoundKeys),
@@ -10744,7 +12426,13 @@ function buildLiveStateSnapshot(env?: unknown) {
     neuralCalendarVersion: NEURAL_CALENDAR_AGGREGATE_VERSION,
     neuralCalendarDailyStats: liveNeuralCalendarDailyStats,
     neuralCalendarHourlyStats: liveNeuralCalendarHourlyStats,
+    engineHourlyStats: liveEngineHourlyStats,
+    engineDailyStats: liveEngineDailyStats,
+    engineWeeklyStats: liveEngineWeeklyStats,
+    engineMonthlyStats: liveEngineMonthlyStats,
+    engineYearlyStats: liveEngineYearlyStats,
     neuralCalendarCountedRoundKeys: liveNeuralCalendarCountedRoundKeys,
+    engineCalendarBackfillKeys: liveEngineCalendarBackfillKeys,
     recipients: liveRecipients,
     clients: liveClients.map(removeLegacyPassword),
     accessEvents: liveAccessEvents,
