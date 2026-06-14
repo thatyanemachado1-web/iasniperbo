@@ -145,7 +145,7 @@ function Get-LegacyDashboardSnapshot($Token) {
     $headers = @{ Accept = "application/json" }
     if ($Token) { $headers.Authorization = "Bearer $Token" }
     $dashboard = Invoke-RestMethod -Uri "http://127.0.0.1:$LegacyApiPort/dashboard" -Headers $headers -TimeoutSec 3
-    $latest = @($dashboard.rounds) | Select-Object -First 1
+    $latest = @($dashboard.rounds) | Select-Object -Last 1
     if (-not $latest) {
       return [pscustomobject]@{
         Ok = $true

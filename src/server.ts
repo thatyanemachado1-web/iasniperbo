@@ -6982,25 +6982,6 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
   return {
     ...safeDashboard,
     currentSignal: signal,
-    neuralReading: safeDashboard.neuralReading
-      ? {
-          ...safeDashboard.neuralReading,
-          sequencePositive: 0,
-          sequenceNegative: 0,
-          maxSequencePositive: 0,
-          maxSequenceNegative: 0,
-        }
-      : safeDashboard.neuralReading,
-    neuralScoreboard: safeDashboard.neuralScoreboard
-      ? {
-          ...safeDashboard.neuralScoreboard,
-          sequencePositive: 0,
-          sequenceNegative: 0,
-          maxSequencePositive: 0,
-          maxSequenceNegative: 0,
-        }
-      : safeDashboard.neuralScoreboard,
-    neuralSequenceLastOutcome: null,
   };
 }
 
