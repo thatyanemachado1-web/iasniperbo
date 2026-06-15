@@ -76,6 +76,37 @@ export interface NeuralScoreboard {
   maxSequenceNegative?: number | null;
 }
 
+export type NeuralEntryStatus = "awaiting_sg" | "awaiting_g1";
+export type NeuralEntryResultKind = "sg" | "g1" | "red" | "tie_sg" | "tie_g1";
+
+export interface NeuralEntryState {
+  key: string;
+  numero?: number | null;
+  origem?: SignalSide | "TIE" | null;
+  origemTipo?: NeuralOriginKind | null;
+  expectedSide?: SignalSide | "TIE" | null;
+  status: NeuralEntryStatus;
+  triggerRoundKey: string;
+  sgRoundKey?: string | null;
+  startedAt?: string | null;
+  readingSnapshot?: NeuralReading | null;
+}
+
+export interface NeuralEntryLastResult {
+  id: string;
+  key: string;
+  numero?: number | null;
+  origem?: SignalSide | "TIE" | null;
+  origemTipo?: NeuralOriginKind | null;
+  expectedSide?: SignalSide | "TIE" | null;
+  kind: NeuralEntryResultKind;
+  outcome: "GREEN" | "RED" | "TIE";
+  resultRoundKey: string;
+  finishedAt: string;
+  tieMultiplier?: number | null;
+  readingSnapshot?: NeuralReading | null;
+}
+
 export interface ModuleToggles {
   tieAlert: boolean;
   surfAnalyzer: boolean;
@@ -282,6 +313,8 @@ export interface DashboardData {
   currentSurfAlert?: SurfAlert;
   neuralReading?: NeuralReading;
   neuralScoreboard?: NeuralScoreboard;
+  neuralEntryState?: NeuralEntryState | null;
+  neuralEntryLastResult?: NeuralEntryLastResult | null;
   moduleToggles?: ModuleToggles;
   entryMode?: EntryMode;
   entryModeFilter?: EntryModeFilter;

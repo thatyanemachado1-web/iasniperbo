@@ -19,7 +19,10 @@ import type {
   CurrentSignalSide,
   DashboardData,
   EntryModeStats,
+  NeuralEntryLastResult,
+  NeuralEntryState,
   NeuralReading,
+  NeuralScoreboard,
   Round,
   SignalSide,
   SignalStatus,
@@ -64,6 +67,8 @@ type LiveDashboardData = DashboardData & {
   neuralSequenceLastOutcome?: "GREEN" | "RED" | null;
   neuralPanelCycleResetVersion?: string;
   neuralPanelCycleResetRoundKey?: string;
+  neuralEntryState?: NeuralEntryState | null;
+  neuralEntryLastResult?: NeuralEntryLastResult | null;
 };
 type NeuralCalendarClassification =
   | "muito_pagante"
@@ -7366,14 +7371,418 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
   };
 
-  const dashboardWithTieScoreboard = trackServerTieRoundScoreboard(
+  const dashboardWithNeuralEntry = trackServerNeuralEntryLifecycle(
     nextDashboard,
+    currentDashboard,
+    incomingLatestRound,
+    receivedNewRound,
+  );
+  const dashboardWithTieScoreboard = trackServerTieRoundScoreboard(
+    dashboardWithNeuralEntry,
     currentDashboard,
     incomingRounds,
   );
   return trackServerEntryModeStats(
     trackServerNeuralSequences(dashboardWithTieScoreboard, currentDashboard),
   );
+}
+
+function trackServerNeuralEntryLifecycle(
+  dashboard: LiveDashboardData,
+  previousDashboard: LiveDashboardData,
+  latestRound: Round | undefined,
+  receivedNewRound: boolean,
+): LiveDashboardData {
+  const latestRoundKey = latestRound ? roundHistoryKey(latestRound) : "";
+  const previousState = normalizeServerNeuralEntryState(
+    previousDashboard.neuralEntryState ?? dashboard.neuralEntryState,
+  );
+  const previousResult = normalizeServerNeuralEntryLastResult(
+    previousDashboard.neuralEntryLastResult ?? dashboard.neuralEntryLastResult,
+  );
+
+  if (previousState) {
+    let state = previousState;
+
+    if (
+      receivedNewRound &&
+      latestRound &&
+      latestRoundKey &&
+      latestRoundKey !== state.triggerRoundKey &&
+      latestRoundKey !== state.sgRoundKey
+    ) {
+      const resolution = resolveServerNeuralEntryRound(state, latestRound, latestRoundKey);
+      if (resolution.result) {
+        const scoreboard = applyServerNeuralEntryResult(
+          previousDashboard.neuralScoreboard ?? dashboard.neuralScoreboard,
+          resolution.result.kind,
+        );
+
+        return {
+          ...dashboard,
+          neuralEntryState: null,
+          neuralEntryLastResult: resolution.result,
+          neuralScoreboard: scoreboard,
+          neuralReading: neuralReadingForEntryResult(resolution.result),
+        };
+      }
+      state = resolution.state ?? state;
+    }
+
+    return {
+      ...dashboard,
+      neuralEntryState: state,
+      neuralEntryLastResult: previousResult,
+      neuralScoreboard: previousDashboard.neuralScoreboard ?? dashboard.neuralScoreboard,
+      neuralReading: neuralReadingForEntryState(state),
+    };
+  }
+
+  if (previousResult && latestRoundKey && previousResult.resultRoundKey === latestRoundKey && !receivedNewRound) {
+    return {
+      ...dashboard,
+      neuralEntryState: null,
+      neuralEntryLastResult: previousResult,
+      neuralScoreboard: previousDashboard.neuralScoreboard ?? dashboard.neuralScoreboard,
+      neuralReading: neuralReadingForEntryResult(previousResult),
+    };
+  }
+
+  const nextState = latestRoundKey ? buildServerNeuralEntryState(dashboard.neuralReading, latestRoundKey) : null;
+  if (!nextState) {
+    return {
+      ...dashboard,
+      neuralEntryState: null,
+      neuralEntryLastResult: previousResult,
+    };
+  }
+
+  return {
+    ...dashboard,
+    neuralEntryState: nextState,
+    neuralEntryLastResult: previousResult,
+    neuralReading: neuralReadingForEntryState(nextState),
+  };
+}
+
+function buildServerNeuralEntryState(
+  reading: DashboardData["neuralReading"],
+  triggerRoundKey: string,
+): NeuralEntryState | null {
+  if (!reading || reading.mode !== "ACTIVE") return null;
+  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
+  if (!expectedSide) return null;
+  const key = serverNeuralEntryKey(reading);
+  if (!key) return null;
+
+  return {
+    key,
+    numero: typeof reading.numero === "number" ? reading.numero : null,
+    origem: readServerNeuralSide(reading.origem),
+    origemTipo: reading.origemTipo ?? null,
+    expectedSide,
+    status: "awaiting_sg",
+    triggerRoundKey,
+    sgRoundKey: null,
+    startedAt: new Date().toISOString(),
+    readingSnapshot: {
+      ...reading,
+      mode: "ACTIVE",
+      validade: reading.validade ?? "G1",
+    },
+  };
+}
+
+function resolveServerNeuralEntryRound(
+  state: NeuralEntryState,
+  round: Round,
+  roundKey: string,
+): { state?: NeuralEntryState; result?: NeuralEntryLastResult } {
+  const expectedSide = readServerNeuralSide(state.expectedSide);
+  const snapshot = state.readingSnapshot ?? neuralReadingForEntryState(state);
+  const tieMultiplier = round.result === "T" ? serverTieMultiplierFromRound(round) : null;
+  const finishedAt = new Date().toISOString();
+
+  if (round.result === "T") {
+    const kind = state.status === "awaiting_sg" ? "tie_sg" : "tie_g1";
+    return {
+      result: {
+        id: `${state.key}:${roundKey}:${kind}`,
+        key: state.key,
+        numero: state.numero,
+        origem: state.origem,
+        origemTipo: state.origemTipo,
+        expectedSide,
+        kind,
+        outcome: "TIE",
+        resultRoundKey: roundKey,
+        finishedAt,
+        tieMultiplier,
+        readingSnapshot: snapshot,
+      },
+    };
+  }
+
+  if (expectedSide && serverRoundMatchesNeuralSide(round, expectedSide)) {
+    const kind = state.status === "awaiting_sg" ? "sg" : "g1";
+    return {
+      result: {
+        id: `${state.key}:${roundKey}:${kind}`,
+        key: state.key,
+        numero: state.numero,
+        origem: state.origem,
+        origemTipo: state.origemTipo,
+        expectedSide,
+        kind,
+        outcome: "GREEN",
+        resultRoundKey: roundKey,
+        finishedAt,
+        tieMultiplier: null,
+        readingSnapshot: snapshot,
+      },
+    };
+  }
+
+  if (state.status === "awaiting_sg") {
+    return {
+      state: {
+        ...state,
+        status: "awaiting_g1",
+        sgRoundKey: roundKey,
+        readingSnapshot: neuralReadingForEntryState({
+          ...state,
+          status: "awaiting_g1",
+          sgRoundKey: roundKey,
+        }),
+      },
+    };
+  }
+
+  return {
+    result: {
+      id: `${state.key}:${roundKey}:red`,
+      key: state.key,
+      numero: state.numero,
+      origem: state.origem,
+      origemTipo: state.origemTipo,
+      expectedSide,
+      kind: "red",
+      outcome: "RED",
+      resultRoundKey: roundKey,
+      finishedAt,
+      tieMultiplier: null,
+      readingSnapshot: snapshot,
+    },
+  };
+}
+
+function neuralReadingForEntryState(state: NeuralEntryState): NeuralReading {
+  const snapshot = state.readingSnapshot ?? {
+    mode: "ACTIVE",
+    numero: state.numero,
+    origem: state.origem,
+    origemTipo: state.origemTipo,
+    direcao: state.expectedSide,
+    validade: "G1",
+  };
+  const expectedSide = state.expectedSide ?? snapshot.direcao ?? snapshot.origem ?? null;
+  const statusLabel = state.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA";
+
+  return {
+    ...snapshot,
+    mode: "ACTIVE",
+    numero: state.numero ?? snapshot.numero,
+    origem: state.origem ?? snapshot.origem,
+    origemTipo: state.origemTipo ?? snapshot.origemTipo,
+    direcao: expectedSide,
+    validade: snapshot.validade ?? "G1",
+    paganteStatus: statusLabel,
+    paganteAlert:
+      state.status === "awaiting_g1"
+        ? "Entrada ativa. SG falhou, aguardando G1 antes de encerrar."
+        : "Entrada ativa travada ate fechar SG ou G1.",
+  };
+}
+
+function neuralReadingForEntryResult(result: NeuralEntryLastResult): NeuralReading {
+  const snapshot = result.readingSnapshot ?? {
+    mode: "OBSERVING",
+    numero: result.numero,
+    origem: result.origem,
+    origemTipo: result.origemTipo,
+    direcao: result.expectedSide,
+    validade: "G1",
+  };
+  const isRed = result.kind === "red";
+  const isTie = result.kind === "tie_sg" || result.kind === "tie_g1";
+  const status = isRed ? "RED_FECHADO" : isTie ? "GREEN_EMPATE" : result.kind === "g1" ? "GREEN_G1" : "GREEN_SG";
+  const multiplierText = isTie && result.tieMultiplier ? ` ${result.tieMultiplier}x` : "";
+
+  return {
+    ...snapshot,
+    mode: "OBSERVING",
+    numero: result.numero ?? snapshot.numero,
+    origem: result.origem ?? snapshot.origem,
+    origemTipo: result.origemTipo ?? snapshot.origemTipo,
+    direcao: result.expectedSide ?? snapshot.direcao ?? snapshot.origem,
+    validade: snapshot.validade ?? "G1",
+    paganteStatus: status,
+    paganteAlert: isRed
+      ? "Entrada encerrada em RED depois do G1."
+      : isTie
+        ? `Entrada encerrada em GREEN EMPATE${multiplierText}.`
+        : result.kind === "g1"
+          ? "Entrada encerrada em GREEN G1."
+          : "Entrada encerrada em GREEN SG.",
+  };
+}
+
+function applyServerNeuralEntryResult(
+  scoreboard: NeuralScoreboard | undefined,
+  kind: NeuralEntryLastResult["kind"],
+): NeuralScoreboard {
+  const current = scoreboard ?? {};
+  const greenSemGale = serverSafeCounter(current.greenSemGale);
+  const greenG1 = serverSafeCounter(current.greenG1);
+  const reds = serverSafeCounter(current.reds ?? current.erros);
+  const isRed = kind === "red";
+  const isG1 = kind === "g1" || kind === "tie_g1";
+  const nextSg = greenSemGale + (!isRed && !isG1 ? 1 : 0);
+  const nextG1 = greenG1 + (!isRed && isG1 ? 1 : 0);
+  const nextReds = reds + (isRed ? 1 : 0);
+  const greens = nextSg + nextG1;
+  const previousPositive = serverSafeCounter(current.sequencePositive);
+  const previousNegative = serverSafeCounter(current.sequenceNegative);
+  const sequencePositive = isRed ? 0 : previousPositive + 1;
+  const sequenceNegative = isRed ? previousNegative + 1 : 0;
+  const maxSequencePositive = Math.max(serverSafeCounter(current.maxSequencePositive), sequencePositive);
+  const maxSequenceNegative = Math.max(serverSafeCounter(current.maxSequenceNegative), sequenceNegative);
+
+  return {
+    ...current,
+    totalAlerts: greens + nextReds,
+    acertos: greens,
+    greens,
+    greenSemGale: nextSg,
+    greenG1: nextG1,
+    erros: nextReds,
+    reds: nextReds,
+    assertividade: calculateMotorAssertiveness(greens, nextReds),
+    sequencePositive,
+    sequenceNegative,
+    maxSequencePositive,
+    maxSequenceNegative,
+  };
+}
+
+function normalizeServerNeuralEntryState(value: unknown): NeuralEntryState | null {
+  const record = readRecord(value);
+  const key = readString(record, "key");
+  const status = readString(record, "status");
+  const triggerRoundKey = readString(record, "triggerRoundKey");
+  if (!key || !triggerRoundKey || (status !== "awaiting_sg" && status !== "awaiting_g1")) return null;
+
+  return {
+    key,
+    numero: readNullableNumber(record.numero),
+    origem: readServerNeuralSide(record.origem),
+    origemTipo: readServerNeuralOriginKind(record.origemTipo),
+    expectedSide: readServerNeuralSide(record.expectedSide),
+    status,
+    triggerRoundKey,
+    sgRoundKey: readString(record, "sgRoundKey") || null,
+    startedAt: readString(record, "startedAt") || null,
+    readingSnapshot: normalizeServerNeuralReading(record.readingSnapshot),
+  };
+}
+
+function normalizeServerNeuralEntryLastResult(value: unknown): NeuralEntryLastResult | null {
+  const record = readRecord(value);
+  const id = readString(record, "id");
+  const key = readString(record, "key");
+  const kind = readString(record, "kind");
+  const resultRoundKey = readString(record, "resultRoundKey");
+  const finishedAt = readString(record, "finishedAt");
+  if (
+    !id ||
+    !key ||
+    !resultRoundKey ||
+    !finishedAt ||
+    !["sg", "g1", "red", "tie_sg", "tie_g1"].includes(kind)
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    key,
+    numero: readNullableNumber(record.numero),
+    origem: readServerNeuralSide(record.origem),
+    origemTipo: readServerNeuralOriginKind(record.origemTipo),
+    expectedSide: readServerNeuralSide(record.expectedSide),
+    kind: kind as NeuralEntryLastResult["kind"],
+    outcome: readServerNeuralOutcome(record.outcome, kind),
+    resultRoundKey,
+    finishedAt,
+    tieMultiplier: readNullableNumber(record.tieMultiplier),
+    readingSnapshot: normalizeServerNeuralReading(record.readingSnapshot),
+  };
+}
+
+function normalizeServerNeuralReading(value: unknown): NeuralReading | null {
+  const record = readRecord(value);
+  if (!Object.keys(record).length) return null;
+  const mode = readString(record, "mode");
+  if (mode !== "ACTIVE" && mode !== "OBSERVING" && mode !== "SCANNING") return null;
+  return record as unknown as NeuralReading;
+}
+
+function readServerNeuralSide(value: unknown): NeuralEntryState["expectedSide"] {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "BANKER" || text === "B") return "BANKER";
+  if (text === "PLAYER" || text === "P") return "PLAYER";
+  if (text === "TIE" || text === "T") return "TIE";
+  return null;
+}
+
+function readServerNeuralOriginKind(value: unknown): NeuralEntryState["origemTipo"] {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "PAGANTE" || text === "OPOSTO" || text === "TIE") return text as NeuralEntryState["origemTipo"];
+  return null;
+}
+
+function readServerNeuralOutcome(value: unknown, kind: string): NeuralEntryLastResult["outcome"] {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "GREEN" || text === "RED" || text === "TIE") return text as NeuralEntryLastResult["outcome"];
+  if (kind === "red") return "RED";
+  if (kind === "tie_sg" || kind === "tie_g1") return "TIE";
+  return "GREEN";
+}
+
+function serverNeuralEntryKey(reading: NeuralReading) {
+  const numero = typeof reading.numero === "number" ? reading.numero : "";
+  const origem = readServerNeuralSide(reading.origem);
+  const origemTipo = readServerNeuralOriginKind(reading.origemTipo);
+  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
+  if (numero === "" || !origem || !origemTipo || !expectedSide) return "";
+  return `${numero}:${origem}:${origemTipo}:${expectedSide}`;
+}
+
+function serverRoundMatchesNeuralSide(round: Round, side: NonNullable<NeuralEntryState["expectedSide"]>) {
+  if (side === "BANKER") return round.result === "B";
+  if (side === "PLAYER") return round.result === "P";
+  return round.result === "T";
+}
+
+function serverTieMultiplierFromRound(round: Round) {
+  const explicit = readNullableNumber((round as unknown as Record<string, unknown>).tieMultiplier);
+  if (explicit) return explicit;
+  const score = Math.max(Number(round.bankerScore) || 0, Number(round.playerScore) || 0);
+  if (score >= 12) return 88;
+  if (score >= 10) return 25;
+  if (score >= 8) return 10;
+  if (score >= 6) return 6;
+  return 4;
 }
 
 function resolveNeuralPanelCycle(
@@ -7514,6 +7923,8 @@ function resetDashboardDailyCycle(
     latestEntryModeSignalId: undefined,
     latestEntryModeSignalModes: [],
     neuralSequenceLastOutcome: null,
+    neuralEntryState: null,
+    neuralEntryLastResult: null,
     tieAlertScoreboard: {
       greenTieAlerts: 0,
       expired: 0,
