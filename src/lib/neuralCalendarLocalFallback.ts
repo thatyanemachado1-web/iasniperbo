@@ -279,8 +279,8 @@ function bestForce(stat: Pick<NeuralCalendarDailyStat, "bankerCount" | "playerCo
 
 function classifyScore(score: number, total: number, minSample: number): NeuralCalendarClassification {
   if (total < minSample) return "sem_amostra";
-  if (score >= 87) return "muito_pagante";
-  if (score >= 56) return "operavel";
+  if (score >= 89) return "muito_pagante";
+  if (score >= 85) return "operavel";
   return "perigoso";
 }
 

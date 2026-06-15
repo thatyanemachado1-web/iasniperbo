@@ -637,7 +637,7 @@ function CalendarHoursOverview({
           </div>
         </div>
         <div className="text-[10px] font-bold uppercase text-muted-foreground">
-          Verde bom · amarelo operavel · vermelho critico
+          Verde 89-100 · amarelo 85-88 · vermelho 0-84
         </div>
       </div>
 
@@ -666,18 +666,18 @@ function CalendarHoursOverview({
 
       <div className="hidden lg:block">
         <div
-          className="grid items-center gap-1 text-center"
-          style={{ gridTemplateColumns: "76px repeat(24, minmax(0, 1fr))" }}
+          className="grid items-center gap-0.5 text-center"
+          style={{ gridTemplateColumns: "42px repeat(24, minmax(18px, 1fr))" }}
         >
           <div />
           {hourLabels.map((hour) => (
-            <div key={hour} className="text-[9px] font-black text-muted-foreground">
+            <div key={hour} className="text-[7px] font-black leading-none text-muted-foreground xl:text-[8px]">
               {hour}
             </div>
           ))}
           {weekdayRows.map((row) => (
             <div key={row.label} className="contents">
-              <div className="text-left text-[10px] font-black uppercase text-muted-foreground">
+              <div className="text-left text-[9px] font-black uppercase text-muted-foreground">
                 {row.label}
               </div>
               {row.hours.map((cell) => (
@@ -750,10 +750,12 @@ function WeekdayHourCell({
       title={`${cell.label} ${String(cell.hour).padStart(2, "0")}:00 · ${
         cell.totalRounds ? formatPercent(cell.score) : "Sem amostra"
       }`}
-      className={`min-h-[22px] rounded-md border px-1 py-1 text-center ${classificationCardClass(visualClass)}`}
+      className={`flex min-h-[22px] min-w-0 items-center justify-center overflow-hidden rounded-md border px-0.5 py-1 text-center ${
+        showHour ? "flex-col gap-0.5" : ""
+      } ${classificationCardClass(visualClass)}`}
     >
       {showHour && <div className="text-[8px] font-bold text-muted-foreground">{String(cell.hour).padStart(2, "0")}h</div>}
-      <div className={`text-[9px] font-black leading-none ${classificationTextClass(visualClass)}`}>
+      <div className={`truncate text-[8px] font-black leading-none xl:text-[9px] ${classificationTextClass(visualClass)}`}>
         {cell.totalRounds ? `${Math.round(cell.score)}%` : "-"}
       </div>
     </div>
@@ -835,7 +837,7 @@ function MonthOverview({ calendar, engineLabel }: { calendar: NeuralCalendarPayl
       <Metric
         label="Media"
         value={summary.averageScore ? formatPercent(summary.averageScore) : "Sem amostra"}
-        tone={summary.averageScore >= 87 ? "green" : summary.averageScore >= 67 ? "amber" : undefined}
+        tone={summary.averageScore >= 89 ? "green" : summary.averageScore >= 85 ? "amber" : undefined}
       />
       <Metric
         label="Melhor dia"
@@ -850,9 +852,9 @@ function MonthOverview({ calendar, engineLabel }: { calendar: NeuralCalendarPayl
           Resumo do mes
         </div>
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <CountPill classification="muito_pagante" label="Dias otimos" value={counts.muito_pagante} />
+          <CountPill classification="muito_pagante" label="Dias muito bons" value={counts.muito_pagante} />
           <CountPill classification="operavel" label="Dias operaveis" value={counts.operavel} />
-          <CountPill classification="perigoso" label="Dias criticos" value={counts.perigoso} />
+          <CountPill classification="perigoso" label="Dias ruins" value={counts.perigoso} />
           <CountPill classification="sem_amostra" label="Sem amostra" value={counts.sem_amostra} />
         </div>
       </div>
@@ -1080,9 +1082,9 @@ function CalendarSkeleton() {
 function ClassificationLegend() {
   return (
     <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground">
-      <LegendDot className="bg-emerald-400" label="87-100 Otimo para operar" />
-      <LegendDot className="bg-yellow-400" label="67-86 Operavel" />
-      <LegendDot className="bg-red-400" label="0-66 Critico" />
+      <LegendDot className="bg-emerald-400" label="89-100 Muito bom para operar" />
+      <LegendDot className="bg-yellow-400" label="85-88 Operavel" />
+      <LegendDot className="bg-red-400" label="0-84 Ruim - nao operar" />
       <LegendDot className="bg-slate-500" label="Sem amostra" />
     </div>
   );
@@ -1244,9 +1246,9 @@ function monthTotalSignals(calendar: NeuralCalendarPayload) {
 }
 
 function classificationLabel(value: NeuralCalendarClassification) {
-  if (value === "muito_pagante") return "Otimo para operar";
+  if (value === "muito_pagante") return "Muito bom para operar";
   if (value === "operavel") return "Operavel";
-  if (value === "perigoso") return "Critico - nao operar";
+  if (value === "perigoso") return "Ruim - nao operar";
   return "Sem amostra";
 }
 
@@ -1294,8 +1296,8 @@ function classificationPillClass(value: NeuralCalendarClassification) {
 
 function classifyScore(score: number, total: number): NeuralCalendarClassification {
   if (!total) return "sem_amostra";
-  if (score >= 87) return "muito_pagante";
-  if (score >= 67) return "operavel";
+  if (score >= 89) return "muito_pagante";
+  if (score >= 85) return "operavel";
   return "perigoso";
 }
 
