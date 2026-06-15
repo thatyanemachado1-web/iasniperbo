@@ -113,7 +113,31 @@ export function LeituraNeuralMiniCard({
   const [entryResult, setEntryResult] = useState<NeuralEntryResult | null>(null);
   const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
   const previousEntryRef = useRef<{ key: string; greens: number; reds: number } | null>(null);
+  const previousTieRoundRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (latestRound?.result !== "T") return;
+    const tieId = tieRoundHistoryId(latestRound);
+    if (previousTieRoundRef.current === tieId) return;
+    previousTieRoundRef.current = tieId;
+
+    const result: NeuralEntryResult = {
+      kind: "tie",
+      side: "TIE",
+      multiplier: multiplierForTieRound(latestRound),
+      minute: minuteLabelFromRound(latestRound),
+    };
+
+    setEntryResult(result);
+    setEntryHistory((items) => {
+      if (items.some((item) => item.id === tieId)) return items;
+      return [{ ...result, id: tieId }, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
+    });
+
+    if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
+    entryResultTimeoutRef.current = window.setTimeout(() => setEntryResult(null), 3200);
+  }, [latestRound]);
 
   useEffect(() => {
     const current = { key: "neural-general", greens: generalEntryTotals.greens, reds: generalEntryTotals.reds };
@@ -139,12 +163,13 @@ export function LeituraNeuralMiniCard({
     };
 
     setEntryResult(result);
-    setEntryHistory((items) =>
-      [
-        { ...result, id: `${Date.now()}:neural:${current.greens}:${current.reds}` },
-        ...items,
-      ].slice(0, MAX_NEURAL_ENTRY_HISTORY),
-    );
+    const historyId = tieMultiplier && latestRound
+      ? tieRoundHistoryId(latestRound)
+      : `${Date.now()}:neural:${current.greens}:${current.reds}`;
+    setEntryHistory((items) => {
+      if (items.some((item) => item.id === historyId)) return items;
+      return [{ ...result, id: historyId }, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
+    });
 
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
     entryResultTimeoutRef.current = window.setTimeout(
@@ -874,6 +899,10 @@ function buildGeneralScore(
 
 function latestRoundFrom(rounds: Round[] | undefined) {
   return rounds?.length ? rounds[rounds.length - 1] : undefined;
+}
+
+function tieRoundHistoryId(round: Round) {
+  return `tie:${round.id}:${round.time}:${round.bankerScore}:${round.playerScore}`;
 }
 
 function minuteLabelFromRound(round: Round | undefined) {
