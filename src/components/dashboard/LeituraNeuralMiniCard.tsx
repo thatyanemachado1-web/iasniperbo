@@ -1,5 +1,5 @@
 import { CircleHelp, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { buildNeuralCopy } from "@/lib/operationalCopy";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
@@ -22,6 +22,13 @@ interface NeuralEntryResult {
 
 interface NeuralEntryHistoryItem extends NeuralEntryResult {
   id: string;
+}
+
+interface NeuralPendingEntry {
+  key: string;
+  side: NeuralSide;
+  status: "awaiting_sg" | "awaiting_g1";
+  startedAfterRoundId: string;
 }
 
 interface NeuralScoreSummary {
@@ -102,81 +109,84 @@ export function LeituraNeuralMiniCard({
     "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
-  const generalEntryTotals = useMemo(
-    () => ({
-      greens: numberFrom(generalScore.greens),
-      reds: numberFrom(generalScore.reds),
-    }),
-    [generalScore.greens, generalScore.reds],
-  );
   const latestRound = latestRoundFrom(rounds);
+  const activeEntryKey =
+    mode === "ACTIVE" && pullingSide
+      ? `${data.numero ?? "-"}:${data.origem ?? "-"}:${data.origemTipo ?? "-"}:${pullingSide}`
+      : null;
   const [entryResult, setEntryResult] = useState<NeuralEntryResult | null>(null);
   const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
-  const previousEntryRef = useRef<{ key: string; greens: number; reds: number } | null>(null);
-  const previousTieRoundRef = useRef<string | null>(null);
+  const pendingEntryRef = useRef<NeuralPendingEntry | null>(null);
+  const processedRoundRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (latestRound?.result !== "T") return;
-    const tieId = tieRoundHistoryId(latestRound);
-    if (previousTieRoundRef.current === tieId) return;
-    previousTieRoundRef.current = tieId;
+    if (!latestRound) return;
 
-    const result: NeuralEntryResult = {
-      kind: "tie",
-      side: "TIE",
-      multiplier: multiplierForTieRound(latestRound),
-      minute: minuteLabelFromRound(latestRound),
-    };
+    const latestRoundId = roundHistoryId(latestRound);
+    const pending = pendingEntryRef.current;
+    const isNewRound = processedRoundRef.current !== latestRoundId;
 
-    setEntryResult(result);
-    setEntryHistory((items) => {
-      if (items.some((item) => item.id === tieId)) return items;
-      return [{ ...result, id: tieId }, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
-    });
+    if (isNewRound) {
+      processedRoundRef.current = latestRoundId;
 
-    if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
-    entryResultTimeoutRef.current = window.setTimeout(() => setEntryResult(null), 3200);
-  }, [latestRound]);
+      if (latestRound.result === "T") {
+        const result: NeuralEntryResult = {
+          kind: "tie",
+          side: "TIE",
+          multiplier: multiplierForTieRound(latestRound),
+          minute: minuteLabelFromRound(latestRound),
+        };
+        pushEntryResult(result, tieRoundHistoryId(latestRound), 3200);
+        pendingEntryRef.current = null;
+      } else if (pending && pending.startedAfterRoundId !== latestRoundId) {
+        if (roundMatchesSide(latestRound, pending.side)) {
+          const result: NeuralEntryResult = {
+            kind: "green",
+            side: pending.side,
+            multiplier: null,
+            minute: minuteLabelFromRound(latestRound),
+          };
+          pushEntryResult(result, `${pending.key}:${latestRoundId}:green`, 3200);
+          pendingEntryRef.current = null;
+        } else if (pending.status === "awaiting_sg") {
+          pendingEntryRef.current = {
+            ...pending,
+            status: "awaiting_g1",
+          };
+        } else {
+          const result: NeuralEntryResult = {
+            kind: "red",
+            side: pending.side,
+            multiplier: null,
+            minute: minuteLabelFromRound(latestRound),
+          };
+          pushEntryResult(result, `${pending.key}:${latestRoundId}:red`, 1600);
+          pendingEntryRef.current = null;
+        }
+      }
+    }
 
-  useEffect(() => {
-    const current = { key: "neural-general", greens: generalEntryTotals.greens, reds: generalEntryTotals.reds };
-    const previous = previousEntryRef.current;
-    previousEntryRef.current = current;
+    if (!pendingEntryRef.current && activeEntryKey && pullingSide) {
+      pendingEntryRef.current = {
+        key: activeEntryKey,
+        side: pullingSide,
+        status: "awaiting_sg",
+        startedAfterRoundId: latestRoundId,
+      };
+    }
 
-    if (!previous || previous.key !== current.key) return;
+    function pushEntryResult(result: NeuralEntryResult, historyId: string, duration: number) {
+      setEntryResult(result);
+      setEntryHistory((items) => {
+        if (items.some((item) => item.id === historyId)) return items;
+        return [{ ...result, id: historyId }, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
+      });
 
-    const greenDelta = current.greens - previous.greens;
-    const redDelta = current.reds - previous.reds;
-    if (greenDelta <= 0 && redDelta <= 0) return;
-
-    const tieMultiplier =
-      greenDelta > 0 && latestRound?.result === "T" ? multiplierForTieRound(latestRound) : null;
-    const resultSide = tieMultiplier ? "TIE" : pullingSide;
-    if (!resultSide) return;
-
-    const result: NeuralEntryResult = {
-      kind: redDelta > 0 ? "red" : tieMultiplier ? "tie" : "green",
-      side: resultSide,
-      multiplier: tieMultiplier,
-      minute: minuteLabelFromRound(latestRound),
-    };
-
-    setEntryResult(result);
-    const historyId = tieMultiplier && latestRound
-      ? tieRoundHistoryId(latestRound)
-      : `${Date.now()}:neural:${current.greens}:${current.reds}`;
-    setEntryHistory((items) => {
-      if (items.some((item) => item.id === historyId)) return items;
-      return [{ ...result, id: historyId }, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
-    });
-
-    if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
-    entryResultTimeoutRef.current = window.setTimeout(
-      () => setEntryResult(null),
-      result.kind === "red" ? 1600 : 3200,
-    );
-  }, [generalEntryTotals.greens, generalEntryTotals.reds, latestRound, pullingSide]);
+      if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
+      entryResultTimeoutRef.current = window.setTimeout(() => setEntryResult(null), duration);
+    }
+  }, [activeEntryKey, latestRound, pullingSide]);
 
   useEffect(() => {
     writeNeuralEntryHistory(entryHistory);
@@ -901,8 +911,18 @@ function latestRoundFrom(rounds: Round[] | undefined) {
   return rounds?.length ? rounds[rounds.length - 1] : undefined;
 }
 
+function roundHistoryId(round: Round) {
+  return `${round.id}:${round.time}:${round.result}:${round.bankerScore}:${round.playerScore}`;
+}
+
 function tieRoundHistoryId(round: Round) {
-  return `tie:${round.id}:${round.time}:${round.bankerScore}:${round.playerScore}`;
+  return `tie:${roundHistoryId(round)}`;
+}
+
+function roundMatchesSide(round: Round, side: NeuralSide) {
+  if (side === "BANKER") return round.result === "B";
+  if (side === "PLAYER") return round.result === "P";
+  return round.result === "T";
 }
 
 function minuteLabelFromRound(round: Round | undefined) {
