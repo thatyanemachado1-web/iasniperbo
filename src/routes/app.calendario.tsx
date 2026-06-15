@@ -4,7 +4,6 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Clock3,
   Download,
   ShieldCheck,
   X,
@@ -43,6 +42,23 @@ const engineOptions: Array<{ id: NeuralCalendarEngineKey; label: string }> = [
 const selectableEngineOptions = engineOptions.filter(
   (option) => option.id !== "todos" && option.id !== "personalizado",
 );
+const hourLabels = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}h`);
+const weekdayMeta = [
+  { index: 0, label: "DOM", fullLabel: "Domingo" },
+  { index: 1, label: "SEG", fullLabel: "Segunda" },
+  { index: 2, label: "TER", fullLabel: "Terca" },
+  { index: 3, label: "QUA", fullLabel: "Quarta" },
+  { index: 4, label: "QUI", fullLabel: "Quinta" },
+  { index: 5, label: "SEX", fullLabel: "Sexta" },
+  { index: 6, label: "SAB", fullLabel: "Sabado" },
+];
+
+interface WeekdayHourCellData {
+  label: string;
+  hour: number;
+  score: number;
+  totalRounds: number;
+}
 
 function NeuralCalendarPage() {
   const today = useMemo(() => saoPauloTodayParts(), []);
@@ -192,14 +208,22 @@ function NeuralCalendarPage() {
           />
           {status === "loading" && <CalendarSkeleton />}
           {calendar && status !== "loading" && (
-            <CalendarMonthGrid
-              calendar={calendar}
-              selectedDate={selectedDate}
-              onSelectDate={(date) => {
-                setSelectedDate(date);
-                setSelectedHour(null);
-              }}
-            />
+            <>
+              <CalendarMonthGrid
+                calendar={calendar}
+                selectedDate={selectedDate}
+                onSelectDate={(date) => {
+                  setSelectedDate(date);
+                  setSelectedHour(null);
+                }}
+              />
+              <CalendarHoursOverview
+                calendar={calendar}
+                selectedDate={selectedDate}
+                selectedHour={selectedHour}
+                onSelectHour={setSelectedHour}
+              />
+            </>
           )}
         </GlassCard>
 
@@ -210,7 +234,6 @@ function NeuralCalendarPage() {
           selectedHour={selectedHour}
           selectedHourStat={selectedHourStat}
           engineLabel={engineLabel}
-          onSelectHour={setSelectedHour}
           onClear={clearDetailSelection}
         />
       </div>
@@ -589,6 +612,154 @@ function CalendarMonthGrid({
   );
 }
 
+function CalendarHoursOverview({
+  calendar,
+  selectedDate,
+  selectedHour,
+  onSelectHour,
+}: {
+  calendar: NeuralCalendarPayload;
+  selectedDate: string;
+  selectedHour: number | null;
+  onSelectHour: (hour: number) => void;
+}) {
+  const selectedDay = calendar.month.days.find((day) => day.date === selectedDate) || null;
+  const weekdayRows = buildWeekdayHourRows(calendar);
+  return (
+    <div className="mt-5 space-y-4 rounded-2xl border border-neon-cyan/20 bg-background/30 p-3 sm:p-4">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-neon-cyan">
+            Horarios organizados
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Mapa leve por hora usando apenas agregados do calendario.
+          </div>
+        </div>
+        <div className="text-[10px] font-bold uppercase text-muted-foreground">
+          Verde bom · amarelo operavel · vermelho critico
+        </div>
+      </div>
+
+      {selectedDay && (
+        <div className="rounded-xl border border-border/60 bg-secondary/10 p-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground">
+              {selectedDay.weekday} · {formatDateShort(selectedDay.date)}
+            </div>
+            <ClassificationBadge classification={classifyScore(selectedDay.score, selectedDay.totalRounds)} compact />
+          </div>
+          <div className="grid grid-cols-6 gap-1.5 sm:grid-cols-8 lg:grid-cols-12 2xl:grid-cols-24">
+            {calendar.selectedHours.map((hour) => (
+              <CompactHourButton
+                key={hour.id}
+                hour={hour.hour}
+                score={hour.score}
+                total={hour.totalRounds}
+                selected={selectedHour === hour.hour}
+                onClick={() => onSelectHour(hour.hour)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="hidden lg:block">
+        <div
+          className="grid items-center gap-1 text-center"
+          style={{ gridTemplateColumns: "76px repeat(24, minmax(0, 1fr))" }}
+        >
+          <div />
+          {hourLabels.map((hour) => (
+            <div key={hour} className="text-[9px] font-black text-muted-foreground">
+              {hour}
+            </div>
+          ))}
+          {weekdayRows.map((row) => (
+            <div key={row.label} className="contents">
+              <div className="text-left text-[10px] font-black uppercase text-muted-foreground">
+                {row.label}
+              </div>
+              {row.hours.map((cell) => (
+                <WeekdayHourCell key={`${row.label}-${cell.hour}`} cell={cell} />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-3 lg:hidden">
+        {weekdayRows.map((row) => (
+          <div key={row.label}>
+            <div className="mb-1 text-[10px] font-black uppercase text-muted-foreground">{row.fullLabel}</div>
+            <div className="grid grid-cols-6 gap-1.5">
+              {row.hours.map((cell) => (
+                <WeekdayHourCell key={`${row.label}-${cell.hour}`} cell={cell} showHour />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CompactHourButton({
+  hour,
+  score,
+  total,
+  selected,
+  onClick,
+}: {
+  hour: number;
+  score: number;
+  total: number;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const visualClass = classifyScore(score, total);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${String(hour).padStart(2, "0")}:00 · ${total ? formatPercent(score) : "Sem amostra"}`}
+      className={`min-h-10 rounded-lg border px-1 py-1 text-center transition ${
+        selected
+          ? `${classificationCardClass(visualClass)} border-violet-300 ring-2 ring-neon-cyan/35`
+          : classificationCardClass(visualClass)
+      }`}
+    >
+      <div className="text-[9px] font-bold text-muted-foreground">{String(hour).padStart(2, "0")}h</div>
+      <div className={`text-[11px] font-black ${classificationTextClass(visualClass)}`}>
+        {scoreShortLabel(score, total)}
+      </div>
+    </button>
+  );
+}
+
+function WeekdayHourCell({
+  cell,
+  showHour = false,
+}: {
+  cell: WeekdayHourCellData;
+  showHour?: boolean;
+}) {
+  const visualClass = classifyScore(cell.score, cell.totalRounds);
+  return (
+    <div
+      title={`${cell.label} ${String(cell.hour).padStart(2, "0")}:00 · ${
+        cell.totalRounds ? formatPercent(cell.score) : "Sem amostra"
+      }`}
+      className={`min-h-[22px] rounded-md border px-1 py-1 text-center ${classificationCardClass(visualClass)}`}
+    >
+      {showHour && <div className="text-[8px] font-bold text-muted-foreground">{String(cell.hour).padStart(2, "0")}h</div>}
+      <div className={`text-[9px] font-black leading-none ${classificationTextClass(visualClass)}`}>
+        {cell.totalRounds ? `${Math.round(cell.score)}%` : "-"}
+      </div>
+    </div>
+  );
+}
+
 function CalendarDetailsPanel({
   calendar,
   selectedDay,
@@ -605,7 +776,6 @@ function CalendarDetailsPanel({
   selectedHour: number | null;
   selectedHourStat: NeuralCalendarHourlyStat | null;
   engineLabel: string;
-  onSelectHour: (hour: number) => void;
   onClear: () => void;
 }) {
   const floatingClass = selectedDate
@@ -648,14 +818,6 @@ function CalendarDetailsPanel({
           <MonthOverview calendar={calendar} engineLabel={engineLabel} />
         )}
       </GlassCard>
-
-      {calendar && selectedDay && !selectedHourStat && (
-        <HourGrid
-          hours={calendar.selectedHours}
-          selectedHour={selectedHour}
-          onSelectHour={onSelectHour}
-        />
-      )}
     </div>
   );
 }
@@ -733,52 +895,6 @@ function DayPanelContent({ day }: { day: NeuralCalendarDailyStat }) {
         {day.observation}
       </div>
     </div>
-  );
-}
-
-function HourGrid({
-  hours,
-  selectedHour,
-  onSelectHour,
-}: {
-  hours: NeuralCalendarHourlyStat[];
-  selectedHour: number | null;
-  onSelectHour: (hour: number) => void;
-}) {
-  return (
-    <GlassCard className="p-4">
-      <div className="mb-3 flex items-center gap-2 text-sm font-black">
-        <Clock3 className="size-4 text-neon-cyan" />
-        Horarios do dia
-      </div>
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 xl:grid-cols-4">
-        {hours.map((hour) => (
-          <button
-            key={hour.id}
-            type="button"
-            onClick={() => onSelectHour(hour.hour)}
-            className={`rounded-xl border p-2 text-center transition ${
-              selectedHour === hour.hour
-                ? `${classificationCardClass(classifyScore(hour.score, hour.totalRounds))} border-violet-300 ring-2 ring-neon-cyan/35`
-                : classificationCardClass(classifyScore(hour.score, hour.totalRounds))
-            }`}
-          >
-            <div className="text-[10px] text-muted-foreground">
-              {String(hour.hour).padStart(2, "0")}:00
-            </div>
-            <div className={`mt-1 text-base font-black ${classificationTextClass(classifyScore(hour.score, hour.totalRounds))}`}>
-              {scoreShortLabel(hour.score, hour.totalRounds)}
-            </div>
-            <div className="mt-1 flex justify-center">
-              <ClassificationDot classification={classifyScore(hour.score, hour.totalRounds)} />
-            </div>
-            <div className="hidden truncate text-[9px] font-bold sm:block">
-              {classificationLabel(classifyScore(hour.score, hour.totalRounds))}
-            </div>
-          </button>
-        ))}
-      </div>
-    </GlassCard>
   );
 }
 
@@ -1082,6 +1198,39 @@ function InfoLine({ icon, label, value }: { icon: ReactNode; label: string; valu
       </div>
     </div>
   );
+}
+
+function buildWeekdayHourRows(calendar: NeuralCalendarPayload) {
+  const buckets = new Map<string, { weightedScore: number; totalRounds: number }>();
+  for (const item of calendar.month.heatmap) {
+    const weekday = weekdayIndexFromDate(item.date);
+    const key = `${weekday}:${item.hour}`;
+    const current = buckets.get(key) || { weightedScore: 0, totalRounds: 0 };
+    const totalRounds = Math.max(0, Math.floor(Number(item.totalRounds) || 0));
+    current.weightedScore += (Number(item.score) || 0) * totalRounds;
+    current.totalRounds += totalRounds;
+    buckets.set(key, current);
+  }
+
+  return weekdayMeta.map((weekday) => ({
+    ...weekday,
+    hours: Array.from({ length: 24 }, (_, hour): WeekdayHourCellData => {
+      const bucket = buckets.get(`${weekday.index}:${hour}`);
+      const totalRounds = bucket?.totalRounds ?? 0;
+      return {
+        label: weekday.fullLabel,
+        hour,
+        score: totalRounds ? Math.round((bucket?.weightedScore ?? 0) / totalRounds) : 0,
+        totalRounds,
+      };
+    }),
+  }));
+}
+
+function weekdayIndexFromDate(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year || 1970, (month || 1) - 1, day || 1));
+  return parsed.getUTCDay();
 }
 
 function canMoveMonth(delta: number, year: number, month: number, allowedYears: number[]) {
