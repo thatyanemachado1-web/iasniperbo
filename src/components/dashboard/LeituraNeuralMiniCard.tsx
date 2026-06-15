@@ -1,4 +1,5 @@
 import { CircleHelp, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { buildNeuralCopy } from "@/lib/operationalCopy";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
@@ -10,6 +11,18 @@ import {
 import type { NeuralReading, NeuralScoreboard, Round, SignalSide } from "@/types/dashboard";
 
 type NeuralSide = SignalSide | "TIE";
+type NeuralEntryResultKind = "green" | "red" | "tie";
+
+interface NeuralEntryResult {
+  kind: NeuralEntryResultKind;
+  side: NeuralSide;
+  multiplier?: number | null;
+  minute: string;
+}
+
+interface NeuralEntryHistoryItem extends NeuralEntryResult {
+  id: string;
+}
 
 interface NeuralScoreSummary {
   totalAlerts: number | null;
@@ -87,6 +100,62 @@ export function LeituraNeuralMiniCard({
     "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
+  const entryKey = hasNumber
+    ? `${data.numero}:${data.origem ?? "-"}:${data.origemTipo ?? "-"}:${pullingSide ?? "-"}`
+    : "waiting";
+  const entryTotals = useMemo(
+    () => ({
+      greens: numberFrom(sg) + numberFrom(g1),
+      reds: numberFrom(red),
+    }),
+    [sg, g1, red],
+  );
+  const latestRound = latestRoundFrom(rounds);
+  const [entryResult, setEntryResult] = useState<NeuralEntryResult | null>(null);
+  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>([]);
+  const previousEntryRef = useRef<{ key: string; greens: number; reds: number } | null>(null);
+  const entryResultTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const current = { key: entryKey, greens: entryTotals.greens, reds: entryTotals.reds };
+    const previous = previousEntryRef.current;
+    previousEntryRef.current = current;
+
+    if (!hasNumber || !pullingSide || !previous || previous.key !== entryKey) return;
+
+    const greenDelta = current.greens - previous.greens;
+    const redDelta = current.reds - previous.reds;
+    if (greenDelta <= 0 && redDelta <= 0) return;
+
+    const tieMultiplier =
+      greenDelta > 0 && latestRound?.result === "T" ? multiplierForTieRound(latestRound) : null;
+    const result: NeuralEntryResult = {
+      kind: redDelta > 0 ? "red" : tieMultiplier ? "tie" : "green",
+      side: tieMultiplier ? "TIE" : pullingSide,
+      multiplier: tieMultiplier,
+      minute: minuteLabelFromRound(latestRound),
+    };
+
+    setEntryResult(result);
+    setEntryHistory((items) =>
+      [
+        { ...result, id: `${Date.now()}:${entryKey}:${current.greens}:${current.reds}` },
+        ...items,
+      ].slice(0, 100),
+    );
+
+    if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
+    entryResultTimeoutRef.current = window.setTimeout(
+      () => setEntryResult(null),
+      result.kind === "red" ? 1600 : 3200,
+    );
+  }, [entryKey, entryTotals.greens, entryTotals.reds, hasNumber, latestRound, pullingSide]);
+
+  useEffect(() => {
+    return () => {
+      if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
+    };
+  }, []);
 
   return (
     <aside
@@ -139,6 +208,13 @@ export function LeituraNeuralMiniCard({
             <span className="max-w-full whitespace-normal break-words">{sequenceCopy.label}</span>
           </div>
           <TieMultiplierMiniLine multipliers={tieMultipliers} />
+          <div className="mt-1.5">
+            <NeuralEntryStatusCard
+              confirmedSide={null}
+              result={entryResult}
+              history={entryHistory}
+            />
+          </div>
         </div>
       ) : (
         <div className="relative mt-2 space-y-1">
@@ -172,6 +248,12 @@ export function LeituraNeuralMiniCard({
               Em observação pagante
             </div>
           )}
+
+          <NeuralEntryStatusCard
+            confirmedSide={mode === "ACTIVE" ? pullingSide : null}
+            result={entryResult}
+            history={entryHistory}
+          />
 
           {showPayingStats ? (
             <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
@@ -299,6 +381,144 @@ function neuralSequenceCopy(
     title: "Aguardando resultado real da Leitura Neural.",
     className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
   };
+}
+
+function NeuralEntryStatusCard({
+  confirmedSide,
+  result,
+  history,
+}: {
+  confirmedSide?: NeuralSide | null;
+  result: NeuralEntryResult | null;
+  history: NeuralEntryHistoryItem[];
+}) {
+  const state = neuralEntryStatusState(confirmedSide, result);
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border px-2 py-1.5 text-center shadow-[0_0_18px_-16px_currentColor]",
+        state.className,
+      )}
+    >
+      <div className="text-[7px] font-black uppercase tracking-[0.14em] opacity-80">
+        {state.kicker}
+      </div>
+      <div className={cn("mt-0.5 text-base font-black uppercase leading-none", state.sideClass)}>
+        {state.label}
+      </div>
+      {state.description ? (
+        <div className="mt-1 text-[8px] font-semibold leading-tight text-muted-foreground">
+          {state.description}
+        </div>
+      ) : null}
+
+      <details className="group mt-1 text-left">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[6.5px] font-black uppercase tracking-[0.08em] text-muted-foreground/80 transition hover:text-neon-cyan">
+          <span>Ultimas entradas</span>
+          <span className="text-[8px] leading-none transition group-open:rotate-90">&gt;</span>
+        </summary>
+        <div className="mt-0.5 max-h-28 space-y-0.5 overflow-y-auto pr-1">
+          {history.length ? (
+            history.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-1 text-[7px] font-semibold leading-tight"
+              >
+                <span className="min-w-0 truncate">
+                  <span className={sideClass(item.side)}>
+                    {entrySideSymbol(item.side)} {entrySideHistoryLabel(item)}
+                  </span>{" "}
+                  <span className={item.kind === "red" ? "text-destructive" : "text-success"}>
+                    {entryResultHistoryLabel(item)}
+                  </span>
+                </span>
+                <span className="shrink-0 text-[6.5px] text-muted-foreground/75">Min {item.minute}</span>
+              </div>
+            ))
+          ) : (
+            <div className="text-[7px] font-semibold text-muted-foreground/75">
+              Sem entradas recentes.
+            </div>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function neuralEntryStatusState(
+  confirmedSide?: NeuralSide | null,
+  result?: NeuralEntryResult | null,
+) {
+  if (result?.kind === "red") {
+    return {
+      kicker: "Resultado",
+      label: "RED",
+      description: null,
+      sideClass: "text-destructive",
+      className: "neural-entry-flash-red border-destructive/35 bg-destructive/10 text-destructive",
+    };
+  }
+
+  if (result?.kind === "tie") {
+    return {
+      kicker: "Resultado",
+      label: `GREEN EMPATE ${result.multiplier ? `${result.multiplier}X` : ""}`.trim(),
+      description: null,
+      sideClass: "text-tie",
+      className: "neural-entry-flash-tie border-tie/40 bg-tie/10 text-tie",
+    };
+  }
+
+  if (result?.kind === "green") {
+    return {
+      kicker: "Resultado",
+      label: `GREEN ${sideLabel(result.side)}`,
+      description: null,
+      sideClass: sideClass(result.side),
+      className: "neural-entry-flash-green border-success/35 bg-success/10 text-success",
+    };
+  }
+
+  if (confirmedSide) {
+    return {
+      kicker: "Entrada confirmada",
+      label: sideLabel(confirmedSide).toUpperCase(),
+      description: null,
+      sideClass: sideClass(confirmedSide),
+      className:
+        confirmedSide === "BANKER"
+          ? "border-banker/30 bg-banker/10 text-banker"
+          : confirmedSide === "PLAYER"
+            ? "border-player/30 bg-player/10 text-player"
+            : "border-tie/35 bg-tie/10 text-tie",
+    };
+  }
+
+  return {
+    kicker: "Aguardando entrada",
+    label: "Sem entrada",
+    description: "Sem entrada confirmada agora.",
+    sideClass: "text-muted-foreground",
+    className: "border-white/10 bg-background/35 text-muted-foreground",
+  };
+}
+
+function entrySideSymbol(side: NeuralSide) {
+  if (side === "BANKER") return "B";
+  if (side === "PLAYER") return "P";
+  return "T";
+}
+
+function entrySideHistoryLabel(item: NeuralEntryHistoryItem) {
+  if (item.kind === "tie") return `EMPATE ${item.multiplier ? `${item.multiplier}X` : ""}`.trim();
+  return sideLabel(item.side).toUpperCase();
+}
+
+function entryResultHistoryLabel(item: NeuralEntryHistoryItem) {
+  if (item.kind === "red") return "RED";
+  return "GREEN";
 }
 
 function NeuralGeneralScorePopover({
@@ -586,6 +806,17 @@ function buildGeneralScore(
     maxGreenSequence,
     maxRedSequence,
   };
+}
+
+function latestRoundFrom(rounds: Round[] | undefined) {
+  return rounds?.length ? rounds[rounds.length - 1] : undefined;
+}
+
+function minuteLabelFromRound(round: Round | undefined) {
+  if (!round?.time) return "--";
+  const parts = String(round.time).split(":");
+  if (parts.length >= 2) return parts[1].padStart(2, "0");
+  return String(round.time).slice(-2) || "--";
 }
 
 function tieMultiplierStats(rounds: Round[] | undefined) {
