@@ -46,6 +46,8 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
 };
 
 const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
+const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_v1";
+const MAX_NEURAL_ENTRY_HISTORY = 100;
 
 const SCANNING_READING: NeuralReading = {
   mode: "SCANNING",
@@ -100,28 +102,25 @@ export function LeituraNeuralMiniCard({
     "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
-  const entryKey = hasNumber
-    ? `${data.numero}:${data.origem ?? "-"}:${data.origemTipo ?? "-"}:${pullingSide ?? "-"}`
-    : "waiting";
-  const entryTotals = useMemo(
+  const generalEntryTotals = useMemo(
     () => ({
-      greens: numberFrom(sg) + numberFrom(g1),
-      reds: numberFrom(red),
+      greens: numberFrom(generalScore.greens),
+      reds: numberFrom(generalScore.reds),
     }),
-    [sg, g1, red],
+    [generalScore.greens, generalScore.reds],
   );
   const latestRound = latestRoundFrom(rounds);
   const [entryResult, setEntryResult] = useState<NeuralEntryResult | null>(null);
-  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>([]);
+  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
   const previousEntryRef = useRef<{ key: string; greens: number; reds: number } | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const current = { key: entryKey, greens: entryTotals.greens, reds: entryTotals.reds };
+    const current = { key: "neural-general", greens: generalEntryTotals.greens, reds: generalEntryTotals.reds };
     const previous = previousEntryRef.current;
     previousEntryRef.current = current;
 
-    if (!hasNumber || !pullingSide || !previous || previous.key !== entryKey) return;
+    if (!previous || previous.key !== current.key) return;
 
     const greenDelta = current.greens - previous.greens;
     const redDelta = current.reds - previous.reds;
@@ -129,9 +128,12 @@ export function LeituraNeuralMiniCard({
 
     const tieMultiplier =
       greenDelta > 0 && latestRound?.result === "T" ? multiplierForTieRound(latestRound) : null;
+    const resultSide = tieMultiplier ? "TIE" : pullingSide;
+    if (!resultSide) return;
+
     const result: NeuralEntryResult = {
       kind: redDelta > 0 ? "red" : tieMultiplier ? "tie" : "green",
-      side: tieMultiplier ? "TIE" : pullingSide,
+      side: resultSide,
       multiplier: tieMultiplier,
       minute: minuteLabelFromRound(latestRound),
     };
@@ -139,9 +141,9 @@ export function LeituraNeuralMiniCard({
     setEntryResult(result);
     setEntryHistory((items) =>
       [
-        { ...result, id: `${Date.now()}:${entryKey}:${current.greens}:${current.reds}` },
+        { ...result, id: `${Date.now()}:neural:${current.greens}:${current.reds}` },
         ...items,
-      ].slice(0, 100),
+      ].slice(0, MAX_NEURAL_ENTRY_HISTORY),
     );
 
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
@@ -149,7 +151,11 @@ export function LeituraNeuralMiniCard({
       () => setEntryResult(null),
       result.kind === "red" ? 1600 : 3200,
     );
-  }, [entryKey, entryTotals.greens, entryTotals.reds, hasNumber, latestRound, pullingSide]);
+  }, [generalEntryTotals.greens, generalEntryTotals.reds, latestRound, pullingSide]);
+
+  useEffect(() => {
+    writeNeuralEntryHistory(entryHistory);
+  }, [entryHistory]);
 
   useEffect(() => {
     return () => {
@@ -351,6 +357,64 @@ export function LeituraNeuralMiniCard({
       )}
     </aside>
   );
+}
+
+function readNeuralEntryHistory(): NeuralEntryHistoryItem[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(NEURAL_ENTRY_HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map(normalizeNeuralEntryHistoryItem)
+      .filter((item): item is NeuralEntryHistoryItem => Boolean(item))
+      .slice(0, MAX_NEURAL_ENTRY_HISTORY);
+  } catch {
+    return [];
+  }
+}
+
+function writeNeuralEntryHistory(history: NeuralEntryHistoryItem[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      NEURAL_ENTRY_HISTORY_STORAGE_KEY,
+      JSON.stringify(history.slice(0, MAX_NEURAL_ENTRY_HISTORY)),
+    );
+  } catch {
+    // Local persistence is only a visual convenience; the engine data remains authoritative.
+  }
+}
+
+function normalizeNeuralEntryHistoryItem(value: unknown): NeuralEntryHistoryItem | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<NeuralEntryHistoryItem>;
+  if (!isNeuralEntryResultKind(record.kind) || !isNeuralSide(record.side)) return null;
+
+  const multiplier =
+    typeof record.multiplier === "number" && Number.isFinite(record.multiplier)
+      ? record.multiplier
+      : null;
+
+  return {
+    id: typeof record.id === "string" && record.id ? record.id : `restored:${Date.now()}:${Math.random()}`,
+    kind: record.kind,
+    side: record.side,
+    multiplier,
+    minute: typeof record.minute === "string" && record.minute ? record.minute : "--",
+  };
+}
+
+function isNeuralEntryResultKind(value: unknown): value is NeuralEntryResultKind {
+  return value === "green" || value === "red" || value === "tie";
+}
+
+function isNeuralSide(value: unknown): value is NeuralSide {
+  return value === "BANKER" || value === "PLAYER" || value === "TIE";
 }
 
 function neuralSequenceCopy(
