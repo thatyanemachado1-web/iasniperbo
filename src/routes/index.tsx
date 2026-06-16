@@ -680,11 +680,174 @@ function LoginPage() {
           </aside>
         </section>
 
-        <footer className="relative z-10 pb-4 text-center text-[11px] leading-5 text-slate-500">
+        <LandingToolsSection />
+        <LandingBenefitsSection />
+        <LandingHowItWorksSection />
+        <LandingPlanSection onCta={requestAccess} />
+        <LandingFinalCta onCta={requestAccess} />
+
+        <footer className="relative z-10 pb-4 pt-8 text-center text-[11px] leading-5 text-slate-500">
+          <div className="mx-auto mb-4 flex max-w-3xl flex-col items-center gap-3 sm:flex-row sm:justify-between">
+            <SniperLogoMark className="h-10 w-auto max-w-[180px] opacity-90" />
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
+              <a href="#ferramentas" className="hover:text-neon-cyan">Ferramentas</a>
+              <a href="#como-funciona" className="hover:text-neon-cyan">Como Funciona</a>
+              <a href="#planos" className="hover:text-neon-cyan">Planos</a>
+              <a href={WAITLIST_URL} target="_blank" rel="noreferrer" className="hover:text-neon-cyan">Suporte</a>
+            </div>
+          </div>
           O SNIPER BO IA é uma ferramenta de leitura e análise operacional. Não existe garantia de lucro. Use sempre gestão de banca e responsabilidade.
+          <div className="mt-2 text-[10px] text-slate-600">© {new Date().getFullYear()} SNIPER BO IA. Todos os direitos reservados.</div>
         </footer>
       </main>
     </div>
+  );
+}
+
+const landingTools = [
+  { icon: Target, title: "VALIDADOR DE PADRÕES / ESTRATÉGIAS", desc: "Teste combinações, valide entradas no histórico e descubra quais padrões tiveram melhor desempenho." },
+  { icon: BrainCircuit, title: "LEITURA NEURAL", desc: "Analisa o comportamento da mesa e entrega uma leitura mais objetiva para apoiar sua tomada de decisão." },
+  { icon: Bell, title: "RADAR DE EMPATES", desc: "Identifica pressão de Tie e destaca momentos em que o empate ganha força na mesa." },
+  { icon: Waves, title: "SURF ANALYZER", desc: "Mostra tendência, continuidade, esticamento e risco de virada para você ler o fluxo do jogo." },
+  { icon: Sparkles, title: "BUSCA DE PADRÕES IA", desc: "Encontra repetições e estruturas recorrentes para revelar oportunidades com apoio da inteligência artificial." },
+];
+
+function LandingToolsSection() {
+  return (
+    <section id="ferramentas" className="relative z-10 mt-4 scroll-mt-20 py-10 sm:py-14">
+      <div className="mx-auto max-w-6xl text-center">
+        <div className="inline-flex items-center gap-2 rounded-full border border-neon-cyan/30 bg-neon-cyan/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan">
+          <Sparkles className="size-3.5" /> Ferramentas
+        </div>
+        <h2 className="mt-4 text-3xl font-black uppercase leading-tight text-white sm:text-4xl">
+          A plataforma completa do <span className="text-gradient-brand">Sniper BO IA</span>
+        </h2>
+        <p className="mx-auto mt-3 max-w-2xl text-sm text-slate-400">
+          Ferramentas visuais, validação de padrões e leitura avançada da mesa em uma única interface.
+        </p>
+      </div>
+      <div className="mx-auto mt-8 grid max-w-6xl gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {landingTools.map((tool) => (
+          <div key={tool.title} className="glass group min-w-0 rounded-2xl border-neon-purple/20 p-5 transition hover:-translate-y-0.5 hover:border-neon-purple/50 hover:shadow-[0_0_30px_rgba(168,85,247,0.18)]">
+            <div className="mb-3 flex size-11 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 transition group-hover:bg-neon-cyan/15">
+              <tool.icon className="size-5 text-neon-cyan" />
+            </div>
+            <div className="text-sm font-black uppercase tracking-wide text-white">{tool.title}</div>
+            <p className="mt-2 text-xs leading-6 text-slate-400">{tool.desc}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const landingBenefits = [
+  { icon: Activity, title: "LEITURA EM TEMPO REAL", desc: "Dados atualizados a cada segundo." },
+  { icon: Sparkles, title: "FERRAMENTAS EXCLUSIVAS", desc: "Recursos únicos para decisões melhores." },
+  { icon: Shield, title: "INTERFACE PROFISSIONAL", desc: "Design limpo, intuitivo e poderoso." },
+  { icon: TrendingUp, title: "ANÁLISE VISUAL INTELIGENTE", desc: "Transforme dados em vantagem real." },
+];
+
+function LandingBenefitsSection() {
+  return (
+    <section className="relative z-10 py-8">
+      <div className="mx-auto grid max-w-6xl gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {landingBenefits.map((b) => (
+          <div key={b.title} className="glass rounded-2xl border-neon-cyan/15 p-4 text-center transition hover:border-neon-cyan/40">
+            <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10">
+              <b.icon className="size-5 text-neon-cyan" />
+            </div>
+            <div className="text-xs font-black uppercase tracking-wide text-white">{b.title}</div>
+            <p className="mt-1 text-[11px] leading-5 text-slate-400">{b.desc}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const landingSteps = [
+  { n: "01", title: "Observe a leitura da mesa", desc: "Acompanhe os dados e sinais visuais em tempo real." },
+  { n: "02", title: "Valide padrões", desc: "Use o validador e a IA para confirmar estratégias antes de entrar." },
+  { n: "03", title: "Tome decisões com clareza", desc: "Entre com mais confiança usando múltiplas ferramentas de análise." },
+];
+
+function LandingHowItWorksSection() {
+  return (
+    <section id="como-funciona" className="relative z-10 scroll-mt-20 py-10 sm:py-14">
+      <div className="mx-auto max-w-6xl text-center">
+        <div className="inline-flex items-center gap-2 rounded-full border border-neon-purple/30 bg-neon-purple/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan">
+          <Zap className="size-3.5" /> Como Funciona
+        </div>
+        <h2 className="mt-4 text-3xl font-black uppercase leading-tight text-white sm:text-4xl">
+          Três passos para operar com <span className="text-gradient-brand">método</span>
+        </h2>
+      </div>
+      <div className="mx-auto mt-8 grid max-w-6xl gap-4 md:grid-cols-3">
+        {landingSteps.map((step) => (
+          <div key={step.n} className="glass relative overflow-hidden rounded-2xl border-neon-purple/20 p-6 transition hover:border-neon-purple/50">
+            <div className="absolute -right-2 -top-4 text-7xl font-black text-neon-purple/10">{step.n}</div>
+            <div className="relative">
+              <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">Passo {step.n}</div>
+              <div className="mt-2 text-lg font-black text-white">{step.title}</div>
+              <p className="mt-2 text-sm leading-6 text-slate-400">{step.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function LandingPlanSection({ onCta }: { onCta: () => void }) {
+  return (
+    <section id="planos" className="relative z-10 scroll-mt-20 py-10 sm:py-14">
+      <div className="mx-auto max-w-3xl">
+        <div className="relative overflow-hidden rounded-3xl border border-gold/40 bg-gradient-to-br from-black/70 via-black/60 to-neon-purple/10 p-8 text-center shadow-[0_0_40px_rgba(212,175,55,0.18)] backdrop-blur-xl sm:p-10">
+          <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-gold/80 to-transparent" />
+          <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl border border-gold/40 bg-gold/10">
+            <Crown className="size-7 text-gold" />
+          </div>
+          <div className="text-xs font-black uppercase tracking-[0.2em] text-gold">Plano em destaque</div>
+          <h3 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">PLANO SNIPER BO IA</h3>
+          <div className="mt-5 flex items-end justify-center gap-2">
+            <span className="text-5xl font-black text-white sm:text-6xl">R$297</span>
+            <span className="pb-2 text-sm text-slate-400">/mês</span>
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Hoje no valor promocional. Após hoje, <span className="text-gold">R$497</span>.
+          </p>
+          <ul className="mx-auto mt-6 grid max-w-md gap-2 text-left">
+            {["Acesso completo ao painel operacional","Validador de padrões e estratégias","Leitura Neural e Surf Analyzer","Radar de Empates e Busca de Padrões IA"].map((f) => (
+              <li key={f} className="flex items-center gap-2 text-sm text-slate-300">
+                <Check className="size-4 shrink-0 text-gold" /> {f}
+              </li>
+            ))}
+          </ul>
+          <button type="button" onClick={onCta} className="btn-gold-grad relative mt-7 inline-flex min-h-12 w-full max-w-sm items-center justify-center gap-2 overflow-hidden rounded-2xl px-6 py-3 text-sm font-black uppercase tracking-wide text-black glow-gold">
+            <Crown className="size-4" /> Quero acessar
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LandingFinalCta({ onCta }: { onCta: () => void }) {
+  return (
+    <section className="relative z-10 py-12">
+      <div className="mx-auto max-w-4xl rounded-3xl border border-neon-purple/30 bg-black/55 p-8 text-center shadow-[0_0_40px_rgba(168,85,247,0.18)] backdrop-blur-xl sm:p-12">
+        <h2 className="text-2xl font-black uppercase leading-tight text-white sm:text-4xl">
+          Pare de operar no escuro.<br />
+          <span className="text-gradient-brand">Use método, leitura e validação ao seu favor.</span>
+        </h2>
+        <button type="button" onClick={onCta} className="btn-primary-grad relative mt-6 inline-flex min-h-12 items-center justify-center gap-2 overflow-hidden rounded-2xl px-8 py-3 text-sm font-black uppercase tracking-wide glow-purple">
+          <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
+          <ShieldCheck className="relative size-4" />
+          <span className="relative">Acessar agora</span>
+        </button>
+      </div>
+    </section>
   );
 }
 
