@@ -14,6 +14,152 @@ export type Database = {
   }
   public: {
     Tables: {
+      crm_clients: {
+        Row: {
+          created_at: string
+          created_by: string
+          email: string
+          id: string
+          name: string
+          notes: string
+          phone: string
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string
+          email: string
+          id: string
+          name: string
+          notes?: string
+          phone?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          email?: string
+          id?: string
+          name?: string
+          notes?: string
+          phone?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: []
+      }
+      crm_deals: {
+        Row: {
+          client_id: string
+          created_at: string
+          created_by: string
+          expected_close_date: string | null
+          id: string
+          notes: string
+          stage: string
+          title: string
+          updated_at: string
+          updated_by: string
+          value: number
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          created_by?: string
+          expected_close_date?: string | null
+          id: string
+          notes?: string
+          stage?: string
+          title: string
+          updated_at?: string
+          updated_by?: string
+          value?: number
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          created_by?: string
+          expected_close_date?: string | null
+          id?: string
+          notes?: string
+          stage?: string
+          title?: string
+          updated_at?: string
+          updated_by?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crm_deals_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "crm_clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crm_invoices: {
+        Row: {
+          amount: number
+          client_id: string
+          created_at: string
+          created_by: string
+          deal_id: string | null
+          due_date: string | null
+          id: string
+          notes: string
+          paid_at: string | null
+          status: string
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          amount?: number
+          client_id: string
+          created_at?: string
+          created_by?: string
+          deal_id?: string | null
+          due_date?: string | null
+          id: string
+          notes?: string
+          paid_at?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Update: {
+          amount?: number
+          client_id?: string
+          created_at?: string
+          created_by?: string
+          deal_id?: string | null
+          due_date?: string | null
+          id?: string
+          notes?: string
+          paid_at?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crm_invoices_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "crm_clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crm_invoices_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "crm_deals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sniper_live_state: {
         Row: {
           id: string
