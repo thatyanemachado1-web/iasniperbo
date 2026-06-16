@@ -7393,7 +7393,11 @@ function trackServerNeuralEntryLifecycle(
   latestRound: Round | undefined,
   receivedNewRound: boolean,
 ): LiveDashboardData {
-  const latestRoundKey = latestRound ? roundHistoryKey(latestRound) : "";
+  const effectiveLatestRound =
+    latestRound ??
+    (Array.isArray(dashboard.rounds) ? dashboard.rounds[dashboard.rounds.length - 1] : undefined) ??
+    liveValidatorRoundHistory[liveValidatorRoundHistory.length - 1];
+  const latestRoundKey = effectiveLatestRound ? roundHistoryKey(effectiveLatestRound) : "";
   const previousState = normalizeServerNeuralEntryState(
     previousDashboard.neuralEntryState ?? dashboard.neuralEntryState,
   );
@@ -7406,12 +7410,12 @@ function trackServerNeuralEntryLifecycle(
 
     if (
       receivedNewRound &&
-      latestRound &&
+      effectiveLatestRound &&
       latestRoundKey &&
       latestRoundKey !== state.triggerRoundKey &&
       latestRoundKey !== state.sgRoundKey
     ) {
-      const resolution = resolveServerNeuralEntryRound(state, latestRound, latestRoundKey);
+      const resolution = resolveServerNeuralEntryRound(state, effectiveLatestRound, latestRoundKey);
       if (resolution.result) {
         const scoreboard = applyServerNeuralEntryResult(
           previousDashboard.neuralScoreboard ?? dashboard.neuralScoreboard,
@@ -8315,15 +8319,40 @@ function normalizeSignal(
     signal.protection || signal.validade || signal.gale || fallback.protection || "G1",
   );
   const terminalStatus = terminalSignalStatus(status);
+  const incomingLastResult = readServerLastResult(signal.lastResult);
   const previousVisibleEntry =
     (fallback.status === "pending" || fallback.status === "g1") &&
     fallback.side === side &&
     (side === "BANKER" || side === "PLAYER");
-  const incomingLastResult = readServerLastResult(signal.lastResult);
   const canAcceptTerminalResult = Boolean(
     terminalStatus &&
       (previousVisibleEntry || (incomingLastResult && incomingLastResult.side === side)),
   );
+  const canPromoteRecentLastResult = Boolean(
+    incomingLastResult &&
+      (status === "pending" || status === "g1") &&
+      incomingLastResult.side === side &&
+      (side === "BANKER" || side === "PLAYER") &&
+      isRecentServerSignalResult(incomingLastResult.finishedAt),
+  );
+
+  if (canPromoteRecentLastResult && incomingLastResult) {
+    const resolvedProtection = incomingLastResult.protection || protection;
+    return {
+      id: String(signal.id || signal.signalId || fallback.id || incomingLastResult.id),
+      side,
+      status: incomingLastResult.status,
+      protection: resolvedProtection,
+      strength: clampPercent(
+        signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
+      ),
+      lastResult: {
+        ...incomingLastResult,
+        side,
+        protection: resolvedProtection,
+      },
+    };
+  }
 
   if (terminalStatus) {
     if (!canAcceptTerminalResult || (side !== "BANKER" && side !== "PLAYER")) {
@@ -8405,6 +8434,13 @@ function readServerLastResult(value: unknown): DashboardData["currentSignal"]["l
     protection: String(record.protection || record.validade || record.gale || "G1"),
     finishedAt: readString(record, "finishedAt") || new Date().toISOString(),
   };
+}
+
+function isRecentServerSignalResult(finishedAt?: string) {
+  const time = Date.parse(finishedAt ?? "");
+  if (!Number.isFinite(time)) return false;
+  const age = Date.now() - time;
+  return age >= -5_000 && age <= 95_000;
 }
 
 function terminalSignalStatus(status: DashboardData["currentSignal"]["status"]) {
