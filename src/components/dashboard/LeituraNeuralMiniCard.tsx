@@ -259,6 +259,12 @@ export function LeituraNeuralMiniCard({
         </div>
       ) : (
         <div className="relative mt-2 space-y-1">
+          <NeuralEntryStatusCard
+            confirmedSide={mode === "ACTIVE" ? pullingSide : null}
+            result={entryResult}
+            history={entryHistory}
+          />
+
           <div className="flex flex-wrap items-center gap-1">
             <span className="flex min-w-0 items-baseline gap-1">
               <span className="text-lg font-black leading-none text-foreground sm:text-xl">
@@ -289,12 +295,6 @@ export function LeituraNeuralMiniCard({
               Em observação pagante
             </div>
           )}
-
-          <NeuralEntryStatusCard
-            confirmedSide={mode === "ACTIVE" ? pullingSide : null}
-            result={entryResult}
-            history={entryHistory}
-          />
 
           {showPayingStats ? (
             <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
