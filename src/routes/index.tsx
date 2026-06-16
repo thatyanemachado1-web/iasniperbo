@@ -42,8 +42,10 @@ import {
   COUNTRY_DIAL_OPTIONS,
   DEFAULT_COUNTRY_DIAL,
   buildInternationalPhone,
+  detectCountryDialOptionFromPhone,
   digitsOnly,
   maskPhoneForCountry,
+  stripCountryCodeFromPhone,
   validatePhoneForCountry,
 } from "@/lib/phone";
 import { readUserSession } from "@/lib/userSession";
@@ -330,6 +332,12 @@ function LoginPage() {
   }
 
   function changeWhatsapp(value: string) {
+    const detectedCountry = detectCountryDialOptionFromPhone(value);
+    if (detectedCountry) {
+      setSelectedCountryId(detectedCountry.id);
+      setWhatsappPhone(maskPhoneForCountry(stripCountryCodeFromPhone(value, detectedCountry), detectedCountry));
+      return;
+    }
     setWhatsappPhone(maskPhoneForCountry(value, selectedCountry));
   }
 

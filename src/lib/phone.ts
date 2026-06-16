@@ -24,6 +24,7 @@ export const COUNTRY_DIAL_OPTIONS: CountryDialOption[] = [
   { id: "FR", flag: "🇫🇷", country: "França", code: "+33", minDigits: 9, maxDigits: 9 },
   { id: "DE", flag: "🇩🇪", country: "Alemanha", code: "+49", minDigits: 7, maxDigits: 12 },
   { id: "IT", flag: "🇮🇹", country: "Itália", code: "+39", minDigits: 8, maxDigits: 11 },
+  { id: "CV", flag: "🇨🇻", country: "Cabo Verde", code: "+238", minDigits: 7, maxDigits: 7 },
   { id: "AO", flag: "🇦🇴", country: "Angola", code: "+244", minDigits: 9, maxDigits: 9 },
   { id: "MZ", flag: "🇲🇿", country: "Moçambique", code: "+258", minDigits: 9, maxDigits: 9 },
 ];
@@ -60,6 +61,23 @@ export function maskPhoneForCountry(value: unknown, option: CountryDialOption) {
 export function validatePhoneForCountry(value: unknown, option: CountryDialOption) {
   const digits = digitsOnly(value);
   return digits.length >= option.minDigits && digits.length <= option.maxDigits;
+}
+
+export function detectCountryDialOptionFromPhone(value: unknown) {
+  const raw = String(value ?? "");
+  if (!/[+＋]/.test(raw)) return null;
+  const digits = digitsOnly(raw);
+  return (
+    [...COUNTRY_DIAL_OPTIONS]
+      .sort((a, b) => digitsOnly(b.code).length - digitsOnly(a.code).length)
+      .find((option) => digits.startsWith(digitsOnly(option.code))) || null
+  );
+}
+
+export function stripCountryCodeFromPhone(value: unknown, option: CountryDialOption) {
+  const digits = digitsOnly(value);
+  const codeDigits = digitsOnly(option.code);
+  return digits.startsWith(codeDigits) ? digits.slice(codeDigits.length) : digits;
 }
 
 export function buildInternationalPhone(countryCode: string, phone: unknown) {
