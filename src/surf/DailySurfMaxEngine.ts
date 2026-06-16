@@ -159,7 +159,7 @@ function normalizeRound(
   const date = round.day && round.day.length >= 10 ? round.day : brasiliaDateKey(timestamp);
 
   return {
-    round_id: round.key ?? `${round.id}:${round.time}:${round.result}:${round.bankerScore}:${round.playerScore}`,
+    round_id: `${round.id}:${round.time}:${round.result}:${round.bankerScore}:${round.playerScore}`,
     result,
     round_time: timestamp,
     table_id: options.tableId ?? "bac-bo",

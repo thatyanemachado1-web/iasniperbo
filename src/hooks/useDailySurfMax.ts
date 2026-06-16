@@ -43,7 +43,7 @@ export function useDailySurfMax({
       tableId,
       fallbackTimestamp: sourceUpdatedAt,
     });
-    const todayRounds = normalizedRounds
+    const todayRounds = uniqueDailyRounds(normalizedRounds)
       .filter((round) => round.date_br === todayKey)
       .sort(compareDailySurfRounds);
 
@@ -76,16 +76,47 @@ function applyTodayRounds(
   todayKey: string,
 ) {
   const lastRoundId = current.dailyMaxSurf.last_round_id;
-  if (!lastRoundId) return DailySurfMaxEngine.recalculate(todayRounds, tableId, todayKey);
+  if (!lastRoundId) {
+    return preserveDailyMax(current, DailySurfMaxEngine.recalculate(todayRounds, tableId, todayKey));
+  }
 
   const lastIndex = todayRounds.findIndex((round) => round.round_id === lastRoundId);
-  if (lastIndex < 0) return DailySurfMaxEngine.recalculate(todayRounds, tableId, todayKey);
+  if (lastIndex < 0) {
+    return preserveDailyMax(current, DailySurfMaxEngine.recalculate(todayRounds, tableId, todayKey));
+  }
 
   let next = current;
   for (const round of todayRounds.slice(lastIndex + 1)) {
     next = DailySurfMaxEngine.processRound(next, round);
   }
   return next;
+}
+
+function uniqueDailyRounds(rounds: DailySurfRound[]) {
+  const byKey = new Map<string, DailySurfRound>();
+  for (const round of rounds) {
+    byKey.set(`${round.date_br}:${round.round_id}`, round);
+  }
+  return [...byKey.values()];
+}
+
+function preserveDailyMax(current: DailySurfMaxSnapshot, next: DailySurfMaxSnapshot) {
+  if (
+    current.dailyMaxSurf.date !== next.dailyMaxSurf.date ||
+    current.dailyMaxSurf.table_id !== next.dailyMaxSurf.table_id
+  ) {
+    return next;
+  }
+
+  return {
+    currentStreak: next.currentStreak,
+    dailyMaxSurf: {
+      ...next.dailyMaxSurf,
+      banker: Math.max(current.dailyMaxSurf.banker, next.dailyMaxSurf.banker),
+      player: Math.max(current.dailyMaxSurf.player, next.dailyMaxSurf.player),
+      tie: Math.max(current.dailyMaxSurf.tie, next.dailyMaxSurf.tie),
+    },
+  };
 }
 
 function roundsSignature(

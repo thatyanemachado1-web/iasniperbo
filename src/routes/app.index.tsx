@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Clock, Crown } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData } from "@/hooks/useDashboardData";
@@ -53,8 +53,12 @@ function DashboardPage() {
     d,
     mode === "live" && !d.mockMode,
   );
+  const dailySurfSourceRounds = useMemo(
+    () => [...roundHistory.todayRounds, ...d.rounds],
+    [roundHistory.todayRounds, d.rounds],
+  );
   const dailySurfMax = useDailySurfMax({
-    rounds: roundHistory.todayRounds.length ? roundHistory.todayRounds : d.rounds,
+    rounds: dailySurfSourceRounds,
     tableId: "bac-bo",
     sourceUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
     enabled: mode === "live" && !d.mockMode,
