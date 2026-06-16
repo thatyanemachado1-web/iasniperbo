@@ -2320,6 +2320,17 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ access: await approverAccess(env, email, request) });
     }
 
+    if (adminRole) {
+      return json(
+        {
+          error: adminPasswordHash
+            ? "Senha admin invalida."
+            : "Senha admin nao configurada no servidor.",
+        },
+        adminPasswordHash ? 401 : 503,
+      );
+    }
+
     let client =
       findClientByEmail(email) ||
       (await hydrateClientFromBilling(env, email)) ||
@@ -2392,6 +2403,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
     if (!getSessionSecret(env)) {
       return json({ error: "Sessão não configurada no servidor." }, 503);
+    }
+
+    if (getAdminRoleForEmail(env, email)) {
+      return json(
+        { error: "E-mail de administrador. Use a aba Entrar com a senha admin." },
+        409,
+      );
     }
 
     let existingIndex = liveClients.findIndex(
