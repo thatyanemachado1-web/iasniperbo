@@ -234,6 +234,7 @@ function NeuralCalendarPage() {
           selectedHour={selectedHour}
           selectedHourStat={selectedHourStat}
           engineLabel={engineLabel}
+          onSelectHour={setSelectedHour}
           onClear={clearDetailSelection}
         />
       </div>
@@ -636,8 +637,8 @@ function CalendarHoursOverview({
             Mapa leve por hora usando apenas agregados do calendario.
           </div>
         </div>
-        <div className="text-[10px] font-bold uppercase text-muted-foreground">
-          Verde 89-100 · amarelo 85-88 · vermelho 0-84
+        <div className="text-[9px] font-bold uppercase leading-tight text-muted-foreground sm:text-[10px]">
+          89-100 bom · 85-88 oper. · 0-84 ruim
         </div>
       </div>
 
@@ -745,17 +746,17 @@ function WeekdayHourCell({
   showHour?: boolean;
 }) {
   const visualClass = classifyScore(cell.score, cell.totalRounds);
+  const cellSizeClass = showHour ? "min-h-[34px] flex-col gap-0.5 px-0.5" : "h-[20px] px-0";
+  const scoreSizeClass = showHour ? "text-[9px]" : "text-[6px] xl:text-[7px] 2xl:text-[8px]";
   return (
     <div
       title={`${cell.label} ${String(cell.hour).padStart(2, "0")}:00 · ${
         cell.totalRounds ? formatPercent(cell.score) : "Sem amostra"
       }`}
-      className={`flex min-h-[22px] min-w-0 items-center justify-center overflow-hidden rounded-md border px-0.5 py-1 text-center ${
-        showHour ? "flex-col gap-0.5" : ""
-      } ${classificationCardClass(visualClass)}`}
+      className={`flex min-w-0 items-center justify-center overflow-hidden rounded-[4px] border py-1 text-center ${cellSizeClass} ${classificationCardClass(visualClass)}`}
     >
       {showHour && <div className="text-[8px] font-bold text-muted-foreground">{String(cell.hour).padStart(2, "0")}h</div>}
-      <div className={`truncate text-[8px] font-black leading-none xl:text-[9px] ${classificationTextClass(visualClass)}`}>
+      <div className={`whitespace-nowrap font-black leading-none ${scoreSizeClass} ${classificationTextClass(visualClass)}`}>
         {cell.totalRounds ? `${Math.round(cell.score)}%` : "-"}
       </div>
     </div>
@@ -778,6 +779,7 @@ function CalendarDetailsPanel({
   selectedHour: number | null;
   selectedHourStat: NeuralCalendarHourlyStat | null;
   engineLabel: string;
+  onSelectHour: (hour: number) => void;
   onClear: () => void;
 }) {
   const floatingClass = selectedDate
@@ -815,11 +817,18 @@ function CalendarDetailsPanel({
         ) : selectedHourStat ? (
           <HourPanelContent hour={selectedHourStat} />
         ) : selectedDay ? (
-          <DayPanelContent day={selectedDay} />
+          <DayPanelContent day={selectedDay} hours={calendar.selectedHours} />
         ) : (
           <MonthOverview calendar={calendar} engineLabel={engineLabel} />
         )}
       </GlassCard>
+      {calendar && selectedDay && (
+        <DailyHoursGrid
+          hours={calendar.selectedHours}
+          selectedHour={selectedHour}
+          onSelectHour={onSelectHour}
+        />
+      )}
     </div>
   );
 }
@@ -838,6 +847,13 @@ function MonthOverview({ calendar, engineLabel }: { calendar: NeuralCalendarPayl
         label="Media"
         value={summary.averageScore ? formatPercent(summary.averageScore) : "Sem amostra"}
         tone={summary.averageScore >= 89 ? "green" : summary.averageScore >= 85 ? "amber" : undefined}
+      />
+      <ScoreSparkline
+        points={calendar.month.days.map((day) => ({
+          label: String(day.day),
+          score: day.score,
+          total: day.totalRounds,
+        }))}
       />
       <Metric
         label="Melhor dia"
@@ -865,7 +881,7 @@ function MonthOverview({ calendar, engineLabel }: { calendar: NeuralCalendarPayl
   );
 }
 
-function DayPanelContent({ day }: { day: NeuralCalendarDailyStat }) {
+function DayPanelContent({ day, hours }: { day: NeuralCalendarDailyStat; hours: NeuralCalendarHourlyStat[] }) {
   const visualClass = classifyScore(day.score, day.totalRounds);
   const hasSample = visualClass !== "sem_amostra";
   return (
@@ -878,6 +894,14 @@ function DayPanelContent({ day }: { day: NeuralCalendarDailyStat }) {
           </div>
           <ClassificationBadge classification={visualClass} className="mt-2" />
           <ScoreMeter score={day.score} total={day.totalRounds} className="mt-3" />
+          <ScoreSparkline
+            points={hours.map((hour) => ({
+              label: `${String(hour.hour).padStart(2, "0")}h`,
+              score: hour.score,
+              total: hour.totalRounds,
+            }))}
+            className="mt-3"
+          />
         </div>
         <AppBadge tone={visualClass === "perigoso" ? "red" : hasSample ? "green" : "amber"}>
           {day.weekday}
@@ -936,6 +960,112 @@ function HourPanelContent({ hour }: { hour: NeuralCalendarHourlyStat }) {
         <InfoLine icon={<ShieldCheck className="size-4" />} label="Melhor modulo" value={hour.bestModule || "Sem dados"} />
         <InfoLine icon={<BarChart3 className="size-4" />} label="Melhor leitura" value={hour.bestReading || "Sem dados"} />
       </div>
+    </div>
+  );
+}
+
+function DailyHoursGrid({
+  hours,
+  selectedHour,
+  onSelectHour,
+}: {
+  hours: NeuralCalendarHourlyStat[];
+  selectedHour: number | null;
+  onSelectHour: (hour: number) => void;
+}) {
+  return (
+    <GlassCard className="p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-black">Desempenho por horario</div>
+          <div className="text-[10px] text-muted-foreground">24 horas do dia selecionado.</div>
+        </div>
+        <AppBadge tone="blue">24H</AppBadge>
+      </div>
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 xl:grid-cols-4">
+        {hours.map((hour) => {
+          const visualClass = classifyScore(hour.score, hour.totalRounds);
+          return (
+            <button
+              key={hour.id}
+              type="button"
+              onClick={() => onSelectHour(hour.hour)}
+              className={`min-h-[56px] rounded-lg border p-1.5 text-center transition ${
+                selectedHour === hour.hour
+                  ? `${classificationCardClass(visualClass)} border-violet-300 ring-2 ring-neon-cyan/35`
+                  : classificationCardClass(visualClass)
+              }`}
+            >
+              <div className="text-[9px] font-bold text-muted-foreground">
+                {String(hour.hour).padStart(2, "0")}:00
+              </div>
+              <div className={`mt-1 text-base font-black leading-none ${classificationTextClass(visualClass)}`}>
+                {scoreShortLabel(hour.score, hour.totalRounds)}
+              </div>
+              <div className="mt-1 flex justify-center">
+                <ClassificationDot classification={visualClass} />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </GlassCard>
+  );
+}
+
+function ScoreSparkline({
+  points,
+  className = "",
+}: {
+  points: Array<{ label: string; score: number; total: number }>;
+  className?: string;
+}) {
+  const sampled = points.filter((point) => point.total > 0);
+  if (sampled.length < 2) {
+    return (
+      <div className={`rounded-xl border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground ${className}`}>
+        Grafico aparece quando houver mais de uma amostra no periodo.
+      </div>
+    );
+  }
+
+  const width = 280;
+  const height = 78;
+  const padX = 8;
+  const padY = 10;
+  const minScore = Math.min(...sampled.map((point) => point.score), 84);
+  const maxScore = Math.max(...sampled.map((point) => point.score), 100);
+  const spread = Math.max(1, maxScore - minScore);
+  const coords = sampled.map((point, index) => {
+    const x = padX + (index / Math.max(1, sampled.length - 1)) * (width - padX * 2);
+    const y = height - padY - ((point.score - minScore) / spread) * (height - padY * 2);
+    return { ...point, x, y };
+  });
+  const linePath = coords.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const areaPath = `${linePath} L${coords[coords.length - 1].x.toFixed(1)},${height - padY} L${coords[0].x.toFixed(1)},${height - padY} Z`;
+  const last = coords[coords.length - 1];
+
+  return (
+    <div className={`rounded-xl border border-neon-cyan/20 bg-background/50 p-3 ${className}`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">Grafico neural</div>
+        <div className={`text-xs font-black ${classificationTextClass(classifyScore(last.score, last.total))}`}>
+          {formatPercent(last.score)}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-[78px] w-full" role="img" aria-label="Grafico de desempenho neural">
+        <path d={areaPath} fill="rgb(52 211 153)" opacity="0.12" />
+        <path d={linePath} fill="none" stroke="rgb(52 211 153)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" />
+        {coords.map((point) => (
+          <circle
+            key={`${point.label}-${point.x}`}
+            cx={point.x}
+            cy={point.y}
+            r="2.8"
+            fill={classificationSvgColor(classifyScore(point.score, point.total))}
+          />
+        ))}
+      </svg>
     </div>
   );
 }
@@ -1285,6 +1415,13 @@ function classificationFillClass(value: NeuralCalendarClassification) {
   if (value === "operavel") return "bg-yellow-400";
   if (value === "perigoso") return "bg-red-400";
   return "bg-slate-500";
+}
+
+function classificationSvgColor(value: NeuralCalendarClassification) {
+  if (value === "muito_pagante") return "rgb(52 211 153)";
+  if (value === "operavel") return "rgb(250 204 21)";
+  if (value === "perigoso") return "rgb(248 113 113)";
+  return "rgb(100 116 139)";
 }
 
 function classificationPillClass(value: NeuralCalendarClassification) {
