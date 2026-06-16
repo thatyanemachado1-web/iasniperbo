@@ -1,15 +1,16 @@
 import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
 import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
-import type { ModuleToggles, Round, SurfAlert } from "@/types/dashboard";
+import type { ModuleToggles, SurfAlert } from "@/types/dashboard";
+import type { DailySurfMaxSnapshot } from "@/surf/DailySurfMaxEngine";
 
 export function SurfAnalyzerDashboardCard({
   alert,
-  rounds,
+  dailySurfMax,
   toggles,
   onModuleTogglesChange,
 }: {
   alert: SurfAlert;
-  rounds?: Round[];
+  dailySurfMax: DailySurfMaxSnapshot;
   toggles?: ModuleToggles;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
 }) {
@@ -21,7 +22,7 @@ export function SurfAnalyzerDashboardCard({
     >
       <SurfAlertCard
         alert={alert}
-        rounds={rounds}
+        dailySurfMax={dailySurfMax}
         toggles={toggles}
         onModuleTogglesChange={onModuleTogglesChange}
         compact

@@ -1,0 +1,123 @@
+import { useEffect, useMemo, useState } from "react";
+import { readUserSession } from "@/lib/userSession";
+import {
+  DailySurfMaxEngine,
+  compareDailySurfRounds,
+  type DailySurfMaxSnapshot,
+  type DailySurfRound,
+  type DailySurfRoundSource,
+} from "@/surf/DailySurfMaxEngine";
+
+interface UseDailySurfMaxParams {
+  rounds: DailySurfRoundSource[];
+  tableId?: string;
+  sourceUpdatedAt?: string | null;
+  enabled?: boolean;
+}
+
+export function useDailySurfMax({
+  rounds,
+  tableId = "bac-bo",
+  sourceUpdatedAt,
+  enabled = true,
+}: UseDailySurfMaxParams): DailySurfMaxSnapshot {
+  const storageScope = useMemo(() => {
+    const email = readUserSession().email.trim().toLowerCase();
+    return email || "local";
+  }, []);
+
+  const [snapshot, setSnapshot] = useState<DailySurfMaxSnapshot>(() =>
+    DailySurfMaxEngine.load(tableId, storageScope),
+  );
+
+  const todayKey = DailySurfMaxEngine.todayKey();
+  const signature = useMemo(
+    () => roundsSignature(rounds, sourceUpdatedAt, tableId),
+    [rounds, sourceUpdatedAt, tableId],
+  );
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const normalizedRounds = DailySurfMaxEngine.normalizeRounds(rounds, {
+      tableId,
+      fallbackTimestamp: sourceUpdatedAt,
+    });
+    const todayRounds = normalizedRounds
+      .filter((round) => round.date_br === todayKey)
+      .sort(compareDailySurfRounds);
+
+    setSnapshot((current) => {
+      const base =
+        current.dailyMaxSurf.date === todayKey && current.dailyMaxSurf.table_id === tableId
+          ? current
+          : DailySurfMaxEngine.empty(tableId, todayKey);
+
+      if (!todayRounds.length) {
+        if (base === current) return current;
+        DailySurfMaxEngine.save(base, storageScope);
+        return base;
+      }
+
+      const next = applyTodayRounds(base, todayRounds, tableId, todayKey);
+      if (isSameSnapshot(current, next)) return current;
+      DailySurfMaxEngine.save(next, storageScope);
+      return next;
+    });
+  }, [enabled, signature, storageScope, tableId, todayKey]);
+
+  return snapshot;
+}
+
+function applyTodayRounds(
+  current: DailySurfMaxSnapshot,
+  todayRounds: DailySurfRound[],
+  tableId: string,
+  todayKey: string,
+) {
+  const lastRoundId = current.dailyMaxSurf.last_round_id;
+  if (!lastRoundId) return DailySurfMaxEngine.recalculate(todayRounds, tableId, todayKey);
+
+  const lastIndex = todayRounds.findIndex((round) => round.round_id === lastRoundId);
+  if (lastIndex < 0) return DailySurfMaxEngine.recalculate(todayRounds, tableId, todayKey);
+
+  let next = current;
+  for (const round of todayRounds.slice(lastIndex + 1)) {
+    next = DailySurfMaxEngine.processRound(next, round);
+  }
+  return next;
+}
+
+function roundsSignature(
+  rounds: DailySurfRoundSource[],
+  sourceUpdatedAt: string | null | undefined,
+  tableId: string,
+) {
+  const first = rounds[0];
+  const last = rounds.at(-1);
+  return [
+    tableId,
+    sourceUpdatedAt ?? "",
+    rounds.length,
+    roundSourceKey(first),
+    roundSourceKey(last),
+  ].join(":");
+}
+
+function roundSourceKey(round: DailySurfRoundSource | undefined) {
+  if (!round) return "";
+  return `${round.key ?? ""}:${round.id}:${round.time}:${round.result}:${round.bankerScore}:${round.playerScore}`;
+}
+
+function isSameSnapshot(left: DailySurfMaxSnapshot, right: DailySurfMaxSnapshot) {
+  return (
+    left.currentStreak.side === right.currentStreak.side &&
+    left.currentStreak.count === right.currentStreak.count &&
+    left.dailyMaxSurf.banker === right.dailyMaxSurf.banker &&
+    left.dailyMaxSurf.player === right.dailyMaxSurf.player &&
+    left.dailyMaxSurf.tie === right.dailyMaxSurf.tie &&
+    left.dailyMaxSurf.date === right.dailyMaxSurf.date &&
+    left.dailyMaxSurf.table_id === right.dailyMaxSurf.table_id &&
+    left.dailyMaxSurf.last_round_id === right.dailyMaxSurf.last_round_id
+  );
+}

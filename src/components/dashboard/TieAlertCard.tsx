@@ -54,7 +54,10 @@ export function TieAlertCard({
       <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warning/22 to-transparent" />
       <div
-        className={cn("mb-2 flex items-center justify-between gap-3", compact && "mb-1.5 gap-1")}
+        className={cn(
+          "mb-2 flex items-center justify-between gap-3",
+          compact && "mb-2 min-h-[58px] items-start gap-1.5",
+        )}
       >
         <div
           className={cn(
@@ -68,7 +71,7 @@ export function TieAlertCard({
           <AppBadge
             tone={status.badgeTone}
             pulse={enabled && alert.status === "active"}
-            className={compact ? "px-2 text-[9px]" : undefined}
+            className={compact ? "max-w-[82px] truncate px-1.5 py-0 text-[8px] tracking-[0.08em]" : undefined}
           >
             {status.badge}
           </AppBadge>
@@ -76,6 +79,7 @@ export function TieAlertCard({
             toggles={toggles}
             modules={["tieAlert"]}
             onChange={onModuleTogglesChange}
+            compact={compact}
           />
         </div>
       </div>

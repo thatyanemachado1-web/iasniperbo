@@ -5,14 +5,15 @@ import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { buildSurfCopy } from "@/lib/operationalCopy";
 import { cn } from "@/lib/utils";
-import type { ModuleToggles, Round, RoundResult, SurfAlert } from "@/types/dashboard";
+import type { DailySurfMaxSnapshot, DailySurfSide } from "@/surf/DailySurfMaxEngine";
+import type { ModuleToggles, SurfAlert } from "@/types/dashboard";
 import { clampPercent, surfRiskBand, surfStrengthBand } from "@/utils/surf";
 import { Activity, AlertTriangle, Gauge, Target, Waves } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function SurfAlertCard({
   alert,
-  rounds = [],
+  dailySurfMax,
   toggles,
   onModuleTogglesChange,
   locked,
@@ -20,7 +21,7 @@ export function SurfAlertCard({
   showRoadPanels = true,
 }: {
   alert: SurfAlert;
-  rounds?: Round[];
+  dailySurfMax: DailySurfMaxSnapshot;
   toggles?: ModuleToggles;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
   locked?: boolean;
@@ -43,7 +44,6 @@ export function SurfAlertCard({
         : "border-neon-cyan/30";
   const message = buildSurfCopy(alert);
   const enabled = toggles?.surfAnalyzer !== false;
-  const surfMax = calculateSurfMaxima(rounds);
 
   return (
     <GlassCard
@@ -57,8 +57,8 @@ export function SurfAlertCard({
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/35 to-transparent" />
       <div className="absolute -right-10 -top-10 size-32 rounded-full bg-neon-cyan/5 blur-2xl" />
       {compact ? (
-        <div className="mb-3 flex min-w-0 flex-col items-start gap-2">
-          <div className="min-w-0">
+        <div className="mb-2 flex min-h-[58px] min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0 pt-0.5">
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
               Surf Analyzer
             </div>
@@ -66,11 +66,11 @@ export function SurfAlertCard({
               Fase da mesa, força e risco contrário.
             </div>
           </div>
-          <div className="flex max-w-full flex-wrap items-center gap-1.5">
+          <div className="flex max-w-[54%] shrink-0 flex-wrap items-center justify-end gap-1">
             <AppBadge
               tone={strengthBand.tone}
               pulse={enabled && alert.surf_alert}
-              className="max-w-full truncate px-2 text-[9px]"
+              className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
             >
               {alert.surf_status ?? alert.surf_phase}
             </AppBadge>
@@ -78,6 +78,7 @@ export function SurfAlertCard({
               toggles={toggles}
               modules={["surfAnalyzer"]}
               onChange={onModuleTogglesChange}
+              compact
             />
           </div>
         </div>
@@ -149,7 +150,7 @@ export function SurfAlertCard({
               />
             </div>
 
-            <SurfMaximaPanel maxima={surfMax} />
+            <SurfMaximaPanel snapshot={dailySurfMax} />
           </div>
         </div>
 
@@ -219,8 +220,9 @@ export function SurfAlertCard({
   );
 }
 
-function SurfMaximaPanel({ maxima }: { maxima: SurfMaxima }) {
-  const best = maxima.best;
+function SurfMaximaPanel({ snapshot }: { snapshot: DailySurfMaxSnapshot }) {
+  const maxima = snapshot.dailyMaxSurf;
+  const best = bestDailySurf(maxima);
   const summary =
     best.value > 0
       ? `Maior surf detectado hoje: ${best.label} com ${best.value} seguidos`
@@ -236,18 +238,18 @@ function SurfMaximaPanel({ maxima }: { maxima: SurfMaxima }) {
       </div>
       <div className="mt-2 grid grid-cols-3 gap-1.5">
         <SurfMaxMiniCard
-          label="Banker"
-          caption="Banker seguidos"
-          value={maxima.banker}
-          tone="banker"
-        />
-        <SurfMaxMiniCard
           label="Player"
           caption="Player seguidos"
           value={maxima.player}
           tone="player"
         />
-        <SurfMaxMiniCard label="Tie" caption="Tie seguidos" value={maxima.tie} tone="tie" />
+        <SurfMaxMiniCard label="Empate" caption="Empates seguidos" value={maxima.tie} tone="tie" />
+        <SurfMaxMiniCard
+          label="Banker"
+          caption="Banker seguidos"
+          value={maxima.banker}
+          tone="banker"
+        />
       </div>
     </div>
   );
@@ -281,49 +283,12 @@ function SurfMaxMiniCard({
   );
 }
 
-interface SurfMaxima {
-  banker: number;
-  player: number;
-  tie: number;
-  best: { label: "BANKER" | "PLAYER" | "TIE"; value: number };
-}
-
-function calculateSurfMaxima(rounds: Round[]): SurfMaxima {
-  const sortedRounds = rounds.slice().sort(compareSurfRounds);
-  const maxima = { banker: 0, player: 0, tie: 0 };
-  let currentSide: RoundResult | null = null;
-  let currentCount = 0;
-
-  for (const round of sortedRounds) {
-    if (round.result !== "B" && round.result !== "P" && round.result !== "T") continue;
-    if (round.result === currentSide) {
-      currentCount += 1;
-    } else {
-      currentSide = round.result;
-      currentCount = 1;
-    }
-
-    if (round.result === "B") maxima.banker = Math.max(maxima.banker, currentCount);
-    if (round.result === "P") maxima.player = Math.max(maxima.player, currentCount);
-    if (round.result === "T") maxima.tie = Math.max(maxima.tie, currentCount);
-  }
-
-  const ranked = [
+function bestDailySurf(maxima: DailySurfMaxSnapshot["dailyMaxSurf"]): { label: DailySurfSide; value: number } {
+  return [
     { label: "BANKER" as const, value: maxima.banker },
     { label: "PLAYER" as const, value: maxima.player },
     { label: "TIE" as const, value: maxima.tie },
-  ].sort((left, right) => right.value - left.value);
-
-  return {
-    ...maxima,
-    best: ranked[0] ?? { label: "BANKER", value: 0 },
-  };
-}
-
-function compareSurfRounds(left: Round, right: Round) {
-  const idCompare = left.id - right.id;
-  if (idCompare) return idCompare;
-  return left.time.localeCompare(right.time);
+  ].sort((left, right) => right.value - left.value)[0];
 }
 
 function Metric({

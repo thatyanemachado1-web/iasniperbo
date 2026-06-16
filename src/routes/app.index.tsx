@@ -34,6 +34,7 @@ import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import { buildSignalCopy } from "@/lib/operationalCopy";
 import { usePatternMiner } from "@/hooks/usePatternMiner";
 import { useRoundHistory } from "@/hooks/useRoundHistory";
+import { useDailySurfMax } from "@/hooks/useDailySurfMax";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
@@ -52,6 +53,12 @@ function DashboardPage() {
     d,
     mode === "live" && !d.mockMode,
   );
+  const dailySurfMax = useDailySurfMax({
+    rounds: roundHistory.todayRounds.length ? roundHistory.todayRounds : d.rounds,
+    tableId: "bac-bo",
+    sourceUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
+    enabled: mode === "live" && !d.mockMode,
+  });
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const tieAlertEnabled = d.moduleToggles?.tieAlert !== false;
   const surfAnalyzerEnabled = d.moduleToggles?.surfAnalyzer !== false;
@@ -127,7 +134,7 @@ function DashboardPage() {
       <DashboardMainCardsGrid
         data={d}
         surfAlert={surfAlert}
-        surfMaxRounds={roundHistory.todayRounds.length ? roundHistory.todayRounds : d.rounds}
+        dailySurfMax={dailySurfMax}
         patternMinerSnapshot={patternMiner.snapshot}
         patternMinerIsUsingRealData={patternMiner.isUsingRealData}
         onModuleTogglesChange={setModuleToggles}
