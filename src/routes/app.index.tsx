@@ -127,6 +127,7 @@ function DashboardPage() {
       <DashboardMainCardsGrid
         data={d}
         surfAlert={surfAlert}
+        surfMaxRounds={roundHistory.todayRounds.length ? roundHistory.todayRounds : d.rounds}
         patternMinerSnapshot={patternMiner.snapshot}
         patternMinerIsUsingRealData={patternMiner.isUsingRealData}
         onModuleTogglesChange={setModuleToggles}

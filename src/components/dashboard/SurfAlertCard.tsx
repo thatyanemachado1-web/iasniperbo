@@ -5,13 +5,14 @@ import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { buildSurfCopy } from "@/lib/operationalCopy";
 import { cn } from "@/lib/utils";
-import type { ModuleToggles, SurfAlert } from "@/types/dashboard";
+import type { ModuleToggles, Round, RoundResult, SurfAlert } from "@/types/dashboard";
 import { clampPercent, surfRiskBand, surfStrengthBand } from "@/utils/surf";
 import { Activity, AlertTriangle, Gauge, Target, Waves } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function SurfAlertCard({
   alert,
+  rounds = [],
   toggles,
   onModuleTogglesChange,
   locked,
@@ -19,6 +20,7 @@ export function SurfAlertCard({
   showRoadPanels = true,
 }: {
   alert: SurfAlert;
+  rounds?: Round[];
   toggles?: ModuleToggles;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
   locked?: boolean;
@@ -41,6 +43,7 @@ export function SurfAlertCard({
         : "border-neon-cyan/30";
   const message = buildSurfCopy(alert);
   const enabled = toggles?.surfAnalyzer !== false;
+  const surfMax = calculateSurfMaxima(rounds);
 
   return (
     <GlassCard
@@ -145,6 +148,8 @@ export function SurfAlertCard({
                 value={alert.surf_prediction_window ? `${alert.surf_prediction_window}` : "-"}
               />
             </div>
+
+            <SurfMaximaPanel maxima={surfMax} />
           </div>
         </div>
 
@@ -212,6 +217,113 @@ export function SurfAlertCard({
       )}
     </GlassCard>
   );
+}
+
+function SurfMaximaPanel({ maxima }: { maxima: SurfMaxima }) {
+  const best = maxima.best;
+  const summary =
+    best.value > 0
+      ? `Maior surf detectado hoje: ${best.label} com ${best.value} seguidos`
+      : "Aguardando rodadas de hoje para calcular a maxima.";
+
+  return (
+    <div className="rounded-xl border border-neon-cyan/12 bg-background/24 p-2">
+      <div className="text-[9px] font-black uppercase tracking-[0.16em] text-neon-cyan">
+        Maxima do Surf Hoje
+      </div>
+      <div className="mt-1 text-[10px] font-semibold leading-snug text-muted-foreground">
+        {summary}
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-1.5">
+        <SurfMaxMiniCard
+          label="Banker"
+          caption="Banker seguidos"
+          value={maxima.banker}
+          tone="banker"
+        />
+        <SurfMaxMiniCard
+          label="Player"
+          caption="Player seguidos"
+          value={maxima.player}
+          tone="player"
+        />
+        <SurfMaxMiniCard label="Tie" caption="Tie seguidos" value={maxima.tie} tone="tie" />
+      </div>
+    </div>
+  );
+}
+
+function SurfMaxMiniCard({
+  label,
+  caption,
+  value,
+  tone,
+}: {
+  label: string;
+  caption: string;
+  value: number;
+  tone: "banker" | "player" | "tie";
+}) {
+  const toneClass = {
+    banker: "border-banker/35 bg-banker/8 text-banker",
+    player: "border-player/35 bg-player/8 text-player",
+    tie: "border-tie/35 bg-tie/10 text-tie",
+  }[tone];
+
+  return (
+    <div className={`min-w-0 rounded-lg border px-1.5 py-1.5 text-center ${toneClass}`}>
+      <div className="text-[8px] font-black uppercase tracking-[0.1em] opacity-80">{label}</div>
+      <div className="mt-0.5 text-lg font-black leading-none">{value}</div>
+      <div className="mt-0.5 truncate text-[8px] font-semibold text-muted-foreground">
+        {caption}
+      </div>
+    </div>
+  );
+}
+
+interface SurfMaxima {
+  banker: number;
+  player: number;
+  tie: number;
+  best: { label: "BANKER" | "PLAYER" | "TIE"; value: number };
+}
+
+function calculateSurfMaxima(rounds: Round[]): SurfMaxima {
+  const sortedRounds = rounds.slice().sort(compareSurfRounds);
+  const maxima = { banker: 0, player: 0, tie: 0 };
+  let currentSide: RoundResult | null = null;
+  let currentCount = 0;
+
+  for (const round of sortedRounds) {
+    if (round.result !== "B" && round.result !== "P" && round.result !== "T") continue;
+    if (round.result === currentSide) {
+      currentCount += 1;
+    } else {
+      currentSide = round.result;
+      currentCount = 1;
+    }
+
+    if (round.result === "B") maxima.banker = Math.max(maxima.banker, currentCount);
+    if (round.result === "P") maxima.player = Math.max(maxima.player, currentCount);
+    if (round.result === "T") maxima.tie = Math.max(maxima.tie, currentCount);
+  }
+
+  const ranked = [
+    { label: "BANKER" as const, value: maxima.banker },
+    { label: "PLAYER" as const, value: maxima.player },
+    { label: "TIE" as const, value: maxima.tie },
+  ].sort((left, right) => right.value - left.value);
+
+  return {
+    ...maxima,
+    best: ranked[0] ?? { label: "BANKER", value: 0 },
+  };
+}
+
+function compareSurfRounds(left: Round, right: Round) {
+  const idCompare = left.id - right.id;
+  if (idCompare) return idCompare;
+  return left.time.localeCompare(right.time);
 }
 
 function Metric({

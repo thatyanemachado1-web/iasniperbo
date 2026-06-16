@@ -1,13 +1,15 @@
 import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
 import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
-import type { ModuleToggles, SurfAlert } from "@/types/dashboard";
+import type { ModuleToggles, Round, SurfAlert } from "@/types/dashboard";
 
 export function SurfAnalyzerDashboardCard({
   alert,
+  rounds,
   toggles,
   onModuleTogglesChange,
 }: {
   alert: SurfAlert;
+  rounds?: Round[];
   toggles?: ModuleToggles;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
 }) {
@@ -19,6 +21,7 @@ export function SurfAnalyzerDashboardCard({
     >
       <SurfAlertCard
         alert={alert}
+        rounds={rounds}
         toggles={toggles}
         onModuleTogglesChange={onModuleTogglesChange}
         compact

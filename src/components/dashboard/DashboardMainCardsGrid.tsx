@@ -3,18 +3,20 @@ import { NeuralPayingDashboardCard } from "@/components/dashboard/NeuralPayingDa
 import { SurfAnalyzerDashboardCard } from "@/components/dashboard/SurfAnalyzerDashboardCard";
 import { TieRadarDashboardCard } from "@/components/dashboard/TieRadarDashboardCard";
 import { SurfRoadPanelsStrip } from "@/components/dashboard/SurfRoadPanelsStrip";
-import type { DashboardData, ModuleToggles, SurfAlert } from "@/types/dashboard";
+import type { DashboardData, ModuleToggles, Round, SurfAlert } from "@/types/dashboard";
 import type { PatternMinerSnapshot } from "@/types/patternMiner";
 
 export function DashboardMainCardsGrid({
   data,
   surfAlert,
+  surfMaxRounds,
   patternMinerSnapshot,
   patternMinerIsUsingRealData,
   onModuleTogglesChange,
 }: {
   data: DashboardData;
   surfAlert: SurfAlert;
+  surfMaxRounds?: Round[];
   patternMinerSnapshot: PatternMinerSnapshot;
   patternMinerIsUsingRealData: boolean;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
@@ -25,6 +27,7 @@ export function DashboardMainCardsGrid({
         <NeuralPayingDashboardCard data={data} />
         <SurfAnalyzerDashboardCard
           alert={surfAlert}
+          rounds={surfMaxRounds ?? data.rounds}
           toggles={data.moduleToggles}
           onModuleTogglesChange={onModuleTogglesChange}
         />

@@ -33,6 +33,7 @@ export interface RoundHistorySnapshot {
   lastCapturedAt: string | null;
   sourceUpdatedAt: string | null;
   storedRounds: number;
+  todayRounds: StoredRound[];
   today: DayRoundSummary;
   yesterday: DayRoundSummary;
   isSourceStale: boolean;
@@ -98,6 +99,9 @@ export function useRoundHistory(data: DashboardData, enabled: boolean): UseRound
       lastCapturedAt: lastRound?.capturedAt ?? null,
       sourceUpdatedAt,
       storedRounds: history.rounds.length,
+      todayRounds: history.rounds
+        .filter((round) => round.day === todayKey)
+        .sort(compareStoredRounds),
       today: summarizeDay(history.rounds, todayKey),
       yesterday: summarizeDay(history.rounds, yesterdayKey),
       isSourceStale: sourceUpdatedAt ? localDayKey(sourceUpdatedAt) !== todayKey : false,
