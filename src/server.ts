@@ -3284,14 +3284,14 @@ async function resetEngineCalendarAggregates(env: unknown) {
     action: "not_deleted",
   }));
 
-  liveEngineHourlyStats = [];
-  liveEngineDailyStats = [];
-  liveEngineWeeklyStats = [];
-  liveEngineMonthlyStats = [];
-  liveEngineYearlyStats = [];
+  const hadCalendarRowsBeforeReload = hasEngineCalendarAggregateRows();
+  // Calendar history is permanent: reload must merge stored rows, never blank previous days.
   neuralCalendarHydratedFromTables = false;
   await hydrateNeuralCalendarStatsFromTables(env);
-  await saveLiveState(env);
+  const hasCalendarRowsAfterReload = hasEngineCalendarAggregateRows();
+  if (hadCalendarRowsBeforeReload || hasCalendarRowsAfterReload) {
+    await saveLiveState(env);
+  }
 
   return {
     ok: true,
@@ -3314,6 +3314,7 @@ async function resetEngineCalendarAggregates(env: unknown) {
       "original_engines",
     ],
     tableResults,
+    liveStateSaved: hadCalendarRowsBeforeReload || hasCalendarRowsAfterReload,
     resetAt: new Date().toISOString(),
   };
 }
@@ -12637,47 +12638,7 @@ function applyLiveState(state: Record<string, unknown>) {
   const calendarVersion = readString(state, "neuralCalendarVersion");
   liveNeuralCalendarStorageVersion = NEURAL_CALENDAR_AGGREGATE_VERSION;
   if (calendarVersion === NEURAL_CALENDAR_AGGREGATE_VERSION) {
-    if (Array.isArray(state.neuralCalendarDailyStats)) {
-      liveNeuralCalendarDailyStats = state.neuralCalendarDailyStats
-        .map((row) => neuralCalendarDailyFromRow(readRecord(row)))
-        .filter((row): row is NeuralCalendarDailyStat => Boolean(row));
-    }
-
-    if (Array.isArray(state.neuralCalendarHourlyStats)) {
-      liveNeuralCalendarHourlyStats = state.neuralCalendarHourlyStats
-        .map((row) => neuralCalendarHourlyFromRow(readRecord(row)))
-        .filter((row): row is NeuralCalendarHourlyStat => Boolean(row));
-    }
-
-    if (Array.isArray(state.engineHourlyStats)) {
-      liveEngineHourlyStats = state.engineHourlyStats
-        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "hourly"))
-        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
-    }
-
-    if (Array.isArray(state.engineDailyStats)) {
-      liveEngineDailyStats = state.engineDailyStats
-        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "daily"))
-        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
-    }
-
-    if (Array.isArray(state.engineWeeklyStats)) {
-      liveEngineWeeklyStats = state.engineWeeklyStats
-        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "weekly"))
-        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
-    }
-
-    if (Array.isArray(state.engineMonthlyStats)) {
-      liveEngineMonthlyStats = state.engineMonthlyStats
-        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "monthly"))
-        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
-    }
-
-    if (Array.isArray(state.engineYearlyStats)) {
-      liveEngineYearlyStats = state.engineYearlyStats
-        .map((row) => engineCalendarAggregateFromRow(readRecord(row), "yearly"))
-        .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
-    }
+    applyStoredNeuralCalendarStats(state);
 
     const calendarKeys = readRecord(state.neuralCalendarCountedRoundKeys);
     if (Object.keys(calendarKeys).length > 0) {
@@ -12688,28 +12649,12 @@ function applyLiveState(state: Record<string, unknown>) {
         }, {}),
       );
     }
-
-    const engineBackfillKeys = readRecord(state.engineCalendarBackfillKeys);
-    if (Object.keys(engineBackfillKeys).length > 0) {
-      liveEngineCalendarBackfillKeys = pruneEngineCalendarBackfillKeys(
-        Object.keys(engineBackfillKeys).reduce<Record<string, true>>((acc, key) => {
-          if (engineBackfillKeys[key]) acc[key] = true;
-          return acc;
-        }, {}),
-      );
-    }
   } else {
-    liveNeuralCalendarDailyStats = [];
-    liveNeuralCalendarHourlyStats = [];
     liveNeuralCalendarCountedRoundKeys = {};
-    liveEngineHourlyStats = [];
-    liveEngineDailyStats = [];
-    liveEngineWeeklyStats = [];
-    liveEngineMonthlyStats = [];
-    liveEngineYearlyStats = [];
-    liveEngineCalendarBackfillKeys = {};
     neuralCalendarHydratedFromTables = false;
   }
+  applyStoredEngineCalendarStats(state);
+  applyStoredEngineCalendarBackfillKeys(state);
 
   if (Array.isArray(state.recipients)) {
     liveRecipients = state.recipients
@@ -12793,6 +12738,100 @@ function applyLiveState(state: Record<string, unknown>) {
       .filter((log) => Object.keys(log).length > 0)
       .slice(0, 250) as LocalAiLog[];
   }
+}
+
+function applyStoredNeuralCalendarStats(state: Record<string, unknown>) {
+  const dailyStats = parseStoredNeuralCalendarDailyStats(state.neuralCalendarDailyStats);
+  if (dailyStats.length) {
+    liveNeuralCalendarDailyStats = mergeNeuralCalendarDailyStats([
+      ...liveNeuralCalendarDailyStats,
+      ...dailyStats,
+    ]);
+  }
+
+  const hourlyStats = parseStoredNeuralCalendarHourlyStats(state.neuralCalendarHourlyStats);
+  if (hourlyStats.length) {
+    liveNeuralCalendarHourlyStats = mergeNeuralCalendarHourlyStats([
+      ...liveNeuralCalendarHourlyStats,
+      ...hourlyStats,
+    ]);
+  }
+}
+
+function applyStoredEngineCalendarStats(state: Record<string, unknown>) {
+  const hourlyStats = parseStoredEngineCalendarStats(state.engineHourlyStats, "hourly");
+  if (hourlyStats.length) {
+    liveEngineHourlyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineHourlyStats,
+      ...hourlyStats,
+    ]);
+  }
+
+  const dailyStats = parseStoredEngineCalendarStats(state.engineDailyStats, "daily");
+  if (dailyStats.length) {
+    liveEngineDailyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineDailyStats,
+      ...dailyStats,
+    ]);
+  }
+
+  const weeklyStats = parseStoredEngineCalendarStats(state.engineWeeklyStats, "weekly");
+  if (weeklyStats.length) {
+    liveEngineWeeklyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineWeeklyStats,
+      ...weeklyStats,
+    ]);
+  }
+
+  const monthlyStats = parseStoredEngineCalendarStats(state.engineMonthlyStats, "monthly");
+  if (monthlyStats.length) {
+    liveEngineMonthlyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineMonthlyStats,
+      ...monthlyStats,
+    ]);
+  }
+
+  const yearlyStats = parseStoredEngineCalendarStats(state.engineYearlyStats, "yearly");
+  if (yearlyStats.length) {
+    liveEngineYearlyStats = mergeEngineCalendarAggregateStats([
+      ...liveEngineYearlyStats,
+      ...yearlyStats,
+    ]);
+  }
+}
+
+function applyStoredEngineCalendarBackfillKeys(state: Record<string, unknown>) {
+  const engineBackfillKeys = readRecord(state.engineCalendarBackfillKeys);
+  if (Object.keys(engineBackfillKeys).length > 0) {
+    liveEngineCalendarBackfillKeys = pruneEngineCalendarBackfillKeys({
+      ...liveEngineCalendarBackfillKeys,
+      ...Object.keys(engineBackfillKeys).reduce<Record<string, true>>((acc, key) => {
+        if (engineBackfillKeys[key]) acc[key] = true;
+        return acc;
+      }, {}),
+    });
+  }
+}
+
+function parseStoredNeuralCalendarDailyStats(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((row) => neuralCalendarDailyFromRow(readRecord(row)))
+    .filter((row): row is NeuralCalendarDailyStat => Boolean(row));
+}
+
+function parseStoredNeuralCalendarHourlyStats(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((row) => neuralCalendarHourlyFromRow(readRecord(row)))
+    .filter((row): row is NeuralCalendarHourlyStat => Boolean(row));
+}
+
+function parseStoredEngineCalendarStats(value: unknown, kind: EngineCalendarAggregateKind) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((row) => engineCalendarAggregateFromRow(readRecord(row), kind))
+    .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
 }
 
 function mergeLiveStates(
