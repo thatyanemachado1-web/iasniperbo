@@ -55,7 +55,7 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
 };
 
 const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
-const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_v1";
+const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
 
 const SCANNING_READING: NeuralReading = {
@@ -118,12 +118,15 @@ export function LeituraNeuralMiniCard({
   const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
   const lastOfficialResultRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
+  const mountedAtRef = useRef(Date.now());
 
   useEffect(() => {
     const result = displayResultFromOfficialEntry(neuralEntryLastResult);
     if (!result || lastOfficialResultRef.current === result.id) return;
 
     lastOfficialResultRef.current = result.id;
+    if (isOfficialEntryOlderThanSession(neuralEntryLastResult, mountedAtRef.current)) return;
+
     setEntryResult(result);
     setEntryHistory((items) => {
       if (items.some((item) => item.id === result.id)) return items;
@@ -413,6 +416,16 @@ function displayResultFromOfficialEntry(result: NeuralEntryLastResult | null | u
     multiplier: kind === "tie" ? result.tieMultiplier ?? null : null,
     minute: minuteLabelFromOfficialResult(result),
   };
+}
+
+function isOfficialEntryOlderThanSession(
+  result: NeuralEntryLastResult | null | undefined,
+  mountedAt: number,
+) {
+  if (!result?.finishedAt) return false;
+  const finishedAt = new Date(result.finishedAt).getTime();
+  if (Number.isNaN(finishedAt)) return false;
+  return finishedAt < mountedAt - 1500;
 }
 
 function normalizeEntrySide(side: unknown): NeuralSide {
