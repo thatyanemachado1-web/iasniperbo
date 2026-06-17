@@ -400,6 +400,7 @@ let liveEngineYearlyStats: EngineCalendarAggregateStat[] = [];
 let liveEngineCalendarBackfillKeys: Record<string, true> = {};
 let engineCalendarAutoBackfillPromise: Promise<void> | null = null;
 let engineCalendarAutoBackfillAttemptedAt = 0;
+let engineCalendarAutoBackfillCompleted = false;
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
 let liveAccessEvents: Array<Record<string, unknown>> = [];
@@ -4314,9 +4315,11 @@ async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
 }
 
 async function ensureEngineCalendarAggregatesAvailable(env: unknown) {
-  if (!getSupabasePersistenceConfig(env) || hasEngineCalendarAggregateRows()) return;
+  if (!getSupabasePersistenceConfig(env)) return;
 
   const now = Date.now();
+  const hasRows = hasEngineCalendarAggregateRows();
+  if (hasRows && engineCalendarAutoBackfillCompleted) return;
   if (engineCalendarAutoBackfillPromise) {
     await engineCalendarAutoBackfillPromise;
     return;
@@ -4330,7 +4333,9 @@ async function ensureEngineCalendarAggregatesAvailable(env: unknown) {
     .then((report) => {
       if (!report.ok) {
         console.warn("Backfill automatico do Calendario Neural nao concluiu.", report.error || report);
+        return;
       }
+      engineCalendarAutoBackfillCompleted = true;
     })
     .catch((error) => {
       console.warn("Backfill automatico do Calendario Neural falhou.", error);
