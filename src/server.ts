@@ -398,6 +398,8 @@ let liveEngineWeeklyStats: EngineCalendarAggregateStat[] = [];
 let liveEngineMonthlyStats: EngineCalendarAggregateStat[] = [];
 let liveEngineYearlyStats: EngineCalendarAggregateStat[] = [];
 let liveEngineCalendarBackfillKeys: Record<string, true> = {};
+let engineCalendarAutoBackfillPromise: Promise<void> | null = null;
+let engineCalendarAutoBackfillAttemptedAt = 0;
 let liveRecipients: Array<Record<string, unknown>> = [];
 let liveClients: Array<Record<string, unknown>> = [];
 let liveAccessEvents: Array<Record<string, unknown>> = [];
@@ -3217,6 +3219,7 @@ async function handleNeuralCalendarRequest(request: Request, url: URL, env: unkn
   }
 
   await hydrateNeuralCalendarStatsFromTables(env);
+  await ensureEngineCalendarAggregatesAvailable(env);
 
   const now = saoPauloDateParts();
   const requestedYear = clampCalendarYear(url.searchParams.get("year"), now.year);
@@ -4240,7 +4243,6 @@ function neuralCalendarTopMonthDays() {
 
 async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
   if (!getSupabasePersistenceConfig(env) || neuralCalendarHydratedFromTables) return;
-  neuralCalendarHydratedFromTables = true;
 
   const [
     storedDailyStats,
@@ -4307,6 +4309,45 @@ async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
       return daily;
     });
   }
+  neuralCalendarHydratedFromTables = true;
+}
+
+async function ensureEngineCalendarAggregatesAvailable(env: unknown) {
+  if (!getSupabasePersistenceConfig(env) || hasEngineCalendarAggregateRows()) return;
+
+  const now = Date.now();
+  if (engineCalendarAutoBackfillPromise) {
+    await engineCalendarAutoBackfillPromise;
+    return;
+  }
+  if (engineCalendarAutoBackfillAttemptedAt && now - engineCalendarAutoBackfillAttemptedAt < 5 * 60 * 1000) {
+    return;
+  }
+
+  engineCalendarAutoBackfillAttemptedAt = now;
+  engineCalendarAutoBackfillPromise = runEngineCalendarBackfill(env)
+    .then((report) => {
+      if (!report.ok) {
+        console.warn("Backfill automatico do Calendario Neural nao concluiu.", report.error || report);
+      }
+    })
+    .catch((error) => {
+      console.warn("Backfill automatico do Calendario Neural falhou.", error);
+    })
+    .finally(() => {
+      engineCalendarAutoBackfillPromise = null;
+    });
+  await engineCalendarAutoBackfillPromise;
+}
+
+function hasEngineCalendarAggregateRows() {
+  return Boolean(
+    liveEngineHourlyStats.length ||
+      liveEngineDailyStats.length ||
+      liveEngineWeeklyStats.length ||
+      liveEngineMonthlyStats.length ||
+      liveEngineYearlyStats.length,
+  );
 }
 
 async function fetchStoredNeuralCalendarDailyStats(env: unknown) {
