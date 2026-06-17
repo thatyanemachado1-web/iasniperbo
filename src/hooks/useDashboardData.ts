@@ -6,7 +6,6 @@ import { readUserSession } from "@/lib/userSession";
 import { useEffect, useMemo, useState } from "react";
 import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } from "@/types/dashboard";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
-import { buildNumeroPaganteNeural } from "@/utils/numeroPaganteNeural";
 
 const LIVE_REFETCH_INTERVAL_MS = 800;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
@@ -233,7 +232,6 @@ function normalizeModuleToggles(value: unknown, fallback: ModuleToggles): Module
 
 function normalizeDashboardData(payload: unknown): DashboardData {
   const data = readRecord(payload) as unknown as DashboardData;
-  const generatedNeural = buildNumeroPaganteNeural(data.rounds);
   const neuralReading =
     data.neuralReading ??
     (data as unknown as Record<string, unknown>).neural_reading ??
@@ -246,26 +244,16 @@ function normalizeDashboardData(payload: unknown): DashboardData {
     (data as unknown as Record<string, unknown>).pagante_scoreboard ??
     (data as unknown as Record<string, unknown>).neuralStats ??
     (data as unknown as Record<string, unknown>).neural_stats;
-  let normalizedNeuralReading = normalizeNeuralReading(
-    neuralReading,
-    data.neuralReading ?? generatedNeural?.reading,
-  );
-  if (!hasNeuralPayingNumber(normalizedNeuralReading) && generatedNeural?.reading) {
-    normalizedNeuralReading = normalizeNeuralReading(generatedNeural.reading, normalizedNeuralReading);
-  }
+  const normalizedNeuralReading = normalizeNeuralReading(neuralReading, data.neuralReading);
 
   return {
     ...data,
     ...applyNeuralScoreBaseline(
       normalizedNeuralReading,
-      normalizeNeuralScoreboard(neuralScoreboard, data.neuralScoreboard ?? generatedNeural?.scoreboard),
+      normalizeNeuralScoreboard(neuralScoreboard, data.neuralScoreboard),
       dashboardDayKey(data),
     ),
   };
-}
-
-function hasNeuralPayingNumber(reading: NeuralReading) {
-  return typeof reading.numero === "number" && Boolean(reading.origem);
 }
 
 function normalizeNeuralScoreboard(

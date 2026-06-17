@@ -7799,12 +7799,16 @@ function serverRoundMatchesNeuralSide(round: Round, side: NonNullable<NeuralEntr
 function serverTieMultiplierFromRound(round: Round) {
   const explicit = readNullableNumber((round as unknown as Record<string, unknown>).tieMultiplier);
   if (explicit) return explicit;
-  const score = Math.max(Number(round.bankerScore) || 0, Number(round.playerScore) || 0);
-  if (score >= 12) return 88;
-  if (score >= 10) return 25;
-  if (score >= 8) return 10;
-  if (score >= 6) return 6;
-  return 4;
+  if (round.result !== "T" || round.bankerScore !== round.playerScore) return null;
+
+  const score = Math.round(Number(round.bankerScore));
+  if (!Number.isFinite(score)) return null;
+  if (score === 2 || score === 12) return 88;
+  if (score === 3 || score === 11) return 25;
+  if (score === 4 || score === 10) return 10;
+  if (score === 5 || score === 9) return 6;
+  if (score === 6 || score === 7 || score === 8) return 4;
+  return null;
 }
 
 function resolveNeuralPanelCycle(

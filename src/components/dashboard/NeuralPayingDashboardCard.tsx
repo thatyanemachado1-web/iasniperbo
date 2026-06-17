@@ -14,6 +14,8 @@ export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
       <LeituraNeuralMiniCard
         {...(data.neuralReading ?? SCANNING_READING)}
         neuralScoreboard={data.neuralScoreboard}
+        neuralEntryState={data.neuralEntryState}
+        neuralEntryLastResult={data.neuralEntryLastResult}
         rounds={data.rounds}
         greenFlash={false}
         className="h-full min-h-[220px] w-full sm:w-full lg:w-full"

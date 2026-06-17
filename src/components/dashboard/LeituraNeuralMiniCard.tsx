@@ -8,27 +8,27 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { NeuralReading, NeuralScoreboard, Round, SignalSide } from "@/types/dashboard";
+import type {
+  NeuralEntryLastResult,
+  NeuralEntryState,
+  NeuralReading,
+  NeuralScoreboard,
+  Round,
+  SignalSide,
+} from "@/types/dashboard";
 
 type NeuralSide = SignalSide | "TIE";
-type NeuralEntryResultKind = "green" | "red" | "tie";
+type NeuralEntryDisplayKind = "green" | "red" | "tie";
 
-interface NeuralEntryResult {
-  kind: NeuralEntryResultKind;
+interface NeuralEntryDisplayResult {
+  kind: NeuralEntryDisplayKind;
   side: NeuralSide;
   multiplier?: number | null;
   minute: string;
 }
 
-interface NeuralEntryHistoryItem extends NeuralEntryResult {
+interface NeuralEntryHistoryItem extends NeuralEntryDisplayResult {
   id: string;
-}
-
-interface NeuralPendingEntry {
-  key: string;
-  side: NeuralSide;
-  status: "awaiting_sg" | "awaiting_g1";
-  startedAfterRoundId: string;
 }
 
 interface NeuralScoreSummary {
@@ -50,6 +50,8 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
   greenFlash?: boolean;
   neuralScoreboard?: NeuralScoreboard;
   rounds?: Round[];
+  neuralEntryState?: NeuralEntryState | null;
+  neuralEntryLastResult?: NeuralEntryLastResult | null;
 };
 
 const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
@@ -75,6 +77,8 @@ export function LeituraNeuralMiniCard({
   greenFlash = false,
   neuralScoreboard,
   rounds,
+  neuralEntryState,
+  neuralEntryLastResult,
   ...reading
 }: LeituraNeuralMiniCardProps) {
   const data = { ...SCANNING_READING, ...reading };
@@ -109,84 +113,29 @@ export function LeituraNeuralMiniCard({
     "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
-  const latestRound = latestRoundFrom(rounds);
-  const activeEntryKey =
-    mode === "ACTIVE" && pullingSide
-      ? `${data.numero ?? "-"}:${data.origem ?? "-"}:${data.origemTipo ?? "-"}:${pullingSide}`
-      : null;
-  const [entryResult, setEntryResult] = useState<NeuralEntryResult | null>(null);
+  const confirmedEntrySide = neuralEntryState?.expectedSide ?? (mode === "ACTIVE" ? pullingSide : null);
+  const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
   const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
-  const pendingEntryRef = useRef<NeuralPendingEntry | null>(null);
-  const processedRoundRef = useRef<string | null>(null);
+  const lastOfficialResultRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!latestRound) return;
+    const result = displayResultFromOfficialEntry(neuralEntryLastResult);
+    if (!result || lastOfficialResultRef.current === result.id) return;
 
-    const latestRoundId = roundHistoryId(latestRound);
-    const pending = pendingEntryRef.current;
-    const isNewRound = processedRoundRef.current !== latestRoundId;
+    lastOfficialResultRef.current = result.id;
+    setEntryResult(result);
+    setEntryHistory((items) => {
+      if (items.some((item) => item.id === result.id)) return items;
+      return [result, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
+    });
 
-    if (isNewRound) {
-      processedRoundRef.current = latestRoundId;
-
-      if (latestRound.result === "T") {
-        const result: NeuralEntryResult = {
-          kind: "tie",
-          side: "TIE",
-          multiplier: multiplierForTieRound(latestRound),
-          minute: minuteLabelFromRound(latestRound),
-        };
-        pushEntryResult(result, tieRoundHistoryId(latestRound), 3200);
-        pendingEntryRef.current = null;
-      } else if (pending && pending.startedAfterRoundId !== latestRoundId) {
-        if (roundMatchesSide(latestRound, pending.side)) {
-          const result: NeuralEntryResult = {
-            kind: "green",
-            side: pending.side,
-            multiplier: null,
-            minute: minuteLabelFromRound(latestRound),
-          };
-          pushEntryResult(result, `${pending.key}:${latestRoundId}:green`, 3200);
-          pendingEntryRef.current = null;
-        } else if (pending.status === "awaiting_sg") {
-          pendingEntryRef.current = {
-            ...pending,
-            status: "awaiting_g1",
-          };
-        } else {
-          const result: NeuralEntryResult = {
-            kind: "red",
-            side: pending.side,
-            multiplier: null,
-            minute: minuteLabelFromRound(latestRound),
-          };
-          pushEntryResult(result, `${pending.key}:${latestRoundId}:red`, 1600);
-          pendingEntryRef.current = null;
-        }
-      }
-    }
-
-    if (!pendingEntryRef.current && activeEntryKey && pullingSide) {
-      pendingEntryRef.current = {
-        key: activeEntryKey,
-        side: pullingSide,
-        status: "awaiting_sg",
-        startedAfterRoundId: latestRoundId,
-      };
-    }
-
-    function pushEntryResult(result: NeuralEntryResult, historyId: string, duration: number) {
-      setEntryResult(result);
-      setEntryHistory((items) => {
-        if (items.some((item) => item.id === historyId)) return items;
-        return [{ ...result, id: historyId }, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
-      });
-
-      if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
-      entryResultTimeoutRef.current = window.setTimeout(() => setEntryResult(null), duration);
-    }
-  }, [activeEntryKey, latestRound, pullingSide]);
+    if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
+    entryResultTimeoutRef.current = window.setTimeout(
+      () => setEntryResult(null),
+      result.kind === "red" ? 1600 : 3200,
+    );
+  }, [neuralEntryLastResult]);
 
   useEffect(() => {
     writeNeuralEntryHistory(entryHistory);
@@ -228,7 +177,7 @@ export function LeituraNeuralMiniCard({
             Leitura Neural
           </div>
           <div className="truncate text-[7px] font-bold uppercase tracking-[0.1em] text-neon-cyan/75 sm:text-[8px]">
-            {originKind === "OPOSTO" ? "gatilho oposto" : postTie ? "cor pos-empate" : "numero pagante"}
+            {originKind === "OPOSTO" ? "numero oposto" : postTie ? "cor pos-empate" : "numero pagante"}
           </div>
         </div>
       </div>
@@ -260,7 +209,7 @@ export function LeituraNeuralMiniCard({
       ) : (
         <div className="relative mt-2 space-y-1">
           <NeuralEntryStatusCard
-            confirmedSide={mode === "ACTIVE" ? pullingSide : null}
+            confirmedSide={confirmedEntrySide}
             result={entryResult}
             history={entryHistory}
           />
@@ -286,7 +235,9 @@ export function LeituraNeuralMiniCard({
 
           {pullingSide ? (
             <div className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]">
-              <span className="text-neon-cyan">{postTie ? "Cor pos-empate" : "Puxando"}</span>{" "}
+              <span className="text-neon-cyan">
+                {originKind === "OPOSTO" ? "Numero oposto puxando" : postTie ? "Cor pos-empate" : "Puxando"}
+              </span>{" "}
               <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>{" "}
               <span className="text-[9px] text-muted-foreground/85">até {data.validade ?? "G1"}</span>
             </div>
@@ -444,7 +395,55 @@ function normalizeNeuralEntryHistoryItem(value: unknown): NeuralEntryHistoryItem
   };
 }
 
-function isNeuralEntryResultKind(value: unknown): value is NeuralEntryResultKind {
+function displayResultFromOfficialEntry(result: NeuralEntryLastResult | null | undefined): NeuralEntryHistoryItem | null {
+  if (!result?.id) return null;
+
+  const side = normalizeEntrySide(result.expectedSide ?? result.origem);
+  const kind: NeuralEntryDisplayKind =
+    result.outcome === "TIE" || result.kind === "tie_sg" || result.kind === "tie_g1"
+      ? "tie"
+      : result.outcome === "RED" || result.kind === "red"
+        ? "red"
+        : "green";
+
+  return {
+    id: result.id,
+    kind,
+    side: kind === "tie" ? "TIE" : side,
+    multiplier: kind === "tie" ? result.tieMultiplier ?? null : null,
+    minute: minuteLabelFromOfficialResult(result),
+  };
+}
+
+function normalizeEntrySide(side: unknown): NeuralSide {
+  return isNeuralSide(side) ? side : "TIE";
+}
+
+function minuteLabelFromOfficialResult(result: NeuralEntryLastResult) {
+  const roundKeyMinute = minuteLabelFromTimeText(result.resultRoundKey);
+  if (roundKeyMinute) return roundKeyMinute;
+
+  const finishedMinute = minuteLabelFromIso(result.finishedAt);
+  return finishedMinute ?? "--";
+}
+
+function minuteLabelFromTimeText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const match = value.match(/\b\d{1,2}:(\d{2})(?::\d{2})?\b/);
+  return match?.[1] ?? null;
+}
+
+function minuteLabelFromIso(value: unknown) {
+  if (typeof value !== "string" || !value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    minute: "2-digit",
+  });
+}
+
+function isNeuralEntryResultKind(value: unknown): value is NeuralEntryDisplayKind {
   return value === "green" || value === "red" || value === "tie";
 }
 
@@ -488,7 +487,7 @@ function NeuralEntryStatusCard({
   history,
 }: {
   confirmedSide?: NeuralSide | null;
-  result: NeuralEntryResult | null;
+  result: NeuralEntryDisplayResult | null;
   history: NeuralEntryHistoryItem[];
 }) {
   const state = neuralEntryStatusState(confirmedSide, result);
@@ -548,7 +547,7 @@ function NeuralEntryStatusCard({
 
 function neuralEntryStatusState(
   confirmedSide?: NeuralSide | null,
-  result?: NeuralEntryResult | null,
+  result?: NeuralEntryDisplayResult | null,
 ) {
   if (result?.kind === "red") {
     return {
@@ -760,7 +759,7 @@ function neuralToolInsight(reading: NeuralReading) {
 
   const prefix =
     originKind === "OPOSTO"
-      ? `${trigger} em gatilho oposto.`
+      ? `${trigger} em numero oposto.`
       : reading.postTie
         ? `${trigger} pós-empate.`
         : `${trigger} pagante.`;
@@ -905,31 +904,6 @@ function buildGeneralScore(
     maxGreenSequence,
     maxRedSequence,
   };
-}
-
-function latestRoundFrom(rounds: Round[] | undefined) {
-  return rounds?.length ? rounds[rounds.length - 1] : undefined;
-}
-
-function roundHistoryId(round: Round) {
-  return `${round.id}:${round.time}:${round.result}:${round.bankerScore}:${round.playerScore}`;
-}
-
-function tieRoundHistoryId(round: Round) {
-  return `tie:${roundHistoryId(round)}`;
-}
-
-function roundMatchesSide(round: Round, side: NeuralSide) {
-  if (side === "BANKER") return round.result === "B";
-  if (side === "PLAYER") return round.result === "P";
-  return round.result === "T";
-}
-
-function minuteLabelFromRound(round: Round | undefined) {
-  if (!round?.time) return "--";
-  const parts = String(round.time).split(":");
-  if (parts.length >= 2) return parts[1].padStart(2, "0");
-  return String(round.time).slice(-2) || "--";
 }
 
 function tieMultiplierStats(rounds: Round[] | undefined) {
