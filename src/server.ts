@@ -70,6 +70,8 @@ type LiveDashboardData = DashboardData & {
   neuralEntryState?: NeuralEntryState | null;
   neuralEntryLastResult?: NeuralEntryLastResult | null;
 };
+const LATE_ENTRY_BLOCK_SECONDS = 2.2;
+const BETTING_TIMING_MAX_AGE_MS = 20_000;
 type NeuralCalendarClassification =
   | "muito_pagante"
   | "operavel"
@@ -7400,7 +7402,8 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   const normalizedSignal = acceptsCurrentCycle
     ? normalizeSignal(readMainSignal(incoming), currentDashboard.currentSignal)
     : currentDashboard.currentSignal;
-  const currentSignal = acceptsCurrentCycle
+  const bettingTiming = pickedSections.bettingTiming ?? currentDashboard.bettingTiming ?? null;
+  const resolvedSignal = acceptsCurrentCycle
     ? resolveSignalImmediatelyFromRound(
         currentDashboard.currentSignal,
         normalizedSignal,
@@ -7408,6 +7411,9 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
         receivedNewRound,
       )
     : currentDashboard.currentSignal;
+  const currentSignal = acceptsCurrentCycle
+    ? resolveLateSignalGuard(resolvedSignal, bettingTiming)
+    : resolvedSignal;
 
   const nextDashboard: LiveDashboardData = {
     ...currentDashboard,
@@ -8247,6 +8253,10 @@ function pickDashboardSections(incoming: Record<string, unknown>): Partial<LiveD
     out.neuralScoreboard = incoming.neural_scoreboard as DashboardData["neuralScoreboard"];
   if (incoming.moduleToggles)
     out.moduleToggles = incoming.moduleToggles as DashboardData["moduleToggles"];
+  const bettingTiming = normalizeBettingTiming(
+    incoming.bettingTiming ?? incoming.betting_timing ?? incoming.tableTiming ?? incoming.table_timing,
+  );
+  if (bettingTiming) out.bettingTiming = bettingTiming;
   if (incoming.engineDecision)
     out.engineDecision = incoming.engineDecision as DashboardData["engineDecision"];
   if (incoming.mainScoreboard)
@@ -8328,6 +8338,37 @@ function resolveSignalImmediatelyFromRound(
   }
 
   return buildResolvedSignalFromRound(previousSignal, latestRound, "red");
+}
+
+function resolveLateSignalGuard(
+  signal: DashboardData["currentSignal"],
+  bettingTiming: DashboardData["bettingTiming"],
+): DashboardData["currentSignal"] {
+  if (!isLateEntryWindow(bettingTiming)) return signal;
+  if (signal.status !== "pending" && signal.status !== "g1" && signal.status !== "tie_watch") return signal;
+  return {
+    ...signal,
+    side: "NONE",
+    status: "waiting",
+    protection: "-",
+    strength: 0,
+    lastResult: signal.lastResult ?? null,
+  };
+}
+
+function isLateEntryWindow(timing: DashboardData["bettingTiming"]) {
+  if (!timing) return false;
+  if (!isFreshBettingTiming(timing)) return false;
+  if (timing.phase === "CLOSED") return true;
+  const remaining = typeof timing.remainingSeconds === "number" ? timing.remainingSeconds : null;
+  return timing.phase === "OPEN" && remaining !== null && remaining <= LATE_ENTRY_BLOCK_SECONDS;
+}
+
+function isFreshBettingTiming(timing: DashboardData["bettingTiming"]) {
+  const updatedAt = Date.parse(String(timing?.updatedAt || ""));
+  if (!Number.isFinite(updatedAt)) return true;
+  const age = Date.now() - updatedAt;
+  return age >= -5_000 && age <= BETTING_TIMING_MAX_AGE_MS;
 }
 
 function preserveTerminalSignalWhileStale(
@@ -8485,6 +8526,38 @@ function normalizeSignal(
       signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength,
     ),
     lastResult: null,
+  };
+}
+
+function normalizeBettingTiming(value: unknown): DashboardData["bettingTiming"] | null {
+  const record = readRecord(value);
+  if (!Object.keys(record).length) return null;
+  const rawPhase = String(record.phase ?? record.status ?? record.state ?? "")
+    .trim()
+    .toUpperCase();
+  const phase =
+    rawPhase === "OPEN" || rawPhase === "ABERTA" || rawPhase === "BETTING_OPEN"
+      ? "OPEN"
+      : rawPhase === "CLOSED" || rawPhase === "FECHADA" || rawPhase === "BETTING_CLOSED"
+        ? "CLOSED"
+        : null;
+  const remainingValue =
+    record.remainingSeconds ??
+    record.remaining_seconds ??
+    record.secondsLeft ??
+    record.seconds_left ??
+    record.timeLeft ??
+    record.time_left;
+  const remainingNumber = Number(remainingValue);
+  const remainingSeconds = Number.isFinite(remainingNumber)
+    ? Math.max(0, Math.min(300, remainingNumber))
+    : null;
+  if (!phase && remainingSeconds === null) return null;
+  return {
+    phase,
+    remainingSeconds,
+    roundId: (record.roundId ?? record.round_id ?? null) as string | number | null,
+    updatedAt: readString(record, "updatedAt") || readString(record, "updated_at") || new Date().toISOString(),
   };
 }
 

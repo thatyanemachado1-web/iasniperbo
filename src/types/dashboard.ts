@@ -30,6 +30,13 @@ export interface MainSignal {
   lastResult?: LastSignalResult | null;
 }
 
+export interface BettingTiming {
+  phase?: "OPEN" | "CLOSED" | null;
+  remainingSeconds?: number | null;
+  roundId?: string | number | null;
+  updatedAt?: string | null;
+}
+
 export type NeuralReadingMode = "SCANNING" | "OBSERVING" | "ACTIVE";
 export type NeuralOriginKind = "PAGANTE" | "OPOSTO" | "TIE";
 
@@ -308,6 +315,7 @@ export interface DashboardData {
   mockMode: boolean;
   rounds: Round[];
   updatedAt?: string;
+  bettingTiming?: BettingTiming | null;
   currentSignal: MainSignal;
   currentTieAlert: TieAlert;
   currentSurfAlert?: SurfAlert;
