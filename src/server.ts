@@ -4590,12 +4590,13 @@ function buildEngineNeuralCalendarPayload({
 }) {
   const now = saoPauloDateParts();
   const availableYears = [now.year - 1, now.year, now.year + 1];
-  const monthDailyRows = combineEngineCalendarRowsForPayload("daily", engineKeys)
-    .filter((row) => row.year === year && row.month === month)
-    .map(engineAggregateToCalendarDailyStat);
-  const monthHourlyRows = combineEngineCalendarRowsForPayload("hourly", engineKeys)
-    .filter((row) => row.year === year && row.month === month)
-    .map(engineAggregateToCalendarHourlyStat);
+  const monthHourlyAggregateRows = combineEngineCalendarRowsForPayload("hourly", engineKeys).filter(
+    (row) => row.year === year && row.month === month,
+  );
+  const monthDailyRows = engineCalendarDailyRowsForDisplay(year, month, engineKeys, monthHourlyAggregateRows).map(
+    engineAggregateToCalendarDailyStat,
+  );
+  const monthHourlyRows = monthHourlyAggregateRows.map(engineAggregateToCalendarHourlyStat);
   const monthAggregate =
     combineEngineCalendarRowsForPayload("monthly", engineKeys).find(
       (row) => row.year === year && row.month === month,
@@ -4623,6 +4624,26 @@ function buildEngineNeuralCalendarPayload({
   const selectedHours = Array.from({ length: 24 }, (_, hour) => {
     return hourlyByHour.get(hour) || emptyEngineCalendarHourlyStat(cleanSelectedDate, hour, engineKeys);
   });
+  const sampledMonthDays = monthDays.filter((day) => day.classification !== "sem_amostra" && day.totalRounds > 0);
+  const bestMonthDay =
+    [...sampledMonthDays].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
+  const topWeekdays = neuralCalendarWeekdayAverages(monthDays)
+    .filter((item) => item.total > 0)
+    .sort((a, b) => b.score - a.score || b.total - a.total)
+    .slice(0, 7);
+  const topMonthDays = sampledMonthDays
+    .map((day) => {
+      const parts = calendarPartsFromDateString(day.date);
+      return {
+        date: day.date,
+        label: `${String(parts.day).padStart(2, "0")}/${String(parts.month).padStart(2, "0")}`,
+        score: day.score,
+        totalRounds: day.totalRounds,
+        classification: day.classification,
+      };
+    })
+    .sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)
+    .slice(0, 8);
 
   return {
     timezone: DASHBOARD_CYCLE_TIME_ZONE,
@@ -4655,11 +4676,11 @@ function buildEngineNeuralCalendarPayload({
     selectedHours,
     rankings: {
       topHours: engineCalendarTopHours(year, month, engineKeys),
-      topWeekdays: engineCalendarTopWeekdays(year, month, engineKeys),
-      topMonthDays: engineCalendarTopMonthDays(year, month, engineKeys),
+      topWeekdays,
+      topMonthDays,
       topEngines: engineCalendarTopEngines(year, month, engineKeys),
       bestHour: bestEngineHourOverall(engineKeys),
-      bestDay: bestEngineDay(engineKeys),
+      bestDay: bestMonthDay || bestEngineDay(engineKeys),
       bestWeek: bestEngineWeek(engineKeys),
       bestMonth: bestEngineMonth(engineKeys),
       bestYear: bestEngineYear(engineKeys),
@@ -4676,6 +4697,81 @@ function combineEngineCalendarRowsForPayload(
   if (kind === "hourly") return filterConsistentEngineHourlyRows(rows, selected);
   if (kind === "daily") return filterConsistentEngineDailyRows(rows, selected);
   return rows;
+}
+
+function engineCalendarDailyRowsForDisplay(
+  year: number,
+  month: number,
+  engineKeys: CalendarEngineKey[],
+  hourlyRows: EngineCalendarAggregateStat[],
+) {
+  const storedRows = combineEngineCalendarRowsForPayload("daily", engineKeys).filter(
+    (row) => row.year === year && row.month === month,
+  );
+  const derivedRows = deriveEngineDailyRowsFromHourly(hourlyRows, engineKeys);
+  return mergeEngineCalendarDailyRowsForDisplay(storedRows, derivedRows);
+}
+
+function deriveEngineDailyRowsFromHourly(
+  hourlyRows: EngineCalendarAggregateStat[],
+  engineKeys: CalendarEngineKey[],
+) {
+  const engineKey = engineKeys.length === 1 ? engineKeys[0] : DEFAULT_CALENDAR_ENGINE_KEY;
+  const byDate = new Map<string, EngineCalendarAggregateStat>();
+
+  for (const row of hourlyRows) {
+    if (!row.date || row.totalSignals <= 0) continue;
+    let daily = byDate.get(row.date);
+    if (!daily) {
+      const parts = calendarPartsFromDateString(row.date);
+      const start = saoPauloLocalIso(row.date, 0);
+      daily = {
+        id: `engine:derived:daily:${engineKey}:${row.date}`,
+        engineKey,
+        periodKind: "daily",
+        periodStart: start,
+        periodEnd: addMillisecondsIso(start, 24 * 60 * 60 * 1000),
+        date: row.date,
+        hour: null,
+        week: saoPauloWeekNumber(row.date),
+        month: row.month || parts.month,
+        year: row.year || parts.year,
+        greens: 0,
+        reds: 0,
+        ties: 0,
+        totalSignals: 0,
+        accuracy: 0,
+        score: 0,
+        classification: "sem_amostra",
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+      byDate.set(row.date, daily);
+    }
+
+    daily.greens += row.greens;
+    daily.reds += row.reds;
+    daily.ties += row.ties;
+    daily.totalSignals += row.totalSignals;
+    if (new Date(row.createdAt).getTime() < new Date(daily.createdAt).getTime()) daily.createdAt = row.createdAt;
+    if (new Date(row.updatedAt).getTime() > new Date(daily.updatedAt).getTime()) daily.updatedAt = row.updatedAt;
+  }
+
+  for (const daily of byDate.values()) recomputeEngineCalendarAggregate(daily);
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function mergeEngineCalendarDailyRowsForDisplay(
+  storedRows: EngineCalendarAggregateStat[],
+  derivedRows: EngineCalendarAggregateStat[],
+) {
+  const byDate = new Map<string, EngineCalendarAggregateStat>();
+  for (const row of derivedRows) byDate.set(row.date, row);
+  for (const row of storedRows) {
+    const derived = byDate.get(row.date);
+    if (!derived || row.totalSignals > 0) byDate.set(row.date, row);
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function combineEngineCalendarRowsForPayloadRaw(
