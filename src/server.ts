@@ -7384,10 +7384,8 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;
-  const currentLatestRound = Array.isArray(currentDashboard.rounds)
-    ? currentDashboard.rounds[currentDashboard.rounds.length - 1]
-    : null;
-  const incomingLatestRound = incomingRounds[incomingRounds.length - 1];
+  const currentLatestRound = latestRoundFromRoundList(currentDashboard.rounds);
+  const incomingLatestRound = latestRoundFromRoundList(incomingRounds);
   const currentLatestKey = currentLatestRound ? roundHistoryKey(currentLatestRound) : "";
   const incomingLatestKey = incomingLatestRound ? roundHistoryKey(incomingLatestRound) : "";
   const receivedNewRound = Boolean(incomingLatestKey && incomingLatestKey !== currentLatestKey);
@@ -8966,7 +8964,13 @@ function normalizeRounds(rounds: unknown[], limit = 30) {
       };
     })
     .filter((round): round is DashboardData["rounds"][number] => Boolean(round))
+    .sort(compareRoundHistory)
     .slice(-Math.max(1, limit));
+}
+
+function latestRoundFromRoundList(rounds: Round[] | undefined | null) {
+  if (!Array.isArray(rounds) || !rounds.length) return null;
+  return [...rounds].sort(compareRoundHistory).at(-1) ?? null;
 }
 
 function normalizeRoundsFromPayload(body: unknown, limit = MAX_SERVER_ROUND_HISTORY) {
