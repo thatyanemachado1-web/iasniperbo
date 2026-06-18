@@ -8,6 +8,13 @@ import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
 import {
+  buildTiePullerStats,
+  emptyTieMultiplierCounts,
+  incrementTieMultiplierCounts,
+  normalizeTieMultiplierCounts,
+  tieMultiplierFromRound,
+} from "./tieRadar/TieRadarStatsEngine";
+import {
   DEFAULT_SITE_CONTENT_SETTINGS,
   normalizeAnnouncementTone,
   normalizeAssetUrl,
@@ -7848,18 +7855,7 @@ function serverRoundMatchesNeuralSide(round: Round, side: NonNullable<NeuralEntr
 }
 
 function serverTieMultiplierFromRound(round: Round) {
-  const explicit = readNullableNumber((round as unknown as Record<string, unknown>).tieMultiplier);
-  if (explicit) return explicit;
-  if (round.result !== "T" || round.bankerScore !== round.playerScore) return null;
-
-  const score = Math.round(Number(round.bankerScore));
-  if (!Number.isFinite(score)) return null;
-  if (score === 2 || score === 12) return 88;
-  if (score === 3 || score === 11) return 25;
-  if (score === 4 || score === 10) return 10;
-  if (score === 5 || score === 9) return 6;
-  if (score === 6 || score === 7 || score === 8) return 4;
-  return null;
+  return tieMultiplierFromRound(round);
 }
 
 function resolveNeuralPanelCycle(
@@ -8009,6 +8005,8 @@ function resetDashboardDailyCycle(
       assertiveness: 0,
       sequencePositive: 0,
       sequenceExpired: 0,
+      multipliers: emptyTieMultiplierCounts(),
+      tiePullers: [],
     },
     surfAnalyzerScoreboard: {
       totalAlerts: 0,
@@ -8074,6 +8072,8 @@ function trackServerTieRoundScoreboard(
     assertiveness: 0,
     sequencePositive: 0,
     sequenceExpired: 0,
+    multipliers: emptyTieMultiplierCounts(),
+    tiePullers: [],
   };
   const currentScoreboard =
     dashboard.tieAlertScoreboard ?? previousDashboard.tieAlertScoreboard ?? fallbackScoreboard;
@@ -8081,6 +8081,10 @@ function trackServerTieRoundScoreboard(
   const currentGreenTieAlerts = serverSafeCounter(currentScoreboard.greenTieAlerts);
   const previousGreenTieAlerts = serverSafeCounter(previousScoreboard.greenTieAlerts);
   const payloadGreenAlreadyAdvanced = currentGreenTieAlerts > previousGreenTieAlerts;
+  const currentMultiplierCounts = normalizeTieMultiplierCounts(currentScoreboard.multipliers);
+  const previousMultiplierCounts = normalizeTieMultiplierCounts(previousScoreboard.multipliers);
+  const payloadMultipliersAlreadyAdvanced =
+    sumTieMultiplierCounts(currentMultiplierCounts) > sumTieMultiplierCounts(previousMultiplierCounts);
 
   const countedRoundKeys = {
     ...(previousDashboard.tieAlertCountedRoundKeys ?? {}),
@@ -8099,6 +8103,7 @@ function trackServerTieRoundScoreboard(
     serverSafeCounter(currentScoreboard.sequenceExpired),
     serverSafeCounter(previousScoreboard.sequenceExpired),
   );
+  let multipliers = maxTieMultiplierCounts(currentMultiplierCounts, previousMultiplierCounts);
   let changed = false;
 
   for (const round of recentRounds.slice().sort(compareRoundHistory)) {
@@ -8107,14 +8112,17 @@ function trackServerTieRoundScoreboard(
     countedRoundKeys[key] = true;
     changed = true;
 
-    if (payloadGreenAlreadyAdvanced) continue;
-
     if (String(round.result).toUpperCase() === "T") {
-      greenTieAlerts += 1;
-      sequencePositive += 1;
-      sequenceExpired = 0;
+      if (!payloadGreenAlreadyAdvanced) {
+        greenTieAlerts += 1;
+        sequencePositive += 1;
+        sequenceExpired = 0;
+      }
+      if (!payloadMultipliersAlreadyAdvanced) {
+        multipliers = incrementTieMultiplierCounts(multipliers, round);
+      }
     } else {
-      sequencePositive = 0;
+      if (!payloadGreenAlreadyAdvanced) sequencePositive = 0;
     }
   }
 
@@ -8128,6 +8136,8 @@ function trackServerTieRoundScoreboard(
     assertiveness: calculateMotorAssertiveness(greenTieAlerts, expired),
     sequencePositive,
     sequenceExpired,
+    multipliers,
+    tiePullers: buildTiePullerStats(liveValidatorRoundHistory, 7, 5),
   };
   const scoreboardChanged =
     nextScoreboard.greenTieAlerts !== currentGreenTieAlerts ||
@@ -8135,7 +8145,10 @@ function trackServerTieRoundScoreboard(
     nextScoreboard.totalAlerts !== serverSafeCounter(currentScoreboard.totalAlerts) ||
     nextScoreboard.sequencePositive !== serverSafeCounter(currentScoreboard.sequencePositive) ||
     nextScoreboard.sequenceExpired !== serverSafeCounter(currentScoreboard.sequenceExpired) ||
-    nextScoreboard.assertiveness !== safeNumber(currentScoreboard.assertiveness);
+    nextScoreboard.assertiveness !== safeNumber(currentScoreboard.assertiveness) ||
+    JSON.stringify(nextScoreboard.multipliers) !==
+      JSON.stringify(normalizeTieMultiplierCounts(currentScoreboard.multipliers)) ||
+    JSON.stringify(nextScoreboard.tiePullers) !== JSON.stringify(currentScoreboard.tiePullers ?? []);
 
   if (!changed && !scoreboardChanged) return dashboard;
 
@@ -8153,6 +8166,21 @@ function pruneTieCountedRoundKeys(keys: Record<string, true>) {
   const out: Record<string, true> = {};
   for (const key of Object.keys(keys)) {
     if (allowedKeys.has(key)) out[key] = true;
+  }
+  return out;
+}
+
+function sumTieMultiplierCounts(value: ReturnType<typeof normalizeTieMultiplierCounts>) {
+  return Object.values(value).reduce((sum, count) => sum + serverSafeCounter(count), 0);
+}
+
+function maxTieMultiplierCounts(
+  a: ReturnType<typeof normalizeTieMultiplierCounts>,
+  b: ReturnType<typeof normalizeTieMultiplierCounts>,
+) {
+  const out = emptyTieMultiplierCounts();
+  for (const label of Object.keys(out) as Array<keyof typeof out>) {
+    out[label] = Math.max(serverSafeCounter(a[label]), serverSafeCounter(b[label]));
   }
   return out;
 }

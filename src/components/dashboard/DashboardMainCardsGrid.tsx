@@ -34,6 +34,7 @@ export function DashboardMainCardsGrid({
         />
         <TieRadarDashboardCard
           alert={data.currentTieAlert}
+          scoreboard={data.tieAlertScoreboard}
           rounds={data.rounds}
           patternMinerSnapshot={patternMinerSnapshot}
           toggles={data.moduleToggles}

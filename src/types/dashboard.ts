@@ -1,4 +1,17 @@
 export type RoundResult = "B" | "P" | "T";
+export type TieMultiplierLabel = "4x" | "6x" | "10x" | "25x" | "88x";
+
+export interface TiePullerStat {
+  key: string;
+  side: RoundResult;
+  score: number;
+  ties: number;
+  samples: number;
+  hitRate: number;
+  window: number;
+  lastDistance?: number;
+  lastRoundKey?: string;
+}
 
 export interface Round {
   id: number;
@@ -228,6 +241,8 @@ export interface TieAlertScoreboard {
   assertiveness: number;
   sequencePositive?: number;
   sequenceExpired?: number;
+  multipliers?: Partial<Record<TieMultiplierLabel, number>>;
+  tiePullers?: TiePullerStat[];
 }
 
 export interface SurfAnalyzerScoreboard {

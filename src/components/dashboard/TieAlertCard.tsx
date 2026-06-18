@@ -5,19 +5,20 @@ import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { PatternSequence } from "@/components/patternMiner/PatternSequence";
 import { buildTieCopy } from "@/lib/operationalCopy";
 import { cn } from "@/lib/utils";
-import type { ModuleToggles, Round, TieAlert } from "@/types/dashboard";
+import {
+  TIE_MULTIPLIER_LABELS,
+  buildTiePullerStats,
+  normalizeTieMultiplierCounts,
+  tieMultiplierFromRound,
+} from "@/tieRadar/TieRadarStatsEngine";
+import type { ModuleToggles, Round, TieAlert, TieAlertScoreboard, TiePullerStat } from "@/types/dashboard";
 import type { PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
 
-const DEFAULT_TIE_MULTIPLIERS = [
-  { label: "4x", value: 12 },
-  { label: "6x", value: 4 },
-  { label: "10x", value: 5 },
-  { label: "25x", value: 1 },
-  { label: "88x", value: 0 },
-];
+const EMPTY_TIE_MULTIPLIERS = TIE_MULTIPLIER_LABELS.map((label) => ({ label, value: 0 }));
 
 export function TieAlertCard({
   alert,
+  scoreboard,
   rounds,
   patternMinerSnapshot,
   toggles,
@@ -26,6 +27,7 @@ export function TieAlertCard({
   compact = false,
 }: {
   alert: TieAlert;
+  scoreboard?: TieAlertScoreboard;
   rounds?: Round[];
   patternMinerSnapshot?: PatternMinerSnapshot;
   toggles?: ModuleToggles;
@@ -35,8 +37,9 @@ export function TieAlertCard({
 }) {
   const enabled = toggles?.tieAlert !== false;
   const status = tieRadarStatus(alert);
-  const multipliers = tieMultiplierStats(rounds);
-  const tieNumber = bestTieNumber(rounds);
+  const multipliers = tieMultiplierStats(rounds, scoreboard);
+  const tiePullers = tiePullerStats(rounds, scoreboard);
+  const mainTiePuller = tiePullers[0];
   const bestMultiplier = multipliers.reduce(
     (best, item) => (item.value > best.value ? item : best),
     multipliers[0],
@@ -212,7 +215,7 @@ export function TieAlertCard({
               Numero puxando Tie
             </div>
             <div className={cn("mt-1 font-black text-warning", compact && "mt-0.5")}>
-              {tieNumber ? `🟡 ${tieNumber.score} com ${tieNumber.count} Tie` : "Coletando"}
+              {mainTiePuller ? tiePullerSummary(mainTiePuller) : "Coletando"}
             </div>
           </div>
           <div
@@ -225,7 +228,7 @@ export function TieAlertCard({
               Empate especifico
             </div>
             <div className={cn("mt-1 font-black text-warning", compact && "mt-0.5")}>
-              {bestMultiplier
+              {bestMultiplier?.value > 0
                 ? `🟡 ${bestMultiplier.label} (${bestMultiplier.value})`
                 : "Coletando"}
             </div>
@@ -241,7 +244,28 @@ export function TieAlertCard({
           {buildTieCopy(alert)}
         </div>
 
-        {tiePattern ? (
+        {tiePullers.length ? (
+          <div
+            className={cn(
+              "mt-2 rounded-xl border border-warning/18 bg-warning/10 px-3 py-2 text-[11px]",
+              compact && "mt-1.5 px-2.5 py-1.5 text-[10px]",
+            )}
+          >
+            <div
+              className={cn(
+                "text-[10px] font-black uppercase tracking-[0.12em] text-warning",
+                compact && "text-[9px]",
+              )}
+            >
+              Numeros puxando Tie ate 7 casas
+            </div>
+            <div className="mt-1 space-y-1">
+              {tiePullers.slice(0, compact ? 3 : 5).map((item) => (
+                <TiePullerLine key={item.key} item={item} compact={compact} />
+              ))}
+            </div>
+          </div>
+        ) : tiePattern ? (
           <div
             className={cn(
               "mt-2 rounded-xl border border-warning/18 bg-warning/10 px-3 py-2 text-[11px]",
@@ -262,11 +286,7 @@ export function TieAlertCard({
             <div className={cn("mt-1 grid grid-cols-3 gap-1.5", compact && "gap-1")}>
               <MiniStat compact={compact} label="Puxou Tie" value={tiePattern.tie} />
               <MiniStat compact={compact} label="Amostras" value={tiePattern.totalValidated} />
-              <MiniStat
-                compact={compact}
-                label="Acerto"
-                value={formatPercent(tiePattern.assertiveness)}
-              />
+              <MiniStat compact={compact} label="Acerto" value={formatPercent(tiePattern.assertiveness)} />
             </div>
           </div>
         ) : null}
@@ -335,59 +355,80 @@ function tieRadarStatus(alert: TieAlert) {
   };
 }
 
-function tieMultiplierStats(rounds: Round[] | undefined) {
-  const counts = new Map(DEFAULT_TIE_MULTIPLIERS.map((item) => [item.label, 0]));
-  for (const round of rounds ?? []) {
-    if (round.result !== "T") continue;
-    const multiplier = multiplierForTieRound(round);
-    if (!multiplier) continue;
-    const label = `${multiplier}x`;
-    counts.set(label, (counts.get(label) ?? 0) + 1);
+function tieMultiplierStats(rounds: Round[] | undefined, scoreboard?: TieAlertScoreboard) {
+  if (scoreboard?.multipliers) {
+    const counts = normalizeTieMultiplierCounts(scoreboard.multipliers);
+    return TIE_MULTIPLIER_LABELS.map((label) => ({ label, value: counts[label] }));
   }
 
-  const hasLiveMultipliers = [...counts.values()].some((value) => value > 0);
-  if (!hasLiveMultipliers) return DEFAULT_TIE_MULTIPLIERS;
+  const counts = normalizeTieMultiplierCounts();
+  for (const round of rounds ?? []) {
+    if (round.result !== "T") continue;
+    const multiplier = tieMultiplierFromRound(round);
+    if (!multiplier) continue;
+    const label = `${multiplier}x` as (typeof TIE_MULTIPLIER_LABELS)[number];
+    if (!TIE_MULTIPLIER_LABELS.includes(label)) continue;
+    counts[label] += 1;
+  }
 
-  return DEFAULT_TIE_MULTIPLIERS.map((item) => ({
+  return EMPTY_TIE_MULTIPLIERS.map((item) => ({
     label: item.label,
-    value: counts.get(item.label) ?? 0,
+    value: counts[item.label],
   }));
 }
 
-function multiplierForTieRound(round: Round) {
-  const explicit = normalizeMultiplier(round.tieMultiplier);
-  if (explicit) return explicit;
-  if (round.bankerScore !== round.playerScore) return null;
-
-  const score = Math.round(Number(round.bankerScore));
-  if (!Number.isFinite(score)) return null;
-  if (score === 2 || score === 12) return 88;
-  if (score === 3 || score === 11) return 25;
-  if (score === 4 || score === 10) return 10;
-  if (score === 5 || score === 9) return 6;
-  if (score === 6 || score === 7 || score === 8) return 4;
-  return null;
+function tiePullerStats(rounds: Round[] | undefined, scoreboard?: TieAlertScoreboard) {
+  if (scoreboard?.tiePullers?.length) return scoreboard.tiePullers;
+  return buildTiePullerStats(rounds, 7, 5);
 }
 
-function normalizeMultiplier(value: unknown) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  const rounded = Math.round(numeric);
-  return [4, 6, 10, 25, 88].includes(rounded) ? rounded : null;
+function tiePullerSummary(item: TiePullerStat) {
+  return `${sideDot(item.side)} ${sideShortLabel(item.side)}${item.score} com ${item.ties} Tie`;
 }
 
-function bestTieNumber(rounds: Round[] | undefined) {
-  const counts = new Map<number, number>();
-  for (const round of rounds ?? []) {
-    if (round.result !== "T") continue;
-    const score = round.bankerScore === round.playerScore ? round.bankerScore : null;
-    if (!score) continue;
-    counts.set(score, (counts.get(score) ?? 0) + 1);
-  }
+function TiePullerLine({ item, compact = false }: { item: TiePullerStat; compact?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between gap-2 rounded-lg border border-warning/12 bg-background/25 px-2 py-1",
+        compact && "gap-1 px-1.5 py-0.5",
+      )}
+    >
+      <div className="min-w-0">
+        <div className={cn("truncate font-black", sideTextClass(item.side))}>
+          {sideDot(item.side)} {sideShortLabel(item.side)}{item.score}
+          <span className="ml-1 text-warning">puxou {item.ties} Tie</span>
+        </div>
+        <div className="text-[9px] font-semibold text-muted-foreground">
+          ate {item.window} casas · {item.samples} amostras
+        </div>
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="text-[10px] font-black text-neon-cyan">{formatPercent(item.hitRate)}</div>
+        {item.lastDistance ? (
+          <div className="text-[8px] font-semibold text-muted-foreground">ult. {item.lastDistance}c</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
-  return [...counts.entries()]
-    .map(([score, count]) => ({ score, count }))
-    .sort((a, b) => b.count - a.count || b.score - a.score)[0];
+function sideDot(side: TiePullerStat["side"]) {
+  if (side === "B") return "🔴";
+  if (side === "P") return "🔵";
+  return "🟡";
+}
+
+function sideShortLabel(side: TiePullerStat["side"]) {
+  if (side === "B") return "B";
+  if (side === "P") return "P";
+  return "T";
+}
+
+function sideTextClass(side: TiePullerStat["side"]) {
+  if (side === "B") return "text-destructive";
+  if (side === "P") return "text-neon-blue";
+  return "text-warning";
 }
 
 function normalizeRisk(level: TieAlert["level"]) {
