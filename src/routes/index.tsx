@@ -70,6 +70,7 @@ export const Route = createFileRoute("/")({
 });
 
 const WAITLIST_URL = "https://wa.me/5567992308362";
+const LOGIN_BOOTSTRAP_FALLBACK_MS = 3500;
 
 const landingFallbackPlans: BillingPlan[] = [
   {
@@ -142,6 +143,9 @@ function LoginPage() {
 
   useEffect(() => {
     let active = true;
+    const fallbackTimer = window.setTimeout(() => {
+      if (active) setSalesClosed((current) => current ?? false);
+    }, LOGIN_BOOTSTRAP_FALLBACK_MS);
     getSalesSettings()
       .then((settings) => {
         if (active) setSalesClosed(settings.salesClosed);
@@ -158,6 +162,7 @@ function LoginPage() {
       });
     return () => {
       active = false;
+      window.clearTimeout(fallbackTimer);
     };
   }, []);
 
