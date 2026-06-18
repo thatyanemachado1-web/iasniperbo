@@ -42,7 +42,7 @@ const CALENDAR_TIMEZONE = "America/Sao_Paulo";
 const engineOptions: Array<{ id: NeuralCalendarEngineKey; label: string }> = [
   { id: "todos", label: "Todos os motores" },
   { id: "neural_pagante", label: "Neural Pagante" },
-  { id: "padroes_quentes_ia", label: "Padroes Quentes IA" },
+  { id: "padroes_quentes_ia", label: "Padroes IA" },
   { id: "surf_analyzer", label: "Surf Analyzer" },
   { id: "radar_empates", label: "Radar de Empates" },
   { id: "tendencia", label: "Tendencia" },

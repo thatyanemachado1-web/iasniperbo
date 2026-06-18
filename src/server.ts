@@ -4798,11 +4798,17 @@ function filterConsistentEngineDailyRows(
     if (row.totalSignals > 0) acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
+  const dailyTotalsByMonth = rows.reduce<Record<string, number>>((acc, row) => {
+    const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
+    acc[key] = (acc[key] || 0) + row.totalSignals;
+    return acc;
+  }, {});
 
   return rows.filter((row) => {
     const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
     const month = monthlyByKey.get(key);
     if (!month?.totalSignals || !row.totalSignals) return true;
+    if ((dailyTotalsByMonth[key] || 0) > month.totalSignals) return true;
     if (row.totalSignals > month.totalSignals) return false;
     if ((activeDaysByMonth[key] || 0) > 1 && row.totalSignals >= month.totalSignals) return false;
     return true;
@@ -4829,16 +4835,25 @@ function filterConsistentEngineHourlyRows(
     if (row.totalSignals > 0) acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
+  const hourlyTotalsByDate = rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.date] = (acc[row.date] || 0) + row.totalSignals;
+    return acc;
+  }, {});
+  const hourlyTotalsByMonth = rows.reduce<Record<string, number>>((acc, row) => {
+    const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
+    acc[key] = (acc[key] || 0) + row.totalSignals;
+    return acc;
+  }, {});
 
   return rows.filter((row) => {
     const day = dailyByDate.get(row.date);
     const monthKey = `${row.year}-${String(row.month).padStart(2, "0")}`;
     const month = monthlyByKey.get(monthKey);
-    if (day?.totalSignals) {
+    if (day?.totalSignals && (hourlyTotalsByDate[row.date] || 0) <= day.totalSignals) {
       if (row.totalSignals > day.totalSignals) return false;
       if ((activeHoursByDate[row.date] || 0) > 1 && row.totalSignals >= day.totalSignals) return false;
     }
-    if (month?.totalSignals) {
+    if (month?.totalSignals && (hourlyTotalsByMonth[monthKey] || 0) <= month.totalSignals) {
       if (row.totalSignals > month.totalSignals) return false;
       if ((activeDaysByMonth[monthKey] || 0) > 1 && row.totalSignals >= month.totalSignals) return false;
     }
@@ -5494,6 +5509,7 @@ function readEngineCalendarCounterSnapshots(
   const tieScoreboard = readRecord(root.tieAlertScoreboard);
   const patternMiner = readRecord(root.patternMinerSnapshot || root.patternMiner);
   const patternScoreboard = readRecord(patternMiner.scoreboard);
+  const patternCounters = patternMinerCalendarCounters(patternMiner, patternScoreboard);
 
   return {
     tendencia: {
@@ -5526,13 +5542,48 @@ function readEngineCalendarCounterSnapshots(
       reds: firstCalendarNumber(tieScoreboard, ["expired", "reds"]),
       ties: 0,
     },
-    padroes_quentes_ia: {
-      greens: firstCalendarNumber(patternScoreboard, ["greens", "totalGreens"]) ||
-        firstCalendarNumber(patternScoreboard, ["sg"]) + firstCalendarNumber(patternScoreboard, ["g1"]),
-      reds: firstCalendarNumber(patternScoreboard, ["red", "reds"]),
-      ties: firstCalendarNumber(patternScoreboard, ["tie", "ties"]),
-    },
+    padroes_quentes_ia: patternCounters,
   };
+}
+
+function patternMinerCalendarCounters(
+  patternMiner: Record<string, unknown>,
+  patternScoreboard: Record<string, unknown>,
+): CalendarEngineCounterSnapshot {
+  const scoreboardCounters = {
+    greens:
+      firstCalendarNumber(patternScoreboard, ["greens", "totalGreens", "acertos", "wins"]) ||
+      firstCalendarNumber(patternScoreboard, ["sg", "greenSemGale"]) +
+        firstCalendarNumber(patternScoreboard, ["g1", "greenG1"]),
+    reds: firstCalendarNumber(patternScoreboard, ["red", "reds", "erros", "losses"]),
+    ties: firstCalendarNumber(patternScoreboard, ["tie", "ties", "empates"]),
+  };
+  if (scoreboardCounters.greens || scoreboardCounters.reds || scoreboardCounters.ties) {
+    return scoreboardCounters;
+  }
+
+  const strategies = [
+    ...(Array.isArray(patternMiner.hotStrategies) ? patternMiner.hotStrategies : []),
+    ...(Array.isArray(patternMiner.ranking) ? patternMiner.ranking : []),
+    ...(Array.isArray(patternMiner.strategies) ? patternMiner.strategies : []),
+  ].map(readRecord);
+  const unique = new Map<string, Record<string, unknown>>();
+  for (const strategy of strategies) {
+    const key = readString(strategy, "id") || readString(strategy, "sequence") || JSON.stringify(strategy);
+    if (key && !unique.has(key)) unique.set(key, strategy);
+  }
+
+  return [...unique.values()].reduce<CalendarEngineCounterSnapshot>(
+    (acc, strategy) => {
+      acc.greens +=
+        firstCalendarNumber(strategy, ["greens", "totalGreens", "acertos"]) ||
+        firstCalendarNumber(strategy, ["sg"]) + firstCalendarNumber(strategy, ["g1"]);
+      acc.reds += firstCalendarNumber(strategy, ["red", "reds", "erros"]);
+      acc.ties += firstCalendarNumber(strategy, ["tie", "ties", "empates"]);
+      return acc;
+    },
+    { greens: 0, reds: 0, ties: 0 },
+  );
 }
 
 function firstCalendarNumber(record: Record<string, unknown>, keys: string[]) {
@@ -5994,7 +6045,7 @@ function calendarEngineSelectionFromUrl(url: URL) {
 
 function calendarEngineLabel(engineKey: CalendarEngineKey) {
   if (engineKey === "neural_pagante") return "Neural Pagante";
-  if (engineKey === "padroes_quentes_ia") return "Padroes Quentes IA";
+  if (engineKey === "padroes_quentes_ia") return "Padroes IA";
   if (engineKey === "surf_analyzer") return "Surf Analyzer";
   if (engineKey === "radar_empates") return "Radar de Empates";
   if (engineKey === "tendencia") return "Tendencia";
@@ -8502,6 +8553,8 @@ function pickDashboardSections(incoming: Record<string, unknown>): Partial<LiveD
   if (incoming.surfAnalyzerScoreboard)
     out.surfAnalyzerScoreboard =
       incoming.surfAnalyzerScoreboard as DashboardData["surfAnalyzerScoreboard"];
+  if (incoming.patternMinerSnapshot || incoming.patternMiner)
+    out.patternMinerSnapshot = (incoming.patternMinerSnapshot || incoming.patternMiner) as LiveDashboardData["patternMinerSnapshot"];
   const incomingEntryModeStats = normalizeServerIncomingEntryModeStats(
     incoming.entryModeStats ?? incoming.entry_mode_stats,
   );

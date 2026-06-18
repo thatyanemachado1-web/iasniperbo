@@ -1,3 +1,5 @@
+import type { PatternMinerSnapshot } from "@/types/patternMiner";
+
 export type RoundResult = "B" | "P" | "T";
 export type TieMultiplierLabel = "4x" | "6x" | "10x" | "25x" | "88x";
 
@@ -346,5 +348,6 @@ export interface DashboardData {
   mainScoreboard: MainScoreboard;
   tieAlertScoreboard: TieAlertScoreboard;
   surfAnalyzerScoreboard: SurfAnalyzerScoreboard;
+  patternMinerSnapshot?: PatternMinerSnapshot;
   pressureSeries: PressurePoint[];
 }

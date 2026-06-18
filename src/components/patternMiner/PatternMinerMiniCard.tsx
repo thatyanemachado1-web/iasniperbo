@@ -42,7 +42,7 @@ export function PatternMinerMiniCard({
             <BrainCircuit className="size-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-black">Padrão Quente Detectado</div>
+            <div className="text-sm font-black">Padrões IA</div>
             {!isUsingRealData ? (
               <div className="mt-1 text-[10px] leading-snug text-warning">
                 Aguardando histórico real da plataforma.
@@ -85,7 +85,7 @@ export function PatternMinerMiniCard({
             </div>
           ) : (
             <div className="text-[10px] leading-snug text-muted-foreground">
-              Nenhum padrão quente em formação neste momento.
+              Nenhum padrão IA em formação neste momento.
             </div>
           )}
         </div>
