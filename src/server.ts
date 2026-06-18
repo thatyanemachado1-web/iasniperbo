@@ -92,6 +92,7 @@ type CalendarEngineKey =
   | "radar_empates"
   | "tendencia"
   | "personalizado";
+type CalendarSignalEngineKey = Exclude<CalendarEngineKey, "todos" | "personalizado">;
 type CalendarHourlyOutcome = "green" | "red" | "tie";
 type CalendarHourlyStatsScope = "day" | "week" | "month" | "year" | "all";
 type CalendarEngineCounterSnapshot = {
@@ -128,6 +129,25 @@ type EngineCalendarAggregateChangeSet = {
   weeklyIds: Set<string>;
   monthlyIds: Set<string>;
   yearlyIds: Set<string>;
+  events: EngineCalendarSignalEvent[];
+};
+type EngineCalendarSignalEvent = {
+  id: string;
+  eventKey: string;
+  engineKey: CalendarSignalEngineKey;
+  outcome: CalendarHourlyOutcome;
+  greens: number;
+  reds: number;
+  ties: number;
+  totalSignals: number;
+  occurredAt: string;
+  date: string;
+  hour: number;
+  week: number;
+  month: number;
+  year: number;
+  source: string;
+  payload: Record<string, unknown>;
 };
 type EngineCalendarBackfillSourceReport = {
   source: string;
@@ -298,6 +318,7 @@ const ENGINE_DAILY_STATS_TABLE = "engine_daily_stats";
 const ENGINE_WEEKLY_STATS_TABLE = "engine_weekly_stats";
 const ENGINE_MONTHLY_STATS_TABLE = "engine_monthly_stats";
 const ENGINE_YEARLY_STATS_TABLE = "engine_yearly_stats";
+const ENGINE_SIGNAL_EVENTS_TABLE = "engine_signal_events";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const DEFAULT_CALENDAR_ENGINE_KEY: CalendarEngineKey = "todos";
 const CALENDAR_ENGINE_KEYS: CalendarEngineKey[] = [
@@ -309,17 +330,14 @@ const CALENDAR_ENGINE_KEYS: CalendarEngineKey[] = [
   "tendencia",
   "personalizado",
 ];
-const CALENDAR_SIGNAL_ENGINE_KEYS: CalendarEngineKey[] = [
+const CALENDAR_SIGNAL_ENGINE_KEYS: CalendarSignalEngineKey[] = [
   "neural_pagante",
   "padroes_quentes_ia",
   "surf_analyzer",
   "radar_empates",
   "tendencia",
-  "personalizado",
 ];
-const CALENDAR_BACKFILL_ENGINE_KEYS: CalendarEngineKey[] = CALENDAR_SIGNAL_ENGINE_KEYS.filter(
-  (key) => key !== "personalizado",
-);
+const CALENDAR_BACKFILL_ENGINE_KEYS: CalendarSignalEngineKey[] = [...CALENDAR_SIGNAL_ENGINE_KEYS];
 const NEURAL_CALENDAR_START_DATE = "2026-06-10";
 const NEURAL_CALENDAR_AGGREGATE_VERSION = "2026-06-10-time-v2";
 const NEURAL_CALENDAR_MIN_DAILY_SAMPLE = 5;
@@ -3279,6 +3297,7 @@ async function handleNeuralCalendarBackfillRequest(request: Request, url: URL, e
 
 async function resetEngineCalendarAggregates(env: unknown) {
   const tables = [
+    ENGINE_SIGNAL_EVENTS_TABLE,
     ENGINE_HOURLY_STATS_TABLE,
     ENGINE_DAILY_STATS_TABLE,
     ENGINE_WEEKLY_STATS_TABLE,
@@ -3315,6 +3334,7 @@ async function resetEngineCalendarAggregates(env: unknown) {
       "engine_weekly_stats",
       "engine_monthly_stats",
       "engine_yearly_stats",
+      "engine_signal_events",
       "validator_rounds",
       "raw_round_history",
       "users",
@@ -3635,7 +3655,7 @@ function addEngineCalendarBackfillSnapshot(
 
 function applyEngineCalendarBackfillCounters(input: {
   key: string;
-  engineKey: CalendarEngineKey;
+  engineKey: CalendarSignalEngineKey;
   counters: CalendarEngineCounterSnapshot;
   occurredAt: Date;
   change: EngineCalendarAggregateChangeSet;
@@ -3659,7 +3679,7 @@ function applyEngineCalendarBackfillCounters(input: {
   liveEngineCalendarBackfillKeys[safeKey] = true;
   mergeEngineCalendarAggregateChange(
     input.change,
-    incrementEngineCalendarAggregates(input.engineKey, counters, input.occurredAt),
+    incrementEngineCalendarAggregates(input.engineKey, counters, input.occurredAt, input.source.source, input.key),
   );
   input.source.countersApplied += total;
   input.report.appliedCounters.greens += counters.greens;
@@ -3739,7 +3759,7 @@ function normalizeBackfillOutcome(value: unknown): CalendarHourlyOutcome | null 
   return null;
 }
 
-function normalizeBackfillEngineKey(value: unknown): CalendarEngineKey | null {
+function normalizeBackfillEngineKey(value: unknown): CalendarSignalEngineKey | null {
   const text = String(value || "")
     .trim()
     .normalize("NFD")
@@ -3756,8 +3776,8 @@ function normalizeBackfillEngineKey(value: unknown): CalendarEngineKey | null {
   if (text.includes("surf")) return "surf_analyzer";
   if (text.includes("empate") || text.includes("tie") || text.includes("radar")) return "radar_empates";
   if (text.includes("tendencia") || text.includes("entrada_principal") || text.includes("main")) return "tendencia";
-  return CALENDAR_BACKFILL_ENGINE_KEYS.includes(text as CalendarEngineKey)
-    ? (text as CalendarEngineKey)
+  return CALENDAR_BACKFILL_ENGINE_KEYS.includes(text as CalendarSignalEngineKey)
+    ? (text as CalendarSignalEngineKey)
     : null;
 }
 
@@ -4421,7 +4441,13 @@ async function persistEngineCalendarAggregateStats(
   change: EngineCalendarAggregateChangeSet,
 ) {
   if (!getSupabasePersistenceConfig(env) || !change.changed) return false;
-  const [hourlySaved, dailySaved, weeklySaved, monthlySaved, yearlySaved] = await Promise.all([
+  const [eventsSaved, hourlySaved, dailySaved, weeklySaved, monthlySaved, yearlySaved] = await Promise.all([
+    persistSupabaseRows(
+      env,
+      ENGINE_SIGNAL_EVENTS_TABLE,
+      dedupeEngineCalendarSignalEvents(change.events).map(engineCalendarSignalEventToRow),
+      "event_key",
+    ),
     persistSupabaseRows(
       env,
       ENGINE_HOURLY_STATS_TABLE,
@@ -4463,7 +4489,11 @@ async function persistEngineCalendarAggregateStats(
       "id",
     ),
   ]);
-  return hourlySaved || dailySaved || weeklySaved || monthlySaved || yearlySaved;
+  return eventsSaved || hourlySaved || dailySaved || weeklySaved || monthlySaved || yearlySaved;
+}
+
+function dedupeEngineCalendarSignalEvents(events: EngineCalendarSignalEvent[]) {
+  return [...new Map(events.map((event) => [event.eventKey, event])).values()];
 }
 
 function mergeNeuralCalendarDailyStats(rows: NeuralCalendarDailyStat[]) {
@@ -4519,6 +4549,27 @@ function engineCalendarAggregateToRow(stat: EngineCalendarAggregateStat) {
     classification: stat.classification,
     created_at: stat.createdAt,
     updated_at: stat.updatedAt,
+  };
+}
+
+function engineCalendarSignalEventToRow(event: EngineCalendarSignalEvent) {
+  return {
+    id: event.id,
+    event_key: event.eventKey,
+    engine_key: event.engineKey,
+    outcome: event.outcome,
+    greens: event.greens,
+    reds: event.reds,
+    ties: event.ties,
+    total_signals: event.totalSignals,
+    occurred_at: event.occurredAt,
+    date: event.date,
+    hour: event.hour,
+    week: event.week,
+    month: event.month,
+    year: event.year,
+    source: event.source,
+    payload_json: event.payload,
   };
 }
 
@@ -4891,7 +4942,7 @@ function engineCalendarAggregateFromRow(
   periodKind: EngineCalendarAggregateKind,
 ): EngineCalendarAggregateStat | null {
   const engineKey = normalizeCalendarEngineKey(row.engine_key ?? row.engineKey);
-  if (engineKey === DEFAULT_CALENDAR_ENGINE_KEY) return null;
+  if (engineKey === DEFAULT_CALENDAR_ENGINE_KEY || engineKey === "personalizado") return null;
   const date = readString(row, "date");
   if (!isValidCalendarDateString(date)) return null;
   const parts = calendarPartsFromDateString(date);
@@ -5311,6 +5362,7 @@ function emptyEngineCalendarAggregateChangeSet(): EngineCalendarAggregateChangeS
     weeklyIds: new Set(),
     monthlyIds: new Set(),
     yearlyIds: new Set(),
+    events: [],
   };
 }
 
@@ -5326,7 +5378,10 @@ function trackEngineCalendarAggregates(
   for (const engineKey of CALENDAR_SIGNAL_ENGINE_KEYS) {
     const delta = diffEngineCalendarCounters(previousCounters[engineKey], nextCounters[engineKey]);
     if (!delta.greens && !delta.reds && !delta.ties) continue;
-    mergeEngineCalendarAggregateChange(change, incrementEngineCalendarAggregates(engineKey, delta, occurredAt));
+    mergeEngineCalendarAggregateChange(
+      change,
+      incrementEngineCalendarAggregates(engineKey, delta, occurredAt, "dashboard_delta"),
+    );
   }
 
   return change;
@@ -5371,9 +5426,9 @@ function readEngineCalendarCounterSnapshots(
       ties: firstCalendarNumber(surfScoreboard, ["ties", "emp"]),
     },
     radar_empates: {
-      greens: 0,
+      greens: firstCalendarNumber(tieScoreboard, ["greenTieAlerts", "greens", "ties"]),
       reds: firstCalendarNumber(tieScoreboard, ["expired", "reds"]),
-      ties: firstCalendarNumber(tieScoreboard, ["greenTieAlerts", "greens", "ties"]),
+      ties: 0,
     },
     padroes_quentes_ia: {
       greens: firstCalendarNumber(patternScoreboard, ["greens", "totalGreens"]) ||
@@ -5412,12 +5467,13 @@ function diffCalendarCounter(previous = 0, next = 0) {
 }
 
 function incrementEngineCalendarAggregates(
-  engineKey: CalendarEngineKey,
+  engineKey: CalendarSignalEngineKey,
   counters: CalendarEngineCounterSnapshot,
   occurredAt = new Date(),
+  source = "dashboard_delta",
+  eventKey = "",
 ) {
   const change = emptyEngineCalendarAggregateChangeSet();
-  if (engineKey === DEFAULT_CALENDAR_ENGINE_KEY) return change;
   if (!counters.greens && !counters.reds && !counters.ties) return change;
 
   for (const kind of ["hourly", "daily", "weekly", "monthly", "yearly"] as const) {
@@ -5429,8 +5485,60 @@ function incrementEngineCalendarAggregates(
     if (kind === "monthly") change.monthlyIds.add(stat.id);
     if (kind === "yearly") change.yearlyIds.add(stat.id);
   }
+  const event = createEngineCalendarSignalEvent(engineKey, counters, occurredAt, source, eventKey);
+  if (event) change.events.push(event);
 
   return change;
+}
+
+function createEngineCalendarSignalEvent(
+  engineKey: CalendarSignalEngineKey,
+  counters: CalendarEngineCounterSnapshot,
+  occurredAt: Date,
+  source: string,
+  eventKey = "",
+): EngineCalendarSignalEvent | null {
+  const normalized = normalizeCalendarCounterSnapshot(counters);
+  const totalSignals = calendarCountersTotal(normalized);
+  if (!totalSignals) return null;
+
+  const parts = saoPauloDateParts(occurredAt);
+  const outcome: CalendarHourlyOutcome =
+    normalized.reds > 0 ? "red" : normalized.ties > 0 && normalized.greens === 0 ? "tie" : "green";
+  const safeKey =
+    eventKey ||
+    `${source}:${engineKey}:${occurredAt.toISOString()}:${normalized.greens}:${normalized.reds}:${normalized.ties}`;
+  const id = `${engineKey}:${safeBackfillKey(safeKey)}:${safeBackfillKey(randomCalendarEventSuffix())}`;
+
+  return {
+    id: id.slice(0, 240),
+    eventKey: safeKey.slice(0, 240),
+    engineKey,
+    outcome,
+    greens: normalized.greens,
+    reds: normalized.reds,
+    ties: normalized.ties,
+    totalSignals,
+    occurredAt: occurredAt.toISOString(),
+    date: parts.date,
+    hour: parts.hour,
+    week: saoPauloWeekNumber(parts.date),
+    month: parts.month,
+    year: parts.year,
+    source,
+    payload: {
+      counters: normalized,
+      aggregateVersion: NEURAL_CALENDAR_AGGREGATE_VERSION,
+    },
+  };
+}
+
+function randomCalendarEventSuffix() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
 }
 
 function upsertEngineCalendarAggregate(
@@ -5519,6 +5627,7 @@ function mergeEngineCalendarAggregateChange(
   source.weeklyIds.forEach((id) => target.weeklyIds.add(id));
   source.monthlyIds.forEach((id) => target.monthlyIds.add(id));
   source.yearlyIds.forEach((id) => target.yearlyIds.add(id));
+  target.events.push(...source.events);
   return target;
 }
 
@@ -5751,7 +5860,10 @@ function normalizeCalendarEngineSelection(value: CalendarEngineKey[] | "todos" |
   if (!value || value === "todos") return [...CALENDAR_SIGNAL_ENGINE_KEYS];
   const selected = value
     .map(normalizeCalendarEngineKey)
-    .filter((engine): engine is CalendarEngineKey => engine !== DEFAULT_CALENDAR_ENGINE_KEY);
+    .filter(
+      (engine): engine is CalendarSignalEngineKey =>
+        engine !== DEFAULT_CALENDAR_ENGINE_KEY && engine !== "personalizado",
+    );
   return selected.length ? Array.from(new Set(selected)) : [...CALENDAR_SIGNAL_ENGINE_KEYS];
 }
 
