@@ -9,6 +9,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Crown,
+  Eye,
+  EyeOff,
   KeyRound,
   Loader2,
   LockKeyhole,
@@ -378,6 +380,16 @@ function LoginPage() {
       loginCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 40);
   }
+  function focusRegister() {
+    if (salesClosed) {
+      window.location.href = WAITLIST_URL;
+      return;
+    }
+    setMode("register");
+    window.setTimeout(() => {
+      loginCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 40);
+  }
 
   function changeCountry(nextId: string) {
     const nextCountry =
@@ -442,14 +454,34 @@ function LoginPage() {
       <main className="landing-safe-inner relative z-10 mx-auto flex min-h-screen flex-col px-5 py-5 sm:px-6 lg:px-10">
         <header className="flex min-w-0 items-center justify-between gap-3">
           <SniperLogoMark className="h-12 w-auto max-w-[170px] min-w-0 sm:h-16 sm:max-w-[280px] drop-shadow-[0_0_24px_rgba(0,229,255,0.24)]" />
-          <AppBadge tone={salesClosed ? "red" : "purple"}>
-            {salesClosed ? "Vagas limitadas" : "Acesso premium"}
-          </AppBadge>
+          <div className="flex items-center gap-2">
+            <div className="hidden min-w-[230px] grid-cols-2 rounded-2xl border border-neon-cyan/25 bg-black/35 p-1 shadow-[0_0_22px_rgba(0,229,255,0.1)] backdrop-blur-xl lg:grid">
+              <button
+                type="button"
+                onClick={focusLogin}
+                className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-wide text-neon-cyan transition hover:bg-neon-cyan/10"
+              >
+                Entrar
+              </button>
+              {!salesClosed && (
+                <button
+                  type="button"
+                  onClick={focusRegister}
+                  className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-wide text-neon-purple transition hover:bg-neon-purple/10"
+                >
+                  Cadastro
+                </button>
+              )}
+            </div>
+            <AppBadge tone={salesClosed ? "red" : "purple"}>
+              {salesClosed ? "Vagas limitadas" : "Acesso premium"}
+            </AppBadge>
+          </div>
         </header>
 
-        <section className="grid min-w-0 flex-1 items-center gap-8 py-8 lg:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)] lg:gap-10 lg:py-10">
+        <section className="grid min-w-0 flex-1 items-center gap-8 py-8 lg:grid-cols-1 lg:gap-10 lg:py-10">
           <div className="min-w-0">
-            <div className="grid min-w-0 items-center gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(300px,0.8fr)]">
+            <div className="grid min-w-0 items-center gap-6 xl:grid-cols-[minmax(0,0.82fr)_minmax(520px,1.18fr)]">
               <div className="order-1 min-w-0">
                 <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)]">
                   <Zap className="size-3.5 shrink-0" />
@@ -508,7 +540,7 @@ function LoginPage() {
             </div>
           </div>
 
-          <aside ref={loginCardRef} className="min-w-0 w-full max-w-md justify-self-center lg:justify-self-end">
+          <aside ref={loginCardRef} className="min-w-0 w-full max-w-md justify-self-center lg:max-w-lg">
             <GlassCard className="max-w-full rounded-[2rem] border-neon-purple/35 bg-background/80 p-5 shadow-[0_0_44px_rgba(168,85,247,0.18)] sm:p-7">
               <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-neon-purple/80 to-transparent" />
               <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10">
@@ -561,7 +593,7 @@ function LoginPage() {
                       onClick={() => window.open(WAITLIST_URL, "_blank", "noopener,noreferrer")}
                       className="text-slate-400 transition hover:text-neon-cyan"
                     >
-                      Esqueci minha senha
+                      Recuperar senha
                     </button>
                     <a href={WAITLIST_URL} target="_blank" rel="noreferrer" className="text-neon-cyan transition hover:text-neon-blue">
                       Suporte oficial
@@ -1074,6 +1106,10 @@ function LoginField({
   type?: string;
   defaultValue?: string;
 }) {
+  const isPassword = type === "password";
+  const [showPassword, setShowPassword] = useState(false);
+  const inputType = isPassword && showPassword ? "text" : type;
+
   return (
     <label className="block min-w-0">
       <span className="text-[11px] uppercase tracking-widest text-muted-foreground">{label}</span>
@@ -1081,12 +1117,22 @@ function LoginField({
         <span className="text-neon-cyan">{icon}</span>
         <input
           name={name}
-          type={type}
+          type={inputType}
           required
           defaultValue={defaultValue}
           placeholder={placeholder}
           className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
+        {isPassword && (
+          <button
+            type="button"
+            onClick={() => setShowPassword((current) => !current)}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-neon-cyan/75 transition hover:bg-neon-cyan/10 hover:text-neon-cyan"
+            aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+          >
+            {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+          </button>
+        )}
       </div>
     </label>
   );
