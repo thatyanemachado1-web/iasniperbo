@@ -825,7 +825,6 @@ function LoginPage() {
         </div>
 
         <LandingToolsSection />
-        <LandingBenefitsSection />
         <LandingHowItWorksSection />
         <LandingPlanSection onCta={requestAccess} />
         <LandingFinalCta onCta={requestAccess} />
