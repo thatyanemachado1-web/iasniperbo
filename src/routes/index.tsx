@@ -160,7 +160,7 @@ const GAME_OPTIONS = [
     image: "/login-games/bacbo-live.png",
     active: true,
     status: "Ao vivo",
-    imageClass: "max-h-14 sm:max-h-16",
+    imageClass: "max-h-20 sm:max-h-24 scale-110",
   },
   {
     name: "Football Studio",
@@ -174,7 +174,7 @@ const GAME_OPTIONS = [
     image: "/login-games/roleta-wheel.png",
     active: false,
     status: "Em breve",
-    imageClass: "max-h-14 sm:max-h-16",
+    imageClass: "max-h-20 sm:max-h-24 scale-110",
   },
 ];
 const PARTICLES = Array.from({ length: 28 }, (_, i) => {
@@ -529,7 +529,7 @@ function LoginPage() {
                 onStep={goSlide}
               />
 
-              <GameAvailabilityStrip className="order-3 xl:-mt-3" />
+              <GameAvailabilityStrip className="order-3 xl:-mt-1" />
 
               <div className="order-4 flex min-w-0 flex-col gap-3 sm:flex-row xl:-mt-2">
                 <button
@@ -1027,7 +1027,7 @@ function GameAvailabilityStrip({ className = "" }: { className?: string }) {
       <div className="grid min-w-0 grid-cols-3 items-end gap-4 sm:gap-6">
         {GAME_OPTIONS.map((game) => (
           <div key={game.name} className="flex min-w-0 flex-col items-center justify-end text-center">
-            <div className="flex h-16 w-full items-center justify-center sm:h-20">
+            <div className="flex h-20 w-full items-center justify-center sm:h-24">
               <img
                 src={game.image}
                 alt={game.name}
