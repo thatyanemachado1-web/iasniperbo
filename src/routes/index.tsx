@@ -869,17 +869,6 @@ function LandingToolsSection() {
           Ferramentas visuais, validação de padrões e leitura avançada da mesa em uma única interface.
         </p>
       </div>
-      <div className="mx-auto mt-8 grid max-w-6xl gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {landingTools.map((tool) => (
-          <div key={tool.title} className="glass group min-w-0 rounded-2xl border-neon-purple/20 p-5 transition hover:-translate-y-0.5 hover:border-neon-purple/50 hover:shadow-[0_0_30px_rgba(168,85,247,0.18)]">
-            <div className="mb-3 flex size-11 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10 transition group-hover:bg-neon-cyan/15">
-              <tool.icon className="size-5 text-neon-cyan" />
-            </div>
-            <div className="text-sm font-black uppercase tracking-wide text-white">{tool.title}</div>
-            <p className="mt-2 text-xs leading-6 text-slate-400">{tool.desc}</p>
-          </div>
-        ))}
-      </div>
     </section>
   );
 }
