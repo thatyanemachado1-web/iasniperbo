@@ -6,6 +6,8 @@ import {
   Bell,
   BrainCircuit,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Crown,
   KeyRound,
   Loader2,
@@ -114,6 +116,51 @@ const hudCards = [
   { icon: Radio, label: "Contexto Operacional", position: "left-1/2 top-[78%] -translate-x-1/2", delay: "2.8s" },
 ];
 
+const FEATURE_SLIDES = [
+  {
+    image: "/login-banners/1.png",
+    title: "Validador de Estratégias",
+    summary: "Crie, valide, salve e monitore estratégias com dados reais da plataforma.",
+    body:
+      "No Validador de Estratégias, você pode validar seus próprios padrões e criar sua própria sala de sinais com estratégias já testadas. Além disso, também pode usar o Buscador de Padrões Quentes da IA e configurar seus padrões para receber alertas no horário exato de entrada.",
+  },
+  {
+    image: "/login-banners/2.png",
+    title: "Leitura Neural + Número Pagante",
+    summary: "Leia a força da mesa e identifique números com maior influência no momento.",
+    body:
+      "Você já entrou na mesa sem saber qual número está pagando mais? A Leitura Neural e o Número Pagante servem exatamente para isso: analisar os números que mais estão pagando na mesa, seja no lado oposto, no pagante ou até mesmo no Tie. A ferramenta identifica qual cor está com mais força: Player, Banker ou Empate.",
+  },
+  {
+    image: "/login-banners/3.png",
+    title: "Surf Analyzer",
+    summary: "Detecte tendências, exaustões e risco de virada com mais clareza.",
+    body:
+      "No Surf Analyzer, você entende melhor o que está acontecendo na mesa naquele momento. Talvez a mesa esteja devedora de surf, devedora de alguma cor ou próxima de uma quebra. A ferramenta analisa possíveis movimentos de surf e quebra através da leitura dos painéis Big Road, Big Eye, Small Road e Cockroach.",
+  },
+  {
+    image: "/login-banners/4.png",
+    title: "Radar de Empates",
+    summary: "Monitore pressão de Tie e identifique momentos de atenção em tempo real.",
+    body:
+      "Se você ainda não sabe identificar um empate seco no Bac Bo, o Radar de Empates ajuda a analisar números quentes que estão puxando empate, pressão de Tie, sequências que já pagaram empates e horários com maior pressão de empate.",
+  },
+  {
+    image: "/login-banners/5.png",
+    title: "Padrões de IA",
+    summary: "Encontre padrões que se repetem e identifique formações prováveis.",
+    body:
+      "Tenho certeza de que você já ficou horas vasculhando a mesa tentando encontrar padrões e estratégias que mais estão batendo. A ferramenta de Padrões de IA faz isso em tempo real, buscando combinações, sequências e oportunidades com G1 em grandes históricos de rodadas.",
+  },
+  {
+    image: "/login-banners/6.png",
+    title: "Calendário de Temperatura do Mercado",
+    summary: "Veja mês, semana, dias, horas e minutos com melhor leitura de mercado.",
+    body:
+      "Quantas vezes você já entrou no mercado sem saber o que estava acontecendo? Essa ferramenta mostra se a mesa está na porcentagem ideal naquele momento, ajudando você a tomar decisões com mais clareza antes de buscar sua meta.",
+  },
+];
+
 const PARTICLES = Array.from({ length: 28 }, (_, i) => {
   const size = 2 + ((i * 7) % 4);
   const left = (i * 37) % 100;
@@ -138,6 +185,8 @@ function LoginPage() {
   const [checkoutLeadEmail, setCheckoutLeadEmail] = useState(savedUser.email || "");
   const [selectedCountryId, setSelectedCountryId] = useState(DEFAULT_COUNTRY_DIAL.id);
   const [whatsappPhone, setWhatsappPhone] = useState("");
+  const [slideIndex, setSlideIndex] = useState(0);
+  const slide = FEATURE_SLIDES[slideIndex];
   const selectedCountry =
     COUNTRY_DIAL_OPTIONS.find((option) => option.id === selectedCountryId) ?? DEFAULT_COUNTRY_DIAL;
 
@@ -292,12 +341,12 @@ function LoginPage() {
     const email = checkoutLeadEmail.trim().toLowerCase();
     const fullName = checkoutLeadName.trim();
     if (!isValidCheckoutEmail(email)) {
-      setNotice("Informe um e-mail valido para abrir o checkout.");
+      setNotice("Informe um e-mail válido para abrir o checkout.");
       plansCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (!plan.checkoutEnabled) {
-      setNotice("Checkout deste plano ainda nao esta configurado.");
+      setNotice("Checkout deste plano ainda não está configurado.");
       return;
     }
     setNotice("");
@@ -309,7 +358,7 @@ function LoginPage() {
       });
       window.location.href = checkout.checkout_url;
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Nao foi possivel abrir o checkout.");
+      setNotice(err instanceof Error ? err.message : "Não foi possível abrir o checkout.");
       setCheckoutLoadingPlan("");
     }
   }
@@ -420,7 +469,13 @@ function LoginPage() {
                 </p>
               </div>
 
-              <HeroBrainShowcase className="order-2 xl:row-span-2" />
+              <LandingFeatureCarousel
+                className="order-2 xl:row-span-2"
+                slide={slide}
+                slideIndex={slideIndex}
+                onSelect={setSlideIndex}
+                onStep={goSlide}
+              />
 
               <div className="order-3 flex min-w-0 flex-col gap-3 sm:flex-row xl:-mt-8">
                 <button
@@ -633,7 +688,7 @@ function LoginPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-black uppercase text-white">{plan.name}</span>
                             <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-black uppercase text-gold">
-                              {formatMoney(plan.amount, plan.currency)}/mes
+                              {formatMoney(plan.amount, plan.currency)}/mês
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap gap-1.5">
@@ -887,6 +942,82 @@ function HeroBrainShowcase({ className = "" }: { className?: string }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function LandingFeatureCarousel({
+  className = "",
+  slide,
+  slideIndex,
+  onSelect,
+  onStep,
+}: {
+  className?: string;
+  slide: (typeof FEATURE_SLIDES)[number];
+  slideIndex: number;
+  onSelect: (index: number) => void;
+  onStep: (direction: -1 | 1) => void;
+}) {
+  return (
+    <GlassCard className={`overflow-hidden rounded-[2rem] border-neon-cyan/25 bg-background/70 p-3 shadow-[0_0_44px_rgba(0,229,255,0.14)] ${className}`}>
+      <div className="relative overflow-hidden rounded-2xl border border-neon-cyan/20 bg-black/35">
+        <img
+          src={slide.image}
+          alt={slide.title}
+          className="aspect-[16/10] h-full w-full object-cover object-center"
+          draggable={false}
+        />
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/50 to-transparent p-4 xl:hidden">
+          <div className="text-xs font-black uppercase tracking-[0.22em] text-neon-cyan">{slide.title}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-2xl border border-border/70 bg-secondary/35 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan">
+            Ferramenta {slideIndex + 1}/{FEATURE_SLIDES.length}
+          </span>
+          <span className="rounded-full border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-1 text-[10px] font-black uppercase text-neon-cyan">
+            Saiba mais
+          </span>
+        </div>
+        <h2 className="mt-3 text-2xl font-black leading-tight text-white sm:text-3xl">{slide.title}</h2>
+        <p className="mt-2 text-sm font-semibold text-neon-cyan">{slide.summary}</p>
+        <p className="mt-3 text-sm leading-6 text-slate-400">{slide.body}</p>
+
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <div className="flex gap-1.5">
+            {FEATURE_SLIDES.map((item, index) => (
+              <button
+                key={item.title}
+                type="button"
+                onClick={() => onSelect(index)}
+                aria-label={`Ver ${item.title}`}
+                className={`h-2 rounded-full transition-all ${index === slideIndex ? "w-8 bg-neon-cyan" : "w-2 bg-slate-500/50 hover:bg-neon-cyan/70"}`}
+              />
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => onStep(-1)}
+              aria-label="Banner anterior"
+              className="inline-flex size-9 items-center justify-center rounded-xl border border-border/70 bg-secondary/50 text-slate-300 hover:border-neon-cyan/50 hover:text-neon-cyan"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onStep(1)}
+              aria-label="Próximo banner"
+              className="inline-flex size-9 items-center justify-center rounded-xl border border-border/70 bg-secondary/50 text-slate-300 hover:border-neon-cyan/50 hover:text-neon-cyan"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </GlassCard>
   );
 }
 
