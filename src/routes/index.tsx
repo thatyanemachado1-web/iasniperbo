@@ -154,6 +154,29 @@ const FEATURE_SLIDES = [
   },
 ];
 
+const GAME_OPTIONS = [
+  {
+    name: "Bac Bo Live",
+    image: "/login-games/bacbo-live.png",
+    active: true,
+    status: "Ao vivo",
+    imageClass: "max-h-14 sm:max-h-16",
+  },
+  {
+    name: "Football Studio",
+    image: "/login-games/football-studio.png",
+    active: false,
+    status: "Em breve",
+    imageClass: "max-h-14 sm:max-h-16 scale-125",
+  },
+  {
+    name: "Roleta",
+    image: "/login-games/roleta-wheel.png",
+    active: false,
+    status: "Em breve",
+    imageClass: "max-h-14 sm:max-h-16",
+  },
+];
 const PARTICLES = Array.from({ length: 28 }, (_, i) => {
   const size = 2 + ((i * 7) % 4);
   const left = (i * 37) % 100;
@@ -477,8 +500,8 @@ function LoginPage() {
 
         <section className="grid min-w-0 flex-1 items-center gap-8 py-8 lg:grid-cols-1 lg:gap-10 lg:py-10">
           <div className="min-w-0">
-            <div className="grid min-w-0 items-center gap-6 xl:grid-cols-[minmax(0,0.82fr)_minmax(520px,1.18fr)]">
-              <div className="order-1 min-w-0">
+            <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,0.82fr)_minmax(520px,1.18fr)]">
+              <div className="order-1 min-w-0 xl:-mt-4">
                 <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)]">
                   <Zap className="size-3.5 shrink-0" />
                   <span className="truncate">Tecnologia que analisa. Inteligência que antecipa.</span>
@@ -506,7 +529,9 @@ function LoginPage() {
                 onStep={goSlide}
               />
 
-              <div className="order-3 flex min-w-0 flex-col gap-3 sm:flex-row xl:-mt-8">
+              <GameAvailabilityStrip className="order-3 xl:-mt-3" />
+
+              <div className="order-4 flex min-w-0 flex-col gap-3 sm:flex-row xl:-mt-2">
                 <button
                   type="button"
                   onClick={requestAccess}
@@ -996,6 +1021,40 @@ function HeroBrainShowcase({ className = "" }: { className?: string }) {
   );
 }
 
+function GameAvailabilityStrip({ className = "" }: { className?: string }) {
+  return (
+    <div className={`min-w-0 py-2 ${className}`}>
+      <div className="grid min-w-0 grid-cols-3 items-end gap-4 sm:gap-6">
+        {GAME_OPTIONS.map((game) => (
+          <div key={game.name} className="flex min-w-0 flex-col items-center justify-end text-center">
+            <div className="flex h-16 w-full items-center justify-center sm:h-20">
+              <img
+                src={game.image}
+                alt={game.name}
+                className={`${game.imageClass} w-auto max-w-full object-contain drop-shadow-[0_0_18px_rgba(0,229,255,0.2)] ${
+                  game.active ? "opacity-100" : "opacity-35 grayscale"
+                }`}
+                loading="lazy"
+              />
+            </div>
+            <span
+              className={`mt-1 max-w-full truncate text-[9px] font-black uppercase tracking-wide sm:text-[10px] ${
+                game.active ? "text-neon-cyan" : "text-slate-500"
+              }`}
+            >
+              {game.name}
+            </span>
+            {!game.active && (
+              <span className="mt-0.5 text-[8px] font-black uppercase tracking-[0.18em] text-slate-500 sm:text-[9px]">
+                Em breve
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 function LandingFeatureCarousel({
   className = "",
   slide,
