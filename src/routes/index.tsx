@@ -215,6 +215,16 @@ function LoginPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setSlideIndex((current) => (current + 1) % FEATURE_SLIDES.length);
+    }, 6500);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  function goSlide(direction: -1 | 1) {
+    setSlideIndex((current) => (current + direction + FEATURE_SLIDES.length) % FEATURE_SLIDES.length);
+  }
   const paidPlans = [...plans]
     .filter((plan) => plan.id !== "free")
     .sort((a, b) => {
