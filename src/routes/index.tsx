@@ -160,21 +160,21 @@ const GAME_OPTIONS = [
     image: "/login-games/bacbo-live.png",
     active: true,
     status: "Ao vivo",
-    imageClass: "max-h-20 sm:max-h-24 scale-110",
+    imageClass: "max-h-none w-[150px] max-w-none -translate-y-1 sm:w-[190px]",
   },
   {
     name: "Football Studio",
     image: "/login-games/football-studio.png",
     active: false,
     status: "Em breve",
-    imageClass: "max-h-14 sm:max-h-16 scale-125",
+    imageClass: "max-h-none w-[88px] max-w-none -translate-y-1 scale-125 sm:w-[112px]",
   },
   {
     name: "Roleta",
     image: "/login-games/roleta-wheel.png",
     active: false,
     status: "Em breve",
-    imageClass: "max-h-20 sm:max-h-24 scale-110",
+    imageClass: "max-h-none w-[92px] max-w-none sm:w-[112px]",
   },
 ];
 const PARTICLES = Array.from({ length: 28 }, (_, i) => {
@@ -1027,18 +1027,18 @@ function GameAvailabilityStrip({ className = "" }: { className?: string }) {
       <div className="grid min-w-0 grid-cols-3 items-end gap-4 sm:gap-6">
         {GAME_OPTIONS.map((game) => (
           <div key={game.name} className="flex min-w-0 flex-col items-center justify-end text-center">
-            <div className="flex h-20 w-full items-center justify-center sm:h-24">
+            <div className="flex h-[86px] w-full items-center justify-center overflow-visible sm:h-[104px]">
               <img
                 src={game.image}
                 alt={game.name}
-                className={`${game.imageClass} w-auto max-w-full object-contain drop-shadow-[0_0_18px_rgba(0,229,255,0.2)] ${
+                className={`w-auto object-contain drop-shadow-[0_0_18px_rgba(0,229,255,0.2)] ${game.imageClass} ${
                   game.active ? "opacity-100" : "opacity-35 grayscale"
                 }`}
                 loading="lazy"
               />
             </div>
             <span
-              className={`mt-1 max-w-full truncate text-[9px] font-black uppercase tracking-wide sm:text-[10px] ${
+              className={`mt-0 max-w-full truncate text-[9px] font-black uppercase tracking-wide sm:text-[10px] ${
                 game.active ? "text-neon-cyan" : "text-slate-500"
               }`}
             >
