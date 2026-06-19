@@ -160,21 +160,21 @@ const GAME_OPTIONS = [
     image: "/login-games/bacbo-live.png",
     active: true,
     status: "Ao vivo",
-    imageClass: "max-h-none w-[150px] max-w-none -translate-y-1 sm:w-[190px]",
+    imageClass: "",
   },
   {
     name: "Football Studio",
     image: "/login-games/football-studio.png",
     active: false,
     status: "Em breve",
-    imageClass: "max-h-none w-[88px] max-w-none -translate-y-1 scale-125 sm:w-[112px]",
+    imageClass: "",
   },
   {
     name: "Roleta",
     image: "/login-games/roleta-wheel.png",
     active: false,
     status: "Em breve",
-    imageClass: "max-h-none w-[92px] max-w-none sm:w-[112px]",
+    imageClass: "",
   },
 ];
 const PARTICLES = Array.from({ length: 28 }, (_, i) => {
@@ -1024,21 +1024,24 @@ function HeroBrainShowcase({ className = "" }: { className?: string }) {
 function GameAvailabilityStrip({ className = "" }: { className?: string }) {
   return (
     <div className={`min-w-0 py-2 ${className}`}>
-      <div className="grid min-w-0 grid-cols-3 items-end gap-4 sm:gap-6">
+      <div className="grid min-w-0 grid-cols-3 items-end justify-items-center gap-x-7 gap-y-4 sm:gap-x-10 lg:gap-x-16">
         {GAME_OPTIONS.map((game) => (
-          <div key={game.name} className="flex min-w-0 flex-col items-center justify-end text-center">
-            <div className="flex h-[86px] w-full items-center justify-center overflow-visible sm:h-[104px]">
+          <div
+            key={game.name}
+            className="flex w-[112px] min-w-0 flex-col items-center justify-end text-center sm:w-[160px]"
+          >
+            <div className="flex h-[72px] w-[112px] items-end justify-center overflow-hidden sm:h-[90px] sm:w-[160px]">
               <img
                 src={game.image}
                 alt={game.name}
-                className={`w-auto object-contain drop-shadow-[0_0_18px_rgba(0,229,255,0.2)] ${game.imageClass} ${
+                className={`block h-[58px] max-h-[58px] w-full max-w-[112px] object-contain object-bottom drop-shadow-[0_0_18px_rgba(0,229,255,0.2)] sm:h-[70px] sm:max-h-[70px] sm:max-w-[140px] ${game.imageClass} ${
                   game.active ? "opacity-100" : "opacity-35 grayscale"
                 }`}
                 loading="lazy"
               />
             </div>
             <span
-              className={`mt-0 max-w-full truncate text-[9px] font-black uppercase tracking-wide sm:text-[10px] ${
+              className={`mt-[14px] max-w-full truncate text-center text-[9px] font-black uppercase tracking-wide leading-none sm:text-[10px] ${
                 game.active ? "text-neon-cyan" : "text-slate-500"
               }`}
             >
