@@ -196,7 +196,7 @@ function LoginPage() {
   const [notice, setNotice] = useState("");
   const [pendingAccess, setPendingAccess] = useState<ClientAccess | null>(null);
   const [prefillEmail, setPrefillEmail] = useState(savedUser.email || "");
-  const [salesClosed, setSalesClosed] = useState<boolean | null>(null);
+  const [salesClosed, setSalesClosed] = useState(false);
   const [plans, setPlans] = useState<BillingPlan[]>(landingFallbackPlans);
   const [checkoutLeadName, setCheckoutLeadName] = useState(savedUser.name || "");
   const [checkoutLeadEmail, setCheckoutLeadEmail] = useState(savedUser.email || "");
@@ -430,10 +430,6 @@ function LoginPage() {
     setWhatsappPhone(maskPhoneForCountry(value, selectedCountry));
   }
 
-  if (salesClosed === null) {
-    return <SalesAccessLoading />;
-  }
-
   return (
     <div className="landing-safe relative min-h-screen overflow-hidden bg-[#020617] text-white">
       <div
@@ -498,44 +494,44 @@ function LoginPage() {
           </div>
         </header>
 
-        <section className="grid min-w-0 flex-1 items-center gap-8 py-8 lg:grid-cols-1 lg:gap-10 lg:py-10">
+        <section className="grid min-w-0 flex-1 items-center gap-5 py-4 sm:gap-8 sm:py-8 lg:grid-cols-1 lg:gap-10 lg:py-10">
           <div className="min-w-0">
             <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,0.82fr)_minmax(520px,1.18fr)]">
               <div className="order-1 min-w-0 xl:-mt-4">
-                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)]">
+                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.18em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)] sm:text-[10px] sm:tracking-[0.2em]">
                   <Zap className="size-3.5 shrink-0" />
                   <span className="truncate">Tecnologia que analisa. Inteligência que antecipa.</span>
                 </div>
 
-                <h1 className="landing-title mt-5 max-w-3xl font-black uppercase leading-[0.95] tracking-tight text-white sm:text-6xl lg:text-7xl">
+                <h1 className="landing-title mt-4 max-w-3xl font-black uppercase leading-[0.95] tracking-tight text-white sm:mt-5 sm:text-6xl lg:text-7xl">
                   NÃO É SORTE. É MÉTODO.
                 </h1>
-                <p className="landing-subtitle mt-4 max-w-2xl font-black uppercase leading-tight text-gradient-brand sm:text-3xl">
+                <p className="landing-subtitle mt-3 max-w-2xl font-black uppercase leading-tight text-gradient-brand sm:mt-4 sm:text-3xl">
                   Crie suas próprias estratégias, valide no histórico e leia a mesa em tempo real com o Sniper BO IA.
                 </p>
-                <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:mt-4 sm:text-base">
                   Enquanto a maioria aposta no impulso, o SNIPER BO IA cruza leitura neural, tendência, surf e risco para entregar contexto operacional em tempo real.
                 </p>
-                <p className="mt-3 max-w-xl text-sm text-slate-400">
+                <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400 sm:mt-3 sm:text-sm">
                   Dados não eliminam risco. Mas reduzem o achismo antes da decisão.
                 </p>
               </div>
 
               <LandingFeatureCarousel
-                className="order-2 xl:row-span-2"
+                className="order-3 xl:order-2 xl:row-span-2"
                 slide={slide}
                 slideIndex={slideIndex}
                 onSelect={setSlideIndex}
                 onStep={goSlide}
               />
 
-              <GameAvailabilityStrip className="order-3 xl:-mt-1" />
+              <GameAvailabilityStrip className="order-4 xl:order-3 xl:-mt-1" />
 
-              <div className="order-4 flex min-w-0 flex-col gap-3 sm:flex-row xl:-mt-2">
+              <div className="order-2 flex min-w-0 flex-col gap-2 sm:flex-row xl:order-4 xl:-mt-2">
                 <button
                   type="button"
                   onClick={requestAccess}
-                  className="btn-primary-grad group relative min-h-12 w-full flex-1 overflow-hidden rounded-2xl px-5 py-3 text-center text-sm font-black uppercase tracking-wide glow-purple"
+                  className="btn-primary-grad group relative min-h-11 w-full flex-1 overflow-hidden rounded-2xl px-5 py-3 text-center text-xs font-black uppercase tracking-wide glow-purple sm:min-h-12 sm:text-sm"
                 >
                   <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
                   <span className="relative">Quero acesso ao Sniper BO IA</span>
@@ -543,7 +539,7 @@ function LoginPage() {
                 <button
                   type="button"
                   onClick={focusLogin}
-                  className="min-h-12 w-full flex-1 rounded-2xl border border-neon-cyan/40 bg-black/35 px-5 py-3 text-center text-sm font-black uppercase tracking-wide text-neon-cyan shadow-[0_0_22px_rgba(0,229,255,0.1)] transition hover:border-neon-cyan/70 hover:bg-neon-cyan/10"
+                  className="min-h-11 w-full flex-1 rounded-2xl border border-neon-cyan/40 bg-black/35 px-5 py-3 text-center text-xs font-black uppercase tracking-wide text-neon-cyan shadow-[0_0_22px_rgba(0,229,255,0.1)] transition hover:border-neon-cyan/70 hover:bg-neon-cyan/10 sm:min-h-12 sm:text-sm"
                 >
                   Já sou cliente premium
                 </button>
@@ -551,7 +547,7 @@ function LoginPage() {
             </div>
 
 
-            <div className="mt-6 min-w-0 rounded-3xl border border-neon-purple/30 bg-black/45 p-5 shadow-[0_0_34px_rgba(168,85,247,0.12)] backdrop-blur-xl">
+            <div className="mt-5 hidden min-w-0 rounded-3xl border border-neon-purple/30 bg-black/45 p-4 shadow-[0_0_34px_rgba(168,85,247,0.12)] backdrop-blur-xl sm:block">
               <p className="text-lg font-black uppercase leading-tight text-white sm:text-2xl">
                 Sem leitura, você reage. O mercado não perdoa.
               </p>
@@ -1059,7 +1055,7 @@ function LandingFeatureCarousel({
   onStep: (direction: -1 | 1) => void;
 }) {
   return (
-    <GlassCard className={`overflow-hidden rounded-[2rem] border-neon-cyan/25 bg-background/70 p-3 shadow-[0_0_44px_rgba(0,229,255,0.14)] ${className}`}>
+    <GlassCard className={`overflow-hidden rounded-[1.5rem] border-neon-cyan/25 bg-background/70 p-2.5 shadow-[0_0_44px_rgba(0,229,255,0.14)] sm:rounded-[2rem] sm:p-3 ${className}`}>
       <div className="relative overflow-hidden rounded-2xl border border-neon-cyan/20 bg-black/35">
         <img
           src={slide.image}
@@ -1072,7 +1068,7 @@ function LandingFeatureCarousel({
         </div>
       </div>
 
-      <div className="mt-3 rounded-2xl border border-border/70 bg-secondary/35 p-4">
+      <div className="mt-2 rounded-2xl border border-border/70 bg-secondary/35 p-3 sm:mt-3 sm:p-4">
         <div className="flex items-center justify-between gap-3">
           <span className="text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan">
             Ferramenta {slideIndex + 1}/{FEATURE_SLIDES.length}
@@ -1081,11 +1077,11 @@ function LandingFeatureCarousel({
             Saiba mais
           </span>
         </div>
-        <h2 className="mt-3 text-2xl font-black leading-tight text-white sm:text-3xl">{slide.title}</h2>
-        <p className="mt-2 text-sm font-semibold text-neon-cyan">{slide.summary}</p>
-        <p className="mt-3 text-sm leading-6 text-slate-400">{slide.body}</p>
+        <h2 className="mt-3 text-xl font-black leading-tight text-white sm:text-3xl">{slide.title}</h2>
+        <p className="mt-2 text-xs font-semibold text-neon-cyan sm:text-sm">{slide.summary}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-400 sm:mt-3 sm:text-sm sm:leading-6">{slide.body}</p>
 
-        <div className="mt-5 flex items-center justify-between gap-3">
+        <div className="mt-4 flex items-center justify-between gap-3 sm:mt-5">
           <div className="flex gap-1.5">
             {FEATURE_SLIDES.map((item, index) => (
               <button
