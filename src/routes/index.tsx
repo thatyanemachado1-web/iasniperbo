@@ -32,7 +32,6 @@ import { BrainAI } from "@/components/brand/BrainAI";
 import { NeuralLines } from "@/components/brand/NeuralLines";
 import { SniperLogoMark } from "@/components/brand/SniperLogoMark";
 import { GlassCard } from "@/components/ui-app/GlassCard";
-import { AppBadge } from "@/components/ui-app/AppBadge";
 import {
   checkClientAccess,
   createPublicBillingCheckout,
@@ -473,9 +472,6 @@ function LoginPage() {
                 </button>
               )}
             </div>
-            <AppBadge tone={salesClosed ? "red" : "purple"}>
-              {salesClosed ? "Vagas limitadas" : "Acesso premium"}
-            </AppBadge>
           </div>
         </header>
 
