@@ -26,6 +26,7 @@ import {
   UserPlus,
   Waves,
   Zap,
+  X,
 } from "lucide-react";
 import { BrainAI } from "@/components/brand/BrainAI";
 import { NeuralLines } from "@/components/brand/NeuralLines";
@@ -113,44 +114,44 @@ const FEATURE_SLIDES = [
   {
     image: "/login-banners/1.png",
     title: "Validador de Estratégias",
-    summary: "Crie, valide, salve e monitore estratégias com dados reais da plataforma.",
+    summary: "Monte seu padrão, valide no histórico real e saiba se vale salvar.",
     body:
-      "No Validador de Estratégias, você pode validar seus próprios padrões e criar sua própria sala de sinais com estratégias já testadas. Além disso, também pode usar o Buscador de Padrões Quentes da IA e configurar seus padrões para receber alertas no horário exato de entrada.",
+      "Ajuda quando você tem uma ideia de entrada, mas não quer apostar no achismo. Você monta a sequência, escolhe entrada, gale e proteção no empate, e vê o desempenho real antes de usar dinheiro na mesa.",
   },
   {
     image: "/login-banners/2.png",
     title: "Leitura Neural + Número Pagante",
-    summary: "Leia a força da mesa e identifique números com maior influência no momento.",
+    summary: "Mostra quais números estão puxando Player, Banker ou Tie agora.",
     body:
-      "Você já entrou na mesa sem saber qual número está pagando mais? A Leitura Neural e o Número Pagante servem exatamente para isso: analisar os números que mais estão pagando na mesa, seja no lado oposto, no pagante ou até mesmo no Tie. A ferramenta identifica qual cor está com mais força: Player, Banker ou Empate.",
+      "Serve para você entender a força da mesa antes da entrada. A leitura mostra se o número está pagando no lado natural, no oposto ou no pós-empate, com placar de SG, G1, RED e sequência.",
   },
   {
     image: "/login-banners/3.png",
     title: "Surf Analyzer",
-    summary: "Detecte tendências, exaustões e risco de virada com mais clareza.",
+    summary: "Ajuda a saber se a tendência ainda tem força ou se pode quebrar.",
     body:
-      "No Surf Analyzer, você entende melhor o que está acontecendo na mesa naquele momento. Talvez a mesa esteja devedora de surf, devedora de alguma cor ou próxima de uma quebra. A ferramenta analisa possíveis movimentos de surf e quebra através da leitura dos painéis Big Road, Big Eye, Small Road e Cockroach.",
+      "Quando a mesa está surfando em uma cor, essa ferramenta organiza a leitura para você não seguir movimento cansado. Ela mostra continuidade, risco de quebra e contexto dos painéis Big Road, Big Eye, Small Road e Cockroach.",
   },
   {
     image: "/login-banners/4.png",
     title: "Radar de Empates",
-    summary: "Monitore pressão de Tie e identifique momentos de atenção em tempo real.",
+    summary: "Identifica pressão de Tie, multiplicadores e números que puxam empate.",
     body:
-      "Se você ainda não sabe identificar um empate seco no Bac Bo, o Radar de Empates ajuda a analisar números quentes que estão puxando empate, pressão de Tie, sequências que já pagaram empates e horários com maior pressão de empate.",
+      "Ajuda você a enxergar quando o empate começa a ganhar força na mesa. Mostra os multiplicadores pegos no dia, os números que mais puxaram Tie e quando o cenário merece atenção.",
   },
   {
     image: "/login-banners/5.png",
     title: "Padrões de IA",
-    summary: "Encontre padrões que se repetem e identifique formações prováveis.",
+    summary: "Mostra formações repetidas e padrões que estão quase confirmando.",
     body:
-      "Tenho certeza de que você já ficou horas vasculhando a mesa tentando encontrar padrões e estratégias que mais estão batendo. A ferramenta de Padrões de IA faz isso em tempo real, buscando combinações, sequências e oportunidades com G1 em grandes históricos de rodadas.",
+      "É para quem não quer ficar horas caçando sequência manualmente. A IA procura padrões recorrentes, mostra o que falta completar e aponta a leitura provável quando existe amostra real.",
   },
   {
     image: "/login-banners/6.png",
     title: "Calendário de Temperatura do Mercado",
-    summary: "Veja mês, semana, dias, horas e minutos com melhor leitura de mercado.",
+    summary: "Mostra se o mercado está bom por mês, semana, dia, hora e minuto.",
     body:
-      "Quantas vezes você já entrou no mercado sem saber o que estava acontecendo? Essa ferramenta mostra se a mesa está na porcentagem ideal naquele momento, ajudando você a tomar decisões com mais clareza antes de buscar sua meta.",
+      "Ajuda você a escolher melhor o momento de operar. Antes de entrar, você consulta se aquele período está muito bom, operável ou ruim, evitando forçar entrada em janela fria.",
   },
 ];
 
@@ -167,6 +168,7 @@ function LoginPage() {
   const loginCardRef = useRef<HTMLDivElement | null>(null);
   const plansCardRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [authPanelOpen, setAuthPanelOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState("");
   const [notice, setNotice] = useState("");
@@ -540,7 +542,15 @@ function LoginPage() {
             </div>
           </div>
 
-          <aside ref={loginCardRef} className="min-w-0 w-full max-w-md justify-self-center lg:max-w-lg">
+          {authPanelOpen && (
+            <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-6">
+              <button
+                type="button"
+                aria-label="Fechar acesso"
+                className="absolute inset-0 cursor-default"
+                onClick={() => setAuthPanelOpen(false)}
+              />
+              <aside ref={loginCardRef} className="relative z-10 max-h-[92vh] min-w-0 w-full max-w-md overflow-y-auto rounded-t-[2rem] sm:max-w-lg sm:rounded-[2rem]">
             <GlassCard className="max-w-full rounded-[2rem] border-neon-purple/35 bg-background/80 p-5 shadow-[0_0_44px_rgba(168,85,247,0.18)] sm:p-7">
               <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-neon-purple/80 to-transparent" />
               <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10">
@@ -764,8 +774,36 @@ function LoginPage() {
                 Entrar na fila de espera
               </a>
             </GlassCard>
-          </aside>
+
+              <button
+                type="button"
+                onClick={() => setAuthPanelOpen(false)}
+                aria-label="Fechar"
+                className="absolute right-3 top-3 z-20 inline-flex size-9 items-center justify-center rounded-full border border-border/70 bg-black/55 text-slate-300 transition hover:border-neon-cyan/50 hover:text-neon-cyan"
+              >
+                <X className="size-4" />
+              </button>
+              </aside>
+            </div>
+          )}
         </section>
+
+        <div className="fixed inset-x-3 bottom-3 z-[70] grid grid-cols-2 gap-2 rounded-2xl border border-neon-cyan/25 bg-background/88 p-2 shadow-[0_0_28px_rgba(0,229,255,0.18)] backdrop-blur-xl lg:hidden">
+          <button
+            type="button"
+            onClick={focusLogin}
+            className="min-h-11 rounded-xl border border-neon-cyan/35 bg-neon-cyan/10 text-xs font-black uppercase tracking-wide text-neon-cyan"
+          >
+            Entrar
+          </button>
+          <button
+            type="button"
+            onClick={requestAccess}
+            className="btn-primary-grad min-h-11 rounded-xl text-xs font-black uppercase tracking-wide"
+          >
+            Comprar agora
+          </button>
+        </div>
 
         <LandingToolsSection />
         <LandingBenefitsSection />
