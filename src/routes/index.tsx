@@ -373,24 +373,22 @@ function LoginPage() {
       window.location.href = WAITLIST_URL;
       return;
     }
-    goCheckout();
+    setMode("register");
+    setAuthPanelOpen(true);
   }
 
   function focusLogin() {
     setMode("login");
-    window.setTimeout(() => {
-      loginCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 40);
+    setAuthPanelOpen(true);
   }
+
   function focusRegister() {
     if (salesClosed) {
       window.location.href = WAITLIST_URL;
       return;
     }
     setMode("register");
-    window.setTimeout(() => {
-      loginCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 40);
+    setAuthPanelOpen(true);
   }
 
   function changeCountry(nextId: string) {
