@@ -99,15 +99,6 @@ const landingFallbackPlans: BillingPlan[] = [
   },
 ];
 
-const moduleCards = [
-  { icon: BrainCircuit, label: "Leitura Neural", desc: "Detecta números pagantes em tempo real." },
-  { icon: Waves, label: "Análise de Surf", desc: "Identifica força, quebra e retomada da mesa." },
-  { icon: Bell, label: "Detector de Empates", desc: "Enxerga pressão de Tie antes da maioria." },
-  { icon: TrendingUp, label: "Tendências da Mesa", desc: "Mostra a direção do jogo com mais clareza." },
-  { icon: Target, label: "Entradas com Contexto", desc: "Cruza leitura, tendência e momento operacional." },
-  { icon: Shield, label: "Gestão de Risco", desc: "Ajuda a evitar decisões por emoção." },
-];
-
 const hudCards = [
   { icon: Target, label: "Número Pagante Ativo", position: "left-0 top-8", delay: "0s" },
   { icon: Activity, label: "Análise em Tempo Real", position: "right-0 top-16", delay: "0.8s" },
@@ -506,20 +497,6 @@ function LoginPage() {
               </div>
             </div>
 
-            <div className="landing-card-grid mt-7 grid w-full gap-2.5 sm:gap-3 lg:grid-cols-3">
-              {moduleCards.map((card) => (
-                <div
-                  key={card.label}
-                  className="glass min-w-0 rounded-2xl border-neon-purple/20 p-3 transition hover:border-neon-purple/50 hover:shadow-[0_0_24px_rgba(168,85,247,0.18)] sm:p-4"
-                >
-                  <div className="mb-3 flex size-10 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10">
-                    <card.icon className="size-5 text-neon-cyan" />
-                  </div>
-                  <div className="text-sm font-black text-white">{card.label}</div>
-                  <p className="mt-1 text-xs leading-5 text-slate-400">{card.desc}</p>
-                </div>
-              ))}
-            </div>
 
             <div className="mt-6 min-w-0 rounded-3xl border border-neon-purple/30 bg-black/45 p-5 shadow-[0_0_34px_rgba(168,85,247,0.12)] backdrop-blur-xl">
               <p className="text-lg font-black uppercase leading-tight text-white sm:text-2xl">
