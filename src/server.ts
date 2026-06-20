@@ -457,6 +457,7 @@ let liveStateSaveStatus: LiveStateSaveStatus = {
 let liveStateLoadedAt = 0;
 let liveStateLoadPromise: Promise<void> | null = null;
 let liveStateSavePromise: Promise<LiveStateSaveStatus> | null = null;
+let liveStateSavePending = false;
 let protectedClientRegistryState: Record<string, unknown> | null = null;
 let protectedClientRegistryLoadedAt = 0;
 let clientRegistrySnapshotSavedAt = 0;
@@ -3151,6 +3152,18 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
     const body = await request.json().catch(() => ({}));
     const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
+    const incomingState = readRecord(body);
+    if (
+      incomingRounds.length &&
+      compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, incomingState) > 0
+    ) {
+      return json({
+        ok: true,
+        ignored: "stale",
+        saved: "skipped",
+        dashboard: publicDashboardSnapshot(liveDashboardData),
+      });
+    }
     if (incomingRounds.length) {
       liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
     }
@@ -3174,6 +3187,10 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
         ),
         "persistir rodada e monitorar sinais",
       );
+    }
+    if (url.pathname === "/dashboard/publish") {
+      const saveStatus = await saveStateTask;
+      return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
     }
     return json({ ok: true, saved: "queued", dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
@@ -13712,9 +13729,22 @@ function buildLiveStateSnapshot(env?: unknown) {
 }
 
 async function saveLiveState(env: unknown): Promise<LiveStateSaveStatus> {
-  if (liveStateSavePromise) return liveStateSavePromise;
-  liveStateSavePromise = saveLiveStateNow(env).finally(() => {
+  if (liveStateSavePromise) {
+    liveStateSavePending = true;
+    return liveStateSavePromise;
+  }
+
+  liveStateSavePending = false;
+  liveStateSavePromise = (async () => {
+    let status = await saveLiveStateNow(env);
+    while (liveStateSavePending) {
+      liveStateSavePending = false;
+      status = await saveLiveStateNow(env);
+    }
+    return status;
+  })().finally(() => {
     liveStateSavePromise = null;
+    if (liveStateSavePending) void saveLiveState(env);
   });
   return liveStateSavePromise;
 }
