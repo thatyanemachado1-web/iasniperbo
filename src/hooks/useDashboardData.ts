@@ -87,10 +87,17 @@ function isSameOriginApiBaseUrl(url: string) {
 }
 
 function isAllowedParsedUrl(parsed: URL) {
-  if (["127.0.0.1", "localhost"].includes(parsed.hostname)) return true;
+  if (["127.0.0.1", "localhost"].includes(parsed.hostname)) return isLocalFrontend();
   if (typeof window !== "undefined" && parsed.hostname === window.location.hostname)
     return parsed.protocol === "https:";
   return parsed.protocol === "https:" && ALLOWED_REMOTE_API_HOSTS.has(parsed.hostname);
+}
+
+function isLocalFrontend() {
+  return (
+    typeof window !== "undefined" &&
+    ["127.0.0.1", "localhost"].includes(window.location.hostname)
+  );
 }
 
 function ensureDashboardPath(url: string) {
@@ -104,7 +111,7 @@ function stripDashboardPath(url: string) {
 
 function defaultDashboardUrl() {
   if (typeof window === "undefined") return "";
-  if (["127.0.0.1", "localhost"].includes(window.location.hostname)) {
+  if (isLocalFrontend()) {
     return ensureDashboardPath(LOCAL_SIGNALS_API_BASE_URL);
   }
   return ensureDashboardPath(PUBLIC_LIVE_API_BASE_URL);
