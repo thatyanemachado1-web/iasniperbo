@@ -71,6 +71,7 @@ type LiveDashboardData = DashboardData & {
   entryModeCountedResults?: Record<string, true>;
   latestEntryModeSignalId?: string;
   latestEntryModeSignalModes?: ActiveEntryMode[];
+  lateSignalHold?: DashboardData["currentSignal"] | null;
   neuralSequenceLastOutcome?: "GREEN" | "RED" | null;
   neuralPanelCycleResetVersion?: string;
   neuralPanelCycleResetRoundKey?: string;
@@ -7332,10 +7333,11 @@ function formatServerPercent(value?: number) {
 function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
   const safeDashboard = liveFeedLooksStale(dashboard) ? pausedDashboardSnapshot(dashboard) : dashboard;
   const signal = safeDashboard.currentSignal;
+  const { lateSignalHold: _lateSignalHold, ...publicDashboard } = safeDashboard;
   return {
-    ...safeDashboard,
+    ...publicDashboard,
     currentSignal: signal,
-  };
+  } as LiveDashboardData;
 }
 
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
@@ -7684,7 +7686,9 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     ? normalizeSignal(readMainSignal(incoming), currentDashboard.currentSignal)
     : currentDashboard.currentSignal;
   const bettingTiming = pickedSections.bettingTiming ?? currentDashboard.bettingTiming ?? null;
-  const resolvedSignal = acceptsCurrentCycle
+  let lateSignalHold = currentDashboard.lateSignalHold ?? null;
+  const carriedLateSignalHold = Boolean(lateSignalHold && !receivedNewRound);
+  let resolvedSignal = acceptsCurrentCycle
     ? resolveSignalImmediatelyFromRound(
         currentDashboard.currentSignal,
         normalizedSignal,
@@ -7692,10 +7696,34 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
         receivedNewRound,
       )
     : currentDashboard.currentSignal;
-  const currentSignal = acceptsCurrentCycle
-    ? resolveLateSignalGuard(resolvedSignal, bettingTiming, currentDashboard.currentSignal)
-    : resolvedSignal;
 
+  if (acceptsCurrentCycle && lateSignalHold && receivedNewRound) {
+    const heldResolution = resolveSignalImmediatelyFromRound(
+      lateSignalHold,
+      normalizedSignal,
+      incomingLatestRound,
+      receivedNewRound,
+    );
+    if (heldResolution.status === "g1") {
+      resolvedSignal = heldResolution;
+    }
+    lateSignalHold = null;
+  }
+
+  let currentSignal = resolvedSignal;
+  if (acceptsCurrentCycle) {
+    currentSignal = resolveLateSignalGuard(resolvedSignal, bettingTiming, currentDashboard.currentSignal);
+    const hiddenLateEntry =
+      isServerEntrySide(resolvedSignal.side) &&
+      (resolvedSignal.status === "pending" || resolvedSignal.status === "g1") &&
+      currentSignal.side === "NONE" &&
+      currentSignal.status === "waiting";
+    if (hiddenLateEntry && resolvedSignal.status === "pending" && signalAllowsG1(resolvedSignal.protection)) {
+      lateSignalHold = resolvedSignal;
+    } else if (!hiddenLateEntry && !carriedLateSignalHold) {
+      lateSignalHold = null;
+    }
+  }
   const nextDashboard: LiveDashboardData = {
     ...currentDashboard,
     ...pickedSections,
@@ -7703,6 +7731,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     user: { ...currentDashboard.user, ...readRecord(incoming.user) },
     rounds,
     currentSignal,
+    lateSignalHold,
     currentTieAlert: normalizeTieAlert(
       acceptsCurrentCycle ? incoming.currentTieAlert || incoming.tieAlert : {},
       currentDashboard.currentTieAlert,
