@@ -3160,8 +3160,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     const calendarChange = incomingRounds.length
       ? trackNeuralCalendarRounds(incomingRounds)
       : emptyNeuralCalendarChangeSet();
+    const saveStateTask = saveLiveState(env);
+    runBackgroundTask(ctx, saveStateTask, "salvar estado vivo do dashboard");
     if (incomingRounds.length || engineCalendarChange.changed) {
-      const saveStatus = await saveLiveState(env);
       runBackgroundTask(
         ctx,
         persistDashboardRoundIngestion(
@@ -3173,11 +3174,8 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
         ),
         "persistir rodada e monitorar sinais",
       );
-      return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
-    } else {
-      const saveStatus = await saveLiveState(env);
-      return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
     }
+    return json({ ok: true, saved: "queued", dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
 
   return null;
@@ -7678,7 +7676,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       )
     : currentDashboard.currentSignal;
   const currentSignal = acceptsCurrentCycle
-    ? resolveLateSignalGuard(resolvedSignal, bettingTiming)
+    ? resolveLateSignalGuard(resolvedSignal, bettingTiming, currentDashboard.currentSignal)
     : resolvedSignal;
 
   const nextDashboard: LiveDashboardData = {
@@ -7712,8 +7710,11 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     incomingLatestRound,
     receivedNewRound,
   );
-  const dashboardWithTieScoreboard = trackServerTieRoundScoreboard(
+  const dashboardWithVisibleNeuralSignal = exposeServerNeuralEntryAsCurrentSignal(
     dashboardWithNeuralEntry,
+  );
+  const dashboardWithTieScoreboard = trackServerTieRoundScoreboard(
+    dashboardWithVisibleNeuralSignal,
     currentDashboard,
     incomingRounds,
   );
@@ -7801,6 +7802,41 @@ function trackServerNeuralEntryLifecycle(
     neuralEntryState: nextState,
     neuralEntryLastResult: previousResult,
     neuralReading: neuralReadingForEntryState(nextState),
+  };
+}
+
+function exposeServerNeuralEntryAsCurrentSignal(dashboard: LiveDashboardData): LiveDashboardData {
+  const state = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
+  if (!state) return dashboard;
+
+  const expectedSide = readServerNeuralSide(state.expectedSide);
+  if (!expectedSide) return dashboard;
+
+  const currentSignal = dashboard.currentSignal;
+  const currentSignalIsIdle =
+    !currentSignal ||
+    currentSignal.side === "NONE" ||
+    currentSignal.status === "waiting" ||
+    String(currentSignal.id || "").startsWith("neural-entry:");
+
+  if (!currentSignalIsIdle) return dashboard;
+
+  const snapshot = state.readingSnapshot ?? dashboard.neuralReading;
+  const protection = String(snapshot?.validade || currentSignal?.protection || "G1");
+  const strength = clampPercent(
+    snapshot?.assertividade ?? snapshot?.confidence ?? currentSignal?.strength ?? 0,
+  );
+
+  return {
+    ...dashboard,
+    currentSignal: {
+      id: `neural-entry:${state.key}:${state.triggerRoundKey}`,
+      side: expectedSide,
+      status: state.status === "awaiting_g1" ? "g1" : "pending",
+      protection,
+      strength,
+      lastResult: null,
+    },
   };
 }
 
@@ -8538,6 +8574,10 @@ function pickDashboardSections(incoming: Record<string, unknown>): Partial<LiveD
     out.neuralScoreboard = incoming.neuralScoreboard as DashboardData["neuralScoreboard"];
   if (incoming.neural_scoreboard)
     out.neuralScoreboard = incoming.neural_scoreboard as DashboardData["neuralScoreboard"];
+  if (incoming.neuralEntryState !== undefined)
+    out.neuralEntryState = incoming.neuralEntryState as LiveDashboardData["neuralEntryState"];
+  if (incoming.neuralEntryLastResult !== undefined)
+    out.neuralEntryLastResult = incoming.neuralEntryLastResult as LiveDashboardData["neuralEntryLastResult"];
   if (incoming.moduleToggles)
     out.moduleToggles = incoming.moduleToggles as DashboardData["moduleToggles"];
   const bettingTiming = normalizeBettingTiming(
@@ -8632,9 +8672,21 @@ function resolveSignalImmediatelyFromRound(
 function resolveLateSignalGuard(
   signal: DashboardData["currentSignal"],
   bettingTiming: DashboardData["bettingTiming"],
+  previousSignal?: DashboardData["currentSignal"],
 ): DashboardData["currentSignal"] {
   if (!isLateEntryWindow(bettingTiming)) return signal;
   if (signal.status !== "pending" && signal.status !== "g1" && signal.status !== "tie_watch") return signal;
+
+  const sameVisibleSignal = Boolean(
+    previousSignal &&
+      previousSignal.id === signal.id &&
+      previousSignal.side === signal.side &&
+      (previousSignal.status === "pending" ||
+        previousSignal.status === "g1" ||
+        previousSignal.status === "tie_watch"),
+  );
+  if (sameVisibleSignal) return signal;
+
   return {
     ...signal,
     side: "NONE",
