@@ -65,8 +65,69 @@ function cleanMonthPayload(settings: Settings, days: DayRow[]): MonthPayload { c
 function sum(days: DayRow[], key: keyof Omit<DayRow, "notes">) { return days.reduce((total, day) => total + n(day[key]), 0); }
 function remainingDays(year: number, month: number, totalDays: number) { const now = new Date(); return now.getFullYear() === year && now.getMonth() + 1 === month ? Math.max(1, totalDays - now.getDate() + 1) : totalDays; }
 function statusFor(result: number, stopWin: number, stopLoss: number): DayStatus { if (stopWin > 0 && result >= stopWin) return "stop_win"; if (stopLoss > 0 && result <= -Math.abs(stopLoss)) return "stop_loss"; if (result > 0) return "positive"; if (result < 0) return "negative"; return "neutral"; }
-function summarize(settings: Settings, days: DayRow[]) { const totalEntries = sum(days, "entriesCount"); const totalGreens = sum(days, "greens"); const totalReds = sum(days, "reds"); const totalTies = sum(days, "ties"); const totalDeposits = sum(days, "deposits"); const totalWithdrawals = sum(days, "withdrawals"); const profit = sum(days, "dailyResult"); const currentBankroll = settings.startingBankroll + totalDeposits - totalWithdrawals + profit; const remainingGoal = Math.max(0, settings.monthlyGoal - profit); const requiredDaily = remainingGoal / Math.max(1, remainingDays(settings.year, settings.month, days.length)); const accuracy = totalGreens + totalReds > 0 ? totalGreens / (totalGreens + totalReds) * 100 : 0; return { totalEntries, totalGreens, totalReds, totalTies, totalDeposits, totalWithdrawals, profit, currentBankroll, remainingGoal, requiredDaily, accuracy, positiveDays: days.filter((d) => d.dailyResult > 0).length, negativeDays: days.filter((d) => d.dailyResult < 0).length, stopWinDays: days.filter((d) => settings.dailyStopWin > 0 && d.dailyResult >= settings.dailyStopWin).length, stopLossDays: days.filter((d) => settings.dailyStopLoss > 0 && d.dailyResult <= -Math.abs(settings.dailyStopLoss)).length }; }
-function dayView(day: DayRow, settings: Settings, days: DayRow[], dailyGoal: number) { const index = days.findIndex((item) => item.day === day.day); const previous = days.slice(0, index + 1); const finalBankroll = settings.startingBankroll + sum(previous, "deposits") - sum(previous, "withdrawals") + sum(previous, "dailyResult"); return { finalBankroll, goalDiff: day.dailyResult - dailyGoal, status: statusFor(day.dailyResult, settings.dailyStopWin, settings.dailyStopLoss), dateLabel: new Date(settings.year, settings.month - 1, day.day).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", weekday: "short" }) }; }
+function summarize(settings: Settings, days: DayRow[]) {
+  const totalEntries = sum(days, "entriesCount");
+  const totalGreens = sum(days, "greens");
+  const totalReds = sum(days, "reds");
+  const totalTies = sum(days, "ties");
+  const totalDeposits = sum(days, "deposits");
+  const totalWithdrawals = sum(days, "withdrawals");
+  const profit = sum(days, "dailyResult");
+  const currentBankroll = settings.startingBankroll + totalDeposits - totalWithdrawals + profit;
+  const remainingGoal = Math.max(0, settings.monthlyGoal - profit);
+  const requiredDaily = remainingGoal / Math.max(1, remainingDays(settings.year, settings.month, days.length));
+  const fixedDailyGoal = days.length > 0 ? settings.monthlyGoal / days.length : 0;
+  const accuracy = totalGreens + totalReds > 0 ? totalGreens / (totalGreens + totalReds) * 100 : 0;
+  const activeDays = days.filter((d) => d.entriesCount > 0 || d.greens > 0 || d.reds > 0 || d.ties > 0 || d.deposits > 0 || d.withdrawals > 0 || d.dailyResult !== 0).length;
+  return {
+    totalEntries,
+    totalGreens,
+    totalReds,
+    totalTies,
+    totalDeposits,
+    totalWithdrawals,
+    profit,
+    currentBankroll,
+    remainingGoal,
+    requiredDaily,
+    fixedDailyGoal,
+    accuracy,
+    activeDays,
+    positiveDays: days.filter((d) => d.dailyResult > 0).length,
+    negativeDays: days.filter((d) => d.dailyResult < 0).length,
+    dailyGoalHitDays: fixedDailyGoal > 0 ? days.filter((d) => d.dailyResult >= fixedDailyGoal).length : 0,
+    stopWinDays: days.filter((d) => settings.dailyStopWin > 0 && d.dailyResult >= settings.dailyStopWin).length,
+    stopLossDays: days.filter((d) => settings.dailyStopLoss > 0 && d.dailyResult <= -Math.abs(settings.dailyStopLoss)).length,
+  };
+}
+function dayView(day: DayRow, settings: Settings, days: DayRow[], dailyGoal: number) {
+  const index = days.findIndex((item) => item.day === day.day);
+  const previous = days.slice(0, index + 1);
+  const finalBankroll = settings.startingBankroll + sum(previous, "deposits") - sum(previous, "withdrawals") + sum(previous, "dailyResult");
+  const goalDiff = day.dailyResult - dailyGoal;
+  const missingForGoal = Math.max(0, dailyGoal - day.dailyResult);
+  const goalProgress = dailyGoal > 0 ? clamp((day.dailyResult / dailyGoal) * 100, 0, 100) : 0;
+  const goalHit = dailyGoal > 0 && day.dailyResult >= dailyGoal;
+  return {
+    finalBankroll,
+    goalDiff,
+    missingForGoal,
+    goalProgress,
+    goalHit,
+    status: statusFor(day.dailyResult, settings.dailyStopWin, settings.dailyStopLoss),
+    dateLabel: new Date(settings.year, settings.month - 1, day.day).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", weekday: "short" }),
+  };
+}
+function dayDecision(day: DayRow, view: ReturnType<typeof dayView>, settings: Settings, dailyGoal: number): { label: string; message: string; tone: "blue" | "green" | "amber" | "red" } {
+  const stopLoss = Math.abs(settings.dailyStopLoss);
+  if (settings.dailyStopLoss > 0 && day.dailyResult <= -stopLoss) return { label: "Stop loss batido", message: "Pare por hoje. O plano já protegeu sua banca; tentar recuperar agora aumenta o risco.", tone: "red" };
+  if (dailyGoal > 0 && view.goalHit) return { label: "Meta do dia batida", message: "Melhor parar e proteger o lucro. Amanhã você continua com a banca preservada.", tone: "green" };
+  if (settings.dailyStopWin > 0 && day.dailyResult >= settings.dailyStopWin) return { label: "Stop win atingido", message: "Objetivo do dia alcançado. Evite devolver lucro para a mesa.", tone: "green" };
+  if (settings.dailyStopLoss > 0 && day.dailyResult <= -(stopLoss * 0.7)) return { label: "Perto do stop", message: "Reduza a mão ou encerre a sessão. A prioridade agora é proteger a banca.", tone: "amber" };
+  if (dailyGoal > 0 && day.dailyResult > 0) return { label: "Dia positivo", message: `Faltam ${money(view.missingForGoal)} para bater a meta do dia. Continue só se a leitura estiver limpa.`, tone: "green" };
+  if (day.dailyResult < 0) return { label: "Atenção no dia", message: "Você está negativo hoje. Não aumente a entrada para recuperar; respeite o stop loss.", tone: "amber" };
+  return { label: "Planejando o dia", message: "Registre as entradas e acompanhe a meta. A tela mostra quando continuar e quando parar.", tone: "blue" };
+}
 function report(settings: Settings, summary: ReturnType<typeof summarize>) { const lines: string[] = []; if (settings.monthlyGoal > 0 && summary.profit >= settings.monthlyGoal) lines.push("Meta mensal batida. O foco agora deve ser preservar lucro, respeitar stop e programar saque."); else if (settings.monthlyGoal > 0) lines.push(`Faltam ${money(summary.remainingGoal)} para bater a meta mensal. A meta diária necessária agora é ${money(summary.requiredDaily)}.`); if (summary.totalGreens + summary.totalReds > 0 && summary.accuracy < 48) lines.push("Sua assertividade está baixa. Reduza a mão e revise os dias de red."); if (summary.stopLossDays >= 2) lines.push("Você teve dias batendo stop loss. Evite aumentar entrada para recuperar no mesmo dia."); if (summary.negativeDays > summary.positiveDays && summary.negativeDays >= 3) lines.push("Você teve muitos dias negativos. Reduza exposição e opere menos entradas."); if (!lines.length) lines.push("Sua operação está dentro do plano. Continue respeitando stop win e stop loss."); return lines; }
 function monthStatusFor(settings: Settings, summary: ReturnType<typeof summarize>): { label: string; tone: "cyan" | "blue" | "green" | "red" | "amber" } { if (settings.monthlyGoal > 0 && summary.profit >= settings.monthlyGoal) return { label: "Meta batida", tone: "green" }; if (summary.stopLossDays > 0 || summary.profit < 0) return { label: "Atenção", tone: summary.profit < 0 ? "red" : "amber" }; if (summary.profit > 0) return { label: "Positivo", tone: "green" }; if (settings.startingBankroll > 0 || settings.monthlyGoal > 0) return { label: "Em andamento", tone: "blue" }; return { label: "Planejando", tone: "cyan" }; }
 
@@ -163,13 +224,13 @@ function BankrollManagerPage() {
 
         <GlassCard>
           <SectionTitle title="Relatório inteligente" subtitle="Leitura automática do seu gerenciamento." />
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><SummaryPill label="Depósitos" value={money(summary.totalDeposits)} /><SummaryPill label="Saques" value={money(summary.totalWithdrawals)} /><SummaryPill label="Greens / Reds" value={`${summary.totalGreens} / ${summary.totalReds}`} /><SummaryPill label="Assertividade" value={`${percent(summary.accuracy)}%`} /></div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><SummaryPill label="Dias na meta" value={`${summary.dailyGoalHitDays} / ${liveDays.length}`} /><SummaryPill label="Depósitos" value={money(summary.totalDeposits)} /><SummaryPill label="Saques" value={money(summary.totalWithdrawals)} /><SummaryPill label="Greens / Reds" value={`${summary.totalGreens} / ${summary.totalReds}`} /></div>
           <div className="mt-4 space-y-2">{report(liveSettings, summary).map((message) => <div key={message} className="rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-sm text-muted-foreground">{message}</div>)}</div>
-          <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4"><InlineStat label="Dias positivos" value={String(summary.positiveDays)} tone="green" /><InlineStat label="Dias negativos" value={String(summary.negativeDays)} tone="red" /><InlineStat label="Stops" value={`${summary.stopWinDays} WIN • ${summary.stopLossDays} LOSS`} tone="amber" /><InlineStat label="Entradas" value={String(summary.totalEntries)} tone="blue" /></div>
+          <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4"><InlineStat label="Dias positivos" value={String(summary.positiveDays)} tone="green" /><InlineStat label="Dias negativos" value={String(summary.negativeDays)} tone="red" /><InlineStat label="Assertividade" value={`${percent(summary.accuracy)}%`} tone="blue" /><InlineStat label="Stops" value={`${summary.stopWinDays} WIN • ${summary.stopLossDays} LOSS`} tone="amber" /></div>
         </GlassCard>
       </div>
 
-      <DailyLaunchCard day={launchDay} view={launchView} dailyGoal={dailyGoal} onChange={updateDay} />
+      <DailyLaunchCard day={launchDay} view={launchView} settings={liveSettings} dailyGoal={dailyGoal} onChange={updateDay} />
 
       <GlassCard className="p-3 sm:p-4">
         <details className="group">
@@ -206,13 +267,36 @@ function BankrollManagerPage() {
   );
 }
 
-function DailyLaunchCard({ day, view, dailyGoal, onChange }: { day?: DayRow; view: ReturnType<typeof dayView> | null; dailyGoal: number; onChange: (day: number, patch: Partial<DayRow>) => void }) {
+function DailyLaunchCard({ day, view, settings, dailyGoal, onChange }: { day?: DayRow; view: ReturnType<typeof dayView> | null; settings: Settings; dailyGoal: number; onChange: (day: number, patch: Partial<DayRow>) => void }) {
   if (!day || !view) return null;
+  const decision = dayDecision(day, view, settings, dailyGoal);
+  const quickAction = (patch: Partial<DayRow>) => onChange(day.day, patch);
   return (
     <GlassCard className="border-neon-cyan/25">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <SectionTitle title="Lançamento de hoje" subtitle="Digite a operação do dia. A tela recalcula tudo na hora." />
         <div className="flex flex-wrap items-center gap-2"><AppBadge tone="blue">{view.dateLabel}</AppBadge><StatusBadge status={view.status} /></div>
+      </div>
+      <div className={cn("mt-3 rounded-2xl border p-3", decision.tone === "green" && "border-success/30 bg-success/10", decision.tone === "red" && "border-destructive/30 bg-destructive/10", decision.tone === "amber" && "border-warning/30 bg-warning/10", decision.tone === "blue" && "border-neon-cyan/25 bg-neon-cyan/10")}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground">Decisão do dia</div>
+            <div className={cn("mt-1 text-lg font-black", decision.tone === "green" && "text-success", decision.tone === "red" && "text-destructive", decision.tone === "amber" && "text-warning", decision.tone === "blue" && "text-neon-cyan")}>{decision.label}</div>
+            <p className="mt-1 text-sm text-muted-foreground">{decision.message}</p>
+          </div>
+          <div className="min-w-[220px] rounded-xl border border-border/70 bg-background/45 p-3">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground"><span>Meta do dia</span><span>{percent(view.goalProgress)}%</span></div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted/50"><div className={cn("h-full rounded-full", view.goalHit ? "bg-success" : "bg-neon-cyan")} style={{ width: `${view.goalProgress}%` }} /></div>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs"><span className="text-muted-foreground">Feito: <strong className={day.dailyResult >= 0 ? "text-success" : "text-destructive"}>{money(day.dailyResult)}</strong></span><span className="text-muted-foreground">Falta: <strong className="text-foreground">{money(view.missingForGoal)}</strong></span></div>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <QuickActionButton label="+1 Entrada" onClick={() => quickAction({ entriesCount: day.entriesCount + 1 })} />
+        <QuickActionButton label="+1 Green" tone="green" onClick={() => quickAction({ greens: day.greens + 1 })} />
+        <QuickActionButton label="+1 Red" tone="red" onClick={() => quickAction({ reds: day.reds + 1 })} />
+        <QuickActionButton label="+1 Empate" tone="amber" onClick={() => quickAction({ ties: day.ties + 1 })} />
+        <QuickActionButton label="Zerar hoje" tone="muted" onClick={() => quickAction({ entriesCount: 0, greens: 0, reds: 0, ties: 0, deposits: 0, withdrawals: 0, dailyResult: 0, notes: "" })} />
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <PanelNumberField label="Entradas" value={day.entriesCount} onChange={(v) => onChange(day.day, { entriesCount: Math.max(0, Math.floor(v)) })} />
@@ -232,6 +316,10 @@ function DailyLaunchCard({ day, view, dailyGoal, onChange }: { day?: DayRow; vie
   );
 }
 
+function QuickActionButton({ label, tone = "blue", onClick }: { label: string; tone?: "blue" | "green" | "red" | "amber" | "muted"; onClick: () => void }) {
+  const toneClass = { blue: "border-neon-cyan/35 text-neon-cyan hover:bg-neon-cyan/10", green: "border-success/35 text-success hover:bg-success/10", red: "border-destructive/35 text-destructive hover:bg-destructive/10", amber: "border-warning/35 text-warning hover:bg-warning/10", muted: "border-border text-muted-foreground hover:bg-muted/30" }[tone];
+  return <button type="button" onClick={onClick} className={cn("rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] transition", toneClass)}>{label}</button>;
+}
 function PanelNumberField({ label, value, onChange, tone }: { label: string; value: number; onChange: (value: number) => void; tone?: "green" | "red" | "amber" }) { return <Field label={label}><input className={cn(inputClass, tone === "green" && "text-success", tone === "red" && "text-destructive", tone === "amber" && "text-warning")} type="number" step="1" value={Number.isFinite(value) ? value : 0} onFocus={(e) => e.currentTarget.select()} onChange={(e) => onChange(Number(e.target.value) || 0)} /></Field>; }
 function PanelMoneyField({ label, value, onChange, tone }: { label: string; value: number; onChange: (value: number) => void; tone?: "green" | "red" | "amber" }) { return <Field label={label}><CurrencyInput className={cn(inputClass, tone === "green" && "text-success", tone === "red" && "text-destructive", tone === "amber" && "text-warning")} value={value} onChange={onChange} /></Field>; }
 function LeverageCalculator({ leverage, coverage, result, coverageRows, onLeverageChange, onCoverageChange, onUseBankroll }: { leverage: LeverageState; coverage: CoverageState; result: ReturnType<typeof calculateLeverage>; coverageRows: CoverageRow[]; onLeverageChange: (patch: Partial<LeverageState>) => void; onCoverageChange: (patch: Partial<CoverageState>) => void; onUseBankroll: () => void }) {
