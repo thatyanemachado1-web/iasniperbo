@@ -61,13 +61,14 @@ function normalizeDayPatch(current: DayRow, patch: Partial<DayRow>) {
   return next;
 }
 function syncDays(entries: DayRow[] | undefined, year: number, month: number) { const byDay = new Map((entries || []).map((entry) => [entry.day, entry])); return createDays(year, month).map((entry) => cleanDayRow({ ...entry, ...byDay.get(entry.day), day: entry.day })); }
-function cleanMonthPayload(settings: Settings, days: DayRow[]): MonthPayload { const month = clamp(settings.month, 1, 12); const year = clamp(settings.year, 2000, 2100); return { month, year, startingBankroll: moneyNumber(settings.startingBankroll), monthlyGoal: moneyNumber(settings.monthlyGoal), dailyStopWin: moneyNumber(settings.dailyStopWin), dailyStopLoss: moneyNumber(settings.dailyStopLoss), days: syncDays(days.map(cleanDayRow), year, month), updatedAt: new Date().toISOString() }; }
+function cleanMonthPayload(settings: Settings, days: DayRow[]): MonthPayload { const month = clamp(Math.floor(n(settings.month)), 1, 12); const year = clamp(Math.floor(n(settings.year)), 2000, 2100); return { month, year, startingBankroll: moneyNumber(settings.startingBankroll), monthlyGoal: moneyNumber(settings.monthlyGoal), dailyStopWin: moneyNumber(settings.dailyStopWin), dailyStopLoss: moneyNumber(settings.dailyStopLoss), days: syncDays(days.map(cleanDayRow), year, month), updatedAt: new Date().toISOString() }; }
 function sum(days: DayRow[], key: keyof Omit<DayRow, "notes">) { return days.reduce((total, day) => total + n(day[key]), 0); }
 function remainingDays(year: number, month: number, totalDays: number) { const now = new Date(); return now.getFullYear() === year && now.getMonth() + 1 === month ? Math.max(1, totalDays - now.getDate() + 1) : totalDays; }
 function statusFor(result: number, stopWin: number, stopLoss: number): DayStatus { if (stopWin > 0 && result >= stopWin) return "stop_win"; if (stopLoss > 0 && result <= -Math.abs(stopLoss)) return "stop_loss"; if (result > 0) return "positive"; if (result < 0) return "negative"; return "neutral"; }
 function summarize(settings: Settings, days: DayRow[]) { const totalEntries = sum(days, "entriesCount"); const totalGreens = sum(days, "greens"); const totalReds = sum(days, "reds"); const totalTies = sum(days, "ties"); const totalDeposits = sum(days, "deposits"); const totalWithdrawals = sum(days, "withdrawals"); const profit = sum(days, "dailyResult"); const currentBankroll = settings.startingBankroll + totalDeposits - totalWithdrawals + profit; const remainingGoal = Math.max(0, settings.monthlyGoal - profit); const requiredDaily = remainingGoal / Math.max(1, remainingDays(settings.year, settings.month, days.length)); const accuracy = totalGreens + totalReds > 0 ? totalGreens / (totalGreens + totalReds) * 100 : 0; return { totalEntries, totalGreens, totalReds, totalTies, totalDeposits, totalWithdrawals, profit, currentBankroll, remainingGoal, requiredDaily, accuracy, positiveDays: days.filter((d) => d.dailyResult > 0).length, negativeDays: days.filter((d) => d.dailyResult < 0).length, stopWinDays: days.filter((d) => settings.dailyStopWin > 0 && d.dailyResult >= settings.dailyStopWin).length, stopLossDays: days.filter((d) => settings.dailyStopLoss > 0 && d.dailyResult <= -Math.abs(settings.dailyStopLoss)).length }; }
 function dayView(day: DayRow, settings: Settings, days: DayRow[], dailyGoal: number) { const index = days.findIndex((item) => item.day === day.day); const previous = days.slice(0, index + 1); const finalBankroll = settings.startingBankroll + sum(previous, "deposits") - sum(previous, "withdrawals") + sum(previous, "dailyResult"); return { finalBankroll, goalDiff: day.dailyResult - dailyGoal, status: statusFor(day.dailyResult, settings.dailyStopWin, settings.dailyStopLoss), dateLabel: new Date(settings.year, settings.month - 1, day.day).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", weekday: "short" }) }; }
 function report(settings: Settings, summary: ReturnType<typeof summarize>) { const lines: string[] = []; if (settings.monthlyGoal > 0 && summary.profit >= settings.monthlyGoal) lines.push("Meta mensal batida. O foco agora deve ser preservar lucro, respeitar stop e programar saque."); else if (settings.monthlyGoal > 0) lines.push(`Faltam ${money(summary.remainingGoal)} para bater a meta mensal. A meta diária necessária agora é ${money(summary.requiredDaily)}.`); if (summary.totalGreens + summary.totalReds > 0 && summary.accuracy < 48) lines.push("Sua assertividade está baixa. Reduza a mão e revise os dias de red."); if (summary.stopLossDays >= 2) lines.push("Você teve dias batendo stop loss. Evite aumentar entrada para recuperar no mesmo dia."); if (summary.negativeDays > summary.positiveDays && summary.negativeDays >= 3) lines.push("Você teve muitos dias negativos. Reduza exposição e opere menos entradas."); if (!lines.length) lines.push("Sua operação está dentro do plano. Continue respeitando stop win e stop loss."); return lines; }
+function monthStatusFor(settings: Settings, summary: ReturnType<typeof summarize>): { label: string; tone: "cyan" | "blue" | "green" | "red" | "amber" } { if (settings.monthlyGoal > 0 && summary.profit >= settings.monthlyGoal) return { label: "Meta batida", tone: "green" }; if (summary.stopLossDays > 0 || summary.profit < 0) return { label: "Atenção", tone: summary.profit < 0 ? "red" : "amber" }; if (summary.profit > 0) return { label: "Positivo", tone: "green" }; if (settings.startingBankroll > 0 || settings.monthlyGoal > 0) return { label: "Em andamento", tone: "blue" }; return { label: "Planejando", tone: "cyan" }; }
 
 function BankrollManagerPage() {
   const session = readUserSession();
@@ -77,8 +78,11 @@ function BankrollManagerPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState("Carregando operação...");
-  const summary = useMemo(() => summarize(settings, days), [settings, days]);
-  const dailyGoal = days.length > 0 ? settings.monthlyGoal / days.length : 0;
+  const liveMonth = useMemo(() => cleanMonthPayload(settings, days), [settings, days]);
+  const liveSettings: Settings = liveMonth;
+  const liveDays = liveMonth.days;
+  const summary = useMemo(() => summarize(liveSettings, liveDays), [liveSettings, liveDays]);
+  const dailyGoal = liveDays.length > 0 ? liveSettings.monthlyGoal / liveDays.length : 0;
   const [leverage, setLeverage] = useState<LeverageState>(() => leverageFromBankroll(settings, summary));
   const [coverage, setCoverage] = useState<CoverageState>({ side: "PLAYER", coverTie: true, tieCoverValue: 0, tieMultiplier: 4, mainTieRule: "push" });
   const leverageResult = useMemo(() => calculateLeverage(leverage), [leverage]);
@@ -111,12 +115,17 @@ function BankrollManagerPage() {
     return () => { cancelled = true; };
   }, [session.clientToken, session.email, settings.month, settings.year]);
 
-  function updateSetting(key: keyof Settings, value: number) { setSettings((current) => ({ ...current, [key]: Number.isFinite(value) ? value : 0 })); }
-  function changePeriod(month: number, year: number) { setSettings((current) => ({ ...current, month, year })); }
+  function updateSetting(key: keyof Settings, value: number) { setSettings((current) => ({ ...current, [key]: moneyNumber(value) })); }
+  function changePeriod(month: number, year: number) { setSettings((current) => ({ ...current, month: clamp(Math.floor(n(month)), 1, 12), year: clamp(Math.floor(n(year)), 2000, 2100) })); }
   function updateDay(day: number, patch: Partial<DayRow>) { setDays((current) => current.map((entry) => entry.day === day ? normalizeDayPatch(entry, patch) : entry)); }
-  async function saveMonth() { setSaving(true); const payload = cleanMonthPayload(settings, days); writeLocalBankroll(session.email, payload); try { const saved = await saveBankrollMonth(session, payload); setSaveStatus(saved ? "Operação salva no banco com segurança." : "Operação salva no backup local deste navegador."); } catch { setSaveStatus("Servidor indisponível. Salvei um backup local para não perder seus dados."); } finally { setSaving(false); } }
+  async function saveMonth() { setSaving(true); const payload = liveMonth; writeLocalBankroll(session.email, payload); try { const saved = await saveBankrollMonth(session, payload); setSaveStatus(saved ? "Operação salva no banco com segurança." : "Operação salva no backup local deste navegador."); } catch { setSaveStatus("Servidor indisponível. Salvei um backup local para não perder seus dados."); } finally { setSaving(false); } }
   function updateLeverage(patch: Partial<LeverageState>) { setLeverage((current) => { const next = { ...current, ...patch }; writeLocalLeverage(session.email, next); return next; }); }
-  function applyBankrollToCalculator() { const next = leverageFromBankroll(settings, summary); setLeverage(next); writeLocalLeverage(session.email, next); }
+  function applyBankrollToCalculator() { const next = leverageFromBankroll(liveSettings, summary); setLeverage(next); writeLocalLeverage(session.email, next); }
+
+  const activeDayNumber = today.getFullYear() === liveSettings.year && today.getMonth() + 1 === liveSettings.month ? today.getDate() : 1;
+  const launchDay = liveDays.find((day) => day.day === activeDayNumber) || liveDays[0];
+  const launchView = launchDay ? dayView(launchDay, liveSettings, liveDays, dailyGoal) : null;
+  const monthStatus = monthStatusFor(liveSettings, summary);
 
   return (
     <div className="space-y-4">
@@ -124,61 +133,72 @@ function BankrollManagerPage() {
         <div>
           <div className="text-[11px] font-black uppercase tracking-[0.24em] text-neon-cyan">Gestor de Banca IA</div>
           <h1 className="mt-1 text-2xl font-black tracking-tight text-foreground sm:text-3xl">Planilha Inteligente Sniper BO</h1>
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">Controle sua banca mensal, stops, depósitos, saques e evolução sem interferir nos motores de sinais.</p>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">Controle sua banca, meta e stops em tempo real sem interferir nos motores de sinais.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2"><AppBadge tone="blue">Módulo separado</AppBadge><AppBadge tone="green">Dados por usuário</AppBadge><AppBadge tone="amber">Gestão de risco</AppBadge></div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard icon={<PiggyBank className="size-4" />} label="Banca atual" value={money(summary.currentBankroll)} tone="cyan" />
-        <MetricCard icon={<TrendingUp className="size-4" />} label="Lucro / prejuízo" value={money(summary.profit)} tone={summary.profit >= 0 ? "green" : "red"} />
         <MetricCard icon={<CalendarDays className="size-4" />} label="Falta para meta" value={money(summary.remainingGoal)} tone={summary.remainingGoal <= 0 ? "green" : "amber"} />
         <MetricCard icon={<Banknote className="size-4" />} label="Meta diária necessária" value={money(summary.requiredDaily)} tone="blue" />
-        <MetricCard icon={<CheckCircle2 className="size-4" />} label="Assertividade" value={`${percent(summary.accuracy)}%`} tone={summary.accuracy >= 55 ? "green" : "amber"} />
+        <MetricCard icon={<TrendingUp className="size-4" />} label="Lucro / prejuízo" value={money(summary.profit)} tone={summary.profit >= 0 ? "green" : "red"} />
+        <MetricCard icon={<CheckCircle2 className="size-4" />} label="Status do mês" value={monthStatus.label} tone={monthStatus.tone} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[0.95fr_1.35fr]">
+      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <GlassCard>
-          <SectionTitle title="Configuração da operação" subtitle="Defina o plano mensal e os limites do dia." />
+          <SectionTitle title="Configuração simples" subtitle="Defina o plano mensal e os limites do dia." />
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Mês"><select className={selectClass} value={settings.month} onChange={(e) => changePeriod(Number(e.target.value), settings.year)}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></Field>
-            <Field label="Ano"><input className={inputClass} type="number" value={settings.year} onChange={(e) => changePeriod(settings.month, Number(e.target.value))} /></Field>
-            <MoneyField label="Banca inicial" value={settings.startingBankroll} onChange={(v) => updateSetting("startingBankroll", v)} />
-            <MoneyField label="Meta mensal desejada" value={settings.monthlyGoal} onChange={(v) => updateSetting("monthlyGoal", v)} />
-            <MoneyField label="Stop win diário" value={settings.dailyStopWin} onChange={(v) => updateSetting("dailyStopWin", v)} />
-            <MoneyField label="Stop loss diário" value={settings.dailyStopLoss} onChange={(v) => updateSetting("dailyStopLoss", v)} />
+            <Field label="Mês"><select className={selectClass} value={liveSettings.month} onChange={(e) => changePeriod(Number(e.target.value), liveSettings.year)}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></Field>
+            <Field label="Ano"><input className={inputClass} type="number" value={liveSettings.year} onChange={(e) => changePeriod(liveSettings.month, Number(e.target.value))} /></Field>
+            <MoneyField label="Banca inicial" value={liveSettings.startingBankroll} onChange={(v) => updateSetting("startingBankroll", v)} />
+            <MoneyField label="Meta mensal" value={liveSettings.monthlyGoal} onChange={(v) => updateSetting("monthlyGoal", v)} />
+            <MoneyField label="Stop win diário" value={liveSettings.dailyStopWin} onChange={(v) => updateSetting("dailyStopWin", v)} />
+            <MoneyField label="Stop loss diário" value={liveSettings.dailyStopLoss} onChange={(v) => updateSetting("dailyStopLoss", v)} />
           </div>
-          <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3"><InlineStat label="Dias do mês" value={String(days.length)} /><InlineStat label="Meta fixa por dia" value={money(dailyGoal)} /><InlineStat label="Status" value={loading ? "Carregando" : saveStatus} /></div>
+          <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3"><InlineStat label="Dias do mês" value={String(liveDays.length)} /><InlineStat label="Meta fixa por dia" value={money(dailyGoal)} /><InlineStat label="Status" value={loading ? "Carregando" : saveStatus} /></div>
           <button type="button" onClick={saveMonth} disabled={saving} className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-violet-500 px-4 text-sm font-black text-white shadow-[0_0_26px_rgba(14,165,233,0.25)] transition hover:brightness-110 disabled:opacity-60"><Save className="size-4" /> {saving ? "Salvando..." : "Salvar mês"}</button>
         </GlassCard>
 
         <GlassCard>
           <SectionTitle title="Relatório inteligente" subtitle="Leitura automática do seu gerenciamento." />
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><SummaryPill label="Depósitos" value={money(summary.totalDeposits)} /><SummaryPill label="Saques" value={money(summary.totalWithdrawals)} /><SummaryPill label="Greens / Reds" value={`${summary.totalGreens} / ${summary.totalReds}`} /><SummaryPill label="Stops" value={`${summary.stopWinDays} WIN • ${summary.stopLossDays} LOSS`} /></div>
-          <div className="mt-4 space-y-2">{report(settings, summary).map((message) => <div key={message} className="rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-sm text-muted-foreground">{message}</div>)}</div>
-          <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4"><InlineStat label="Dias positivos" value={String(summary.positiveDays)} tone="green" /><InlineStat label="Dias negativos" value={String(summary.negativeDays)} tone="red" /><InlineStat label="Empates" value={String(summary.totalTies)} tone="amber" /><InlineStat label="Entradas" value={String(summary.totalEntries)} tone="blue" /></div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><SummaryPill label="Depósitos" value={money(summary.totalDeposits)} /><SummaryPill label="Saques" value={money(summary.totalWithdrawals)} /><SummaryPill label="Greens / Reds" value={`${summary.totalGreens} / ${summary.totalReds}`} /><SummaryPill label="Assertividade" value={`${percent(summary.accuracy)}%`} /></div>
+          <div className="mt-4 space-y-2">{report(liveSettings, summary).map((message) => <div key={message} className="rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-sm text-muted-foreground">{message}</div>)}</div>
+          <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4"><InlineStat label="Dias positivos" value={String(summary.positiveDays)} tone="green" /><InlineStat label="Dias negativos" value={String(summary.negativeDays)} tone="red" /><InlineStat label="Stops" value={`${summary.stopWinDays} WIN • ${summary.stopLossDays} LOSS`} tone="amber" /><InlineStat label="Entradas" value={String(summary.totalEntries)} tone="blue" /></div>
         </GlassCard>
       </div>
+
+      <DailyLaunchCard day={launchDay} view={launchView} dailyGoal={dailyGoal} onChange={updateDay} />
+
       <GlassCard className="p-3 sm:p-4">
-        <SectionTitle title="Planilha mensal inteligente" subtitle="Dias inexistentes do mês não aparecem. A banca final é calculada em sequência." right={<AppBadge tone="muted">{MONTHS[settings.month - 1]} {settings.year}</AppBadge>} />
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1420px] border-separate border-spacing-y-2 text-left text-xs">
-            <thead className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground"><tr>{["Dia", "Data", "Entradas", "Greens", "Reds", "Empates", "Depósitos", "Saques", "Resultado", "Banca final", "Meta diária", "Diferença", "Status", "Anotações"].map((h) => <th key={h} className="px-2">{h}</th>)}</tr></thead>
-            <tbody>{days.map((day) => { const view = dayView(day, settings, days, dailyGoal); return (
-              <tr key={day.day} className="rounded-xl bg-background/45 align-middle shadow-[inset_0_0_0_1px_rgba(148,163,184,0.14)]">
-                <td className="rounded-l-xl px-2 py-2 font-black text-neon-cyan">{String(day.day).padStart(2, "0")}</td><td className="px-2 py-2 text-muted-foreground">{view.dateLabel}</td>
-                <EditNumber value={day.entriesCount} onChange={(v) => updateDay(day.day, { entriesCount: Math.max(0, Math.floor(v)) })} />
-                <EditNumber value={day.greens} onChange={(v) => updateDay(day.day, { greens: Math.max(0, Math.floor(v)) })} tone="green" />
-                <EditNumber value={day.reds} onChange={(v) => updateDay(day.day, { reds: Math.max(0, Math.floor(v)) })} tone="red" />
-                <EditNumber value={day.ties} onChange={(v) => updateDay(day.day, { ties: Math.max(0, Math.floor(v)) })} tone="amber" />
-                <EditMoney value={day.deposits} onChange={(v) => updateDay(day.day, { deposits: v })} />
-                <EditMoney value={day.withdrawals} onChange={(v) => updateDay(day.day, { withdrawals: v })} />
-                <EditMoney value={day.dailyResult} onChange={(v) => updateDay(day.day, { dailyResult: v })} tone={day.dailyResult >= 0 ? "green" : "red"} />
-                <td className="px-2 py-2 font-bold">{money(view.finalBankroll)}</td><td className="px-2 py-2 text-muted-foreground">{money(dailyGoal)}</td><td className={cn("px-2 py-2 font-bold", view.goalDiff >= 0 ? "text-success" : "text-destructive")}>{money(view.goalDiff)}</td><td className="px-2 py-2"><StatusBadge status={view.status} /></td>
-                <td className="rounded-r-xl px-2 py-2"><input className="h-9 w-56 rounded-lg border border-border/70 bg-background/50 px-2 text-xs outline-none focus:border-neon-cyan/60" value={day.notes} onChange={(e) => updateDay(day.day, { notes: e.target.value })} placeholder="Observação do dia" /></td>
-              </tr>); })}</tbody>
-          </table>
-        </div>
+        <details className="group">
+          <summary className="flex cursor-pointer list-none flex-col gap-2 rounded-2xl border border-border/70 bg-background/45 px-4 py-3 transition hover:border-neon-cyan/40 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-[0.22em] text-neon-cyan">Ver mês completo</div>
+              <p className="mt-1 text-xs text-muted-foreground">Dias inexistentes do mês não aparecem. A banca final é calculada em sequência.</p>
+            </div>
+            <div className="flex items-center gap-2"><AppBadge tone="muted">{MONTHS[liveSettings.month - 1]} {liveSettings.year}</AppBadge><span className="text-xs font-bold text-muted-foreground group-open:hidden">Abrir</span><span className="hidden text-xs font-bold text-muted-foreground group-open:inline">Fechar</span></div>
+          </summary>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[1420px] border-separate border-spacing-y-2 text-left text-xs">
+              <thead className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground"><tr>{["Dia", "Data", "Entradas", "Greens", "Reds", "Empates", "Depósitos", "Saques", "Resultado", "Banca final", "Meta diária", "Diferença", "Status", "Anotações"].map((h) => <th key={h} className="px-2">{h}</th>)}</tr></thead>
+              <tbody>{liveDays.map((day) => { const view = dayView(day, liveSettings, liveDays, dailyGoal); return (
+                <tr key={day.day} className="rounded-xl bg-background/45 align-middle shadow-[inset_0_0_0_1px_rgba(148,163,184,0.14)]">
+                  <td className="rounded-l-xl px-2 py-2 font-black text-neon-cyan">{String(day.day).padStart(2, "0")}</td><td className="px-2 py-2 text-muted-foreground">{view.dateLabel}</td>
+                  <EditNumber value={day.entriesCount} onChange={(v) => updateDay(day.day, { entriesCount: Math.max(0, Math.floor(v)) })} />
+                  <EditNumber value={day.greens} onChange={(v) => updateDay(day.day, { greens: Math.max(0, Math.floor(v)) })} tone="green" />
+                  <EditNumber value={day.reds} onChange={(v) => updateDay(day.day, { reds: Math.max(0, Math.floor(v)) })} tone="red" />
+                  <EditNumber value={day.ties} onChange={(v) => updateDay(day.day, { ties: Math.max(0, Math.floor(v)) })} tone="amber" />
+                  <EditMoney value={day.deposits} onChange={(v) => updateDay(day.day, { deposits: v })} />
+                  <EditMoney value={day.withdrawals} onChange={(v) => updateDay(day.day, { withdrawals: v })} />
+                  <EditMoney value={day.dailyResult} onChange={(v) => updateDay(day.day, { dailyResult: v })} tone={day.dailyResult >= 0 ? "green" : "red"} />
+                  <td className="px-2 py-2 font-bold">{money(view.finalBankroll)}</td><td className="px-2 py-2 text-muted-foreground">{money(dailyGoal)}</td><td className={cn("px-2 py-2 font-bold", view.goalDiff >= 0 ? "text-success" : "text-destructive")}>{money(view.goalDiff)}</td><td className="px-2 py-2"><StatusBadge status={view.status} /></td>
+                  <td className="rounded-r-xl px-2 py-2"><input className="h-9 w-56 rounded-lg border border-border/70 bg-background/50 px-2 text-xs outline-none focus:border-neon-cyan/60" value={day.notes} onChange={(e) => updateDay(day.day, { notes: e.target.value })} placeholder="Observação do dia" /></td>
+                </tr>); })}</tbody>
+            </table>
+          </div>
+        </details>
       </GlassCard>
 
       <LeverageCalculator leverage={leverage} coverage={coverage} result={leverageResult} coverageRows={coverageRows} onLeverageChange={updateLeverage} onCoverageChange={(patch) => setCoverage((current) => ({ ...current, ...patch }))} onUseBankroll={applyBankrollToCalculator} />
@@ -186,35 +206,65 @@ function BankrollManagerPage() {
   );
 }
 
-function LeverageCalculator({ leverage, coverage, result, coverageRows, onLeverageChange, onCoverageChange, onUseBankroll }: { leverage: LeverageState; coverage: CoverageState; result: ReturnType<typeof calculateLeverage>; coverageRows: CoverageRow[]; onLeverageChange: (patch: Partial<LeverageState>) => void; onCoverageChange: (patch: Partial<CoverageState>) => void; onUseBankroll: () => void }) {
+function DailyLaunchCard({ day, view, dailyGoal, onChange }: { day?: DayRow; view: ReturnType<typeof dayView> | null; dailyGoal: number; onChange: (day: number, patch: Partial<DayRow>) => void }) {
+  if (!day || !view) return null;
   return (
-    <GlassCard>
-      <SectionTitle title="Calculadora de Alavancagem IA" subtitle="Simule risco antes de operar. Não altera sinais nem motores." right={<button type="button" onClick={onUseBankroll} className="rounded-full border border-neon-cyan/35 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-neon-cyan hover:bg-neon-cyan/10">Puxar da planilha</button>} />
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <MoneyField label="Banca atual" value={leverage.currentBankroll} onChange={(v) => onLeverageChange({ currentBankroll: v })} />
-          <MoneyField label="Banca desejada" value={leverage.desiredBankroll} onChange={(v) => onLeverageChange({ desiredBankroll: v })} />
-          <Field label="Prazo em dias"><input className={inputClass} type="number" value={leverage.daysDeadline} onChange={(e) => onLeverageChange({ daysDeadline: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} /></Field>
-          <MoneyField label="Entrada inicial" value={leverage.initialEntry} onChange={(v) => onLeverageChange({ initialEntry: v })} />
-          <Field label="Quantidade de gales"><select className={selectClass} value={leverage.galeLimit} onChange={(e) => onLeverageChange({ galeLimit: e.target.value as GaleLimit })}><option value="SG">Sem gale</option><option value="G1">G1</option><option value="G2">G2</option></select></Field>
-          <Field label="Multiplicador do gale"><input className={inputClass} type="number" step="0.1" value={leverage.galeMultiplier} onChange={(e) => onLeverageChange({ galeMultiplier: Math.max(1, Number(e.target.value) || 1) })} /></Field>
-          <MoneyField label="Stop win diário" value={leverage.dailyStopWin} onChange={(v) => onLeverageChange({ dailyStopWin: v })} />
-          <MoneyField label="Stop loss diário" value={leverage.dailyStopLoss} onChange={(v) => onLeverageChange({ dailyStopLoss: v })} />
-          <Field label="Máx. entradas por dia"><input className={inputClass} type="number" value={leverage.maxEntriesPerDay} onChange={(e) => onLeverageChange({ maxEntriesPerDay: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} /></Field>
-          <Field label="Assertividade estimada"><input className={inputClass} type="number" value={leverage.estimatedAccuracy} onChange={(e) => onLeverageChange({ estimatedAccuracy: clamp(Number(e.target.value), 0, 100) })} /></Field>
-          <Field label="Perfil"><select className={selectClass} value={leverage.profile} onChange={(e) => onLeverageChange({ profile: e.target.value as RiskProfile })}><option value="conservador">Conservador</option><option value="moderado">Moderado</option><option value="agressivo">Agressivo</option></select></Field>
-          <div className="rounded-2xl border border-warning/30 bg-warning/10 p-3 text-xs text-warning sm:col-span-2">Esta calculadora não garante resultado. Ela serve para controle de risco, disciplina e planejamento de banca.</div>
-        </div>
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"><MetricCard icon={<Calculator className="size-4" />} label="Lucro necessário" value={money(result.profitNeeded)} tone="blue" /><MetricCard icon={<CalendarDays className="size-4" />} label="Meta diária" value={money(result.dailyTarget)} tone={result.metaAggressive ? "amber" : "green"} /><MetricCard icon={<TrendingUp className="size-4" />} label="Crescimento" value={`${percent(result.growthPercent)}%`} tone="cyan" /><MetricCard icon={<ShieldAlert className="size-4" />} label="Risco por entrada" value={`${percent(result.riskPerEntryPercent)}%`} tone={riskTone(result.riskStatus)} /><MetricCard icon={<AlertTriangle className="size-4" />} label="Exposição com gale" value={money(result.totalExposure)} tone={riskTone(result.exposureStatus)} /><MetricCard icon={<TrendingDown className="size-4" />} label="Reds suportados" value={decimal(result.redsSupported)} tone={result.redsSupported <= 3 ? "red" : "green"} /></div>
-          <div className="rounded-2xl border border-border/70 bg-background/45 p-4"><div className="mb-2 flex items-center justify-between gap-2"><div className="text-[11px] font-black uppercase tracking-[0.18em] text-neon-cyan">Diagnóstico IA</div><AppBadge tone={riskTone(result.riskStatus)}>{result.riskStatusLabel}</AppBadge></div><div className="space-y-2 text-sm text-muted-foreground">{result.messages.map((m) => <p key={m}>{m}</p>)}</div></div>
-        </div>
+    <GlassCard className="border-neon-cyan/25">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <SectionTitle title="Lançamento de hoje" subtitle="Digite a operação do dia. A tela recalcula tudo na hora." />
+        <div className="flex flex-wrap items-center gap-2"><AppBadge tone="blue">{view.dateLabel}</AppBadge><StatusBadge status={view.status} /></div>
       </div>
-      <CoverageSimulator leverage={leverage} coverage={coverage} rows={coverageRows} onChange={onCoverageChange} />
+      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <PanelNumberField label="Entradas" value={day.entriesCount} onChange={(v) => onChange(day.day, { entriesCount: Math.max(0, Math.floor(v)) })} />
+        <PanelNumberField label="Greens" value={day.greens} onChange={(v) => onChange(day.day, { greens: Math.max(0, Math.floor(v)) })} tone="green" />
+        <PanelNumberField label="Reds" value={day.reds} onChange={(v) => onChange(day.day, { reds: Math.max(0, Math.floor(v)) })} tone="red" />
+        <PanelNumberField label="Empates" value={day.ties} onChange={(v) => onChange(day.day, { ties: Math.max(0, Math.floor(v)) })} tone="amber" />
+        <PanelMoneyField label="Depósito" value={day.deposits} onChange={(v) => onChange(day.day, { deposits: v })} />
+        <PanelMoneyField label="Saque" value={day.withdrawals} onChange={(v) => onChange(day.day, { withdrawals: v })} />
+        <PanelMoneyField label="Resultado do dia" value={day.dailyResult} onChange={(v) => onChange(day.day, { dailyResult: v })} tone={day.dailyResult >= 0 ? "green" : "red"} />
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1"><InlineStat label="Banca final" value={money(view.finalBankroll)} /><InlineStat label="Diferença da meta" value={money(view.goalDiff)} tone={view.goalDiff >= 0 ? "green" : "red"} /></div>
+      </div>
+      <div className="mt-3 grid gap-3 xl:grid-cols-[1fr_0.55fr]">
+        <Field label="Observação"><textarea className="min-h-20 w-full rounded-xl border border-border/70 bg-background/55 px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/70 focus:border-neon-cyan/60 focus:ring-2 focus:ring-neon-cyan/15" value={day.notes} onChange={(e) => onChange(day.day, { notes: e.target.value })} placeholder="O que aconteceu hoje?" /></Field>
+        <div className="rounded-2xl border border-border/70 bg-background/45 p-3 text-xs text-muted-foreground"><div className="font-black uppercase tracking-[0.16em] text-neon-cyan">Resumo do dia</div><p className="mt-2">Meta diária: <strong className="text-foreground">{money(dailyGoal)}</strong></p><p>Entradas registradas: <strong className="text-foreground">{day.entriesCount}</strong></p><p>Placar: <strong className="text-success">{day.greens} green</strong> / <strong className="text-destructive">{day.reds} red</strong> / <strong className="text-warning">{day.ties} empate</strong></p></div>
+      </div>
     </GlassCard>
   );
 }
 
+function PanelNumberField({ label, value, onChange, tone }: { label: string; value: number; onChange: (value: number) => void; tone?: "green" | "red" | "amber" }) { return <Field label={label}><input className={cn(inputClass, tone === "green" && "text-success", tone === "red" && "text-destructive", tone === "amber" && "text-warning")} type="number" step="1" value={Number.isFinite(value) ? value : 0} onFocus={(e) => e.currentTarget.select()} onChange={(e) => onChange(Number(e.target.value) || 0)} /></Field>; }
+function PanelMoneyField({ label, value, onChange, tone }: { label: string; value: number; onChange: (value: number) => void; tone?: "green" | "red" | "amber" }) { return <Field label={label}><CurrencyInput className={cn(inputClass, tone === "green" && "text-success", tone === "red" && "text-destructive", tone === "amber" && "text-warning")} value={value} onChange={onChange} /></Field>; }
+function LeverageCalculator({ leverage, coverage, result, coverageRows, onLeverageChange, onCoverageChange, onUseBankroll }: { leverage: LeverageState; coverage: CoverageState; result: ReturnType<typeof calculateLeverage>; coverageRows: CoverageRow[]; onLeverageChange: (patch: Partial<LeverageState>) => void; onCoverageChange: (patch: Partial<CoverageState>) => void; onUseBankroll: () => void }) {
+  return (
+    <GlassCard>
+      <SectionTitle title="Calculadora de Alavancagem IA" subtitle="Resumo de risco para decidir a mão antes de operar." right={<button type="button" onClick={onUseBankroll} className="rounded-full border border-neon-cyan/35 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-neon-cyan hover:bg-neon-cyan/10">Puxar da planilha</button>} />
+      <div className="grid gap-3 md:grid-cols-3">
+        <MetricCard icon={<Calculator className="size-4" />} label="Entrada sugerida" value={money(leverage.initialEntry)} tone="blue" />
+        <MetricCard icon={<ShieldAlert className="size-4" />} label="Risco" value={`${result.riskStatusLabel} · ${percent(result.riskPerEntryPercent)}%`} tone={riskTone(result.riskStatus)} />
+        <MetricCard icon={<TrendingDown className="size-4" />} label="Reds suportados" value={decimal(result.redsSupported)} tone={result.redsSupported <= 3 ? "red" : "green"} />
+      </div>
+      <div className="mt-3 rounded-2xl border border-border/70 bg-background/45 p-4"><div className="mb-2 flex items-center justify-between gap-2"><div className="text-[11px] font-black uppercase tracking-[0.18em] text-neon-cyan">Diagnóstico IA</div><AppBadge tone={riskTone(result.riskStatus)}>{result.riskStatusLabel}</AppBadge></div><div className="space-y-2 text-sm text-muted-foreground">{result.messages.slice(0, 3).map((m) => <p key={m}>{m}</p>)}</div></div>
+      <details className="mt-4 rounded-2xl border border-border/70 bg-background/35 p-3">
+        <summary className="cursor-pointer list-none text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground hover:text-neon-cyan">Ajustar simulação avançada</summary>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <MoneyField label="Banca atual" value={leverage.currentBankroll} onChange={(v) => onLeverageChange({ currentBankroll: v })} />
+          <MoneyField label="Banca desejada" value={leverage.desiredBankroll} onChange={(v) => onLeverageChange({ desiredBankroll: v })} />
+          <Field label="Prazo em dias"><input className={inputClass} type="number" value={leverage.daysDeadline} onChange={(e) => onLeverageChange({ daysDeadline: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} /></Field>
+          <MoneyField label="Entrada inicial" value={leverage.initialEntry} onChange={(v) => onLeverageChange({ initialEntry: v })} />
+          <Field label="Gale"><select className={selectClass} value={leverage.galeLimit} onChange={(e) => onLeverageChange({ galeLimit: e.target.value as GaleLimit })}><option value="SG">Sem gale</option><option value="G1">G1</option><option value="G2">G2</option></select></Field>
+          <Field label="Multiplicador"><input className={inputClass} type="number" step="0.1" value={leverage.galeMultiplier} onChange={(e) => onLeverageChange({ galeMultiplier: Math.max(1, Number(e.target.value) || 1) })} /></Field>
+          <MoneyField label="Stop win diário" value={leverage.dailyStopWin} onChange={(v) => onLeverageChange({ dailyStopWin: v })} />
+          <MoneyField label="Stop loss diário" value={leverage.dailyStopLoss} onChange={(v) => onLeverageChange({ dailyStopLoss: v })} />
+        </div>
+        <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3"><InlineStat label="Lucro necessário" value={money(result.profitNeeded)} tone="blue" /><InlineStat label="Meta diária" value={money(result.dailyTarget)} tone={result.metaAggressive ? "amber" : "green"} /><InlineStat label="Exposição com gale" value={money(result.totalExposure)} tone={riskTone(result.exposureStatus)} /></div>
+      </details>
+      <details className="mt-3 rounded-2xl border border-border/70 bg-background/35 p-3">
+        <summary className="cursor-pointer list-none text-[10px] font-black uppercase tracking-[0.18em] text-muted-foreground hover:text-neon-cyan">Simulador de cobertura de empate</summary>
+        <CoverageSimulator leverage={leverage} coverage={coverage} rows={coverageRows} onChange={onCoverageChange} />
+      </details>
+    </GlassCard>
+  );
+}
 function CoverageSimulator({ leverage, coverage, rows, onChange }: { leverage: LeverageState; coverage: CoverageState; rows: CoverageRow[]; onChange: (patch: Partial<CoverageState>) => void }) {
   return (
     <div className="mt-5 rounded-2xl border border-border/70 bg-background/45 p-4">
