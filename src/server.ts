@@ -7759,8 +7759,11 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   const dashboardWithVisibleNeuralSignal = exposeServerNeuralEntryAsCurrentSignal(
     dashboardWithNeuralEntry,
   );
+  const dashboardWithLateSignalGuard = acceptsCurrentCycle
+    ? guardLateServerNeuralSignal(dashboardWithVisibleNeuralSignal, currentDashboard)
+    : dashboardWithVisibleNeuralSignal;
   const dashboardWithTieScoreboard = trackServerTieRoundScoreboard(
-    dashboardWithVisibleNeuralSignal,
+    dashboardWithLateSignalGuard,
     currentDashboard,
     incomingRounds,
   );
@@ -8713,6 +8716,34 @@ function resolveSignalImmediatelyFromRound(
   }
 
   return buildResolvedSignalFromRound(previousSignal, latestRound, "red");
+}
+
+function guardLateServerNeuralSignal(
+  dashboard: LiveDashboardData,
+  previousDashboard: LiveDashboardData,
+): LiveDashboardData {
+  const signal = dashboard.currentSignal;
+  const guardedSignal = resolveLateSignalGuard(signal, dashboard.bettingTiming, previousDashboard.currentSignal);
+  if (guardedSignal === signal) return dashboard;
+
+  const hiddenLateEntry =
+    isServerEntrySide(signal.side) &&
+    (signal.status === "pending" || signal.status === "g1" || signal.status === "tie_watch") &&
+    guardedSignal.side === "NONE" &&
+    guardedSignal.status === "waiting";
+
+  let lateSignalHold = dashboard.lateSignalHold ?? null;
+  if (hiddenLateEntry && signal.status === "pending" && signalAllowsG1(signal.protection)) {
+    lateSignalHold = signal;
+  } else if (hiddenLateEntry) {
+    lateSignalHold = null;
+  }
+
+  return {
+    ...dashboard,
+    currentSignal: guardedSignal,
+    lateSignalHold,
+  };
 }
 
 function resolveLateSignalGuard(
