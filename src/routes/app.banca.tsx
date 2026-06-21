@@ -1,4 +1,4 @@
-﻿import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AlertTriangle, Banknote, Calculator, CalendarDays, CheckCircle2, PiggyBank, Save, ShieldAlert, TrendingDown, TrendingUp } from "lucide-react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -30,11 +30,38 @@ const pct = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFr
 function n(value: unknown) { const number = Number(value); return Number.isFinite(number) ? number : 0; }
 function clamp(value: number, min: number, max: number) { return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : min; }
 function money(value: number) { return currency.format(Number.isFinite(value) ? value : 0); }
+function moneyInputValue(value: number) { return new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0); }
+function normalizeMoneyDraft(value: string) {
+  const trimmed = value.trim();
+  const sign = trimmed.startsWith("-") ? "-" : "";
+  let body = trimmed.replace(/[^\d,.]/g, "");
+  if (!body.includes(",") && !body.includes(".")) body = body.replace(/^0+(?=\d)/, "");
+  return sign + body;
+}
+function parseMoneyDraft(value: string) {
+  const normalized = normalizeMoneyDraft(value).replace(/\./g, "").replace(",", ".");
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+}
 function percent(value: number) { return pct.format(Number.isFinite(value) ? value : 0); }
 function decimal(value: number) { return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(Number.isFinite(value) ? value : 0); }
 function daysInMonth(year: number, month: number) { return new Date(year, month, 0).getDate(); }
 function createDays(year: number, month: number): DayRow[] { return Array.from({ length: daysInMonth(year, month) }, (_, index) => ({ day: index + 1, entriesCount: 0, greens: 0, reds: 0, ties: 0, deposits: 0, withdrawals: 0, dailyResult: 0, notes: "" })); }
-function syncDays(entries: DayRow[] | undefined, year: number, month: number) { const byDay = new Map((entries || []).map((entry) => [entry.day, entry])); return createDays(year, month).map((entry) => ({ ...entry, ...byDay.get(entry.day), day: entry.day })); }
+function moneyNumber(value: unknown) { return Math.round(n(value) * 100) / 100; }
+function cleanDayRow(day: DayRow): DayRow { return { day: Math.max(1, Math.floor(n(day.day))), entriesCount: Math.max(0, Math.floor(n(day.entriesCount))), greens: Math.max(0, Math.floor(n(day.greens))), reds: Math.max(0, Math.floor(n(day.reds))), ties: Math.max(0, Math.floor(n(day.ties))), deposits: moneyNumber(day.deposits), withdrawals: moneyNumber(day.withdrawals), dailyResult: moneyNumber(day.dailyResult), notes: String(day.notes || "").slice(0, 600) }; }
+function normalizeDayPatch(current: DayRow, patch: Partial<DayRow>) {
+  const next = cleanDayRow({ ...current, ...patch });
+  const touchedResult = Object.prototype.hasOwnProperty.call(patch, "dailyResult");
+  const touchedCounters = Object.prototype.hasOwnProperty.call(patch, "greens") || Object.prototype.hasOwnProperty.call(patch, "reds") || Object.prototype.hasOwnProperty.call(patch, "ties");
+  if (touchedResult && current.greens === 0 && current.reds === 0 && current.ties === 0) {
+    if (next.dailyResult > 0) next.greens = 1;
+    if (next.dailyResult < 0) next.reds = 1;
+  }
+  if (touchedResult || touchedCounters) next.entriesCount = Math.max(next.entriesCount, next.greens + next.reds + next.ties);
+  return next;
+}
+function syncDays(entries: DayRow[] | undefined, year: number, month: number) { const byDay = new Map((entries || []).map((entry) => [entry.day, entry])); return createDays(year, month).map((entry) => cleanDayRow({ ...entry, ...byDay.get(entry.day), day: entry.day })); }
+function cleanMonthPayload(settings: Settings, days: DayRow[]): MonthPayload { const month = clamp(settings.month, 1, 12); const year = clamp(settings.year, 2000, 2100); return { month, year, startingBankroll: moneyNumber(settings.startingBankroll), monthlyGoal: moneyNumber(settings.monthlyGoal), dailyStopWin: moneyNumber(settings.dailyStopWin), dailyStopLoss: moneyNumber(settings.dailyStopLoss), days: syncDays(days.map(cleanDayRow), year, month), updatedAt: new Date().toISOString() }; }
 function sum(days: DayRow[], key: keyof Omit<DayRow, "notes">) { return days.reduce((total, day) => total + n(day[key]), 0); }
 function remainingDays(year: number, month: number, totalDays: number) { const now = new Date(); return now.getFullYear() === year && now.getMonth() + 1 === month ? Math.max(1, totalDays - now.getDate() + 1) : totalDays; }
 function statusFor(result: number, stopWin: number, stopLoss: number): DayStatus { if (stopWin > 0 && result >= stopWin) return "stop_win"; if (stopLoss > 0 && result <= -Math.abs(stopLoss)) return "stop_loss"; if (result > 0) return "positive"; if (result < 0) return "negative"; return "neutral"; }
@@ -86,8 +113,8 @@ function BankrollManagerPage() {
 
   function updateSetting(key: keyof Settings, value: number) { setSettings((current) => ({ ...current, [key]: Number.isFinite(value) ? value : 0 })); }
   function changePeriod(month: number, year: number) { setSettings((current) => ({ ...current, month, year })); }
-  function updateDay(day: number, patch: Partial<DayRow>) { setDays((current) => current.map((entry) => entry.day === day ? { ...entry, ...patch } : entry)); }
-  async function saveMonth() { setSaving(true); const payload: MonthPayload = { ...settings, days, updatedAt: new Date().toISOString() }; try { const saved = await saveBankrollMonth(session, payload); writeLocalBankroll(session.email, payload); setSaveStatus(saved ? "Operação salva no banco com segurança." : "Operação salva no backup local deste navegador."); } catch { writeLocalBankroll(session.email, payload); setSaveStatus("Servidor indisponível. Salvei um backup local para não perder seus dados."); } finally { setSaving(false); } }
+  function updateDay(day: number, patch: Partial<DayRow>) { setDays((current) => current.map((entry) => entry.day === day ? normalizeDayPatch(entry, patch) : entry)); }
+  async function saveMonth() { setSaving(true); const payload = cleanMonthPayload(settings, days); writeLocalBankroll(session.email, payload); try { const saved = await saveBankrollMonth(session, payload); setSaveStatus(saved ? "Operação salva no banco com segurança." : "Operação salva no backup local deste navegador."); } catch { setSaveStatus("Servidor indisponível. Salvei um backup local para não perder seus dados."); } finally { setSaving(false); } }
   function updateLeverage(patch: Partial<LeverageState>) { setLeverage((current) => { const next = { ...current, ...patch }; writeLocalLeverage(session.email, next); return next; }); }
   function applyBankrollToCalculator() { const next = leverageFromBankroll(settings, summary); setLeverage(next); writeLocalLeverage(session.email, next); }
 
@@ -144,9 +171,9 @@ function BankrollManagerPage() {
                 <EditNumber value={day.greens} onChange={(v) => updateDay(day.day, { greens: Math.max(0, Math.floor(v)) })} tone="green" />
                 <EditNumber value={day.reds} onChange={(v) => updateDay(day.day, { reds: Math.max(0, Math.floor(v)) })} tone="red" />
                 <EditNumber value={day.ties} onChange={(v) => updateDay(day.day, { ties: Math.max(0, Math.floor(v)) })} tone="amber" />
-                <EditNumber value={day.deposits} onChange={(v) => updateDay(day.day, { deposits: v })} />
-                <EditNumber value={day.withdrawals} onChange={(v) => updateDay(day.day, { withdrawals: v })} />
-                <EditNumber value={day.dailyResult} onChange={(v) => updateDay(day.day, { dailyResult: v })} tone={day.dailyResult >= 0 ? "green" : "red"} />
+                <EditMoney value={day.deposits} onChange={(v) => updateDay(day.day, { deposits: v })} />
+                <EditMoney value={day.withdrawals} onChange={(v) => updateDay(day.day, { withdrawals: v })} />
+                <EditMoney value={day.dailyResult} onChange={(v) => updateDay(day.day, { dailyResult: v })} tone={day.dailyResult >= 0 ? "green" : "red"} />
                 <td className="px-2 py-2 font-bold">{money(view.finalBankroll)}</td><td className="px-2 py-2 text-muted-foreground">{money(dailyGoal)}</td><td className={cn("px-2 py-2 font-bold", view.goalDiff >= 0 ? "text-success" : "text-destructive")}>{money(view.goalDiff)}</td><td className="px-2 py-2"><StatusBadge status={view.status} /></td>
                 <td className="rounded-r-xl px-2 py-2"><input className="h-9 w-56 rounded-lg border border-border/70 bg-background/50 px-2 text-xs outline-none focus:border-neon-cyan/60" value={day.notes} onChange={(e) => updateDay(day.day, { notes: e.target.value })} placeholder="Observação do dia" /></td>
               </tr>); })}</tbody>
@@ -212,8 +239,32 @@ function CoverageSimulator({ leverage, coverage, rows, onChange }: { leverage: L
 
 function MetricCard({ icon, label, value, tone }: { icon: ReactNode; label: string; value: string; tone: "cyan" | "blue" | "green" | "red" | "amber" }) { const tones = { cyan: "text-neon-cyan border-neon-cyan/25 bg-neon-cyan/10", blue: "text-neon-blue border-neon-blue/25 bg-neon-blue/10", green: "text-success border-success/25 bg-success/10", red: "text-destructive border-destructive/25 bg-destructive/10", amber: "text-warning border-warning/25 bg-warning/10" } as const; return <div className="rounded-2xl border border-border/70 bg-background/55 p-3"><div className={cn("mb-2 inline-flex size-8 items-center justify-center rounded-xl border", tones[tone])}>{icon}</div><div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{label}</div><div className={cn("mt-1 text-lg font-black", tones[tone].split(" ")[0])}>{value}</div></div>; }
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="block"><span className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{label}</span>{children}</label>; }
-function MoneyField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) { return <Field label={label}><input className={inputClass} type="number" inputMode="decimal" step="0.01" value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Number(e.target.value) || 0)} /></Field>; }
-function EditNumber({ value, onChange, tone }: { value: number; onChange: (value: number) => void; tone?: "green" | "red" | "amber" }) { return <td className="px-2 py-2"><input className={cn(compactInputClass, tone === "green" && "text-success", tone === "red" && "text-destructive", tone === "amber" && "text-warning")} type="number" step="0.01" value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Number(e.target.value) || 0)} /></td>; }
+function CurrencyInput({ value, onChange, className }: { value: number; onChange: (value: number) => void; className: string }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const displayValue = draft ?? moneyInputValue(value);
+  return (
+    <input
+      className={className}
+      type="text"
+      inputMode="decimal"
+      value={displayValue}
+      placeholder="0,00"
+      onFocus={(event) => {
+        setDraft(value === 0 ? "" : moneyInputValue(value));
+        window.requestAnimationFrame(() => event.currentTarget.select());
+      }}
+      onChange={(event) => {
+        const nextDraft = normalizeMoneyDraft(event.target.value);
+        setDraft(nextDraft);
+        onChange(parseMoneyDraft(nextDraft));
+      }}
+      onBlur={() => setDraft(null)}
+    />
+  );
+}
+function MoneyField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) { return <Field label={label}><CurrencyInput className={inputClass} value={value} onChange={onChange} /></Field>; }
+function EditMoney({ value, onChange, tone }: { value: number; onChange: (value: number) => void; tone?: "green" | "red" | "amber" }) { return <td className="px-2 py-2"><CurrencyInput className={cn(compactInputClass, tone === "green" && "text-success", tone === "red" && "text-destructive", tone === "amber" && "text-warning")} value={value} onChange={onChange} /></td>; }
+function EditNumber({ value, onChange, tone }: { value: number; onChange: (value: number) => void; tone?: "green" | "red" | "amber" }) { return <td className="px-2 py-2"><input className={cn(compactInputClass, tone === "green" && "text-success", tone === "red" && "text-destructive", tone === "amber" && "text-warning")} type="number" step="1" value={Number.isFinite(value) ? value : 0} onFocus={(e) => e.currentTarget.select()} onChange={(e) => onChange(Number(e.target.value) || 0)} /></td>; }
 function InlineStat({ label, value, tone = "muted" }: { label: string; value: string; tone?: "green" | "red" | "amber" | "blue" | "muted" }) { const toneClass = { green: "text-success", red: "text-destructive", amber: "text-warning", blue: "text-neon-cyan", muted: "text-foreground" }[tone]; return <div className="rounded-xl border border-border/70 bg-background/45 px-3 py-2"><div className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{label}</div><div className={cn("mt-1 text-sm font-black", toneClass)}>{value}</div></div>; }
 function SummaryPill({ label, value }: { label: string; value: string }) { return <div className="rounded-xl border border-border/70 bg-background/45 px-3 py-2"><div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{label}</div><div className="mt-1 text-base font-black text-foreground">{value}</div></div>; }
 function StatusBadge({ status }: { status: DayStatus }) { const config = { stop_win: ["green", "Stop win atingido"], stop_loss: ["red", "Stop loss atingido"], positive: ["green", "Positivo"], negative: ["red", "Negativo"], neutral: ["muted", "Neutro"] } as const; const [tone, label] = config[status]; return <AppBadge tone={tone}>{label}</AppBadge>; }
