@@ -320,7 +320,6 @@ const ENGINE_WEEKLY_STATS_TABLE = "engine_weekly_stats";
 const ENGINE_MONTHLY_STATS_TABLE = "engine_monthly_stats";
 const ENGINE_YEARLY_STATS_TABLE = "engine_yearly_stats";
 const ENGINE_SIGNAL_EVENTS_TABLE = "engine_signal_events";
-const BANKROLL_MONTHLY_TABLE = "user_bankroll_monthly";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const DEFAULT_CALENDAR_ENGINE_KEY: CalendarEngineKey = "todos";
 const CALENDAR_ENGINE_KEYS: CalendarEngineKey[] = [
@@ -2991,7 +2990,6 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/calendar/neural" ||
       url.pathname === "/calendar/neural/backfill" ||
       url.pathname === "/calendar/neural/reset" ||
-      url.pathname === "/bankroll/month" ||
       url.pathname === "/validator/validate" ||
       url.pathname === "/validator/round-history" ||
       url.pathname === "/validator/patterns" ||
@@ -3015,9 +3013,6 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   const neuralCalendarResponse = await handleNeuralCalendarRequest(request, url, env);
   if (neuralCalendarResponse) return neuralCalendarResponse;
-
-  const bankrollResponse = await handleBankrollRequest(request, url, env);
-  if (bankrollResponse) return bankrollResponse;
 
   const validatorStorageResponse = await handleValidatorStorageRequest(request, url, env);
   if (validatorStorageResponse) return validatorStorageResponse;
@@ -7953,9 +7948,9 @@ function trackServerNeuralEntryLifecycle(
   const previousState = normalizeServerNeuralEntryState(
     previousDashboard.neuralEntryState ?? dashboard.neuralEntryState,
   );
-  const previousResult = normalizeServerNeuralEntryLastResult(
-    previousDashboard.neuralEntryLastResult ?? dashboard.neuralEntryLastResult,
-  );
+  const incomingResult = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
+  const previousResult =
+    incomingResult ?? normalizeServerNeuralEntryLastResult(previousDashboard.neuralEntryLastResult);
 
   if (previousState) {
     let state = previousState;
