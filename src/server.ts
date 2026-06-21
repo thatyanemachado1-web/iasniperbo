@@ -320,6 +320,7 @@ const ENGINE_WEEKLY_STATS_TABLE = "engine_weekly_stats";
 const ENGINE_MONTHLY_STATS_TABLE = "engine_monthly_stats";
 const ENGINE_YEARLY_STATS_TABLE = "engine_yearly_stats";
 const ENGINE_SIGNAL_EVENTS_TABLE = "engine_signal_events";
+const BANKROLL_MONTHLY_TABLE = "user_bankroll_monthly";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const DEFAULT_CALENDAR_ENGINE_KEY: CalendarEngineKey = "todos";
 const CALENDAR_ENGINE_KEYS: CalendarEngineKey[] = [
@@ -2990,6 +2991,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/calendar/neural" ||
       url.pathname === "/calendar/neural/backfill" ||
       url.pathname === "/calendar/neural/reset" ||
+      url.pathname === "/bankroll/month" ||
       url.pathname === "/validator/validate" ||
       url.pathname === "/validator/round-history" ||
       url.pathname === "/validator/patterns" ||
@@ -3013,6 +3015,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   const neuralCalendarResponse = await handleNeuralCalendarRequest(request, url, env);
   if (neuralCalendarResponse) return neuralCalendarResponse;
+
+  const bankrollResponse = await handleBankrollRequest(request, url, env);
+  if (bankrollResponse) return bankrollResponse;
 
   const validatorStorageResponse = await handleValidatorStorageRequest(request, url, env);
   if (validatorStorageResponse) return validatorStorageResponse;
@@ -6116,6 +6121,168 @@ function summarizeValidatorResultForResponse(result: ValidatorResult): Validator
 
 function isDefaultCalendarHourlyStat(row: NeuralCalendarHourlyStat) {
   return !row.engineKey || row.engineKey === DEFAULT_CALENDAR_ENGINE_KEY;
+}
+
+
+async function handleBankrollRequest(request: Request, url: URL, env: unknown) {
+  if (url.pathname !== "/bankroll/month") return null;
+  if (request.method === "OPTIONS") return json(null, 204);
+
+  const userId = await bankrollRequestUserId(request, url, env);
+  if (!userId) return json({ error: "Nao autorizado." }, 401);
+
+  if (request.method === "GET") {
+    const month = clampBankrollMonth(url.searchParams.get("month"));
+    const year = clampBankrollYear(url.searchParams.get("year"));
+    if (!month || !year) return json({ error: "Periodo invalido." }, 400);
+    const row = await loadBankrollMonthRow(env, userId, month, year);
+    return json({ month: row ? publicBankrollMonth(row, userId, month, year) : null });
+  }
+
+  if (request.method === "POST" || request.method === "PUT") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const normalized = normalizeBankrollMonthPayload(body, userId);
+    if (!normalized) return json({ error: "Dados invalidos." }, 400);
+    const existing = await loadBankrollMonthRow(env, userId, normalized.month, normalized.year);
+    const now = new Date().toISOString();
+    const row = bankrollMonthToRow(normalized, userId, readString(existing, "created_at") || now, now);
+    const saved = await persistSupabaseRow(env, BANKROLL_MONTHLY_TABLE, row, "id");
+    if (!saved) return json({ error: "Nao foi possivel salvar a banca no banco." }, 500);
+    return json({ ok: true, month: publicBankrollMonth(row, userId, normalized.month, normalized.year) });
+  }
+
+  return json({ error: "Metodo nao permitido." }, 405);
+}
+
+async function bankrollRequestUserId(request: Request, url: URL, env: unknown) {
+  const token = getBearerToken(request);
+  const session = token ? await verifySessionToken(env, token) : null;
+  if (session) {
+    const bindingOk = await sessionMatchesRequestBinding(env, request, session);
+    if (bindingOk && (session.scope === "client" || session.scope === "owner" || session.scope === "admin_approver")) {
+      return normalizeBankrollUserId(session.email);
+    }
+  }
+
+  if ((await isDashboardAuthorized(request, url, env)) && isLocalDevelopmentRequest(request)) {
+    return normalizeBankrollUserId(request.headers.get("x-bankroll-user-id") || "local-user");
+  }
+
+  return "";
+}
+
+function normalizeBankrollUserId(value: unknown) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function bankrollMonthId(userId: string, month: number, year: number) {
+  return userId + ":" + year + ":" + String(month).padStart(2, "0");
+}
+
+function clampBankrollMonth(value: unknown) {
+  const month = Math.floor(Number(value));
+  return month >= 1 && month <= 12 ? month : 0;
+}
+
+function clampBankrollYear(value: unknown) {
+  const year = Math.floor(Number(value));
+  return year >= 2000 && year <= 2100 ? year : 0;
+}
+
+async function loadBankrollMonthRow(env: unknown, userId: string, month: number, year: number) {
+  const id = bankrollMonthId(userId, month, year);
+  const rows = await fetchSupabaseRows(
+    env,
+    BANKROLL_MONTHLY_TABLE,
+    "select=*&id=eq." + encodeURIComponent(id) + "&limit=1",
+  );
+  return rows[0] || null;
+}
+
+type ServerBankrollMonth = {
+  month: number;
+  year: number;
+  startingBankroll: number;
+  monthlyGoal: number;
+  dailyStopWin: number;
+  dailyStopLoss: number;
+  days: Record<string, unknown>[];
+};
+
+function normalizeBankrollMonthPayload(value: unknown, userId: string): ServerBankrollMonth | null {
+  const record = readRecord(value);
+  const month = clampBankrollMonth(record.month);
+  const year = clampBankrollYear(record.year);
+  if (!userId || !month || !year) return null;
+  const totalDays = new Date(year, month, 0).getDate();
+  const days = Array.isArray(record.days)
+    ? record.days.map(readRecord).map((day) => normalizeBankrollDay(day, totalDays)).filter(Boolean) as Record<string, unknown>[]
+    : [];
+  return {
+    month,
+    year,
+    startingBankroll: finiteBankrollNumber(record.startingBankroll),
+    monthlyGoal: finiteBankrollNumber(record.monthlyGoal),
+    dailyStopWin: finiteBankrollNumber(record.dailyStopWin),
+    dailyStopLoss: finiteBankrollNumber(record.dailyStopLoss),
+    days,
+  };
+}
+
+function normalizeBankrollDay(day: Record<string, unknown>, totalDays: number) {
+  const dayNumber = Math.floor(Number(day.day));
+  if (dayNumber < 1 || dayNumber > totalDays) return null;
+  return {
+    day: dayNumber,
+    entriesCount: Math.max(0, Math.floor(Number(day.entriesCount) || 0)),
+    greens: Math.max(0, Math.floor(Number(day.greens) || 0)),
+    reds: Math.max(0, Math.floor(Number(day.reds) || 0)),
+    ties: Math.max(0, Math.floor(Number(day.ties) || 0)),
+    deposits: finiteBankrollNumber(day.deposits),
+    withdrawals: finiteBankrollNumber(day.withdrawals),
+    dailyResult: finiteBankrollNumber(day.dailyResult),
+    notes: readString(day, "notes").slice(0, 600),
+  };
+}
+
+function finiteBankrollNumber(value: unknown) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round(number * 100) / 100;
+}
+
+function bankrollMonthToRow(month: ServerBankrollMonth, userId: string, createdAt: string, updatedAt: string) {
+  return {
+    id: bankrollMonthId(userId, month.month, month.year),
+    user_id: userId,
+    month: month.month,
+    year: month.year,
+    starting_bankroll: month.startingBankroll,
+    monthly_goal: month.monthlyGoal,
+    daily_stop_win: month.dailyStopWin,
+    daily_stop_loss: month.dailyStopLoss,
+    days_json: month.days,
+    created_at: createdAt,
+    updated_at: updatedAt,
+  };
+}
+
+function publicBankrollMonth(row: Record<string, unknown>, userId: string, fallbackMonth: number, fallbackYear: number) {
+  const month = clampBankrollMonth(row.month) || fallbackMonth;
+  const year = clampBankrollYear(row.year) || fallbackYear;
+  const daysJson = row.days_json;
+  return {
+    id: readString(row, "id") || bankrollMonthId(userId, month, year),
+    userId,
+    month,
+    year,
+    startingBankroll: finiteBankrollNumber(row.starting_bankroll),
+    monthlyGoal: finiteBankrollNumber(row.monthly_goal),
+    dailyStopWin: finiteBankrollNumber(row.daily_stop_win),
+    dailyStopLoss: finiteBankrollNumber(row.daily_stop_loss),
+    days: Array.isArray(daysJson) ? daysJson.map(readRecord) : [],
+    updatedAt: readString(row, "updated_at"),
+  };
 }
 
 function defaultCalendarHourlyStats(rows = liveNeuralCalendarHourlyStats) {
