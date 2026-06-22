@@ -7912,16 +7912,22 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
   };
 
-  const dashboardWithNeuralEntry = trackServerNeuralEntryLifecycle(
-    nextDashboard,
-    currentDashboard,
-    incomingLatestRound,
-    receivedNewRound,
-  );
-  const dashboardWithVisibleNeuralSignal = exposeServerNeuralEntryAsCurrentSignal(
-    dashboardWithNeuralEntry,
-  );
-  const dashboardWithLateSignalGuard = acceptsCurrentCycle
+  const hasIncomingNeuralLifecycle =
+    acceptsCurrentCycle &&
+    (Object.prototype.hasOwnProperty.call(incoming, "neuralEntryState") ||
+      Object.prototype.hasOwnProperty.call(incoming, "neuralEntryLastResult"));
+  const dashboardWithNeuralEntry = hasIncomingNeuralLifecycle
+    ? nextDashboard
+    : trackServerNeuralEntryLifecycle(
+        nextDashboard,
+        currentDashboard,
+        incomingLatestRound,
+        receivedNewRound,
+      );
+  const dashboardWithVisibleNeuralSignal = hasIncomingNeuralLifecycle
+    ? dashboardWithNeuralEntry
+    : exposeServerNeuralEntryAsCurrentSignal(dashboardWithNeuralEntry);
+  const dashboardWithLateSignalGuard = acceptsCurrentCycle && !hasIncomingNeuralLifecycle
     ? guardLateServerNeuralSignal(dashboardWithVisibleNeuralSignal, currentDashboard)
     : dashboardWithVisibleNeuralSignal;
   const dashboardWithTieScoreboard = trackServerTieRoundScoreboard(
