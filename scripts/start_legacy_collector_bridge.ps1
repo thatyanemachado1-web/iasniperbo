@@ -212,9 +212,7 @@ function Test-LegacyCollectorFresh($Token) {
     $failures = 1
     if ($state -and $state.failures) { $failures = [int]$state.failures + 1 }
     Write-StaleState "dashboard-failure" $now $failures
-    if ($failures -ge 3) {
-      return [pscustomobject]@{ ShouldRestart = $true; Reason = "legacy-dashboard-failures-$failures" }
-    }
+    Write-StartupLog "legacy collector dashboard unavailable failures=$failures keeping collector/browser alive"
     return [pscustomobject]@{ ShouldRestart = $false; Reason = "legacy-dashboard-failure-$failures" }
   }
 
@@ -294,6 +292,10 @@ if ($freshness.ShouldRestart) {
 
 $collectorProcesses = Get-CollectorProcesses
 $legacyListenerPid = Get-LegacyApiListenerPid
+if ($collectorProcesses.Count -gt 1 -and $legacyListenerPid) {
+  $collectorPidText = ($collectorProcesses.ProcessId -join ",")
+  Write-StartupLog "legacy collector duplicate detected listener=$legacyListenerPid pids=$collectorPidText keeping all alive to avoid closing browser"
+}
 $legacyDashboardReady = Test-Url "http://127.0.0.1:$LegacyApiPort/dashboard" $legacyToken
 if ($collectorProcesses.Count -eq 0 -and -not $legacyListenerPid -and -not $legacyDashboardReady) {
   Write-StartupLog "starting legacy collector isolated port=$LegacyApiPort"
@@ -328,7 +330,7 @@ if ($bridgeProcesses.Count -eq 0 -and -not $bridgeLogFresh) {
   Write-StartupLog "starting collector bridge $LegacyApiPort -> $SignalsApiPort"
   $bridgeInfo = New-Object System.Diagnostics.ProcessStartInfo
   $bridgeInfo.FileName = "python.exe"
-  $bridgeInfo.Arguments = "scripts\official_dashboard_publisher.py --env-file `"$LocalEnvPath`" --local-url `"http://127.0.0.1:$LegacyApiPort/dashboard`" --remote-base-url `"http://127.0.0.1:$SignalsApiPort`" --remote-url `"http://127.0.0.1:$SignalsApiPort/dashboard`" --interval 0.7 --log-file legacy_collector_bridge.log"
+  $bridgeInfo.Arguments = "scripts\official_dashboard_publisher.py --env-file `"$LocalEnvPath`" --local-url `"http://127.0.0.1:$LegacyApiPort/dashboard`" --remote-base-url `"http://127.0.0.1:$SignalsApiPort`" --remote-url `"http://127.0.0.1:$SignalsApiPort/dashboard`" --interval 0.35 --repeat-interval 1.0 --remote-timeout 1.5 --urgent-retry-interval 0.35 --non-entry-urgent-interval 1.0 --urgent-signal --log-file legacy_collector_bridge.log"
   $bridgeInfo.WorkingDirectory = $ProjectRoot
   $bridgeInfo.UseShellExecute = $false
   $bridgeInfo.CreateNoWindow = $true
