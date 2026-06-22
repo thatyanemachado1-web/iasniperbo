@@ -14584,13 +14584,13 @@ function json(data: unknown, status = 200) {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store, no-cache, must-revalidate, max-age=0",
+      "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0",
       "cdn-cache-control": "no-store",
       "cloudflare-cdn-cache-control": "no-store",
       "surrogate-control": "no-store",
       pragma: "no-cache",
       expires: "0",
-      vary: "*",
+      vary: "Authorization",
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
       "access-control-allow-headers":
