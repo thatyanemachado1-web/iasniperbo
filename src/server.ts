@@ -3189,7 +3189,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
         "persistir rodada e monitorar sinais",
       );
     }
-    if (url.pathname === "/dashboard/publish") {
+    if (url.pathname === "/dashboard/publish" || url.pathname === "/dashboard/signal") {
       const saveStatus = await saveStateTask;
       return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
     }
