@@ -62,7 +62,7 @@ export function SurfAlertCard({
               Surf Analyzer
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
-              Fase da mesa, forÃ§a e risco contrÃ¡rio.
+              Fase da mesa, força e risco contrário.
             </div>
           </div>
           <div className="flex max-w-[54%] shrink-0 flex-wrap items-center justify-end gap-1">
@@ -84,7 +84,7 @@ export function SurfAlertCard({
       ) : (
         <SectionTitle
           title="Surf Analyzer"
-          subtitle="Fase da mesa, forÃ§a e risco contrÃ¡rio."
+          subtitle="Fase da mesa, força e risco contrário."
           right={
             <div className="flex shrink-0 items-center gap-1.5">
               <AppBadge tone={strengthBand.tone} pulse={enabled && alert.surf_alert}>
@@ -132,7 +132,7 @@ export function SurfAlertCard({
             <div className="grid grid-cols-2 gap-2 text-xs">
               <Metric
                 icon={<Activity className="size-3.5" />}
-                label="ForÃ§a"
+                label="Força"
                 value={`${confidence}%`}
                 tone={strengthBand.tone}
               />
@@ -155,9 +155,9 @@ export function SurfAlertCard({
 
         <div
           className={cn(
-            "mt-3 overflow-hidden rounded-2xl border bg-background/42 p-3 text-center shadow-[inset_0_0_28px_rgba(0,229,255,0.05)]",
+            "mt-2 overflow-hidden rounded-xl border bg-background/42 p-2.5 text-center shadow-[inset_0_0_28px_rgba(0,229,255,0.05)]",
             surfDecision.borderClass,
-            compact && "mt-2 p-2.5",
+            compact && "mt-2 p-2",
           )}
         >
           <div className="flex items-center justify-center gap-2">
@@ -166,13 +166,13 @@ export function SurfAlertCard({
               {surfDecision.kicker}
             </div>
           </div>
-          <div className={cn("mt-1 text-xl font-black uppercase leading-none", surfDecision.textClass)}>
+          <div className={cn("mt-1 text-lg font-black uppercase leading-none", surfDecision.textClass)}>
             {surfDecision.action}
           </div>
-          <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <div className="mt-1 text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
             {surfDecision.title}
           </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
+          <div className="mt-1 text-[10px] text-muted-foreground">
             Forca {confidence}% · Risco de quebra {breakRisk}% · {riskBand.label}
           </div>
         </div>
@@ -208,7 +208,7 @@ export function SurfAlertCard({
 
         <div className={cn("mt-3 text-[11px] text-muted-foreground", compact && "mt-2")}>
           <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">Como usar: </span>
-          mostra tendÃªncia. SÃ³ seguir o lado do Surf quando o risco de quebra estiver controlado.
+          mostra tendência. Só seguir o lado do Surf quando o risco de quebra estiver controlado.
         </div>
       </div>
 
@@ -221,7 +221,7 @@ export function SurfAlertCard({
       {locked && (
         <PremiumLock
           title="Surf Analyzer Premium"
-          description="Leitura de surf e risco contrÃ¡rio em tempo real bloqueados"
+          description="Leitura de surf e risco contrário em tempo real bloqueados"
         />
       )}
     </GlassCard>
@@ -233,7 +233,7 @@ function buildSurfDecision(confidence: number, side: string) {
 
   if (confidence >= 89 && sideLabel !== "AGUARDAR") {
     return {
-      kicker: "Decisao do Surf",
+      kicker: "Decisão do Surf",
       title: "Forte para surf",
       action: `Seguir ${sideLabel}`,
       borderClass: "border-success/35 bg-success/10",
@@ -244,8 +244,8 @@ function buildSurfDecision(confidence: number, side: string) {
 
   if (confidence >= 85) {
     return {
-      kicker: "Decisao do Surf",
-      title: "Surf em observacao",
+      kicker: "Decisão do Surf",
+      title: "Surf em observação",
       action: "Aguardar",
       borderClass: "border-warning/35 bg-warning/10",
       iconClass: "text-warning",
@@ -254,9 +254,9 @@ function buildSurfDecision(confidence: number, side: string) {
   }
 
   return {
-    kicker: "Decisao do Surf",
+    kicker: "Decisão do Surf",
     title: "Risco de quebra",
-    action: "Nao seguir",
+    action: "Não seguir",
     borderClass: "border-destructive/35 bg-destructive/10",
     iconClass: "text-destructive",
     textClass: "text-destructive",
@@ -268,12 +268,12 @@ function SurfMaximaPanel({ snapshot }: { snapshot: DailySurfMaxSnapshot }) {
   const summary =
     best.value > 0
       ? `Maior surf detectado hoje: ${best.label} com ${best.value} seguidos`
-      : "Aguardando rodadas de hoje para calcular a maxima.";
+      : "Aguardando rodadas de hoje para calcular a máxima.";
 
   return (
     <div className="rounded-xl border border-neon-cyan/12 bg-background/24 p-2">
       <div className="text-[9px] font-black uppercase tracking-[0.16em] text-neon-cyan">
-        Maxima do Surf Hoje
+        Máxima do Surf Hoje
       </div>
       <div className="mt-1 text-[10px] font-semibold leading-snug text-muted-foreground">
         {summary}

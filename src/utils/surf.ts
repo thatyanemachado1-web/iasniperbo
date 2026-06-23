@@ -1,4 +1,4 @@
-﻿import type { SignalSide, SurfAlert, SurfEntrySummary } from "@/types/dashboard";
+import type { SignalSide, SurfAlert, SurfEntrySummary } from "@/types/dashboard";
 
 type BadgeTone = "blue" | "purple" | "green" | "red" | "amber" | "gold" | "muted";
 
@@ -8,24 +8,22 @@ export function clampPercent(value: number) {
 
 export function surfRiskBand(risk: number): { label: string; tone: BadgeTone; status: string } {
   const value = clampPercent(risk);
-  if (value <= 25) return { label: "BAIXO", tone: "green", status: "Quebra pouco provÃ¡vel agora." };
-  if (value <= 45) return { label: "OBSERVAÃ‡ÃƒO", tone: "amber", status: "CorreÃ§Ãµes curtas possÃ­veis." };
-  if (value <= 65) return { label: "MÃ‰DIO", tone: "amber", status: "Roads pedem cautela tÃ©cnica." };
+  if (value <= 25) return { label: "BAIXO", tone: "green", status: "Quebra pouco provável agora." };
+  if (value <= 45) return { label: "OBSERVAÇÃO", tone: "amber", status: "Correções curtas possíveis." };
+  if (value <= 65) return { label: "MÉDIO", tone: "amber", status: "Roads pedem cautela técnica." };
   if (value <= 85) return { label: "ALTO", tone: "red", status: "Quebra ou virada em monitoramento." };
   return { label: "MUITO ALTO", tone: "red", status: "Estrutura muito pressionada para quebra." };
 }
-
 export function surfStrengthBand(confidence: number): { label: string; tone: BadgeTone; status: string } {
   const value = clampPercent(confidence);
   if (value >= 89) {
-    return { label: "FORTE PARA SURF", tone: "green", status: "Forca suficiente para seguir o lado do surf." };
+    return { label: "FORTE PARA SURF", tone: "green", status: "Força suficiente para seguir o lado do surf." };
   }
   if (value >= 85) {
-    return { label: "SURF EM OBSERVACAO", tone: "amber", status: "Aguardar mais uma casa antes de seguir." };
+    return { label: "SURF EM OBSERVAÇÃO", tone: "amber", status: "Aguardar mais uma casa antes de seguir." };
   }
-  return { label: "RISCO DE QUEBRA", tone: "red", status: "Nao seguir surf agora." };
+  return { label: "RISCO DE QUEBRA", tone: "red", status: "Não seguir surf agora." };
 }
-
 export function surfOppositeRiskLevel(risk: number): SurfEntrySummary["oppositeRiskLevel"] {
   const value = clampPercent(risk);
   if (value <= 30) return "BAIXO";
@@ -41,7 +39,7 @@ export function buildSurfEntrySummary(
     return {
       oppositeRisk: 0,
       oppositeRiskLevel: "BAIXO",
-      status: "Sem leitura de surf relevante atÃ© G1.",
+      status: "Sem leitura de surf relevante até G1.",
     };
   }
 
@@ -66,14 +64,14 @@ export function buildSurfEntrySummary(
 
   risk = clampPercent(risk);
 
-  let status = "Sem risco relevante atÃ© G1.";
+  let status = "Sem risco relevante até G1.";
   if (alignedWithEntry) status = "Surf alinhado com a entrada.";
-  if (againstEntry && phase === "PRE_SURF") status = "AtenÃ§Ã£o: prÃ©-surf contra a entrada.";
-  if (againstEntry && phase === "CONTINUIDADE") status = "PossÃ­vel continuidade contra a entrada.";
+  if (againstEntry && phase === "PRE_SURF") status = "Atenção: pré-surf contra a entrada.";
+  if (againstEntry && phase === "CONTINUIDADE") status = "Possível continuidade contra a entrada.";
   if (againstEntry && ["SURF_FORTE", "SURF_EXTREMO", "RISCO_QUEBRA", "VIRADA_OUTRO_LADO", "POS_MANIPULACAO"].includes(phase)) {
-    status = "PossÃ­vel virada contra a entrada.";
+    status = "Possível virada contra a entrada.";
   }
-  if (phase === "SEM_RISCO" || surfSide === "NONE") status = "Sem risco relevante atÃ© G1.";
+  if (phase === "SEM_RISCO" || surfSide === "NONE") status = "Sem risco relevante até G1.";
 
   return {
     oppositeRisk: risk,
