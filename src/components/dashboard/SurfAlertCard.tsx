@@ -1,4 +1,4 @@
-﻿import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
+import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
@@ -155,24 +155,25 @@ export function SurfAlertCard({
 
         <div
           className={cn(
-            "mt-3 rounded-xl border bg-background/30 p-3 text-xs",
+            "mt-3 overflow-hidden rounded-2xl border bg-background/42 p-3 text-center shadow-[inset_0_0_28px_rgba(0,229,255,0.05)]",
             surfDecision.borderClass,
             compact && "mt-2 p-2.5",
           )}
         >
-          <div className="flex items-start gap-2">
-            <Target className={cn("mt-0.5 size-3.5", surfDecision.iconClass)} />
-            <div className="min-w-0">
-              <div className={cn("text-[10px] font-black uppercase tracking-[0.16em]", surfDecision.textClass)}>
-                {surfDecision.title}
-              </div>
-              <div className="mt-1 text-sm font-black uppercase leading-tight text-foreground">
-                {surfDecision.action}
-              </div>
-              <div className="mt-1 text-[11px] text-muted-foreground">
-                Forca {confidence}% · Quebra {breakRisk}% {riskBand.label}
-              </div>
+          <div className="flex items-center justify-center gap-2">
+            <Target className={cn("size-3.5", surfDecision.iconClass)} />
+            <div className={cn("text-[9px] font-black uppercase tracking-[0.28em]", surfDecision.textClass)}>
+              {surfDecision.kicker}
             </div>
+          </div>
+          <div className={cn("mt-1 text-xl font-black uppercase leading-none", surfDecision.textClass)}>
+            {surfDecision.action}
+          </div>
+          <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            {surfDecision.title}
+          </div>
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            Forca {confidence}% · Risco de quebra {breakRisk}% · {riskBand.label}
           </div>
         </div>
 
@@ -232,9 +233,10 @@ function buildSurfDecision(confidence: number, side: string) {
 
   if (confidence >= 89 && sideLabel !== "AGUARDAR") {
     return {
+      kicker: "Decisao do Surf",
       title: "Forte para surf",
       action: `Seguir ${sideLabel}`,
-      borderClass: "border-success/25",
+      borderClass: "border-success/35 bg-success/10",
       iconClass: "text-success",
       textClass: "text-success",
     };
@@ -242,18 +244,20 @@ function buildSurfDecision(confidence: number, side: string) {
 
   if (confidence >= 85) {
     return {
+      kicker: "Decisao do Surf",
       title: "Surf em observacao",
-      action: "Aguardar mais uma casa",
-      borderClass: "border-warning/25",
+      action: "Aguardar",
+      borderClass: "border-warning/35 bg-warning/10",
       iconClass: "text-warning",
       textClass: "text-warning",
     };
   }
 
   return {
+    kicker: "Decisao do Surf",
     title: "Risco de quebra",
-    action: "Nao seguir surf agora",
-    borderClass: "border-destructive/25",
+    action: "Nao seguir",
+    borderClass: "border-destructive/35 bg-destructive/10",
     iconClass: "text-destructive",
     textClass: "text-destructive",
   };
