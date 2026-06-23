@@ -41,7 +41,7 @@ export function SurfAlertCard({
       : strengthBand.tone === "amber"
         ? "border-warning/35"
         : "border-neon-cyan/30";
-  const surfDecision = buildSurfDecision(confidence, dominantSide);
+  const surfDecision = buildSurfDecision(confidence, breakRisk, dominantSide);
   const enabled = toggles?.surfAnalyzer !== false;
 
   return (
@@ -228,7 +228,7 @@ export function SurfAlertCard({
   );
 }
 
-function buildSurfDecision(confidence: number, side: string) {
+function buildSurfDecision(confidence: number, breakRisk: number, side: string) {
   const sideLabel = side === "BANKER" || side === "PLAYER" ? side : "AGUARDAR";
 
   if (confidence >= 89 && sideLabel !== "AGUARDAR") {
@@ -253,13 +253,24 @@ function buildSurfDecision(confidence: number, side: string) {
     };
   }
 
+  if (breakRisk >= 66) {
+    return {
+      kicker: "Decisão do Surf",
+      title: "Risco de quebra",
+      action: "Não seguir",
+      borderClass: "border-destructive/35 bg-destructive/10",
+      iconClass: "text-destructive",
+      textClass: "text-destructive",
+    };
+  }
+
   return {
     kicker: "Decisão do Surf",
-    title: "Risco de quebra",
-    action: "Não seguir",
-    borderClass: "border-destructive/35 bg-destructive/10",
-    iconClass: "text-destructive",
-    textClass: "text-destructive",
+    title: "Sem surf limpo",
+    action: "Aguardar",
+    borderClass: "border-neon-cyan/20 bg-secondary/20",
+    iconClass: "text-neon-cyan",
+    textClass: "text-foreground",
   };
 }
 function SurfMaximaPanel({ snapshot }: { snapshot: DailySurfMaxSnapshot }) {
