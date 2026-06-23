@@ -1,9 +1,8 @@
-import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
+﻿import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
-import { buildSurfCopy } from "@/lib/operationalCopy";
 import { cn } from "@/lib/utils";
 import type { DailySurfMaxSnapshot, DailySurfSide } from "@/surf/DailySurfMaxEngine";
 import type { ModuleToggles, SurfAlert } from "@/types/dashboard";
@@ -42,7 +41,7 @@ export function SurfAlertCard({
       : strengthBand.tone === "amber"
         ? "border-warning/35"
         : "border-neon-cyan/30";
-  const message = buildSurfCopy(alert);
+  const surfDecision = buildSurfDecision(confidence, dominantSide);
   const enabled = toggles?.surfAnalyzer !== false;
 
   return (
@@ -63,7 +62,7 @@ export function SurfAlertCard({
               Surf Analyzer
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
-              Fase da mesa, força e risco contrário.
+              Fase da mesa, forÃ§a e risco contrÃ¡rio.
             </div>
           </div>
           <div className="flex max-w-[54%] shrink-0 flex-wrap items-center justify-end gap-1">
@@ -85,7 +84,7 @@ export function SurfAlertCard({
       ) : (
         <SectionTitle
           title="Surf Analyzer"
-          subtitle="Fase da mesa, força e risco contrário."
+          subtitle="Fase da mesa, forÃ§a e risco contrÃ¡rio."
           right={
             <div className="flex shrink-0 items-center gap-1.5">
               <AppBadge tone={strengthBand.tone} pulse={enabled && alert.surf_alert}>
@@ -133,7 +132,7 @@ export function SurfAlertCard({
             <div className="grid grid-cols-2 gap-2 text-xs">
               <Metric
                 icon={<Activity className="size-3.5" />}
-                label="Força"
+                label="ForÃ§a"
                 value={`${confidence}%`}
                 tone={strengthBand.tone}
               />
@@ -156,15 +155,23 @@ export function SurfAlertCard({
 
         <div
           className={cn(
-            "mt-3 rounded-xl border border-neon-cyan/12 bg-background/28 p-3 text-xs",
+            "mt-3 rounded-xl border bg-background/30 p-3 text-xs",
+            surfDecision.borderClass,
             compact && "mt-2 p-2.5",
           )}
         >
           <div className="flex items-start gap-2">
-            <Target className="mt-0.5 size-3.5 text-neon-cyan" />
-            <div>
-              <div className="font-semibold text-foreground">{message}</div>
-              <div className="mt-1 text-muted-foreground">{alert.reason}</div>
+            <Target className={cn("mt-0.5 size-3.5", surfDecision.iconClass)} />
+            <div className="min-w-0">
+              <div className={cn("text-[10px] font-black uppercase tracking-[0.16em]", surfDecision.textClass)}>
+                {surfDecision.title}
+              </div>
+              <div className="mt-1 text-sm font-black uppercase leading-tight text-foreground">
+                {surfDecision.action}
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                Forca {confidence}% · Quebra {breakRisk}% {riskBand.label}
+              </div>
             </div>
           </div>
         </div>
@@ -200,7 +207,7 @@ export function SurfAlertCard({
 
         <div className={cn("mt-3 text-[11px] text-muted-foreground", compact && "mt-2")}>
           <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">Como usar: </span>
-          mostra tendência. Só seguir o lado do Surf quando o risco de quebra estiver controlado.
+          mostra tendÃªncia. SÃ³ seguir o lado do Surf quando o risco de quebra estiver controlado.
         </div>
       </div>
 
@@ -213,13 +220,44 @@ export function SurfAlertCard({
       {locked && (
         <PremiumLock
           title="Surf Analyzer Premium"
-          description="Leitura de surf e risco contrário em tempo real bloqueados"
+          description="Leitura de surf e risco contrÃ¡rio em tempo real bloqueados"
         />
       )}
     </GlassCard>
   );
 }
 
+function buildSurfDecision(confidence: number, side: string) {
+  const sideLabel = side === "BANKER" || side === "PLAYER" ? side : "AGUARDAR";
+
+  if (confidence >= 89 && sideLabel !== "AGUARDAR") {
+    return {
+      title: "Forte para surf",
+      action: `Seguir ${sideLabel}`,
+      borderClass: "border-success/25",
+      iconClass: "text-success",
+      textClass: "text-success",
+    };
+  }
+
+  if (confidence >= 85) {
+    return {
+      title: "Surf em observacao",
+      action: "Aguardar mais uma casa",
+      borderClass: "border-warning/25",
+      iconClass: "text-warning",
+      textClass: "text-warning",
+    };
+  }
+
+  return {
+    title: "Risco de quebra",
+    action: "Nao seguir surf agora",
+    borderClass: "border-destructive/25",
+    iconClass: "text-destructive",
+    textClass: "text-destructive",
+  };
+}
 function SurfMaximaPanel({ snapshot }: { snapshot: DailySurfMaxSnapshot }) {
   const maxima = snapshot.dailyMaxSurf;
   const best = bestDailySurf(maxima);
