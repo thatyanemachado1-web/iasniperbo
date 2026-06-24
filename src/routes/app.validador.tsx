@@ -8,8 +8,10 @@ import {
   Eye,
   History,
   Layers3,
+  Loader2,
   RotateCcw,
   Save,
+  Search,
   Send,
   ShieldCheck,
   Trash2,
@@ -135,6 +137,12 @@ function NeuralValidatorPage() {
   const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
   const [testingTelegramId, setTestingTelegramId] = useState("");
+  const [savingChannel, setSavingChannel] = useState(false);
+  const [channelValidation, setChannelValidation] = useState({
+    key: "",
+    code: "",
+    validatedAt: "",
+  });
   const [siteAlerts, setSiteAlerts] = useState<LiveValidatorHit[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
   const [channelForm, setChannelForm] = useState({
@@ -208,24 +216,32 @@ function NeuralValidatorPage() {
     let cancelled = false;
 
     async function loadBackendValidatorData() {
+      let confirmedChannels: ValidatorNotificationChannel[] | null = null;
+
       try {
-        const [serverPatterns, serverChannels] = await Promise.all([
-          fetchServerValidatorPatterns(),
-          fetchServerValidatorChannels(),
-        ]);
+        const serverChannels = await fetchServerValidatorChannels();
+        if (cancelled) return;
+
+        confirmedChannels = mergeValidatorChannels(serverChannels);
+        writeNotificationChannels(confirmedChannels);
+        setChannels(confirmedChannels);
+      } catch {
+        // Keep the current UI while the backend is unreachable.
+      }
+
+      try {
+        const serverPatterns = await fetchServerValidatorPatterns();
         if (cancelled) return;
 
         const localPatterns = readSavedPatterns();
-        const mergedChannels = mergeValidatorChannels(serverChannels);
+        const syncedChannels = confirmedChannels ?? readNotificationChannels();
         const mergedPatterns = autoPrepareAdminTelegramDelivery(
           mergeValidatorItems(serverPatterns, localPatterns),
-          mergedChannels,
+          syncedChannels,
           adminAccess,
         );
         writeSavedPatterns(mergedPatterns);
-        writeNotificationChannels(mergedChannels);
         setSavedPatterns(mergedPatterns);
-        setChannels(mergedChannels);
 
         const patternsToSync = mergedPatterns.filter((item) => shouldSyncValidatorItem(item, serverPatterns));
         await Promise.all([
@@ -545,6 +561,19 @@ function NeuralValidatorPage() {
       showNotice(`Seu plano permite ate ${planLimits.channels} canais.`);
       return;
     }
+    if (!token && !matchingChannel?.botTokenMasked) {
+      showNotice("Informe o Bot Token para salvar o canal no servidor.");
+      return;
+    }
+    if (!chatId && !matchingChannel?.chatId) {
+      showNotice("Informe o Chat ID/codigo do canal.");
+      return;
+    }
+    const validationKey = telegramChannelValidationKey(token, chatId);
+    if (token && chatId && channelValidation.key !== validationKey) {
+      showNotice("Clique em Procurar grupo e valide o Telegram antes de salvar.");
+      return;
+    }
     const now = new Date().toISOString();
     const channel: ValidatorNotificationChannel = {
       id: matchingChannel?.id || createStorageId("channel"),
@@ -565,17 +594,18 @@ function NeuralValidatorPage() {
       createdAt: matchingChannel?.createdAt || now,
       updatedAt: now,
     };
-    const next = upsertNotificationChannel(channel);
-    setChannels(next);
-    void saveServerValidatorChannel(channel, token).then((serverChannel) => {
-      if (!serverChannel) {
-        showNotice("Canal salvo no navegador, mas o servidor nao confirmou. Telegram precisa do canal no servidor.");
-        return;
-      }
-      setChannels(upsertNotificationChannel(serverChannel));
-    });
-    setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
-    showNotice("Canal salvo para este usuario. Token fica mascarado depois de salvo.");
+    setSavingChannel(true);
+    void saveServerValidatorChannel(channel, token, channelValidation.key === validationKey ? channelValidation.code : "")
+      .then((serverChannel) => {
+        setChannels(upsertNotificationChannel(serverChannel));
+        setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
+        setChannelValidation({ key: "", code: "", validatedAt: "" });
+        showNotice("Canal salvo no servidor. Token fica mascarado depois de salvo.");
+      })
+      .catch((error) => {
+        showNotice(error instanceof Error ? error.message : "Servidor nao confirmou o canal.");
+      })
+      .finally(() => setSavingChannel(false));
   }
 
   function updateNotificationChannel(
@@ -592,8 +622,11 @@ function NeuralValidatorPage() {
       },
       updatedAt: new Date().toISOString(),
     };
-    setChannels(upsertNotificationChannel(updated));
-    void saveServerValidatorChannel(updated);
+    void saveServerValidatorChannel(updated)
+      .then((serverChannel) => setChannels(upsertNotificationChannel(serverChannel)))
+      .catch((error) => {
+        showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a atualizacao.");
+      });
   }
 
   async function testChannelFromForm() {
@@ -604,16 +637,24 @@ function NeuralValidatorPage() {
     const botToken = channelForm.botToken.trim();
     const chatId = channelForm.chatId.trim();
     if (!botToken || !chatId) {
-      showNotice("Informe Bot Token e Chat ID para testar.");
+      showNotice("Informe Bot Token e Chat ID para procurar o grupo.");
       return;
     }
-    await testTelegramChannel({
-      id: "form",
-      name: channelForm.name || "Canal Telegram",
-      botToken,
-      chatId,
-      buttonLink: channelForm.buttonLink,
-    });
+    setTestingTelegramId("form");
+    try {
+      const validation = await validateServerValidatorChannel(botToken, chatId);
+      setChannelValidation({
+        key: telegramChannelValidationKey(botToken, chatId),
+        code: validation.validationCode,
+        validatedAt: new Date().toISOString(),
+      });
+      showNotice("Grupo validado: enviei oi no Telegram.");
+    } catch (error) {
+      setChannelValidation({ key: "", code: "", validatedAt: "" });
+      showNotice(error instanceof Error ? error.message : "Falha ao validar grupo no Telegram.");
+    } finally {
+      setTestingTelegramId("");
+    }
   }
 
   async function testSavedChannel(channel: ValidatorNotificationChannel) {
@@ -682,6 +723,16 @@ function NeuralValidatorPage() {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3200);
   }
+
+  const currentChannelValidationKey = telegramChannelValidationKey(
+    channelForm.botToken,
+    channelForm.chatId,
+  );
+  const isChannelFormValidated = Boolean(
+    currentChannelValidationKey &&
+    channelValidation.key === currentChannelValidationKey &&
+    channelValidation.code,
+  );
 
   return (
     <div className="space-y-4">
@@ -815,6 +866,8 @@ function NeuralValidatorPage() {
             onTestForm={testChannelFromForm}
             onTestChannel={testSavedChannel}
             onUpdateChannel={updateNotificationChannel}
+            isChannelFormValidated={isChannelFormValidated}
+            savingChannel={savingChannel}
             telegramEnabled={planLimits.telegram}
             testingTelegramId={testingTelegramId}
           />
@@ -1488,6 +1541,8 @@ function ChannelsTab({
   onTestForm,
   onTestChannel,
   onUpdateChannel,
+  isChannelFormValidated,
+  savingChannel,
   telegramEnabled,
   testingTelegramId,
 }: {
@@ -1519,9 +1574,15 @@ function ChannelsTab({
   onTestForm: () => void;
   onTestChannel: (channel: ValidatorNotificationChannel) => void;
   onUpdateChannel: (channel: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>) => void;
+  isChannelFormValidated: boolean;
+  savingChannel: boolean;
   telegramEnabled: boolean;
   testingTelegramId: string;
 }) {
+  const requiresValidation = Boolean(channelForm.botToken.trim() && channelForm.chatId.trim());
+  const validatingChannelForm = testingTelegramId === "form";
+  const saveBlockedByValidation = requiresValidation && !isChannelFormValidated;
+
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
       <GlassCard>
@@ -1541,6 +1602,16 @@ function ChannelsTab({
           <Field label="Chat ID">
             <Input value={channelForm.chatId} onChange={(event) => setChannelForm({ ...channelForm, chatId: event.target.value })} />
           </Field>
+          {(validatingChannelForm || isChannelFormValidated) && (
+            <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold ${
+              isChannelFormValidated
+                ? "border-success/35 bg-success/10 text-success"
+                : "border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan"
+            }`}>
+              {validatingChannelForm ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+              {validatingChannelForm ? "Validando grupo no Telegram..." : "Grupo validado"}
+            </div>
+          )}
           <Field label="Link do botao">
             <Input value={channelForm.buttonLink} onChange={(event) => setChannelForm({ ...channelForm, buttonLink: event.target.value })} />
           </Field>
@@ -1585,17 +1656,42 @@ function ChannelsTab({
             </div>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <Button type="button" className="w-full btn-primary-grad" onClick={onSave} disabled={!telegramEnabled}>
-              <Save className="size-4" /> Salvar configuracao
+            <Button
+              type="button"
+              className="w-full btn-primary-grad"
+              onClick={onSave}
+              disabled={!telegramEnabled || savingChannel || validatingChannelForm || saveBlockedByValidation}
+            >
+              {savingChannel ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Salvando...
+                </>
+              ) : (
+                <>
+                  <Save className="size-4" /> {saveBlockedByValidation ? "Valide para salvar" : "Salvar configuracao"}
+                </>
+              )}
             </Button>
             <Button
               type="button"
               variant="secondary"
-              className="w-full"
+              className={`w-full ${isChannelFormValidated ? "border-success/40 bg-success/10 text-success hover:bg-success/15" : ""}`}
               onClick={onTestForm}
-              disabled={!telegramEnabled || testingTelegramId === "form"}
+              disabled={!telegramEnabled || validatingChannelForm || savingChannel}
             >
-              <Send className="size-4" /> {testingTelegramId === "form" ? "Enviando..." : "Testar envio"}
+              {validatingChannelForm ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Validando...
+                </>
+              ) : isChannelFormValidated ? (
+                <>
+                  <ShieldCheck className="size-4" /> Grupo validado
+                </>
+              ) : (
+                <>
+                  <Search className="size-4" /> Procurar grupo
+                </>
+              )}
             </Button>
           </div>
         </div>
@@ -2172,7 +2268,11 @@ async function fetchServerValidatorChannels() {
   return Array.isArray(data?.channels) ? data.channels : [];
 }
 
-async function saveServerValidatorChannel(channel: ValidatorNotificationChannel, botToken?: string) {
+async function saveServerValidatorChannel(
+  channel: ValidatorNotificationChannel,
+  botToken?: string,
+  validationCode?: string,
+) {
   const response = await fetch("/validator/channels", {
     method: "POST",
     cache: "no-store",
@@ -2182,11 +2282,29 @@ async function saveServerValidatorChannel(channel: ValidatorNotificationChannel,
         ...channel,
         ...(botToken?.trim() ? { botToken: botToken.trim() } : {}),
       },
+      ...(validationCode?.trim() ? { validationCode: validationCode.trim() } : {}),
     }),
   });
-  if (!response.ok) return null;
-  const data = await response.json().catch(() => null) as { channel?: ValidatorNotificationChannel } | null;
-  return data?.channel ?? null;
+  const data = await response.json().catch(() => null) as { channel?: ValidatorNotificationChannel; error?: string } | null;
+  if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou o canal.");
+  if (!data?.channel) throw new Error("Servidor nao retornou o canal salvo.");
+  return data.channel;
+}
+
+async function validateServerValidatorChannel(botToken: string, chatId: string) {
+  const response = await fetch("/validator/channels/validate", {
+    method: "POST",
+    cache: "no-store",
+    headers: validatorApiHeaders(true),
+    body: JSON.stringify({
+      botToken: botToken.trim(),
+      chatId: chatId.trim(),
+    }),
+  });
+  const data = await response.json().catch(() => null) as { validationCode?: string; error?: string } | null;
+  if (!response.ok) throw new Error(data?.error || "Falha ao validar grupo no Telegram.");
+  if (!data?.validationCode) throw new Error("Grupo validado, mas o servidor nao confirmou o salvamento.");
+  return { validationCode: data?.validationCode || "" };
 }
 
 async function deleteServerValidatorChannel(channelId: string) {
@@ -2266,6 +2384,12 @@ function validatorChannelDedupeKey(channel: Pick<ValidatorNotificationChannel, "
 
 function normalizeValidatorChannelCode(value: string) {
   return value.trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function telegramChannelValidationKey(botToken: string, chatId: string) {
+  const token = botToken.trim();
+  const code = normalizeValidatorChannelCode(chatId);
+  return token && code ? `${token}:${code}` : "";
 }
 
 function shouldSyncValidatorItem<T extends { id: string; updatedAt: string }>(item: T, serverItems: T[]) {

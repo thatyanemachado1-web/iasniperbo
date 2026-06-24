@@ -6428,8 +6428,16 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   if (url.pathname === "/validator/channels") {
     if (request.method === "GET") {
+      const storedUserChannels = getSupabasePersistenceConfig(env)
+        ? await withTimeout(
+            fetchStoredValidatorChannels(env, userId),
+            LIVE_STATE_IO_TIMEOUT_MS,
+            "carregar canais do Validador",
+            null as ValidatorNotificationChannel[] | null,
+          )
+        : null;
       const userChannels = mergeValidatorChannelList(
-        liveValidatorChannels.filter((channel) => channel.userId === userId),
+        storedUserChannels ?? liveValidatorChannels.filter((channel) => channel.userId === userId),
       );
       liveValidatorChannels = [
         ...userChannels,
@@ -6445,16 +6453,35 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     if (request.method === "POST") {
       const body = readRecord(await request.json().catch(() => ({})));
       const incoming = readRecord(body.channel || body);
+      const incomingToken = normalizeSecretValue(readString(incoming, "botToken"));
+      const validationCode = readString(body, "validationCode") || readString(incoming, "validationCode");
       const existingById = liveValidatorChannels.find(
         (channel) => channel.userId === userId && channel.id === readString(incoming, "id"),
       );
       const existingByCode = findValidatorChannelByIncomingCode(liveValidatorChannels, userId, incoming);
+      if (existingByCode && existingByCode.id !== existingById?.id) {
+        return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409);
+      }
       const existing = existingById || existingByCode;
-      const normalizedIncoming = existing && !existingById
-        ? { ...incoming, id: existing.id, createdAt: existing.createdAt }
-        : incoming;
-      const channel = normalizeServerNotificationChannel(normalizedIncoming, userId, existing);
+      const channel = normalizeServerNotificationChannel(incoming, userId, existing);
       if (!channel) return json({ error: "Canal invalido." }, 400);
+      const botToken = decodeServerToken(channel.botTokenEncoded);
+      if (!botToken || !channel.chatId) {
+        return json({ error: "Bot Token e Chat ID sao obrigatorios para salvar o canal." }, 400);
+      }
+      if (incomingToken || !existing) {
+        const validationOk = await verifyTelegramChannelValidationCode(
+          env,
+          userId,
+          botToken,
+          channel.chatId,
+          validationCode,
+        );
+        if (!validationOk) {
+          const validation = await validateTelegramChannelAccess(request, botToken, channel.chatId);
+          if (!validation.ok) return json({ error: validation.error }, validation.status);
+        }
+      }
       const duplicateIds = validatorChannelRelatedIds(liveValidatorChannels, channel)
         .filter((channelId) => channelId !== channel.id);
       liveValidatorChannels = upsertValidatorChannel(channel);
@@ -6487,6 +6514,26 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
         },
       }, 201);
     }
+  }
+
+  if (request.method === "POST" && url.pathname === "/validator/channels/validate") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const botToken = normalizeSecretValue(readString(body, "botToken"));
+    const chatId = readString(body, "chatId");
+    if (!botToken) return json({ error: "Bot Token obrigatorio." }, 400);
+    if (!chatId) return json({ error: "Chat ID obrigatorio." }, 400);
+
+    const existingByCode = findValidatorChannelByIncomingCode(liveValidatorChannels, userId, { chatId });
+    if (existingByCode) return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409);
+
+    const validation = await validateTelegramChannelAccess(request, botToken, chatId);
+    if (!validation.ok) return json({ error: validation.error }, validation.status);
+    return json({
+      ok: true,
+      validated: true,
+      messageId: validation.messageId,
+      validationCode: await issueTelegramChannelValidationCode(env, userId, botToken, chatId),
+    });
   }
 
   if (request.method === "POST" && url.pathname === "/validator/channels/test") {
@@ -6587,6 +6634,66 @@ async function findValidatorChannelForUser(env: unknown, userId: string, channel
     liveValidatorChannels = upsertValidatorChannel(storedFromList);
   }
   return storedFromList;
+}
+
+async function validateTelegramChannelAccess(request: Request, botToken: string, chatId: string) {
+  return sendTelegramMessage({
+    botToken,
+    chatId,
+    message: "oi",
+    buttonLabel: "Abrir Sniper Bo IA",
+    buttonUrl: "",
+    allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
+  });
+}
+
+async function issueTelegramChannelValidationCode(
+  env: unknown,
+  userId: string,
+  botToken: string,
+  chatId: string,
+) {
+  const bucket = telegramValidationBucket();
+  const signature = await telegramChannelValidationSignature(env, userId, botToken, chatId, bucket);
+  return signature ? `${bucket}.${signature}` : "";
+}
+
+async function verifyTelegramChannelValidationCode(
+  env: unknown,
+  userId: string,
+  botToken: string,
+  chatId: string,
+  validationCode: string,
+) {
+  const [bucketText, signature] = validationCode.split(".");
+  const bucket = Number(bucketText);
+  if (!Number.isFinite(bucket) || !signature) return false;
+  const currentBucket = telegramValidationBucket();
+  if (bucket < currentBucket - 1 || bucket > currentBucket) return false;
+  const expected = await telegramChannelValidationSignature(env, userId, botToken, chatId, bucket);
+  return Boolean(expected && constantTimeStringEqual(signature, expected));
+}
+
+async function telegramChannelValidationSignature(
+  env: unknown,
+  userId: string,
+  botToken: string,
+  chatId: string,
+  bucket: number,
+) {
+  const secret = getSessionSecret(env);
+  if (!secret) return "";
+  const payload = [
+    normalizeValidatorUserId(userId),
+    normalizeSecretValue(botToken),
+    normalizeValidatorChannelCode(chatId),
+    String(bucket),
+  ].join("|");
+  return bytesToB64Url(await hmacSign(secret, payload));
+}
+
+function telegramValidationBucket() {
+  return Math.floor(Date.now() / (10 * 60_000));
 }
 
 async function sendTelegramMessage({
@@ -6979,19 +7086,15 @@ function publicValidatorChannel(channel: ValidatorNotificationChannel): Validato
 async function hydrateValidatorUserCache(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return;
   const legacyPatterns = liveValidatorPatterns.filter((pattern) => pattern.userId === userId);
-  const legacyChannels = liveValidatorChannels.filter((channel) => channel.userId === userId);
   const [storedPatterns, storedChannels] = await Promise.all([
     fetchStoredValidatorPatterns(env, userId),
     fetchStoredValidatorChannels(env, userId),
   ]);
   const patterns = mergeValidatorEntityList(storedPatterns, legacyPatterns);
-  const channels = mergeValidatorChannelList(storedChannels, legacyChannels);
+  const channels = mergeValidatorChannelList(storedChannels);
 
   if (!storedPatterns.length && legacyPatterns.length) {
     void Promise.all(legacyPatterns.map((pattern) => persistValidatorPattern(env, pattern)));
-  }
-  if (!storedChannels.length && legacyChannels.length) {
-    void Promise.all(legacyChannels.map((channel) => persistValidatorChannel(env, channel)));
   }
 
   liveValidatorPatterns = [
