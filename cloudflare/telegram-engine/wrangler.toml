@@ -1,0 +1,15 @@
+name = "sniperbo-telegram-engine"
+main = "src/index.js"
+compatibility_date = "2026-06-24"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ALLOWED_ORIGIN = "https://sniperbo.com"
+
+[[durable_objects.bindings]]
+name = "TELEGRAM_ENGINE"
+class_name = "TelegramEngine"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TelegramEngine"]
