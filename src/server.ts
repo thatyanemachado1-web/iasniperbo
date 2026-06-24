@@ -6574,21 +6574,39 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     if (request.method === "DELETE") {
       const current = await findValidatorChannelForUser(env, userId, channelId);
       const idsToDelete = new Set<string>([channelId]);
+      const channelCodeToDelete = current ? normalizeValidatorChannelCode(current.chatId) : "";
       if (current) {
         for (const relatedId of validatorChannelRelatedIds(liveValidatorChannels, current)) {
+          idsToDelete.add(relatedId);
+        }
+        for (const relatedId of await findStoredValidatorChannelRelatedIds(env, userId, current)) {
           idsToDelete.add(relatedId);
         }
       }
       const deletedIds = [...idsToDelete].filter(Boolean);
       liveValidatorChannels = liveValidatorChannels.filter(
-        (channel) => !(channel.userId === userId && idsToDelete.has(channel.id)),
+        (channel) =>
+          !(
+            channel.userId === userId &&
+            (idsToDelete.has(channel.id) ||
+              (channelCodeToDelete && normalizeValidatorChannelCode(channel.chatId) === channelCodeToDelete))
+          ),
       );
       liveValidatorPatterns = liveValidatorPatterns.map((pattern) =>
         pattern.userId === userId && idsToDelete.has(pattern.telegramChannelId)
           ? { ...pattern, telegramChannelId: "", updatedAt: new Date().toISOString() }
           : pattern,
       );
+      liveValidatorNotifications = liveValidatorNotifications.filter((notification) => {
+        const notificationUserId = normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id"));
+        const notificationChannelId = readString(notification, "channelId") || readString(notification, "channel_id");
+        return !(notificationUserId === userId && idsToDelete.has(notificationChannelId));
+      });
       await deleteValidatorChannelRows(env, userId, deletedIds);
+      await deleteValidatorChannelNotificationRows(env, userId, deletedIds);
+      if (current?.chatId) {
+        await deleteValidatorChannelsByCode(env, userId, current.chatId);
+      }
       await Promise.all(
         liveValidatorPatterns
           .filter((pattern) => pattern.userId === userId && pattern.telegramChannelId === "")
@@ -7294,6 +7312,44 @@ async function fetchStoredValidatorChannels(env: unknown, userId: string) {
   return mergeValidatorChannelList(storedChannels, stateChannels).filter((channel) => !deletedIds.has(channel.id));
 }
 
+async function fetchRawStoredValidatorChannels(env: unknown, userId: string) {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  if (!normalizedUserId) return [];
+  const [rows, stateChannels] = await Promise.all([
+    fetchSupabaseRows(
+      env,
+      VALIDATOR_CHANNELS_TABLE,
+      `select=*&user_id=eq.${encodeURIComponent(normalizedUserId)}&order=updated_at.desc&limit=1000`,
+    ),
+    fetchValidatorChannelStateChannels(env, normalizedUserId),
+  ]);
+  const storedChannels = rows
+    .map(validatorChannelFromRow)
+    .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
+  return [...storedChannels, ...stateChannels].filter((channel) => channel.userId === normalizedUserId);
+}
+
+async function findStoredValidatorChannelRelatedIds(
+  env: unknown,
+  userId: string,
+  target: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">,
+) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const targetCode = normalizeValidatorChannelCode(target.chatId);
+  const targetKey = validatorChannelUniqueKey({ ...target, userId: normalizedUserId });
+  if (!normalizedUserId) return [];
+  const rawChannels = await fetchRawStoredValidatorChannels(env, normalizedUserId);
+  return rawChannels
+    .filter((channel) => {
+      if (channel.id === target.id) return true;
+      if (targetCode && normalizeValidatorChannelCode(channel.chatId) === targetCode) return true;
+      return validatorChannelUniqueKey(channel) === targetKey;
+    })
+    .map((channel) => channel.id)
+    .filter(Boolean);
+}
+
 async function fetchStoredActiveValidatorChannels(env: unknown) {
   if (!getSupabasePersistenceConfig(env)) return [];
   const [rows, stateChannels, deletedIds] = await Promise.all([
@@ -7373,6 +7429,47 @@ async function deleteValidatorChannelRows(env: unknown, userId: string, channelI
   return results.some((result) => result.status === "fulfilled");
 }
 
+async function deleteValidatorChannelNotificationRows(env: unknown, userId: string, channelIds: string[]) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const ids = [...new Set(channelIds.map(readString).filter(Boolean))];
+  if (!normalizedUserId || !ids.length) return false;
+  const results = await Promise.allSettled(
+    ids.map((channelId) =>
+      deleteSupabaseRows(
+        env,
+        VALIDATOR_NOTIFICATIONS_TABLE,
+        `user_id=eq.${encodeURIComponent(normalizedUserId)}&channel_id=eq.${encodeURIComponent(channelId)}`,
+      )
+    ),
+  );
+  return results.some((result) => result.status === "fulfilled");
+}
+
+async function deleteValidatorChannelsByCode(env: unknown, userId: string, chatId: string) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedCode = normalizeValidatorChannelCode(chatId);
+  if (!normalizedUserId || !normalizedCode) return false;
+
+  const rawChannels = await fetchRawStoredValidatorChannels(env, normalizedUserId);
+  const ids = rawChannels
+    .filter((channel) => normalizeValidatorChannelCode(channel.chatId) === normalizedCode)
+    .map((channel) => channel.id)
+    .filter(Boolean);
+
+  await Promise.allSettled([
+    deleteValidatorChannelRows(env, normalizedUserId, ids),
+    deleteValidatorChannelNotificationRows(env, normalizedUserId, ids),
+    deleteSupabaseRows(
+      env,
+      VALIDATOR_CHANNELS_TABLE,
+      `user_id=eq.${encodeURIComponent(normalizedUserId)}&chat_id=eq.${encodeURIComponent(chatId)}`,
+    ),
+  ]);
+  return true;
+}
+
 async function persistValidatorChannelState(env: unknown, channel: ValidatorNotificationChannel) {
   return saveDurableLiveStateById(env, validatorChannelStateId(channel.userId, channel.id), {
     type: "validator_channel",
@@ -7385,17 +7482,19 @@ async function deleteValidatorChannelState(env: unknown, userId: string, channel
   const normalizedUserId = normalizeValidatorUserId(userId);
   const normalizedChannelId = readString(channelId);
   if (!normalizedUserId || !normalizedChannelId) return false;
-  await deleteSupabaseRows(
-    env,
-    LIVE_STATE_TABLE,
-    `id=eq.${encodeURIComponent(validatorChannelStateId(normalizedUserId, normalizedChannelId))}`,
-  );
-  return saveDurableLiveStateById(env, validatorChannelDeletedStateId(normalizedUserId, normalizedChannelId), {
-    type: "validator_channel_deleted",
-    userId: normalizedUserId,
-    channelId: normalizedChannelId,
-    deletedAt: new Date().toISOString(),
-  });
+  await Promise.allSettled([
+    deleteSupabaseRows(
+      env,
+      LIVE_STATE_TABLE,
+      `id=eq.${encodeURIComponent(validatorChannelStateId(normalizedUserId, normalizedChannelId))}`,
+    ),
+    deleteSupabaseRows(
+      env,
+      LIVE_STATE_TABLE,
+      `id=eq.${encodeURIComponent(validatorChannelDeletedStateId(normalizedUserId, normalizedChannelId))}`,
+    ),
+  ]);
+  return true;
 }
 
 async function fetchValidatorChannelStateChannels(env: unknown, userId?: string) {

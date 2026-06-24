@@ -226,7 +226,10 @@ function NeuralValidatorPage() {
         writeNotificationChannels(confirmedChannels);
         setChannels(confirmedChannels);
       } catch {
-        // Keep the current UI while the backend is unreachable.
+        if (cancelled) return;
+        confirmedChannels = [];
+        writeNotificationChannels([]);
+        setChannels([]);
       }
 
       try {
