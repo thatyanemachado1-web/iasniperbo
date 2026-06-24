@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import copy
+import functools
 import json
 import logging
 import os
@@ -92,6 +93,30 @@ def create_session() -> requests.Session:
 
 
 SESSION = create_session()
+PROCESS_LOCK_HANDLE: Any = None
+
+
+def acquire_process_lock(args: argparse.Namespace) -> bool:
+    global PROCESS_LOCK_HANDLE
+    try:
+        import fcntl  # type: ignore[import-not-found]
+    except ImportError:
+        return True
+    lock_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{args.remote_url}_{args.log_file}")[-180:]
+    lock_path = Path("/tmp") / f"sniperbo_publisher_{lock_name}.lock"
+    handle = lock_path.open("w", encoding="utf-8")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"Publisher already running for {args.remote_url} ({args.log_file}).")
+        handle.close()
+        return False
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"pid={os.getpid()} remote_url={args.remote_url} log_file={args.log_file}\n")
+    handle.flush()
+    PROCESS_LOCK_HANDLE = handle
+    return True
 
 
 def http_error_summary(exc: BaseException) -> tuple[int, str]:
@@ -762,16 +787,29 @@ def update_direct_pattern_round_bank(bank: list[dict[str, Any]], payload: dict[s
     return [merged[key] for key in order if key in merged][-PATTERN_MINER_HISTORY_LIMIT:]
 
 
+def direct_payload_pattern_rounds(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    payload_rounds = payload.get("rounds") if isinstance(payload.get("rounds"), list) else []
+    incoming = [direct_normalize_pattern_round(item) for item in payload_rounds]
+    return [item for item in incoming if item]
+
+
 def direct_ai_patterns_from_round_bank(rounds: list[dict[str, Any]], round_id: int) -> list[dict[str, Any]]:
     if len(rounds) < max(PATTERN_MINER_LENGTHS) + 2:
         return []
     alerts = direct_pattern_miner_entry_alerts(rounds)
     if not alerts:
         return []
-    alert = alerts[0]
+    alert = None
+    for candidate in alerts:
+        strategy = candidate.get("strategy") if isinstance(candidate.get("strategy"), dict) else {}
+        if direct_ai_pattern_entry_allowed(direct_telegram_entry(strategy.get("expectedResult"))):
+            alert = candidate
+            break
+    if not alert:
+        return []
     strategy = alert.get("strategy") if isinstance(alert.get("strategy"), dict) else {}
     entry = direct_telegram_entry(strategy.get("expectedResult"))
-    if not entry:
+    if not direct_ai_pattern_entry_allowed(entry):
         return []
     sequence = strategy.get("sequence") if isinstance(strategy.get("sequence"), list) else []
     pattern = " > ".join(str(item) for item in sequence if item) or "Padrao IA confirmado"
@@ -813,10 +851,7 @@ def direct_pattern_miner_entry_alerts(rounds: list[dict[str, Any]]) -> list[dict
                 "title": "PADRAO VALIDADO",
             })
 
-    alerts.sort(key=lambda alert: (
-        -direct_float((alert.get("strategy") or {}).get("assertiveness")),
-        -int((alert.get("strategy") or {}).get("totalValidated") or 0),
-    ))
+    alerts.sort(key=lambda alert: -direct_float((alert.get("strategy") or {}).get("assertiveness")))
     DIRECT_PATTERN_MINER_CACHE_KEY = cache_key
     DIRECT_PATTERN_MINER_CACHE_ALERTS = alerts[:40]
     return DIRECT_PATTERN_MINER_CACHE_ALERTS
@@ -843,7 +878,7 @@ def direct_pattern_miner_rank_strategies(rounds: list[dict[str, Any]]) -> list[d
         for bucket in buckets.values()
         if int(bucket.get("occurrences") or 0) >= PATTERN_MINER_MIN_OCCURRENCES
     ]
-    strategies.sort(key=direct_pattern_strategy_sort_key)
+    strategies.sort(key=functools.cmp_to_key(direct_compare_pattern_strategies))
     for index, strategy in enumerate(strategies, start=1):
         strategy["rank"] = index
     return strategies
@@ -909,16 +944,56 @@ def direct_pattern_bucket_to_strategy(bucket: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def direct_pattern_strategy_sort_key(strategy: dict[str, Any]) -> tuple[Any, ...]:
-    assertiveness = direct_float(strategy.get("assertiveness"))
-    return (
-        bool(strategy.get("insufficientSample")),
-        -assertiveness,
-        -direct_numeric_specificity(strategy.get("sequence") if isinstance(strategy.get("sequence"), list) else []),
-        -int(strategy.get("totalValidated") or 0),
-        -int(strategy.get("occurrences") or 0),
-        str(strategy.get("id") or ""),
-    )
+def direct_compare_pattern_strategies(a: dict[str, Any], b: dict[str, Any]) -> int:
+    a_insufficient = bool(a.get("insufficientSample"))
+    b_insufficient = bool(b.get("insufficientSample"))
+    if a_insufficient != b_insufficient:
+        return 1 if a_insufficient else -1
+
+    a_rate = direct_float(a.get("assertiveness")) if a.get("assertiveness") is not None else -1.0
+    b_rate = direct_float(b.get("assertiveness")) if b.get("assertiveness") is not None else -1.0
+    rate_diff = b_rate - a_rate
+    if abs(rate_diff) > 3:
+        return 1 if rate_diff > 0 else -1
+
+    a_sequence = a.get("sequence") if isinstance(a.get("sequence"), list) else []
+    b_sequence = b.get("sequence") if isinstance(b.get("sequence"), list) else []
+    a_specificity = direct_numeric_specificity(a_sequence)
+    b_specificity = direct_numeric_specificity(b_sequence)
+    if a_specificity != b_specificity:
+        return b_specificity - a_specificity
+    if a_rate != b_rate:
+        return 1 if rate_diff > 0 else -1
+    a_total = int(a.get("totalValidated") or 0)
+    b_total = int(b.get("totalValidated") or 0)
+    if a_total != b_total:
+        return b_total - a_total
+    a_occurrences = int(a.get("occurrences") or 0)
+    b_occurrences = int(b.get("occurrences") or 0)
+    if a_occurrences != b_occurrences:
+        return b_occurrences - a_occurrences
+    a_id = str(a.get("id") or "")
+    b_id = str(b.get("id") or "")
+    if b_id < a_id:
+        return -1
+    if b_id > a_id:
+        return 1
+    return 0
+
+
+def direct_first_ai_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for candidate in candidates:
+        if str(candidate.get("moduleKey") or "") != "ai_patterns":
+            continue
+        if direct_ai_pattern_entry_allowed(str(candidate.get("entry") or "")):
+            return candidate
+    return None
+
+
+def direct_module_has_pending(pending_items: list[dict[str, Any]], module_key: str) -> bool:
+    if not module_key:
+        return False
+    return any(str(item.get("moduleKey") or "") == module_key for item in pending_items)
 
 
 def direct_pattern_status(stats: dict[str, Any], assertiveness: float, has_sample: bool) -> str:
@@ -1051,6 +1126,10 @@ def direct_stable_pattern_id(sequence: list[str]) -> str:
     return f"pm-{hash_value:x}"
 
 
+def direct_ai_pattern_entry_allowed(entry: str) -> bool:
+    return entry in {"BANKER", "PLAYER"}
+
+
 def direct_ai_pattern_from_engine(payload: dict[str, Any], round_id: int) -> dict[str, Any] | None:
     decision = payload.get("engineDecision") if isinstance(payload.get("engineDecision"), dict) else {}
     if direct_engine_state(decision) != "ENTRADA":
@@ -1063,7 +1142,7 @@ def direct_ai_pattern_from_engine(payload: dict[str, Any], round_id: int) -> dic
         or decision.get("entry")
         or decision.get("side")
     )
-    if not entry:
+    if not direct_ai_pattern_entry_allowed(entry):
         return None
     confidence = direct_float(decision.get("confidence"))
     variables = {
@@ -1099,7 +1178,7 @@ def direct_ai_patterns_from_alerts(payload: dict[str, Any], round_id: int) -> li
             or strategy.get("entry")
             or alert.get("entry")
         )
-        if not entry:
+        if not direct_ai_pattern_entry_allowed(entry):
             continue
         sequence = strategy.get("sequence") if isinstance(strategy.get("sequence"), list) else []
         pattern = " > ".join(str(item) for item in sequence if item) or str(alert.get("title") or "Padrao validado")
@@ -1157,11 +1236,16 @@ def direct_telegram_signals(payload: dict[str, Any], pattern_round_bank: list[di
             "message": build_direct_telegram_message("paying_numbers", entry, variables),
         })
 
-    ai_signal = direct_ai_pattern_from_engine(payload, round_id)
-    if ai_signal:
-        candidates.append(ai_signal)
-    candidates.extend(direct_ai_patterns_from_alerts(payload, round_id))
-    candidates.extend(direct_ai_patterns_from_round_bank(pattern_round_bank or [], round_id))
+    ai_candidate = direct_first_ai_candidate(direct_ai_patterns_from_alerts(payload, round_id))
+    if not ai_candidate:
+        ai_candidate = direct_first_ai_candidate(direct_ai_patterns_from_round_bank(direct_payload_pattern_rounds(payload), round_id))
+    if not ai_candidate:
+        engine_ai_signal = direct_ai_pattern_from_engine(payload, round_id)
+        ai_candidate = engine_ai_signal if engine_ai_signal else None
+    if not ai_candidate:
+        ai_candidate = direct_first_ai_candidate(direct_ai_patterns_from_round_bank(pattern_round_bank or [], round_id))
+    if ai_candidate:
+        candidates.append(ai_candidate)
 
     surf = payload.get("currentSurfAlert") if isinstance(payload.get("currentSurfAlert"), dict) else {}
     surf_side = direct_telegram_entry(
@@ -1299,10 +1383,14 @@ def direct_result_message(pending: dict[str, Any], outcome: dict[str, Any]) -> s
     label = str(outcome.get("label") or status)
     gale = str(outcome.get("gale") or "SG")
     tie_multiplier = str(outcome.get("tieMultiplier") or "")
+    variables = pending.get("variables") if isinstance(pending.get("variables"), dict) else {}
+    pattern = str(variables.get("pattern") or pending.get("pattern") or "").strip()
+    pattern_line = [f"🧩 <b>Padrão:</b> {pattern}"] if pattern else []
     if status == "RED":
         return "\n".join([
             "❌ <b>RED</b>",
             "",
+            *pattern_line,
             f"🎯 <b>Entrada:</b> {entry}",
             f"🛡️ <b>Proteção:</b> {gale}",
         ])
@@ -1311,12 +1399,14 @@ def direct_result_message(pending: dict[str, Any], outcome: dict[str, Any]) -> s
         return "\n".join([
             f"🟡 <b>{tie_text}</b>",
             "",
+            *pattern_line,
             f"🎯 <b>Entrada:</b> {entry}",
             "✅ <b>Empate confirmado</b>",
         ])
     return "\n".join([
         f"✅ <b>{label}</b>",
         "",
+        *pattern_line,
         f"🎯 <b>Entrada:</b> {entry}",
         f"🛡️ <b>Proteção:</b> {gale}",
     ])
@@ -1419,6 +1509,8 @@ def main() -> int:
     parser.add_argument("--skip-full-publish", action="store_true", help="Only publish urgent signal payloads; do not POST the heavy full dashboard.")
     parser.add_argument("--log-file", type=Path, default=Path("official_dashboard_publisher.log"))
     args = parser.parse_args()
+    if not acquire_process_lock(args):
+        return 0
     if not args.signal_url:
         args.signal_url = f"{args.remote_base_url.rstrip('/')}/dashboard/signal"
 
@@ -1553,6 +1645,7 @@ def main() -> int:
                     "roundId": outcome.get("roundId"),
                     "entry": pending.get("entry"),
                     "variables": {
+                        **(pending.get("variables") if isinstance(pending.get("variables"), dict) else {}),
                         "result": outcome.get("label"),
                         "gale": outcome.get("gale"),
                         "tieMultiplier": outcome.get("tieMultiplier"),
@@ -1596,6 +1689,15 @@ def main() -> int:
                 direct_key = str(direct_signal.get("signalKey") or "")
                 if not direct_key or direct_key in direct_telegram_sent_keys:
                     continue
+                direct_module_key = str(direct_signal.get("moduleKey") or "")
+                if direct_module_has_pending(direct_telegram_pending, direct_module_key):
+                    logging.info(
+                        "direct telegram skipped: module=%s entry=%s round=%s reason=pending_module_open",
+                        direct_signal.get("moduleKey"),
+                        direct_signal.get("entry"),
+                        direct_signal.get("roundId"),
+                    )
+                    continue
                 try:
                     direct_ok, direct_status, direct_ms, direct_reason = publish_direct_telegram_signal(
                         direct_telegram_config,
@@ -1618,13 +1720,20 @@ def main() -> int:
                         direct_telegram_sent_keys.add(direct_key)
                         if direct_ok:
                             direct_telegram_pending = [
-                                item for item in direct_telegram_pending if item.get("signalKey") != direct_key
+                                item for item in direct_telegram_pending
+                                if item.get("signalKey") != direct_key
+                                and not (
+                                    item.get("moduleKey") == direct_signal.get("moduleKey")
+                                    and item.get("roundId") == direct_signal.get("roundId")
+                                    and item.get("entry") == direct_signal.get("entry")
+                                )
                             ]
                             direct_telegram_pending.append({
                                 "moduleKey": direct_signal.get("moduleKey"),
                                 "signalKey": direct_key,
                                 "roundId": direct_signal.get("roundId"),
                                 "entry": direct_signal.get("entry"),
+                                "variables": direct_signal.get("variables") if isinstance(direct_signal.get("variables"), dict) else {},
                                 "maxGale": 4 if direct_signal.get("moduleKey") == "ties_only" else 1,
                             })
                         if len(direct_telegram_sent_keys) > 500:
