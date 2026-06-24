@@ -112,13 +112,27 @@ type ValidatorTelegramModuleKey =
   | "validator";
 type ValidatorTelegramModuleConfig = {
   enabled: boolean;
+  entryType: "AUTO" | "BANKER" | "PLAYER" | "TIE";
   galeLimit: number;
+  coverTie: boolean;
   tieCoverage: number;
   cooldownSeconds: number;
   template: string;
 };
 type ValidatorChannelWithModules = ValidatorNotificationChannel & {
   signalModules?: Partial<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>;
+};
+type ValidatorTelegramNotification = {
+  id: string;
+  type: string;
+  userId: string;
+  channelId: string;
+  roundId: number;
+  status: string;
+  error: string;
+  payloadJson?: Record<string, unknown>;
+  sentAt: string;
+  updatedAt: string;
 };
 type ChannelFormState = {
   name: string;
@@ -183,6 +197,7 @@ function NeuralValidatorPage() {
   const [manualResult, setManualResult] = useState<ValidatorResult | null>(null);
   const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
+  const [recentTelegramNotifications, setRecentTelegramNotifications] = useState<ValidatorTelegramNotification[]>([]);
   const [testingTelegramId, setTestingTelegramId] = useState("");
   const [savingChannel, setSavingChannel] = useState(false);
   const [channelValidation, setChannelValidation] = useState({
@@ -300,6 +315,13 @@ function NeuralValidatorPage() {
         ]);
       } catch {
         // Local storage remains the fallback when backend sync is unavailable.
+      }
+
+      try {
+        const notifications = await fetchServerValidatorNotifications();
+        if (!cancelled) setRecentTelegramNotifications(notifications);
+      } catch {
+        if (!cancelled) setRecentTelegramNotifications([]);
       }
     }
 
@@ -839,10 +861,10 @@ function NeuralValidatorPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-5">
           <TabsTrigger value="dashboard" className="gap-1.5"><Activity className="size-3.5" /> Dashboard</TabsTrigger>
+          <TabsTrigger value="channels" className="gap-1.5"><Send className="size-3.5" /> Central Telegram</TabsTrigger>
           <TabsTrigger value="validator" className="gap-1.5"><ShieldCheck className="size-3.5" /> Validador</TabsTrigger>
           <TabsTrigger value="ai" className="gap-1.5"><Wand2 className="size-3.5" /> IA de Padroes</TabsTrigger>
           <TabsTrigger value="saved" className="gap-1.5"><Save className="size-3.5" /> Padroes Salvos</TabsTrigger>
-          <TabsTrigger value="channels" className="gap-1.5"><Send className="size-3.5" /> Canais</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard" className="space-y-4">
@@ -909,7 +931,7 @@ function NeuralValidatorPage() {
         </TabsContent>
 
         <TabsContent value="channels" className="space-y-4">
-          <ChannelsTab
+          <CentralTelegramTab
             channels={channels}
             channelForm={channelForm}
             setChannelForm={setChannelForm}
@@ -922,6 +944,7 @@ function NeuralValidatorPage() {
             savingChannel={savingChannel}
             telegramEnabled={planLimits.telegram}
             testingTelegramId={testingTelegramId}
+            recentNotifications={recentTelegramNotifications}
           />
         </TabsContent>
       </Tabs>
@@ -1584,7 +1607,7 @@ function SavedPatternsTab({
   );
 }
 
-function ChannelsTab({
+function CentralTelegramTab({
   channels,
   channelForm,
   setChannelForm,
@@ -1597,6 +1620,7 @@ function ChannelsTab({
   savingChannel,
   telegramEnabled,
   testingTelegramId,
+  recentNotifications,
 }: {
   channels: ValidatorNotificationChannel[];
   channelForm: ChannelFormState;
@@ -1610,228 +1634,361 @@ function ChannelsTab({
   savingChannel: boolean;
   telegramEnabled: boolean;
   testingTelegramId: string;
+  recentNotifications: ValidatorTelegramNotification[];
 }) {
+  const [selectedChannelId, setSelectedChannelId] = useState("");
+  const [selectedModuleKey, setSelectedModuleKey] = useState<ValidatorTelegramModuleKey>("ai_patterns");
   const requiresValidation = Boolean(channelForm.botToken.trim() && channelForm.chatId.trim());
   const validatingChannelForm = testingTelegramId === "form";
   const saveBlockedByValidation = requiresValidation && !isChannelFormValidated;
+  const selectedChannel =
+    channels.find((channel) => channel.id === selectedChannelId) ||
+    channels.find((channel) => channel.isActive) ||
+    channels[0] ||
+    null;
+  const selectedChannelModules = selectedChannel ? channelSignalModules(selectedChannel) : defaultTelegramModuleConfigs();
+  const connected = Boolean(
+    selectedChannel?.isActive &&
+      selectedChannel.chatId &&
+      (selectedChannel.botTokenMasked || (selectedChannel as ValidatorChannelWithModules).botTokenEncoded),
+  );
+  const engineActive = connected && TELEGRAM_MODULE_OPTIONS.some((option) => selectedChannelModules[option.key]?.enabled);
+
+  function patchChannelModule(key: ValidatorTelegramModuleKey, patch: Partial<ValidatorTelegramModuleConfig>) {
+    if (!selectedChannel) return;
+    const nextModules = normalizeTelegramModuleConfigs({
+      ...selectedChannelModules,
+      [key]: {
+        ...selectedChannelModules[key],
+        ...patch,
+      },
+    });
+    onUpdateChannel(selectedChannel, {
+      signalModules: nextModules,
+    } as Partial<ValidatorNotificationChannel>);
+  }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
-      <GlassCard>
-        <SectionTitle title="Meus canais de envio" subtitle="Cada usuario Premium/VIP usa os proprios canais e modelos." />
-        {!telegramEnabled && (
-          <div className="mt-4 rounded-xl border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
-            Telegram bloqueado no plano Free. O alerta no site continua disponivel.
-          </div>
-        )}
-        <div className="mt-4 space-y-3">
-          <Field label="Nome do canal">
-            <Input value={channelForm.name} onChange={(event) => setChannelForm({ ...channelForm, name: event.target.value })} />
-          </Field>
-          <Field label="Bot Token">
-            <Input value={channelForm.botToken} onChange={(event) => setChannelForm({ ...channelForm, botToken: event.target.value })} placeholder="872946...XNwY" />
-          </Field>
-          <Field label="Chat ID">
-            <Input value={channelForm.chatId} onChange={(event) => setChannelForm({ ...channelForm, chatId: event.target.value })} />
-          </Field>
-          {(validatingChannelForm || isChannelFormValidated) && (
-            <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold ${
-              isChannelFormValidated
-                ? "border-success/35 bg-success/10 text-success"
-                : "border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan"
-            }`}>
-              {validatingChannelForm ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
-              {validatingChannelForm ? "Validando grupo no Telegram..." : "Grupo validado"}
-            </div>
-          )}
-          <Field label="Link do botao">
-            <Input value={channelForm.buttonLink} onChange={(event) => setChannelForm({ ...channelForm, buttonLink: event.target.value })} />
-          </Field>
-          <Field label="Status">
-            <div className="flex h-9 items-center justify-between rounded-md border border-input bg-secondary/20 px-3">
-              <span className="text-sm">{channelForm.isActive ? "Ativo" : "Inativo"}</span>
-              <Switch checked={channelForm.isActive} onCheckedChange={(checked) => setChannelForm({ ...channelForm, isActive: checked })} />
-            </div>
-          </Field>
-          <div className="rounded-xl border border-border/70 bg-secondary/15 p-3">
-            <div className="text-sm font-black">Modos automaticos</div>
-            <div className="mt-3">
-              <TelegramModulesEditor
-                modules={channelForm.signalModules}
-                onChange={(signalModules) => setChannelForm({ ...channelForm, signalModules })}
-              />
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_430px]">
+      <div className="space-y-4">
+        <GlassCard>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <SectionTitle title="Central Telegram" subtitle="Disparo direto pela API, sem precisar deixar o site aberto." />
+            <div className="flex flex-wrap gap-2">
+              <AppBadge tone={connected ? "green" : "amber"}>{connected ? "Canal conectado" : "Canal pendente"}</AppBadge>
+              <AppBadge tone={engineActive ? "green" : "amber"}>{engineActive ? "Motor ativo" : "Motor inativo"}</AppBadge>
             </div>
           </div>
-          <Field label="Modelo entrada">
-            <Textarea value={channelForm.entryTemplate} onChange={(event) => setChannelForm({ ...channelForm, entryTemplate: event.target.value })} className="min-h-36" />
-          </Field>
-          <div className="rounded-xl border border-border/70 bg-secondary/15 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-black">Mensagem sem entrada</div>
-                <div className="mt-1 text-xs text-muted-foreground">Envia quando nao tiver entrada validada.</div>
-              </div>
-              <Switch
-                checked={channelForm.analyzingEnabled}
-                onCheckedChange={(checked) => setChannelForm({ ...channelForm, analyzingEnabled: checked })}
-              />
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
-              <Textarea
-                value={channelForm.analyzingTemplate}
-                onChange={(event) => setChannelForm({ ...channelForm, analyzingTemplate: event.target.value })}
-                className="min-h-24"
-                placeholder={DEFAULT_MESSAGE_TEMPLATES.analyzing}
-              />
-              <Field label="Intervalo">
-                <Input
-                  value={channelForm.analyzingCooldownRounds}
-                  onChange={(event) => setChannelForm({
-                    ...channelForm,
-                    analyzingCooldownRounds: Math.max(1, Number(event.target.value) || 1),
-                  })}
-                  type="number"
-                  min={1}
-                />
-              </Field>
-            </div>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Button
-              type="button"
-              className="w-full btn-primary-grad"
-              onClick={onSave}
-              disabled={!telegramEnabled || savingChannel || validatingChannelForm || saveBlockedByValidation}
-            >
-              {savingChannel ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" /> Salvando...
-                </>
-              ) : (
-                <>
-                  <Save className="size-4" /> {saveBlockedByValidation ? "Valide para salvar" : "Salvar configuracao"}
-                </>
-              )}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              className={`w-full ${isChannelFormValidated ? "border-success/40 bg-success/10 text-success hover:bg-success/15" : ""}`}
-              onClick={onTestForm}
-              disabled={!telegramEnabled || validatingChannelForm || savingChannel}
-            >
-              {validatingChannelForm ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" /> Validando...
-                </>
-              ) : isChannelFormValidated ? (
-                <>
-                  <ShieldCheck className="size-4" /> Grupo validado
-                </>
-              ) : (
-                <>
-                  <Search className="size-4" /> Procurar grupo
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-      </GlassCard>
+        </GlassCard>
 
-      <GlassCard>
-        <SectionTitle title="Canais cadastrados" subtitle="Tokens ficam mascarados depois de salvos." />
-        <div className="mt-4 space-y-3">
-          {channels.map((channel) => {
-            const signalModules = channelSignalModules(channel);
-            const activeModules = TELEGRAM_MODULE_OPTIONS
-              .filter((option) => signalModules[option.key]?.enabled)
-              .map((option) => option.label.replace("SEGUIR ", ""));
+        {!telegramEnabled && (
+          <GlassCard className="border-warning/40">
+            <div className="text-sm font-black text-warning">Telegram bloqueado no plano Free.</div>
+          </GlassCard>
+        )}
+
+        <div className="grid gap-3 md:grid-cols-2">
+          {TELEGRAM_MODULE_OPTIONS.map((option) => {
+            const moduleConfig = selectedChannelModules[option.key] || defaultTelegramModuleConfig(option.key);
             return (
-            <div key={channel.id} className="rounded-xl border border-border/70 bg-secondary/20 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-bold">{channel.name}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">Token: {channel.botTokenMasked || "sem token"} | Chat: {channel.chatId || "sem chat"}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">Status: {channel.isActive ? "ativo" : "inativo"}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Modos: {activeModules.length ? activeModules.join(", ") : "nenhum ativo"}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Sem entrada: {channel.analyzingEnabled ? `ativo a cada ${channel.analyzingCooldownRounds || 3} rodadas` : "inativo"}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => onTestChannel(channel)}
-                    disabled={!telegramEnabled || testingTelegramId === channel.id}
-                  >
-                    <Send className="size-4" />
-                    <span className="hidden sm:inline">{testingTelegramId === channel.id ? "Enviando" : "Testar"}</span>
-                  </Button>
-                  <Button type="button" variant="destructive" size="sm" onClick={() => onRemove(channel.id)}>
-                    <Trash2 className="size-4" />
-                  </Button>
-                </div>
-              </div>
-              <details className="mt-3 rounded-xl border border-border/60 bg-background/25 p-3 text-xs">
-                <summary className="cursor-pointer font-bold text-muted-foreground">Configurar modos automaticos</summary>
-                <div className="mt-3">
-                  <TelegramModulesEditor
-                    modules={signalModules}
-                    onChange={(nextModules) => onUpdateChannel(channel, {
-                      signalModules: nextModules,
-                    } as Partial<ValidatorNotificationChannel>)}
-                  />
-                </div>
-              </details>
-              <details className="mt-3 rounded-xl border border-border/60 bg-background/25 p-3 text-xs">
-                <summary className="cursor-pointer font-bold text-muted-foreground">Configurar analisando padrao</summary>
-                <div className="mt-3 space-y-3">
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/15 px-3 py-2">
-                    <span className="font-bold">Enviar quando nao tiver entrada</span>
-                    <Switch
-                      checked={Boolean(channel.analyzingEnabled)}
-                      onCheckedChange={(checked) => onUpdateChannel(channel, { analyzingEnabled: checked })}
-                    />
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
-                    <Textarea
-                      value={channel.templates.analyzing || DEFAULT_MESSAGE_TEMPLATES.analyzing}
-                      onChange={(event) => onUpdateChannel(channel, {
-                        templates: {
-                          ...channel.templates,
-                          analyzing: event.target.value,
-                        },
-                      })}
-                      className="min-h-24"
-                    />
-                    <Field label="Intervalo">
-                      <Input
-                        value={channel.analyzingCooldownRounds || 3}
-                        onChange={(event) => onUpdateChannel(channel, {
-                          analyzingCooldownRounds: Math.max(1, Number(event.target.value) || 1),
-                        })}
-                        type="number"
-                        min={1}
-                      />
-                    </Field>
-                  </div>
-                </div>
-              </details>
-            </div>
+              <TelegramModeCard
+                key={option.key}
+                name={option.label}
+                description={telegramModuleDescription(option.key)}
+                active={Boolean(moduleConfig.enabled)}
+                disabled={!telegramEnabled || !selectedChannel}
+                selected={selectedModuleKey === option.key}
+                onToggle={() => patchChannelModule(option.key, { enabled: !moduleConfig.enabled })}
+                onConfigure={() => setSelectedModuleKey(option.key)}
+              />
             );
           })}
-          {!channels.length && (
-            <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
-              Nenhum canal salvo para este usuario.
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <GlassCard>
+          <SectionTitle title="Status do motor" subtitle={selectedChannel?.name || "Nenhum canal selecionado"} />
+          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+            <MiniStat label="Canal" value={connected ? "Conectado" : "Pendente"} tone={connected ? "text-success" : "text-warning"} />
+            <MiniStat label="Motor" value={engineActive ? "Ativo" : "Inativo"} tone={engineActive ? "text-success" : "text-warning"} />
+          </div>
+          {channels.length > 0 && (
+            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+              <Field label="Canal Telegram">
+                <Select value={selectedChannel?.id || ""} onValueChange={setSelectedChannelId}>
+                  <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {channels.map((channel) => (
+                      <SelectItem key={channel.id} value={channel.id}>{channel.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Button
+                type="button"
+                variant="secondary"
+                className="mt-5 h-9"
+                onClick={() => selectedChannel && onTestChannel(selectedChannel)}
+                disabled={!telegramEnabled || !selectedChannel || testingTelegramId === selectedChannel.id}
+              >
+                <Send className="size-4" /> Testar
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                className="mt-5 h-9"
+                onClick={() => selectedChannel && onRemove(selectedChannel.id)}
+                disabled={!selectedChannel}
+              >
+                <Trash2 className="size-4" />
+              </Button>
             </div>
           )}
-        </div>
-      </GlassCard>
+        </GlassCard>
+
+        <GlassCard>
+          <SectionTitle title={channels.length ? "Configurar modo" : "Conectar Telegram"} subtitle={channels.length ? moduleDisplayName(selectedModuleKey) : "Cadastre e valide o grupo primeiro."} />
+          {!channels.length ? (
+            <div className="mt-4 space-y-3">
+              <Field label="Nome do canal">
+                <Input value={channelForm.name} onChange={(event) => setChannelForm({ ...channelForm, name: event.target.value })} />
+              </Field>
+              <Field label="Bot Token">
+                <Input value={channelForm.botToken} onChange={(event) => setChannelForm({ ...channelForm, botToken: event.target.value })} placeholder="872946...XNwY" />
+              </Field>
+              <Field label="Chat ID">
+                <Input value={channelForm.chatId} onChange={(event) => setChannelForm({ ...channelForm, chatId: event.target.value })} />
+              </Field>
+              {(validatingChannelForm || isChannelFormValidated) && (
+                <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold ${
+                  isChannelFormValidated
+                    ? "border-success/35 bg-success/10 text-success"
+                    : "border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan"
+                }`}>
+                  {validatingChannelForm ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
+                  {validatingChannelForm ? "Validando grupo..." : "Grupo validado"}
+                </div>
+              )}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className={`w-full ${isChannelFormValidated ? "border-success/40 bg-success/10 text-success hover:bg-success/15" : ""}`}
+                  onClick={onTestForm}
+                  disabled={!telegramEnabled || validatingChannelForm || savingChannel}
+                >
+                  {validatingChannelForm ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+                  {isChannelFormValidated ? "Grupo validado" : "Procurar grupo"}
+                </Button>
+                <Button
+                  type="button"
+                  className="w-full btn-primary-grad"
+                  onClick={onSave}
+                  disabled={!telegramEnabled || savingChannel || validatingChannelForm || saveBlockedByValidation}
+                >
+                  {savingChannel ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                  {saveBlockedByValidation ? "Valide para salvar" : "Salvar canal"}
+                </Button>
+              </div>
+            </div>
+          ) : selectedChannel ? (
+            <TelegramModuleConfigPanel
+              channels={channels}
+              selectedChannelId={selectedChannel.id}
+              onSelectedChannelChange={setSelectedChannelId}
+              moduleKey={selectedModuleKey}
+              config={selectedChannelModules[selectedModuleKey] || defaultTelegramModuleConfig(selectedModuleKey)}
+              onSave={(nextConfig) => patchChannelModule(selectedModuleKey, { ...nextConfig, enabled: true })}
+            />
+          ) : null}
+        </GlassCard>
+
+        <TelegramDayPerformanceCards notifications={recentNotifications} />
+        <RecentTelegramSignals notifications={recentNotifications} />
+      </div>
     </div>
+  );
+}
+
+function TelegramModeCard({
+  name,
+  description,
+  active,
+  disabled,
+  selected,
+  onToggle,
+  onConfigure,
+}: {
+  name: string;
+  description: string;
+  active: boolean;
+  disabled: boolean;
+  selected: boolean;
+  onToggle: () => void;
+  onConfigure: () => void;
+}) {
+  return (
+    <GlassCard className={`rounded-xl p-4 ${selected ? "border-neon-cyan/45" : ""}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-black">{name}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{description}</div>
+        </div>
+        <AppBadge tone={active ? "green" : "amber"}>{active ? "Ativo" : "Inativo"}</AppBadge>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <Button type="button" className="h-10 w-full" variant={active ? "secondary" : "default"} onClick={onToggle} disabled={disabled}>
+          {active ? "Desativar" : "Ativar"}
+        </Button>
+        <Button type="button" className="h-10 w-full" variant="secondary" onClick={onConfigure}>
+          Configurar
+        </Button>
+      </div>
+    </GlassCard>
+  );
+}
+
+function TelegramModuleConfigPanel({
+  channels,
+  selectedChannelId,
+  onSelectedChannelChange,
+  moduleKey,
+  config,
+  onSave,
+}: {
+  channels: ValidatorNotificationChannel[];
+  selectedChannelId: string;
+  onSelectedChannelChange: (channelId: string) => void;
+  moduleKey: ValidatorTelegramModuleKey;
+  config: ValidatorTelegramModuleConfig;
+  onSave: (config: ValidatorTelegramModuleConfig) => void;
+}) {
+  const [draft, setDraft] = useState(() => normalizeTelegramModuleConfig(moduleKey, config));
+
+  useEffect(() => {
+    setDraft(normalizeTelegramModuleConfig(moduleKey, config));
+  }, [moduleKey, config.enabled, config.entryType, config.galeLimit, config.coverTie, config.cooldownSeconds, config.template]);
+
+  return (
+    <div className="mt-4 space-y-3">
+      <Field label="Canal Telegram">
+        <Select value={selectedChannelId} onValueChange={onSelectedChannelChange}>
+          <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {channels.map((channel) => (
+              <SelectItem key={channel.id} value={channel.id}>{channel.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field label="Tipo de entrada">
+        <Select
+          value={draft.entryType}
+          onValueChange={(value) => setDraft({ ...draft, entryType: value as ValidatorTelegramModuleConfig["entryType"] })}
+        >
+          <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="AUTO">Automatico</SelectItem>
+            <SelectItem value="BANKER">Banker</SelectItem>
+            <SelectItem value="PLAYER">Player</SelectItem>
+            <SelectItem value="TIE">Tie</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Field label="Protecao de gale">
+          <Select
+            value={String(draft.galeLimit)}
+            onValueChange={(value) => setDraft({ ...draft, galeLimit: Number(value) || 0 })}
+          >
+            <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0">Sem gale</SelectItem>
+              <SelectItem value="1">G1</SelectItem>
+              <SelectItem value="2">G2</SelectItem>
+              <SelectItem value="3">G3</SelectItem>
+              <SelectItem value="4">G4</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Tempo minimo">
+          <Input
+            type="number"
+            min={0}
+            max={300}
+            value={draft.cooldownSeconds}
+            onChange={(event) => setDraft({
+              ...draft,
+              cooldownSeconds: clampTelegramModuleNumber(event.target.value, draft.cooldownSeconds, 0, 300),
+            })}
+          />
+        </Field>
+        <Field label="Cobrir empate">
+          <div className="flex h-9 items-center justify-between rounded-md border border-input bg-secondary/20 px-3">
+            <span className="text-sm">{draft.coverTie ? "Sim" : "Nao"}</span>
+            <Switch checked={draft.coverTie} onCheckedChange={(checked) => setDraft({ ...draft, coverTie: checked })} />
+          </div>
+        </Field>
+      </div>
+      <Field label="Modelo da mensagem Telegram">
+        <Textarea
+          value={draft.template}
+          onChange={(event) => setDraft({ ...draft, template: event.target.value })}
+          className="min-h-28"
+        />
+      </Field>
+      <div className="rounded-xl border border-border/70 bg-secondary/15 p-3 text-xs">
+        <div className="font-black">Preview da mensagem</div>
+        <pre className="mt-2 whitespace-pre-wrap font-sans text-muted-foreground">{telegramModulePreview(moduleKey, draft)}</pre>
+      </div>
+      <Button
+        type="button"
+        className="sticky bottom-3 z-10 h-11 w-full btn-primary-grad xl:static"
+        onClick={() => onSave({ ...draft, enabled: true })}
+      >
+        <Save className="size-4" /> Salvar e ativar
+      </Button>
+    </div>
+  );
+}
+
+function TelegramDayPerformanceCards({ notifications }: { notifications: ValidatorTelegramNotification[] }) {
+  const stats = telegramDayStats(notifications);
+  return (
+    <GlassCard>
+      <SectionTitle title="Desempenho do dia" subtitle="Resumo dos disparos enviados hoje." />
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <MiniStat label="Sinais enviados hoje" value={stats.sent} tone="text-neon-cyan" />
+        <MiniStat label="Greens" value={stats.greens} tone="text-success" />
+        <MiniStat label="Reds" value={stats.reds} tone="text-destructive" />
+        <MiniStat label="Assertividade" value={stats.assertiveness} tone="text-neon-cyan" />
+        <div className="col-span-2">
+          <MiniStat label="Ultimo sinal" value={stats.lastSignal} />
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
+
+function RecentTelegramSignals({ notifications }: { notifications: ValidatorTelegramNotification[] }) {
+  const signals = notifications.slice(0, 10);
+  return (
+    <GlassCard>
+      <SectionTitle title="Ultimos sinais enviados" subtitle="Linha rapida do que saiu no Telegram." />
+      <div className="mt-4 space-y-2">
+        {signals.map((notification) => (
+          <div key={notification.id} className="rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-xs">
+            {formatTelegramSignalLine(notification)}
+          </div>
+        ))}
+        {!signals.length && (
+          <div className="rounded-lg border border-border/60 bg-secondary/15 px-3 py-3 text-xs text-muted-foreground">
+            Nenhum sinal enviado ainda.
+          </div>
+        )}
+      </div>
+    </GlassCard>
   );
 }
 
@@ -2340,7 +2497,11 @@ function normalizeTelegramModuleConfigs(value: unknown) {
       const hasEnabled = Object.prototype.hasOwnProperty.call(raw, "enabled");
       acc[option.key] = {
         enabled: hasEnabled ? moduleBoolean(raw.enabled) : defaults.enabled,
+        entryType: moduleEntryType(raw.entryType, defaults.entryType),
         galeLimit: clampTelegramModuleNumber(raw.galeLimit, defaults.galeLimit, 0, 4),
+        coverTie: Object.prototype.hasOwnProperty.call(raw, "coverTie")
+          ? moduleBoolean(raw.coverTie)
+          : defaults.coverTie,
         tieCoverage: clampTelegramModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
         cooldownSeconds: clampTelegramModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
         template: moduleString(raw.template) || defaults.template,
@@ -2354,11 +2515,20 @@ function normalizeTelegramModuleConfigs(value: unknown) {
 function defaultTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
   return {
     enabled: key === "validator",
+    entryType: "AUTO",
     galeLimit: key === "ties_only" ? 0 : 1,
+    coverTie: key === "ties_only",
     tieCoverage: key === "ties_only" ? 4 : 1,
     cooldownSeconds: key === "validator" ? 0 : 2,
     template: DEFAULT_TELEGRAM_MODULE_TEMPLATES[key],
   };
+}
+
+function normalizeTelegramModuleConfig(
+  key: ValidatorTelegramModuleKey,
+  value: Partial<ValidatorTelegramModuleConfig>,
+) {
+  return normalizeTelegramModuleConfigs({ [key]: value })[key];
 }
 
 function channelSignalModules(channel: ValidatorNotificationChannel) {
@@ -2380,10 +2550,122 @@ function moduleBoolean(value: unknown) {
   return ["1", "true", "sim", "yes", "on", "active", "ativo"].includes(moduleString(value).toLowerCase());
 }
 
+function moduleEntryType(value: unknown, fallback: ValidatorTelegramModuleConfig["entryType"]) {
+  const text = moduleString(value).toUpperCase();
+  if (text === "AUTO" || text === "BANKER" || text === "PLAYER" || text === "TIE") {
+    return text as ValidatorTelegramModuleConfig["entryType"];
+  }
+  return fallback;
+}
+
 function clampTelegramModuleNumber(value: unknown, fallback: number, min: number, max: number) {
   const number = Math.floor(Number(value));
   if (!Number.isFinite(number)) return fallback;
   return Math.max(min, Math.min(max, number));
+}
+
+function moduleDisplayName(key: ValidatorTelegramModuleKey) {
+  return TELEGRAM_MODULE_OPTIONS.find((option) => option.key === key)?.label.replace("SEGUIR ", "") || key;
+}
+
+function telegramModuleDescription(key: ValidatorTelegramModuleKey) {
+  if (key === "ai_patterns") return "Envia quando a IA confirmar uma entrada.";
+  if (key === "paying_numbers") return "Segue os numeros pagantes confirmados.";
+  if (key === "surf_alert") return "Avisa quando o Surf confirmar sinal.";
+  if (key === "ties_only") return "Cobre possiveis empates.";
+  return "Segue as estrategias salvas no Validador.";
+}
+
+function telegramModulePreview(key: ValidatorTelegramModuleKey, config: ValidatorTelegramModuleConfig) {
+  const variables: Record<string, string> = {
+    table: "Bac Bo",
+    pattern: "B P B",
+    entry: config.entryType === "AUTO" ? "Banker" : signalEntryLabel(config.entryType),
+    gale: formatTelegramProtection(config.galeLimit),
+    tieCoverage: config.coverTie ? "4" : "0",
+    confidence: "92%",
+    percentage: "92%",
+    status: "CONFIRMADO",
+    risk: "baixo",
+    number: "7",
+    level: "alto",
+    round: "123456",
+    module: moduleDisplayName(key),
+  };
+  return config.template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, variable: string) => variables[variable] ?? "");
+}
+
+function telegramDayStats(notifications: ValidatorTelegramNotification[]) {
+  const today = new Date().toISOString().slice(0, 10);
+  const todaySignals = notifications.filter((notification) => (notification.sentAt || notification.updatedAt).slice(0, 10) === today);
+  const sent = todaySignals.filter((notification) => notification.status === "sent").length;
+  const greens = todaySignals.filter((notification) => telegramSignalResult(notification).toLowerCase().startsWith("green")).length;
+  const reds = todaySignals.filter((notification) => telegramSignalResult(notification).toLowerCase() === "red").length;
+  const closed = greens + reds;
+  return {
+    sent,
+    greens,
+    reds,
+    assertiveness: closed ? formatPercent((greens / closed) * 100) : "--",
+    lastSignal: todaySignals[0] ? compactTelegramSignal(todaySignals[0]) : "--",
+  };
+}
+
+function formatTelegramSignalLine(notification: ValidatorTelegramNotification) {
+  const time = formatTelegramSignalTime(notification.sentAt || notification.updatedAt);
+  return `${time} - ${telegramSignalType(notification)} - ${telegramSignalEntry(notification)} - ${telegramSignalProtection(notification)} - ${telegramSignalResult(notification)}`;
+}
+
+function compactTelegramSignal(notification: ValidatorTelegramNotification) {
+  return `${telegramSignalType(notification)} / ${telegramSignalEntry(notification)} / ${telegramSignalProtection(notification)}`;
+}
+
+function telegramSignalType(notification: ValidatorTelegramNotification) {
+  const payload = moduleRecord(notification.payloadJson);
+  const moduleKey = moduleString(payload.moduleKey);
+  if (moduleKey === "ai_patterns" || notification.type === "module:ai_patterns") return "Padroes IA";
+  if (moduleKey === "paying_numbers" || notification.type === "module:paying_numbers") return "Numeros Pagantes";
+  if (moduleKey === "surf_alert" || notification.type === "module:surf_alert") return "Aviso de Surf";
+  if (moduleKey === "ties_only" || notification.type === "module:ties_only") return "Empate";
+  return "Validador";
+}
+
+function telegramSignalEntry(notification: ValidatorTelegramNotification) {
+  const payload = moduleRecord(notification.payloadJson);
+  return signalEntryLabel(payload.entryText || payload.entry || payload.expectedSide || "Aguardando");
+}
+
+function telegramSignalProtection(notification: ValidatorTelegramNotification) {
+  const payload = moduleRecord(notification.payloadJson);
+  const protection = moduleString(payload.protection);
+  return protection || "--";
+}
+
+function telegramSignalResult(notification: ValidatorTelegramNotification) {
+  const payload = moduleRecord(notification.payloadJson);
+  const result = moduleString(payload.result);
+  if (result) return result;
+  if (notification.status === "error") return "Aguardando resultado";
+  return "Aguardando resultado";
+}
+
+function signalEntryLabel(value: unknown) {
+  const text = moduleString(value).toUpperCase();
+  if (text === "B" || text === "BANKER" || text.includes("BANKER")) return "Banker";
+  if (text === "P" || text === "PLAYER" || text.includes("PLAYER")) return "Player";
+  if (text === "T" || text === "TIE" || text.includes("TIE")) return "Tie";
+  return moduleString(value) || "Aguardando";
+}
+
+function formatTelegramProtection(value: unknown) {
+  const gale = clampTelegramModuleNumber(value, 0, 0, 4);
+  return gale <= 0 ? "SG" : `G${gale}`;
+}
+
+function formatTelegramSignalTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--:--";
+  return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
 async function fetchValidatorRoundHistory(limit: number) {
@@ -2477,6 +2759,16 @@ async function fetchServerValidatorChannels() {
   if (!response.ok) throw new Error("Backend do Validador indisponivel.");
   const data = await response.json().catch(() => null) as { channels?: ValidatorNotificationChannel[] } | null;
   return Array.isArray(data?.channels) ? data.channels : [];
+}
+
+async function fetchServerValidatorNotifications() {
+  const response = await fetch("/validator/notifications", {
+    cache: "no-store",
+    headers: validatorApiHeaders(),
+  });
+  if (!response.ok) throw new Error("Backend do Validador indisponivel.");
+  const data = await response.json().catch(() => null) as { notifications?: ValidatorTelegramNotification[] } | null;
+  return Array.isArray(data?.notifications) ? data.notifications : [];
 }
 
 async function saveServerValidatorChannel(
