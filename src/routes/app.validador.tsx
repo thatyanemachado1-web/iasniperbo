@@ -784,8 +784,8 @@ function NeuralValidatorPage() {
         message:
           "ENTRADA CONFIRMADA\n" +
           "Mesa: Bac Bo\n" +
-          "Padrao: ??10 ? ??7 ? ??6\n" +
-          "Entrada: ?? Banker\n" +
+          "Padrao: B10 > T7 > P6\n" +
+          "Entrada: B Banker\n" +
           "Gale: Ate G1\n" +
           "Protecao Tie: Ativa\n" +
           `Canal: ${channel.name}`,
@@ -2130,7 +2130,7 @@ function ValidationDetailsPanel({ result, config }: { result: ValidatorResult | 
         <div className="text-sm font-black">Detalhes da validacao</div>
         <div className="flex flex-wrap gap-2 text-xs">
           <ResultChip label="Entrada" side={selectedEntry ?? result.entry} />
-          <ResultChip label="Empate" value={config.tieProtection ? "?? coberto" : "?? sem cobertura"} />
+          <ResultChip label="Empate" value={config.tieProtection ? "TIE coberto" : "TIE sem cobertura"} />
           <ResultChip label="Rodadas" value={result.analyzedRounds.toLocaleString("pt-BR")} />
         </div>
       </div>
@@ -2234,7 +2234,7 @@ function PatternLine({
       {pattern.map((token, index) => (
         <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1">
           <TokenPill token={token} />
-          {index < pattern.length - 1 && <span className="text-muted-foreground">?</span>}
+          {index < pattern.length - 1 && <span className="text-muted-foreground">&gt;</span>}
         </span>
       ))}
       <span className="text-muted-foreground">= puxou</span>
@@ -2293,7 +2293,7 @@ function CompactPatternLine({
               </button>
             ) : null}
           </span>
-          {index < pattern.length - 1 && <span className="text-muted-foreground">?</span>}
+          {index < pattern.length - 1 && <span className="text-muted-foreground">&gt;</span>}
         </span>
       ))}
     </div>
@@ -3178,9 +3178,9 @@ function invertToken(token: ValidatorPatternToken): ValidatorPatternToken {
 }
 
 function sideEmoji(side: RoundResult) {
-  if (side === "B") return "??";
-  if (side === "P") return "??";
-  return "??";
+  if (side === "B") return "B";
+  if (side === "P") return "P";
+  return "T";
 }
 
 function entryTypeToSide(entryType: ValidatorEntryType): RoundResult | null {

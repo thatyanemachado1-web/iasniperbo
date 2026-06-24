@@ -6663,8 +6663,8 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       message:
         "ENTRADA CONFIRMADA\n" +
         "Mesa: Bac Bo\n" +
-        "Padrao: ????10 ??? ????7 ??? ????6\n" +
-        "Entrada: ???? Banker\n" +
+        "Padrao: B10 > T7 > P6\n" +
+        "Entrada: B Banker\n" +
         "Gale: Ate G1\n" +
         "Protecao Tie: Ativa\n" +
         `Canal: ${channel.name}`,
@@ -9236,19 +9236,19 @@ function validatorEntrySide(entryType: ValidatorEntryType): Round["result"] | nu
 }
 
 function formatServerTelegramPattern(pattern: ValidatorPatternToken[]) {
-  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join(" ??? ");
+  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join(" > ");
 }
 
 function formatServerTelegramSide(side: Round["result"]) {
-  if (side === "B") return "???? Banker";
-  if (side === "P") return "???? Player";
-  return "???? Tie";
+  if (side === "B") return "B Banker";
+  if (side === "P") return "P Player";
+  return "T Tie";
 }
 
 function serverSideCircle(side: Round["result"]) {
-  if (side === "B") return "????";
-  if (side === "P") return "????";
-  return "????";
+  if (side === "B") return "B";
+  if (side === "P") return "P";
+  return "T";
 }
 
 function formatServerPercent(value?: number) {
