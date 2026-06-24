@@ -12605,11 +12605,12 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
     (user) =>
       readString(user, "plan") === "trial" || readString(user, "subscriptionStatus") === "trial",
   );
-  const currentSignal = readRecord((liveDashboardData as Record<string, unknown>).currentSignal);
+  const dashboardRecord = liveDashboardData as unknown as Record<string, unknown>;
+  const currentSignal = readRecord(dashboardRecord.currentSignal);
   const side =
     readString(currentSignal, "side") ||
-    readString((liveDashboardData as Record<string, unknown>).entrySide) ||
-    readString((liveDashboardData as Record<string, unknown>).recommendedSide) ||
+    readString(dashboardRecord, "entrySide") ||
+    readString(dashboardRecord, "recommendedSide") ||
     "BANKER";
 
   return {
@@ -12622,7 +12623,7 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
     onlineNow: countOnlineClientUsers(now),
     lastSignal: side.toUpperCase(),
     lastSignalAt: relativeTimeFromIso(
-      readString(liveDashboardData as Record<string, unknown>, "updatedAt"),
+      readString(dashboardRecord, "updatedAt"),
     ),
   };
 }
