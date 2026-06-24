@@ -8388,7 +8388,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     : trackServerNeuralEntryLifecycle(
         nextDashboard,
         currentDashboard,
-        incomingLatestRound,
+        incomingLatestRound ?? undefined,
         receivedNewRound,
       );
   const dashboardWithVisibleNeuralSignal = hasIncomingNeuralLifecycle
@@ -8508,7 +8508,7 @@ function exposeServerNeuralEntryAsCurrentSignal(dashboard: LiveDashboardData): L
   const snapshot = state.readingSnapshot ?? dashboard.neuralReading;
   const protection = String(snapshot?.validade || currentSignal?.protection || "G1");
   const strength = clampPercent(
-    snapshot?.assertividade ?? snapshot?.confidence ?? currentSignal?.strength ?? 0,
+    snapshot?.assertividade ?? readRecord(snapshot).confidence ?? currentSignal?.strength ?? 0,
   );
 
   return {
@@ -9509,7 +9509,7 @@ function normalizeSignal(
       ),
       lastResult: {
         ...incomingLastResult,
-        side,
+        side: side as SignalSide,
         protection: resolvedProtection,
       },
     };
@@ -10000,13 +10000,13 @@ function normalizeServerModeList(value: unknown) {
   return ACTIVE_ENTRY_MODES.filter((mode) => selected.has(mode));
 }
 
-function normalizeServerCountedResults(value: unknown) {
+function normalizeServerCountedResults(value: unknown): Record<string, true> {
   const record = readRecord(value);
   return Object.fromEntries(
     Object.keys(record)
       .filter(Boolean)
       .map((key) => [key, true]),
-  );
+  ) as Record<string, true>;
 }
 
 function sameServerModeList(left: ActiveEntryMode[] | undefined, right: ActiveEntryMode[]) {
@@ -10021,10 +10021,10 @@ function pruneServerSignalModes(signalModes: Record<string, ActiveEntryMode[]>) 
   return Object.fromEntries(keys.slice(-220).map((key) => [key, signalModes[key]]));
 }
 
-function pruneServerCountedResults(countedResults: Record<string, true>) {
+function pruneServerCountedResults(countedResults: Record<string, true>): Record<string, true> {
   const keys = Object.keys(countedResults);
   if (keys.length <= 300) return countedResults;
-  return Object.fromEntries(keys.slice(-220).map((key) => [key, true]));
+  return Object.fromEntries(keys.slice(-220).map((key) => [key, true])) as Record<string, true>;
 }
 
 function serverFirstDefined(...values: unknown[]) {
