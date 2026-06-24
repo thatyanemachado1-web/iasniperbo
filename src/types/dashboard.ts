@@ -22,6 +22,7 @@ export interface Round {
   playerScore: number;
   tieMultiplier?: number | null;
   time: string;
+  recordedAt?: string;
 }
 
 export type SignalSide = "BANKER" | "PLAYER";
