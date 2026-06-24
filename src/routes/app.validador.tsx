@@ -2229,31 +2229,39 @@ function PatternLine({
   compact?: boolean;
 }) {
   return (
-    <div className={`flex min-w-0 flex-wrap items-center gap-1.5 ${compact ? "text-xs" : "text-sm"}`}>
-      <span className="font-semibold text-muted-foreground">Estrategia:</span>
+    <div className={`flex min-w-0 flex-wrap items-end gap-x-1.5 gap-y-2 ${compact ? "text-xs" : "text-sm"}`}>
+      <span className="mb-3 font-semibold text-muted-foreground">Estrategia:</span>
       {pattern.map((token, index) => (
-        <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1">
+        <span key={`${formatToken(token)}-${index}`} className="inline-flex items-start gap-1">
           <TokenPill token={token} />
-          {index < pattern.length - 1 && <span className="text-muted-foreground">&gt;</span>}
+          {index < pattern.length - 1 && <span className="mt-2 text-muted-foreground">&rarr;</span>}
         </span>
       ))}
-      <span className="text-muted-foreground">= puxou</span>
+      <span className="mb-3 text-muted-foreground">= puxou</span>
       {pulledSide === undefined ? (
-        <span className="text-muted-foreground">aguardando validacao</span>
+        <span className="mb-3 text-muted-foreground">aguardando validacao</span>
       ) : pulledSide ? (
-        <SideLabel side={pulledSide} />
+        <span className="mb-3">
+          <SideLabel side={pulledSide} />
+        </span>
       ) : (
-        <span className="text-warning">sem amostra suficiente</span>
+        <span className="mb-3 text-warning">sem amostra suficiente</span>
       )}
     </div>
   );
 }
 
 function TokenPill({ token }: { token: ValidatorPatternToken }) {
+  const value = token.score ? String(token.score) : sideEmoji(token.side);
+
   return (
-    <span className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-black ${tokenClass(token.side)}`}>
-      <span className="text-base leading-none">{sideEmoji(token.side)}</span>
-      {token.score ? <span>{token.score}</span> : null}
+    <span className="inline-flex shrink-0 flex-col items-center gap-0.5">
+      <span className={`inline-flex size-8 items-center justify-center rounded-full border text-[11px] font-black leading-none shadow-lg ${tokenCircleClass(token.side)}`}>
+        {value}
+      </span>
+      <span className={`text-[8px] font-black leading-none ${sideTone(token.side)}`}>
+        {sideEmoji(token.side)}
+      </span>
     </span>
   );
 }
@@ -2276,11 +2284,11 @@ function CompactPatternLine({
   }
 
   return (
-    <div className={`flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 pt-1 text-base font-black ${className}`}>
+    <div className={`flex min-w-0 flex-wrap items-start gap-x-2 gap-y-3 pt-1 text-base font-black ${className}`}>
       {pattern.map((token, index) => (
-        <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1.5">
-          <span className="relative inline-flex items-center">
-            <span className={sideTone(token.side)}>{sideEmoji(token.side)}{token.score ?? ""}</span>
+        <span key={`${formatToken(token)}-${index}`} className="inline-flex items-start gap-1.5">
+          <span className="relative inline-flex">
+            <TokenPill token={token} />
             {onRemove ? (
               <button
                 type="button"
@@ -2293,7 +2301,7 @@ function CompactPatternLine({
               </button>
             ) : null}
           </span>
-          {index < pattern.length - 1 && <span className="text-muted-foreground">&gt;</span>}
+          {index < pattern.length - 1 && <span className="mt-2 text-sm text-muted-foreground">&rarr;</span>}
         </span>
       ))}
     </div>
@@ -2311,8 +2319,8 @@ function SimpleInfoCard({ label, children }: { label: string; children: ReactNod
 
 function SideLabel({ side }: { side: RoundResult | null | undefined }) {
   return (
-    <span className={`inline-flex items-center gap-1 font-black ${sideTone(side)}`}>
-      {side ? <span className="text-base leading-none">{sideEmoji(side)}</span> : null}
+    <span className={`inline-flex items-center gap-1.5 font-black ${sideTone(side)}`}>
+      {side ? <span className={`inline-flex size-2.5 rounded-full ${sideDotClass(side)}`} /> : null}
       {sideName(side)}
     </span>
   );
@@ -3194,6 +3202,18 @@ function tokenClass(side: RoundResult) {
   if (side === "B") return "border-banker/40 bg-banker/10 text-banker";
   if (side === "P") return "border-player/40 bg-player/10 text-player";
   return "border-warning/50 bg-warning/10 text-warning";
+}
+
+function tokenCircleClass(side: RoundResult) {
+  if (side === "B") return "border-banker/70 bg-banker text-white shadow-banker/25";
+  if (side === "P") return "border-player/70 bg-player text-white shadow-player/25";
+  return "border-warning/70 bg-warning text-background shadow-warning/25";
+}
+
+function sideDotClass(side: RoundResult) {
+  if (side === "B") return "bg-banker shadow-lg shadow-banker/25";
+  if (side === "P") return "bg-player shadow-lg shadow-player/25";
+  return "bg-warning shadow-lg shadow-warning/25";
 }
 
 function formatCountPercent(count: number, total: number) {
