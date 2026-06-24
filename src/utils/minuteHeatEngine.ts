@@ -99,9 +99,9 @@ function summarizeBuckets(buckets: MinuteHeatBucket[], minRounds: number) {
 
 function recomputeBucket(bucket: MinuteHeatBucket, minRounds: number) {
   const rows: Array<{ side: MinuteHeatSide; count: number }> = [
-    { side: "BANKER", count: bucket.banker },
-    { side: "PLAYER", count: bucket.player },
-    { side: "TIE", count: bucket.tie },
+    { side: "BANKER" as MinuteHeatSide, count: bucket.banker },
+    { side: "PLAYER" as MinuteHeatSide, count: bucket.player },
+    { side: "TIE" as MinuteHeatSide, count: bucket.tie },
   ].sort((a, b) => b.count - a.count);
   const best = rows[0];
   bucket.dominantSide = best && best.count > 0 ? best.side : "NONE";
