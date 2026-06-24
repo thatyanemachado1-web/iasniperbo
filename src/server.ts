@@ -6372,15 +6372,40 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
-  if (getTelegramEngineConfig(env) && (isChannelsRoute || isNotificationsRoute)) {
-    // Cloudflare Telegram Engine eh a fonte unica da verdade quando configurado.
+  if (isChannelsRoute || isNotificationsRoute) {
+    // Cloudflare Telegram Engine eh a UNICA fonte da verdade.
     // Nao caimos mais no armazenamento local antigo para evitar mensagens duplicadas.
+    const engineUrlExists = Boolean(
+      readServerEnvString(env, "TELEGRAM_ENGINE_URL", "") ||
+        readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL", ""),
+    );
+    const engineSecretExists = Boolean(
+      readServerEnvString(env, "TELEGRAM_ENGINE_SECRET", "") ||
+        readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_SECRET", ""),
+    );
+    console.log("[telegram-engine]", {
+      path: url.pathname,
+      method: request.method,
+      TELEGRAM_ENGINE_URL_EXISTS: engineUrlExists,
+      TELEGRAM_ENGINE_SECRET_EXISTS: engineSecretExists,
+      validatorUserId: userId,
+    });
+    if (!engineUrlExists || !engineSecretExists) {
+      return json(
+        {
+          error: "Telegram Engine secrets missing",
+          TELEGRAM_ENGINE_URL_EXISTS: engineUrlExists,
+          TELEGRAM_ENGINE_SECRET_EXISTS: engineSecretExists,
+        },
+        500,
+      );
+    }
     try {
       const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId);
       if (cloudResponse) return cloudResponse;
       return json({ error: "Motor do Telegram indisponivel." }, 502);
     } catch (error) {
-      console.warn("Cloudflare Telegram Engine indisponivel.", error);
+      console.warn("[telegram-engine] proxy error", error);
       return json({ error: "Motor do Telegram indisponivel." }, 502);
     }
   }
