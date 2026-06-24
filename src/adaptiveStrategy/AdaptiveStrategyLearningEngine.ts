@@ -247,7 +247,7 @@ function currentGreenRedSequence(outcomes: string[]) {
   const validated = outcomes.filter((outcome) => outcome !== "expired");
   const last = validated.at(-1);
   if (!last) return { type: "none" as const, count: 0 };
-  const type = last === "red" ? "red" : "green";
+  const type: "green" | "none" | "red" = last === "red" ? "red" : "green";
   let count = 0;
   for (let index = validated.length - 1; index >= 0; index -= 1) {
     const currentType = validated[index] === "red" ? "red" : "green";
