@@ -6485,11 +6485,16 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
           if (!validation.ok) return json({ error: validation.error }, validation.status);
         }
       }
-      const duplicateIds = validatorChannelRelatedIds(liveValidatorChannels, channel)
-        .filter((channelId) => channelId !== channel.id);
+      const duplicateIds = [
+        ...new Set([
+          ...validatorChannelRelatedIds(liveValidatorChannels, channel),
+          ...(await findStoredValidatorChannelRelatedIds(env, userId, channel)),
+        ]),
+      ].filter((channelId) => channelId !== channel.id);
       liveValidatorChannels = upsertValidatorChannel(channel);
       if (duplicateIds.length) {
         await deleteValidatorChannelRows(env, userId, duplicateIds);
+        await markValidatorChannelsDeleted(env, userId, duplicateIds, "");
         liveValidatorChannels = liveValidatorChannels.filter(
           (item) => !(item.userId === userId && duplicateIds.includes(item.id)),
         );
@@ -6604,6 +6609,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       });
       await deleteValidatorChannelRows(env, userId, deletedIds);
       await deleteValidatorChannelNotificationRows(env, userId, deletedIds);
+      await markValidatorChannelsDeleted(env, userId, deletedIds, current?.chatId || "");
       if (current?.chatId) {
         await deleteValidatorChannelsByCode(env, userId, current.chatId);
       }
@@ -7276,28 +7282,27 @@ async function fetchStoredValidatorChannel(env: unknown, userId: string, channel
   const normalizedChannelId = readString(channelId);
   if (!normalizedUserId || !normalizedChannelId) return null;
 
-  const [rows, stateChannel, deletedState] = await Promise.all([
+  const [rows, stateChannel, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
       VALIDATOR_CHANNELS_TABLE,
       `select=*&user_id=eq.${encodeURIComponent(normalizedUserId)}&id=eq.${encodeURIComponent(normalizedChannelId)}&limit=1`,
     ),
     fetchValidatorChannelStateChannel(env, normalizedUserId, normalizedChannelId),
-    loadDurableLiveStateById(env, validatorChannelDeletedStateId(normalizedUserId, normalizedChannelId)),
+    fetchValidatorChannelDeletedRefs(env, normalizedUserId),
   ]);
-  if (deletedState && hasRecordFields(deletedState)) return null;
   const dedicatedChannel = rows
     .map(validatorChannelFromRow)
     .find((channel): channel is ValidatorNotificationChannel => Boolean(channel)) || null;
   return mergeValidatorChannelList(
     dedicatedChannel ? [dedicatedChannel] : [],
     stateChannel ? [stateChannel] : [],
-  )[0] || null;
+  ).find((channel) => !isValidatorChannelDeleted(channel, deletedRefs)) || null;
 }
 
 async function fetchStoredValidatorChannels(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return [];
-  const [rows, stateChannels, deletedIds] = await Promise.all([
+  const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
       VALIDATOR_CHANNELS_TABLE,
@@ -7309,7 +7314,8 @@ async function fetchStoredValidatorChannels(env: unknown, userId: string) {
   const storedChannels = rows
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  return mergeValidatorChannelList(storedChannels, stateChannels).filter((channel) => !deletedIds.has(channel.id));
+  return mergeValidatorChannelList(storedChannels, stateChannels)
+    .filter((channel) => !isValidatorChannelDeleted(channel, deletedRefs));
 }
 
 async function fetchRawStoredValidatorChannels(env: unknown, userId: string) {
@@ -7352,7 +7358,7 @@ async function findStoredValidatorChannelRelatedIds(
 
 async function fetchStoredActiveValidatorChannels(env: unknown) {
   if (!getSupabasePersistenceConfig(env)) return [];
-  const [rows, stateChannels, deletedIds] = await Promise.all([
+  const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
       VALIDATOR_CHANNELS_TABLE,
@@ -7365,7 +7371,7 @@ async function fetchStoredActiveValidatorChannels(env: unknown) {
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
   return mergeValidatorChannelList(storedChannels, stateChannels)
-    .filter((channel) => channel.isActive && !deletedIds.has(channel.id));
+    .filter((channel) => channel.isActive && !isValidatorChannelDeleted(channel, deletedRefs));
 }
 
 async function fetchStoredRecentValidatorNotifications(env: unknown) {
@@ -7395,11 +7401,7 @@ async function deleteValidatorPatternRow(env: unknown, userId: string, patternId
 
 async function persistValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
   if (!getSupabasePersistenceConfig(env)) return false;
-  await deleteSupabaseRows(
-    env,
-    LIVE_STATE_TABLE,
-    `id=eq.${encodeURIComponent(validatorChannelDeletedStateId(channel.userId, channel.id))}`,
-  );
+  await clearValidatorChannelDeletedState(env, channel);
   const dedicated = await persistSupabaseRow(env, VALIDATOR_CHANNELS_TABLE, validatorChannelToRow(channel), "id");
   if (dedicated) return true;
   return persistValidatorChannelState(env, channel);
@@ -7482,19 +7484,67 @@ async function deleteValidatorChannelState(env: unknown, userId: string, channel
   const normalizedUserId = normalizeValidatorUserId(userId);
   const normalizedChannelId = readString(channelId);
   if (!normalizedUserId || !normalizedChannelId) return false;
-  await Promise.allSettled([
-    deleteSupabaseRows(
-      env,
-      LIVE_STATE_TABLE,
-      `id=eq.${encodeURIComponent(validatorChannelStateId(normalizedUserId, normalizedChannelId))}`,
-    ),
-    deleteSupabaseRows(
-      env,
-      LIVE_STATE_TABLE,
-      `id=eq.${encodeURIComponent(validatorChannelDeletedStateId(normalizedUserId, normalizedChannelId))}`,
-    ),
-  ]);
+  await deleteSupabaseRows(
+    env,
+    LIVE_STATE_TABLE,
+    `id=eq.${encodeURIComponent(validatorChannelStateId(normalizedUserId, normalizedChannelId))}`,
+  );
   return true;
+}
+
+async function clearValidatorChannelDeletedState(env: unknown, channel: ValidatorNotificationChannel) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const ids = [
+    validatorChannelDeletedStateId(channel.userId, channel.id),
+    validatorChannelDeletedCodeStateId(channel.userId, channel.chatId),
+  ].filter(Boolean);
+  if (!ids.length) return false;
+  await Promise.allSettled(
+    ids.map((id) =>
+      deleteSupabaseRows(
+        env,
+        LIVE_STATE_TABLE,
+        `id=eq.${encodeURIComponent(id)}`,
+      )
+    ),
+  );
+  return true;
+}
+
+async function markValidatorChannelsDeleted(
+  env: unknown,
+  userId: string,
+  channelIds: string[],
+  chatId: string,
+) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const ids = [...new Set(channelIds.map(readString).filter(Boolean))];
+  const normalizedCode = normalizeValidatorChannelCode(chatId);
+  if (!normalizedUserId || (!ids.length && !normalizedCode)) return false;
+  const now = new Date().toISOString();
+  const results = await Promise.allSettled([
+    ...ids.map((channelId) =>
+      saveDurableLiveStateById(env, validatorChannelDeletedStateId(normalizedUserId, channelId), {
+        type: "validator_channel_deleted",
+        userId: normalizedUserId,
+        channelId,
+        chatId: readString(chatId),
+        code: normalizedCode,
+        deletedAt: now,
+      })
+    ),
+    normalizedCode
+      ? saveDurableLiveStateById(env, validatorChannelDeletedCodeStateId(normalizedUserId, chatId), {
+          type: "validator_channel_deleted",
+          userId: normalizedUserId,
+          chatId: readString(chatId),
+          code: normalizedCode,
+          deletedAt: now,
+        })
+      : Promise.resolve(false),
+  ]);
+  return results.some((result) => result.status === "fulfilled" && result.value);
 }
 
 async function fetchValidatorChannelStateChannels(env: unknown, userId?: string) {
@@ -7527,10 +7577,16 @@ async function fetchValidatorChannelStateChannel(env: unknown, userId: string, c
 }
 
 async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
+  return (await fetchValidatorChannelDeletedRefs(env, userId)).ids;
+}
+
+async function fetchValidatorChannelDeletedRefs(env: unknown, userId?: string) {
   const ids = new Set<string>();
-  if (!getSupabasePersistenceConfig(env)) return ids;
-  const prefix = userId
-    ? `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:`
+  const codes = new Set<string>();
+  if (!getSupabasePersistenceConfig(env)) return { ids, codes };
+  const normalizedUserId = normalizeValidatorUserId(userId || "");
+  const prefix = normalizedUserId
+    ? `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizedUserId}:`
     : VALIDATOR_CHANNEL_DELETED_STATE_PREFIX;
   const rows = await fetchSupabaseRows(
     env,
@@ -7539,10 +7595,26 @@ async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
   );
   for (const row of rows) {
     const state = readRecord(row.state);
-    const channelId = readString(state, "channelId") || readString(row, "id").split(":").pop() || "";
+    const rowId = readString(row, "id");
+    const parts = rowId.split(":");
+    const codeFromId = parts.length >= 4 && parts[2] === "code" ? parts.slice(3).join(":") : "";
+    const idFromId = parts.length >= 3 && parts[2] !== "code" ? parts.slice(2).join(":") : "";
+    const channelId = readString(state, "channelId") || idFromId;
+    const code = normalizeValidatorChannelCode(
+      readString(state, "code") || readString(state, "chatId") || codeFromId,
+    );
     if (channelId) ids.add(channelId);
+    if (code) codes.add(code);
   }
-  return ids;
+  return { ids, codes };
+}
+
+function isValidatorChannelDeleted(
+  channel: ValidatorNotificationChannel,
+  deletedRefs: { ids: Set<string>; codes: Set<string> },
+) {
+  const code = normalizeValidatorChannelCode(channel.chatId);
+  return deletedRefs.ids.has(channel.id) || Boolean(code && deletedRefs.codes.has(code));
 }
 
 function validatorChannelStateId(userId: string, channelId: string) {
@@ -7551,6 +7623,11 @@ function validatorChannelStateId(userId: string, channelId: string) {
 
 function validatorChannelDeletedStateId(userId: string, channelId: string) {
   return `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
+}
+
+function validatorChannelDeletedCodeStateId(userId: string, chatId: string) {
+  const code = normalizeValidatorChannelCode(chatId);
+  return code ? `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:code:${code}` : "";
 }
 
 function encodePostgrestLikeValue(value: string) {
