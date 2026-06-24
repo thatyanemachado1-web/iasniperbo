@@ -8321,7 +8321,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     ? resolveSignalImmediatelyFromRound(
         currentDashboard.currentSignal,
         normalizedSignal,
-        incomingLatestRound,
+        incomingLatestRound ?? undefined,
         receivedNewRound,
       )
     : currentDashboard.currentSignal;
@@ -8330,7 +8330,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     const heldResolution = resolveSignalImmediatelyFromRound(
       lateSignalHold,
       normalizedSignal,
-      incomingLatestRound,
+      incomingLatestRound ?? undefined,
       receivedNewRound,
     );
     if (heldResolution.status === "g1") {
