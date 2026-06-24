@@ -1240,11 +1240,6 @@ def direct_telegram_signals(payload: dict[str, Any], pattern_round_bank: list[di
     ai_candidate = direct_first_ai_candidate(direct_ai_patterns_from_alerts(payload, round_id))
     if not ai_candidate:
         ai_candidate = direct_first_ai_candidate(direct_ai_patterns_from_round_bank(direct_payload_pattern_rounds(payload), round_id))
-    if not ai_candidate:
-        engine_ai_signal = direct_ai_pattern_from_engine(payload, round_id)
-        ai_candidate = engine_ai_signal if engine_ai_signal else None
-    if not ai_candidate:
-        ai_candidate = direct_first_ai_candidate(direct_ai_patterns_from_round_bank(pattern_round_bank or [], round_id))
     if ai_candidate:
         candidates.append(ai_candidate)
 
