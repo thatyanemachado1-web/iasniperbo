@@ -1,4 +1,4 @@
-﻿import "./lib/error-capture";
+import "./lib/error-capture";
 
 import bcrypt from "bcryptjs";
 import { mockDashboardData } from "./data/mockDashboardData";
@@ -537,7 +537,7 @@ function isCatastrophicSsrErrorBody(body: string, responseStatus: number): boole
 }
 
 // h3 swallows in-handler throws into a normal 500 Response with body
-// {"unhandled":true,"message":"HTTPError"} â€” try/catch alone never fires for those.
+// {"unhandled":true,"message":"HTTPError"} ??? try/catch alone never fires for those.
 async function normalizeCatastrophicSsrResponse(response: Response): Promise<Response> {
   if (response.status < 500) return response;
   const contentType = response.headers.get("content-type") ?? "";
@@ -760,18 +760,18 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
   }
 
   if (request.method !== "POST") {
-    return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+    return json({ error: "M??todo n??o permitido." }, 405);
   }
 
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const body = readRecord(await request.json().catch(() => ({})));
   const rawText = String(body.text || body.narration || "");
   const text = normalizeNarrationText(rawText);
   if (!text) {
-    return json({ error: "Texto de voz obrigatÃ³rio." }, 400);
+    return json({ error: "Texto de voz obrigat??rio." }, 400);
   }
   if (text.length > MAX_NARRATION_CHARS) {
     return json(
@@ -789,12 +789,12 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
 
   const apiKeys = getElevenLabsApiKeys(env);
   if (!apiKeys.length) {
-    return json({ error: "ELEVENLABS_API_KEY nÃ£o configurada no backend." }, 503);
+    return json({ error: "ELEVENLABS_API_KEY n??o configurada no backend." }, 503);
   }
 
   const voiceId = getElevenLabsVoiceId(env);
   if (!voiceId) {
-    return json({ error: "ELEVENLABS_VOICE_ID nÃ£o configurado no backend." }, 503);
+    return json({ error: "ELEVENLABS_VOICE_ID n??o configurado no backend." }, 503);
   }
 
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
@@ -834,7 +834,7 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
       console.warn(`Falha ao gerar voz ElevenLabs (${lastFailureStatus}) em todas as chaves configuradas.`);
       return json(elevenLabsErrorPayload(lastFailureStatus), elevenLabsErrorStatus(lastFailureStatus));
     }
-    return json({ error: "Falha de conexÃ£o ao gerar voz ElevenLabs." }, 502);
+    return json({ error: "Falha de conex??o ao gerar voz ElevenLabs." }, 502);
   }
 
   recordElevenLabsStatus("ok");
@@ -856,10 +856,10 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
   if (url.pathname !== "/voice/diagnostics") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "GET") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "GET") return json({ error: "M??todo n??o permitido." }, 405);
 
   if (!(await isDashboardAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const apiKeys = getElevenLabsApiKeys(env);
@@ -908,14 +908,14 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
   if (url.pathname !== "/api/voice/speak") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "M??todo n??o permitido." }, 405);
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const body = readRecord(await request.json().catch(() => ({})));
   const text = normalizeNarrationText(readString(body, "text"));
-  if (!text) return json({ error: "Texto de voz obrigatÃ³rio." }, 400);
+  if (!text) return json({ error: "Texto de voz obrigat??rio." }, 400);
   if (text.length > MAX_NARRATION_CHARS) {
     return json({ error: `Texto de voz muito longo. Limite: ${MAX_NARRATION_CHARS} caracteres.` }, 413);
   }
@@ -926,12 +926,12 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
     return generateElevenLabsVoiceResponse(text, env);
   }
   if (provider !== "edge-tts") {
-    return json({ fallback: "browser", reason: "Provedor local ainda nÃ£o ativo no backend." });
+    return json({ fallback: "browser", reason: "Provedor local ainda n??o ativo no backend." });
   }
 
   const edgeTtsUrl = readServerEnvString(env, "EDGE_TTS_URL", "").replace(/\/+$/, "");
   if (!edgeTtsUrl) {
-    return json({ fallback: "browser", reason: "EDGE_TTS_URL nÃ£o configurado no backend." });
+    return json({ fallback: "browser", reason: "EDGE_TTS_URL n??o configurado no backend." });
   }
 
   try {
@@ -948,7 +948,7 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
       }),
     });
     if (!response.ok) {
-      return json({ fallback: "browser", reason: `Edge TTS indisponÃ­vel (${response.status}).` });
+      return json({ fallback: "browser", reason: `Edge TTS indispon??vel (${response.status}).` });
     }
 
     return new Response(await response.arrayBuffer(), {
@@ -963,20 +963,20 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
       },
     });
   } catch (error) {
-    console.warn("Edge TTS indisponÃ­vel.", error);
-    return json({ fallback: "browser", reason: "Falha de conexÃ£o com Edge TTS." });
+    console.warn("Edge TTS indispon??vel.", error);
+    return json({ fallback: "browser", reason: "Falha de conex??o com Edge TTS." });
   }
 }
 
 async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
   const apiKeys = getElevenLabsApiKeys(env);
   if (!apiKeys.length) {
-    return json({ error: "ELEVENLABS_API_KEY nÃ£o configurada no backend." }, 503);
+    return json({ error: "ELEVENLABS_API_KEY n??o configurada no backend." }, 503);
   }
 
   const voiceId = getElevenLabsVoiceId(env);
   if (!voiceId) {
-    return json({ error: "ELEVENLABS_VOICE_ID nÃ£o configurado no backend." }, 503);
+    return json({ error: "ELEVENLABS_VOICE_ID n??o configurado no backend." }, 503);
   }
 
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
@@ -1015,7 +1015,7 @@ async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
     if (typeof lastFailureStatus === "number") {
       return json(elevenLabsErrorPayload(lastFailureStatus), elevenLabsErrorStatus(lastFailureStatus));
     }
-    return json({ error: "Falha de conexÃ£o ao gerar voz ElevenLabs." }, 502);
+    return json({ error: "Falha de conex??o ao gerar voz ElevenLabs." }, 502);
   }
 
   recordElevenLabsStatus("ok");
@@ -1038,7 +1038,7 @@ async function handleLocalAiRequest(request: Request, env: unknown) {
   if (url.pathname === "/admin/local-ai") {
     if (request.method === "OPTIONS") return json(null, 204);
     const role = await getAdminRequestRole(request, env);
-    if (!role) return json({ error: "NÃ£o autorizado." }, 401);
+    if (!role) return json({ error: "N??o autorizado." }, 401);
     if (request.method === "GET") {
       return json({
         settings: getLocalAiSettings(env),
@@ -1056,14 +1056,14 @@ async function handleLocalAiRequest(request: Request, env: unknown) {
         status: await probeOllamaStatus(env),
       });
     }
-    return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+    return json({ error: "M??todo n??o permitido." }, 405);
   }
 
   if (url.pathname !== "/api/ai/local-commentary") return null;
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "M??todo n??o permitido." }, 405);
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const startedAt = Date.now();
@@ -1235,17 +1235,17 @@ function buildLocalAiPrompt(
   summary: Record<string, unknown>,
 ) {
   return [
-    "VocÃª Ã© o Sniper Voice IA, analista virtual de Bac Bo dentro do Sniper Bo IA.",
-    "VocÃª NÃƒO decide entradas. As entradas jÃ¡ foram decididas pelos mÃ³dulos internos.",
-    "Use somente os dados reais enviados em JSON. NÃ£o invente porcentagens, estatÃ­sticas ou fatos.",
+    "Voc?? ?? o Sniper Voice IA, analista virtual de Bac Bo dentro do Sniper Bo IA.",
+    "Voc?? N??O decide entradas. As entradas j?? foram decididas pelos m??dulos internos.",
+    "Use somente os dados reais enviados em JSON. N??o invente porcentagens, estat??sticas ou fatos.",
     "Nunca prometa lucro. Nunca diga certeza, garantida ou entrada garantida.",
-    "Se nÃ£o houver dados suficientes, diga que a mesa estÃ¡ em observaÃ§Ã£o.",
+    "Se n??o houver dados suficientes, diga que a mesa est?? em observa????o.",
     "Tom: natural, agressivo, confiante, profissional, frases curtas, sala ao vivo.",
     "Sempre mencione risco quando o risco estiver alto.",
-    "Responda em portuguÃªs do Brasil com acentos corretos e no mÃ¡ximo 3 frases curtas.",
+    "Responda em portugu??s do Brasil com acentos corretos e no m??ximo 3 frases curtas.",
     `Evento: ${event || "chat"}`,
-    question ? `Pergunta do usuÃ¡rio: ${question}` : "",
-    fallbackText ? `ComentÃ¡rio base do sistema: ${fallbackText}` : "",
+    question ? `Pergunta do usu??rio: ${question}` : "",
+    fallbackText ? `Coment??rio base do sistema: ${fallbackText}` : "",
     `Dados reais do Sniper Bo IA: ${JSON.stringify(summary).slice(0, 6000)}`,
     "Resposta:",
   ]
@@ -1323,68 +1323,68 @@ function fallbackLocalAiCommentary(event: string, summary: Record<string, unknow
   const entry = readRecord(summary.entradaAtual);
   const side = readString(entry, "side");
   if (readString(risk, "nivel") === "alto") {
-    return "Cuidado. O mercado estÃ¡ pesado e o risco subiu. Melhor nÃ£o forÃ§ar entrada agora.";
+    return "Cuidado. O mercado est?? pesado e o risco subiu. Melhor n??o for??ar entrada agora.";
   }
-  if (event.includes("green")) return "Bateu. Green confirmado. A leitura respeitou o padrÃ£o.";
-  if (event.includes("red")) return "Red confirmado. O mercado quebrou a leitura. GestÃ£o primeiro.";
+  if (event.includes("green")) return "Bateu. Green confirmado. A leitura respeitou o padr??o.";
+  if (event.includes("red")) return "Red confirmado. O mercado quebrou a leitura. Gest??o primeiro.";
   if (side === "BANKER" || side === "PLAYER" || side === "TIE") {
-    return `Entrada confirmada em ${side}. A leitura veio dos mÃ³dulos internos e o risco estÃ¡ monitorado.`;
+    return `Entrada confirmada em ${side}. A leitura veio dos m??dulos internos e o risco est?? monitorado.`;
   }
-  return "Mesa ainda em observaÃ§Ã£o. Tem movimento, mas nÃ£o existe confirmaÃ§Ã£o limpa para entrada.";
+  return "Mesa ainda em observa????o. Tem movimento, mas n??o existe confirma????o limpa para entrada.";
 }
 
 function cleanLocalAiResponse(value: string) {
   const text = beautifyPortugueseText(sanitizeQuestion(value, 520))
-    .replace(/entrada\s+garantida/gi, "entrada confirmada pelos mÃ³dulos")
+    .replace(/entrada\s+garantida/gi, "entrada confirmada pelos m??dulos")
     .replace(/\bgarantid[ao]\b/gi, "confirmado pelos dados")
     .replace(/\bcerteza\b/gi, "leitura")
     .replace(/lucro\s+certo/gi, "resultado ainda depende do mercado");
-  return text || "Mesa em observaÃ§Ã£o. Ainda sem dados suficientes para comentÃ¡rio seguro.";
+  return text || "Mesa em observa????o. Ainda sem dados suficientes para coment??rio seguro.";
 }
 
 function beautifyPortugueseText(value: string) {
   const mojibakeFixed = value
-    .replace(/nÃƒÂ£o/g, "nÃ£o")
-    .replace(/NÃƒÂ£o/g, "NÃ£o")
-    .replace(/atenÃƒÂ§ÃƒÂ£o/g, "atenÃ§Ã£o")
-    .replace(/AtenÃƒÂ§ÃƒÂ£o/g, "AtenÃ§Ã£o")
-    .replace(/painÃƒÂ©is/g, "painÃ©is")
-    .replace(/indisponÃƒÂ­vel/g, "indisponÃ­vel");
+    .replace(/n????o/g, "n??o")
+    .replace(/N????o/g, "N??o")
+    .replace(/aten????????o/g, "aten????o")
+    .replace(/Aten????????o/g, "Aten????o")
+    .replace(/pain????is/g, "pain??is")
+    .replace(/indispon????vel/g, "indispon??vel");
 
   return [
-    ["voce", "vocÃª"],
-    ["nao", "nÃ£o"],
-    ["atencao", "atenÃ§Ã£o"],
-    ["observacao", "observaÃ§Ã£o"],
-    ["narracao", "narraÃ§Ã£o"],
-    ["comentario", "comentÃ¡rio"],
-    ["analise", "anÃ¡lise"],
-    ["numero", "nÃºmero"],
-    ["padrao", "padrÃ£o"],
-    ["gestao", "gestÃ£o"],
-    ["confianca", "confianÃ§a"],
-    ["direcao", "direÃ§Ã£o"],
-    ["protecao", "proteÃ§Ã£o"],
-    ["confirmacao", "confirmaÃ§Ã£o"],
-    ["proxima", "prÃ³xima"],
-    ["forcar", "forÃ§ar"],
-    ["modulos", "mÃ³dulos"],
-    ["metricas", "mÃ©tricas"],
-    ["estatisticas", "estatÃ­sticas"],
-    ["usuario", "usuÃ¡rio"],
-    ["usuarios", "usuÃ¡rios"],
-    ["responsavel", "responsÃ¡vel"],
-    ["prejuizo", "prejuÃ­zo"],
-    ["apos", "apÃ³s"],
-    ["ate", "atÃ©"],
-    ["esta", "estÃ¡"],
-    ["ta", "tÃ¡"],
-    ["so", "sÃ³"],
-    ["mao", "mÃ£o"],
-    ["tambem", "tambÃ©m"],
-    ["valida", "vÃ¡lida"],
-    ["possivel", "possÃ­vel"],
-    ["saida", "saÃ­da"],
+    ["voce", "voc??"],
+    ["nao", "n??o"],
+    ["atencao", "aten????o"],
+    ["observacao", "observa????o"],
+    ["narracao", "narra????o"],
+    ["comentario", "coment??rio"],
+    ["analise", "an??lise"],
+    ["numero", "n??mero"],
+    ["padrao", "padr??o"],
+    ["gestao", "gest??o"],
+    ["confianca", "confian??a"],
+    ["direcao", "dire????o"],
+    ["protecao", "prote????o"],
+    ["confirmacao", "confirma????o"],
+    ["proxima", "pr??xima"],
+    ["forcar", "for??ar"],
+    ["modulos", "m??dulos"],
+    ["metricas", "m??tricas"],
+    ["estatisticas", "estat??sticas"],
+    ["usuario", "usu??rio"],
+    ["usuarios", "usu??rios"],
+    ["responsavel", "respons??vel"],
+    ["prejuizo", "preju??zo"],
+    ["apos", "ap??s"],
+    ["ate", "at??"],
+    ["esta", "est??"],
+    ["ta", "t??"],
+    ["so", "s??"],
+    ["mao", "m??o"],
+    ["tambem", "tamb??m"],
+    ["valida", "v??lida"],
+    ["possivel", "poss??vel"],
+    ["saida", "sa??da"],
   ].reduce((text, [plain, accented]) => replacePortugueseWord(text, plain, accented), mojibakeFixed);
 }
 
@@ -1500,7 +1500,7 @@ async function handleSalesSettingsRequest(request: Request) {
   if (url.pathname !== "/sales/settings") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "GET") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "GET") return json({ error: "M??todo n??o permitido." }, 405);
 
   return json({ salesSettings: publicSalesSettings() });
 }
@@ -1510,7 +1510,7 @@ async function handleSiteContentRequest(request: Request) {
   if (url.pathname !== "/site-content") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "GET") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "GET") return json({ error: "M??todo n??o permitido." }, 405);
 
   return json({ siteContent: publicSiteContentSettings() });
 }
@@ -1553,7 +1553,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
   if (request.method === "POST" && url.pathname === "/billing/checkout") {
     if (liveSalesSettings.salesClosed) {
       return json(
-        { error: "Vendas encerradas no momento. Entre na fila de espera para a prÃ³xima abertura." },
+        { error: "Vendas encerradas no momento. Entre na fila de espera para a pr??xima abertura." },
         403,
       );
     }
@@ -1568,7 +1568,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
       return json(
         {
           error:
-            "SessÃ£o expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
+            "Sess??o expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
         },
         auth.status,
       );
@@ -1600,7 +1600,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
     });
   }
 
-  return json({ error: "Rota de assinatura nÃ£o encontrada." }, 404);
+  return json({ error: "Rota de assinatura n??o encontrada." }, 404);
 }
 
 async function requireClientBillingSession(
@@ -1611,17 +1611,17 @@ async function requireClientBillingSession(
   | { ok: false; status: number; error: string }
 > {
   const token = getBearerToken(request);
-  if (!token) return { ok: false, status: 401, error: "SessÃ£o obrigatÃ³ria." };
+  if (!token) return { ok: false, status: 401, error: "Sess??o obrigat??ria." };
 
   const session = await verifySessionToken(env, token);
-  if (!session) return { ok: false, status: 401, error: "SessÃ£o expirada." };
+  if (!session) return { ok: false, status: 401, error: "Sess??o expirada." };
   if (session.scope !== "client") {
     return { ok: false, status: 403, error: "Use uma conta de cliente para assinar." };
   }
 
   const client =
     findClientByEmail(session.email) || (await hydrateClientFromBilling(env, session.email));
-  if (!client) return { ok: false, status: 404, error: "Cliente nÃ£o encontrado." };
+  if (!client) return { ok: false, status: 404, error: "Cliente n??o encontrado." };
 
   const sessionCheck = await validateClientSessionBinding(env, request, session, client);
   if (!sessionCheck.ok) {
@@ -1633,7 +1633,7 @@ async function requireClientBillingSession(
       user_agent_hash: sessionCheck.userAgentHash || "",
     });
     await saveLiveState(env);
-    return { ok: false, status: 401, error: "SessÃ£o invÃ¡lida ou usada em outro dispositivo." };
+    return { ok: false, status: 401, error: "Sess??o inv??lida ou usada em outro dispositivo." };
   }
 
   return { ok: true, client, session };
@@ -1658,7 +1658,7 @@ async function recoverCheckoutClientFromBody(
   recordAccessEvent("checkout_session_recovered", {
     ...client,
     risk: auth.status >= 500 ? "medium" : "low",
-    detail: `Checkout liberado por e-mail apÃ³s falha de sessÃ£o: ${auth.error}`,
+    detail: `Checkout liberado por e-mail ap??s falha de sess??o: ${auth.error}`,
     ip_hash: binding.ipHash || "",
     user_agent_hash: binding.userAgentHash || "",
   });
@@ -1775,7 +1775,7 @@ async function createMercadoPagoCheckout(
     return json(
       {
         error:
-          "Checkout Hubla nÃ£o configurado. Adicione HUBLA_CHECKOUT_URL ou o link do plano nos Secrets.",
+          "Checkout Hubla n??o configurado. Adicione HUBLA_CHECKOUT_URL ou o link do plano nos Secrets.",
       },
       503,
     );
@@ -1783,7 +1783,7 @@ async function createMercadoPagoCheckout(
 
   const planConfig = getBillingPlan(plan, env);
   if (!planConfig || !planConfig.amount || planConfig.amount <= 0) {
-    return json({ error: "Valor do plano nÃ£o configurado." }, 503);
+    return json({ error: "Valor do plano n??o configurado." }, 503);
   }
 
   const now = new Date().toISOString();
@@ -1849,18 +1849,18 @@ async function createMercadoPagoCheckout(
     preference = readRecord(await response.json().catch(() => ({})));
     if (!response.ok) {
       console.warn(`Mercado Pago preference falhou (${response.status}).`);
-      return json({ error: "NÃ£o foi possÃ­vel criar checkout no Mercado Pago." }, 502);
+      return json({ error: "N??o foi poss??vel criar checkout no Mercado Pago." }, 502);
     }
   } catch (error) {
     console.warn("Falha de rede ao criar checkout Mercado Pago.", error);
-    return json({ error: "Mercado Pago indisponÃ­vel no momento." }, 502);
+    return json({ error: "Mercado Pago indispon??vel no momento." }, 502);
   }
 
   const preferenceId = readString(preference, "id");
   const checkoutUrl =
     readString(preference, "init_point") || readString(preference, "sandbox_init_point");
   if (!preferenceId || !checkoutUrl) {
-    return json({ error: "Mercado Pago nÃ£o retornou o link de checkout." }, 502);
+    return json({ error: "Mercado Pago n??o retornou o link de checkout." }, 502);
   }
 
   const subscription = upsertSubscriptionRecord({
@@ -1920,7 +1920,7 @@ async function handleMercadoPagoWebhook(request: Request, url: URL, env: unknown
     paymentId,
   );
   if (!signatureOk) {
-    return json({ error: "Webhook Mercado Pago invÃ¡lido." }, 401);
+    return json({ error: "Webhook Mercado Pago inv??lido." }, 401);
   }
 
   const payment = await fetchMercadoPagoPayment(env, paymentId);
@@ -1935,7 +1935,7 @@ async function handleMercadoPagoWebhook(request: Request, url: URL, env: unknown
 async function handleHublaWebhook(request: Request, env: unknown) {
   const rawBody = await request.text();
   if (!(await validateHublaWebhook(request, rawBody, env))) {
-    return json({ error: "Webhook Hubla invÃ¡lido." }, 401);
+    return json({ error: "Webhook Hubla inv??lido." }, 401);
   }
 
   const payload = readRecord(parseJsonSafe(rawBody));
@@ -2110,7 +2110,7 @@ async function fetchMercadoPagoPayment(
 > {
   const accessToken = getMercadoPagoAccessToken(env);
   if (!accessToken) {
-    return { ok: false, status: 503, error: "Mercado Pago nÃ£o configurado no servidor." };
+    return { ok: false, status: 503, error: "Mercado Pago n??o configurado no servidor." };
   }
 
   try {
@@ -2123,12 +2123,12 @@ async function fetchMercadoPagoPayment(
     const payment = readRecord(await response.json().catch(() => ({})));
     if (!response.ok) {
       console.warn(`Consulta de pagamento Mercado Pago falhou (${response.status}).`);
-      return { ok: false, status: 502, error: "NÃ£o foi possÃ­vel confirmar o pagamento." };
+      return { ok: false, status: 502, error: "N??o foi poss??vel confirmar o pagamento." };
     }
     return { ok: true, payment };
   } catch (error) {
     console.warn("Falha de rede ao consultar pagamento Mercado Pago.", error);
-    return { ok: false, status: 502, error: "Mercado Pago indisponÃ­vel no momento." };
+    return { ok: false, status: 502, error: "Mercado Pago indispon??vel no momento." };
   }
 }
 
@@ -2272,7 +2272,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (request.method === "GET" && url.pathname === "/auth/diagnostics") {
     if (!(await isDashboardAuthorized(request, url, env))) {
-      return json({ error: "NÃ£o autorizado." }, 401);
+      return json({ error: "N??o autorizado." }, 401);
     }
     return json({
       hasAdminEmail: getAdminEmails(env).length > 0,
@@ -2291,7 +2291,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const adminPasswordHash = getAdminPasswordHash(env);
 
     if (!adminPasswordHash || !getSessionSecret(env)) {
-      return json({ error: "Credenciais admin nÃ£o configuradas no servidor." }, 503);
+      return json({ error: "Credenciais admin n??o configuradas no servidor." }, 503);
     }
 
     if (adminRole && await verifyPassword(readString(body, "password"), adminPasswordHash)) {
@@ -2320,7 +2320,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ token, email: loginEmail, role: adminRole });
     }
 
-    return json({ error: "E-mail ou senha admin invÃ¡lidos." }, 401);
+    return json({ error: "E-mail ou senha admin inv??lidos." }, 401);
   }
 
   if (request.method === "POST" && url.pathname === "/auth/check") {
@@ -2331,7 +2331,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const adminRole = getAdminRoleForEmail(env, email);
 
     if (!getSessionSecret(env)) {
-      return json({ error: "SessÃ£o nÃ£o configurada no servidor." }, 503);
+      return json({ error: "Sess??o n??o configurada no servidor." }, 503);
     }
 
     if (adminRole === "owner" && adminPasswordHash && await verifyPassword(password, adminPasswordHash)) {
@@ -2386,7 +2386,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
           email,
           full_name: "",
           expires_at: "",
-          reason: "E-mail ainda nÃ£o cadastrado.",
+          reason: "E-mail ainda n??o cadastrado.",
         },
       });
     }
@@ -2421,7 +2421,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       );
     }
     if (!ok) {
-      return json({ error: "Senha invÃ¡lida." }, 401);
+      return json({ error: "Senha inv??lida." }, 401);
     }
 
     recordAccessEvent(client.enabled ? "client_login" : "client_pending_login", client);
@@ -2435,10 +2435,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
     if (!email || !password) {
-      return json({ error: "E-mail e senha sÃ£o obrigatÃ³rios." }, 400);
+      return json({ error: "E-mail e senha s??o obrigat??rios." }, 400);
     }
     if (!getSessionSecret(env)) {
-      return json({ error: "SessÃ£o nÃ£o configurada no servidor." }, 503);
+      return json({ error: "Sess??o n??o configurada no servidor." }, 503);
     }
 
     if (getAdminRoleForEmail(env, email)) {
@@ -2537,7 +2537,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (session.scope === "owner") {
       if (!(await sessionMatchesRequestBinding(env, request, session))) {
         return json(
-          { valid: false, reason: "SessÃ£o invÃ¡lida ou usada em outro dispositivo." },
+          { valid: false, reason: "Sess??o inv??lida ou usada em outro dispositivo." },
           401,
         );
       }
@@ -2547,7 +2547,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (session.scope === "admin_approver") {
       if (!(await sessionMatchesRequestBinding(env, request, session))) {
         return json(
-          { valid: false, reason: "SessÃ£o invÃ¡lida ou usada em outro dispositivo." },
+          { valid: false, reason: "Sess??o inv??lida ou usada em outro dispositivo." },
           401,
         );
       }
@@ -2574,7 +2574,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
           email: session.email,
           full_name: "",
           expires_at: "",
-          reason: "E-mail ainda nÃ£o cadastrado.",
+          reason: "E-mail ainda n??o cadastrado.",
           client_token: "",
         },
       });
@@ -2590,7 +2590,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         user_agent_hash: sessionCheck.userAgentHash || "",
       });
       await saveLiveState(env);
-      return json({ valid: false, reason: "SessÃ£o invÃ¡lida ou usada em outro dispositivo." }, 401);
+      return json({ valid: false, reason: "Sess??o inv??lida ou usada em outro dispositivo." }, 401);
     }
 
     const access = await clientAccess(env, client, request, session);
@@ -2600,7 +2600,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   const adminRole = await getAdminRequestRole(request, env);
   if (!adminRole) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   if (url.pathname === "/admin/sales-settings") {
@@ -2629,7 +2629,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ salesSettings: adminSalesSettings(env, saveStatus) });
     }
 
-    return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+    return json({ error: "M??todo n??o permitido." }, 405);
   }
 
   if (url.pathname === "/admin/site-content") {
@@ -2661,7 +2661,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ siteContent: adminSiteContentSettings(env, saveStatus) });
     }
 
-    return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+    return json({ error: "M??todo n??o permitido." }, 405);
   }
 
   if (request.method === "GET" && url.pathname === "/admin/summary") {
@@ -2697,7 +2697,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const userId = decodeURIComponent(adminUserMatch[1]);
     const actionPath = adminUserMatch[2] || "";
     const target = findAdminManagedUser(userId, env);
-    if (!target) return json({ error: "UsuÃ¡rio nÃ£o encontrado." }, 404);
+    if (!target) return json({ error: "Usu??rio n??o encontrado." }, 404);
 
     if (request.method === "GET" && !actionPath) {
       return json({ user: target });
@@ -2819,7 +2819,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = readRecord(await request.json().catch(() => ({})));
     const title = readString(body, "title");
     const message = readString(body, "message");
-    if (!title || !message) return json({ error: "TÃ­tulo e mensagem sÃ£o obrigatÃ³rios." }, 400);
+    if (!title || !message) return json({ error: "T??tulo e mensagem s??o obrigat??rios." }, 400);
     const before = liveSiteContentSettings;
     liveSiteContentSettings = normalizeSiteContentSettings(
       {
@@ -2896,7 +2896,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       const clientIndex = liveClients.findIndex((client) => client.id === recipientId);
       if (clientIndex === -1) {
         if (syncChanged) await saveLiveState(env);
-        return json({ error: "DestinatÃ¡rio nÃ£o encontrado." }, 404);
+        return json({ error: "Destinat??rio n??o encontrado." }, 404);
       }
       upsertRecipientFromClient(liveClients[clientIndex]);
       await saveLiveState(env);
@@ -2979,7 +2979,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     });
   }
 
-  return json({ error: "Rota nÃ£o encontrada." }, 404);
+  return json({ error: "Rota n??o encontrada." }, 404);
 }
 
 async function handleDashboardRequest(request: Request, env: unknown, ctx?: unknown) {
@@ -3029,7 +3029,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     (url.pathname === "/validator/telegram/test" || url.pathname === "/validator/telegram/send")
   ) {
     if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "NÃƒÆ’Ã‚Â£o autorizado." }, 401);
+      return json({ error: "N????????o autorizado." }, 401);
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
@@ -3061,7 +3061,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     (url.pathname === "/dashboard/round-history" || url.pathname === "/validator/round-history")
   ) {
     if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "NÃƒÂ£o autorizado." }, 401);
+      return json({ error: "N????o autorizado." }, 401);
     }
 
     const limit = clampRoundHistoryLimit(url.searchParams.get("limit"));
@@ -3089,7 +3089,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   if (request.method === "POST" && url.pathname === "/validator/round-history") {
     if (!(await isDashboardWriteAuthorized(request, url, env))) {
-      return json({ error: "NÃƒÂ£o autorizado." }, 401);
+      return json({ error: "N????o autorizado." }, 401);
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
@@ -3134,7 +3134,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   if (request.method === "GET" && url.pathname === "/dashboard") {
     if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "NÃ£o autorizado." }, 401);
+      return json({ error: "N??o autorizado." }, 401);
     }
 
     await syncDashboardReadState(env);
@@ -3153,7 +3153,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/dashboard/publish")
   ) {
     if (!(await isDashboardWriteAuthorized(request, url, env))) {
-      return json({ error: "NÃ£o autorizado." }, 401);
+      return json({ error: "N??o autorizado." }, 401);
     }
 
     const body = await request.json().catch(() => ({}));
@@ -6433,9 +6433,15 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   if (url.pathname === "/validator/channels") {
     if (request.method === "GET") {
+      const userChannels = mergeValidatorChannelList(
+        liveValidatorChannels.filter((channel) => channel.userId === userId),
+      );
+      liveValidatorChannels = [
+        ...userChannels,
+        ...liveValidatorChannels.filter((channel) => channel.userId !== userId),
+      ].slice(0, 1000);
       return json({
-        channels: liveValidatorChannels
-          .filter((channel) => channel.userId === userId)
+        channels: userChannels
           .map(publicValidatorChannel)
           .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       });
@@ -6444,12 +6450,32 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     if (request.method === "POST") {
       const body = readRecord(await request.json().catch(() => ({})));
       const incoming = readRecord(body.channel || body);
-      const existing = liveValidatorChannels.find(
+      const existingById = liveValidatorChannels.find(
         (channel) => channel.userId === userId && channel.id === readString(incoming, "id"),
       );
-      const channel = normalizeServerNotificationChannel(incoming, userId, existing);
+      const existingByCode = findValidatorChannelByIncomingCode(liveValidatorChannels, userId, incoming);
+      const existing = existingById || existingByCode;
+      const normalizedIncoming = existing && !existingById
+        ? { ...incoming, id: existing.id, createdAt: existing.createdAt }
+        : incoming;
+      const channel = normalizeServerNotificationChannel(normalizedIncoming, userId, existing);
       if (!channel) return json({ error: "Canal invalido." }, 400);
+      const duplicateIds = validatorChannelRelatedIds(liveValidatorChannels, channel)
+        .filter((channelId) => channelId !== channel.id);
       liveValidatorChannels = upsertValidatorChannel(channel);
+      if (duplicateIds.length) {
+        await deleteValidatorChannelRows(env, userId, duplicateIds);
+        liveValidatorChannels = liveValidatorChannels.filter(
+          (item) => !(item.userId === userId && duplicateIds.includes(item.id)),
+        );
+      }
+      const userChannels = mergeValidatorChannelList(
+        liveValidatorChannels.filter((item) => item.userId === userId),
+      );
+      liveValidatorChannels = [
+        ...userChannels,
+        ...liveValidatorChannels.filter((item) => item.userId !== userId),
+      ].slice(0, 1000);
       const persisted = await persistValidatorChannel(env, channel);
       const saveStatus = await saveLiveState(env);
       if (getSupabasePersistenceConfig(env) && !persisted && !saveStatus.durable && !saveStatus.cache) {
@@ -6462,6 +6488,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
           dedicated: persisted,
           durable: saveStatus.durable,
           cache: saveStatus.cache,
+          deduped: duplicateIds.length,
         },
       }, 201);
     }
@@ -6482,8 +6509,8 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       message:
         "ENTRADA CONFIRMADA\n" +
         "Mesa: Bac Bo\n" +
-        "Padrao: ðŸ”´10 â†’ ðŸ”µ7 â†’ ðŸŸ¡6\n" +
-        "Entrada: ðŸ”´ Banker\n" +
+        "Padrao: ????10 ??? ????7 ??? ????6\n" +
+        "Entrada: ???? Banker\n" +
         "Gale: Ate G1\n" +
         "Protecao Tie: Ativa\n" +
         `Canal: ${channel.name}`,
@@ -6498,6 +6525,34 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   const channelMatch = url.pathname.match(/^\/validator\/channels\/([^/]+)$/);
   if (channelMatch) {
     const channelId = decodeURIComponent(channelMatch[1] || "");
+
+    if (request.method === "DELETE") {
+      const current = await findValidatorChannelForUser(env, userId, channelId);
+      const idsToDelete = new Set<string>([channelId]);
+      if (current) {
+        for (const relatedId of validatorChannelRelatedIds(liveValidatorChannels, current)) {
+          idsToDelete.add(relatedId);
+        }
+      }
+      const deletedIds = [...idsToDelete].filter(Boolean);
+      liveValidatorChannels = liveValidatorChannels.filter(
+        (channel) => !(channel.userId === userId && idsToDelete.has(channel.id)),
+      );
+      liveValidatorPatterns = liveValidatorPatterns.map((pattern) =>
+        pattern.userId === userId && idsToDelete.has(pattern.telegramChannelId)
+          ? { ...pattern, telegramChannelId: "", updatedAt: new Date().toISOString() }
+          : pattern,
+      );
+      await deleteValidatorChannelRows(env, userId, deletedIds);
+      await Promise.all(
+        liveValidatorPatterns
+          .filter((pattern) => pattern.userId === userId && pattern.telegramChannelId === "")
+          .map((pattern) => persistValidatorPattern(env, pattern)),
+      );
+      await saveLiveState(env);
+      return json({ ok: true, deleted: deletedIds.length });
+    }
+
     const current = await findValidatorChannelForUser(env, userId, channelId);
     if (!current) return json({ error: "Canal nao encontrado." }, 404);
 
@@ -6509,25 +6564,6 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       await persistValidatorChannel(env, next);
       await saveLiveState(env);
       return json({ channel: publicValidatorChannel(next) });
-    }
-
-    if (request.method === "DELETE") {
-      liveValidatorChannels = liveValidatorChannels.filter(
-        (channel) => !(channel.userId === userId && channel.id === channelId),
-      );
-      liveValidatorPatterns = liveValidatorPatterns.map((pattern) =>
-        pattern.userId === userId && pattern.telegramChannelId === channelId
-          ? { ...pattern, telegramChannelId: "", updatedAt: new Date().toISOString() }
-          : pattern,
-      );
-      await deleteValidatorChannelRow(env, userId, channelId);
-      await Promise.all(
-        liveValidatorPatterns
-          .filter((pattern) => pattern.userId === userId && pattern.telegramChannelId === "")
-          .map((pattern) => persistValidatorPattern(env, pattern)),
-      );
-      await saveLiveState(env);
-      return json({ ok: true });
     }
   }
 
@@ -6544,12 +6580,18 @@ async function findValidatorChannelForUser(env: unknown, userId: string, channel
   );
   if (cached) return cached;
 
-  const storedChannels = await fetchStoredValidatorChannels(env, normalizedUserId);
-  const stored = storedChannels.find((channel) => channel.id === normalizedChannelId) || null;
+  const stored = await fetchStoredValidatorChannel(env, normalizedUserId, normalizedChannelId);
   if (stored) {
     liveValidatorChannels = upsertValidatorChannel(stored);
+    return stored;
   }
-  return stored;
+
+  const storedChannels = await fetchStoredValidatorChannels(env, normalizedUserId);
+  const storedFromList = storedChannels.find((channel) => channel.id === normalizedChannelId) || null;
+  if (storedFromList) {
+    liveValidatorChannels = upsertValidatorChannel(storedFromList);
+  }
+  return storedFromList;
 }
 
 async function sendTelegramMessage({
@@ -6948,7 +6990,7 @@ async function hydrateValidatorUserCache(env: unknown, userId: string) {
     fetchStoredValidatorChannels(env, userId),
   ]);
   const patterns = mergeValidatorEntityList(storedPatterns, legacyPatterns);
-  const channels = mergeValidatorEntityList(storedChannels, legacyChannels);
+  const channels = mergeValidatorChannelList(storedChannels, legacyChannels);
 
   if (!storedPatterns.length && legacyPatterns.length) {
     void Promise.all(legacyPatterns.map((pattern) => persistValidatorPattern(env, pattern)));
@@ -6990,6 +7032,74 @@ function mergeValidatorEntityList<T extends { id: string }>(stored: T[], legacy:
       stateEntityUpdatedAtMs(right as Record<string, unknown>) -
       stateEntityUpdatedAtMs(left as Record<string, unknown>),
   );
+}
+
+function mergeValidatorChannelList(...lists: ValidatorNotificationChannel[][]) {
+  const byKey = new Map<string, ValidatorNotificationChannel>();
+  for (const channel of lists.flat()) {
+    if (!channel.id) continue;
+    const key = validatorChannelUniqueKey(channel);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, channel);
+      continue;
+    }
+
+    const channelIsNewer = stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>) >=
+      stateEntityUpdatedAtMs(existing as unknown as Record<string, unknown>);
+    const merged = channelIsNewer
+      ? mergeStateEntityRecord(existing as unknown as Record<string, unknown>, channel as unknown as Record<string, unknown>)
+      : mergeStateEntityRecord(channel as unknown as Record<string, unknown>, existing as unknown as Record<string, unknown>);
+    byKey.set(key, merged as unknown as ValidatorNotificationChannel);
+  }
+
+  return [...byKey.values()].sort(
+    (left, right) =>
+      stateEntityUpdatedAtMs(right as unknown as Record<string, unknown>) -
+      stateEntityUpdatedAtMs(left as unknown as Record<string, unknown>),
+  );
+}
+
+function validatorChannelUniqueKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
+  const userId = normalizeValidatorUserId(channel.userId);
+  const chatId = normalizeValidatorChannelCode(channel.chatId);
+  if (chatId) return `${userId}:chat:${chatId}`;
+  const name = readString(channel.name).trim().toLowerCase();
+  return `${userId}:name:${name || readString(channel.id)}`;
+}
+
+function normalizeValidatorChannelCode(value: unknown) {
+  return String(value || "").trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function findValidatorChannelByIncomingCode(
+  channels: ValidatorNotificationChannel[],
+  userId: string,
+  incoming: Record<string, unknown>,
+) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const incomingCode = normalizeValidatorChannelCode(readString(incoming, "chatId"));
+  if (!normalizedUserId || !incomingCode) return null;
+  return channels.find(
+    (channel) =>
+      channel.userId === normalizedUserId &&
+      normalizeValidatorChannelCode(channel.chatId) === incomingCode,
+  ) || null;
+}
+
+function validatorChannelRelatedIds(
+  channels: ValidatorNotificationChannel[],
+  target: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">,
+) {
+  const key = validatorChannelUniqueKey(target);
+  const userId = normalizeValidatorUserId(target.userId);
+  return channels
+    .filter((channel) =>
+      channel.userId === userId &&
+      (channel.id === target.id || validatorChannelUniqueKey(channel) === key)
+    )
+    .map((channel) => channel.id)
+    .filter(Boolean);
 }
 
 async function refreshValidatorMonitorCache(env: unknown) {
@@ -7041,6 +7151,31 @@ async function fetchStoredActiveValidatorPatterns(env: unknown) {
     .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
 }
 
+async function fetchStoredValidatorChannel(env: unknown, userId: string, channelId: string) {
+  if (!getSupabasePersistenceConfig(env)) return null;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedChannelId = readString(channelId);
+  if (!normalizedUserId || !normalizedChannelId) return null;
+
+  const [rows, stateChannel, deletedState] = await Promise.all([
+    fetchSupabaseRows(
+      env,
+      VALIDATOR_CHANNELS_TABLE,
+      `select=*&user_id=eq.${encodeURIComponent(normalizedUserId)}&id=eq.${encodeURIComponent(normalizedChannelId)}&limit=1`,
+    ),
+    fetchValidatorChannelStateChannel(env, normalizedUserId, normalizedChannelId),
+    loadDurableLiveStateById(env, validatorChannelDeletedStateId(normalizedUserId, normalizedChannelId)),
+  ]);
+  if (deletedState && hasRecordFields(deletedState)) return null;
+  const dedicatedChannel = rows
+    .map(validatorChannelFromRow)
+    .find((channel): channel is ValidatorNotificationChannel => Boolean(channel)) || null;
+  return mergeValidatorChannelList(
+    dedicatedChannel ? [dedicatedChannel] : [],
+    stateChannel ? [stateChannel] : [],
+  )[0] || null;
+}
+
 async function fetchStoredValidatorChannels(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return [];
   const [rows, stateChannels, deletedIds] = await Promise.all([
@@ -7055,7 +7190,7 @@ async function fetchStoredValidatorChannels(env: unknown, userId: string) {
   const storedChannels = rows
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  return mergeValidatorEntityList(storedChannels, stateChannels).filter((channel) => !deletedIds.has(channel.id));
+  return mergeValidatorChannelList(storedChannels, stateChannels).filter((channel) => !deletedIds.has(channel.id));
 }
 
 async function fetchStoredActiveValidatorChannels(env: unknown) {
@@ -7072,7 +7207,7 @@ async function fetchStoredActiveValidatorChannels(env: unknown) {
   const storedChannels = rows
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  return mergeValidatorEntityList(storedChannels, stateChannels)
+  return mergeValidatorChannelList(storedChannels, stateChannels)
     .filter((channel) => channel.isActive && !deletedIds.has(channel.id));
 }
 
@@ -7114,16 +7249,27 @@ async function persistValidatorChannel(env: unknown, channel: ValidatorNotificat
 }
 
 async function deleteValidatorChannelRow(env: unknown, userId: string, channelId: string) {
+  return deleteValidatorChannelRows(env, userId, [channelId]);
+}
+
+async function deleteValidatorChannelRows(env: unknown, userId: string, channelIds: string[]) {
   if (!getSupabasePersistenceConfig(env)) return false;
-  const [dedicatedResult, stateResult] = await Promise.allSettled([
-    deleteSupabaseRows(
-      env,
-      VALIDATOR_CHANNELS_TABLE,
-      `user_id=eq.${encodeURIComponent(userId)}&id=eq.${encodeURIComponent(channelId)}`,
-    ),
-    deleteValidatorChannelState(env, userId, channelId),
-  ]);
-  return dedicatedResult.status === "fulfilled" || stateResult.status === "fulfilled";
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const ids = [...new Set(channelIds.map(readString).filter(Boolean))];
+  if (!normalizedUserId || !ids.length) return false;
+  const results = await Promise.allSettled(
+    ids.map(async (channelId) => {
+      await Promise.allSettled([
+        deleteSupabaseRows(
+          env,
+          VALIDATOR_CHANNELS_TABLE,
+          `user_id=eq.${encodeURIComponent(normalizedUserId)}&id=eq.${encodeURIComponent(channelId)}`,
+        ),
+        deleteValidatorChannelState(env, normalizedUserId, channelId),
+      ]);
+    }),
+  );
+  return results.some((result) => result.status === "fulfilled");
 }
 
 async function persistValidatorChannelState(env: unknown, channel: ValidatorNotificationChannel) {
@@ -7159,11 +7305,25 @@ async function fetchValidatorChannelStateChannels(env: unknown, userId?: string)
   const rows = await fetchSupabaseRows(
     env,
     LIVE_STATE_TABLE,
-    `select=id,state&id=like.${encodeURIComponent(`${prefix}*`)}&order=updated_at.desc&limit=1000`,
+    `select=id,state&id=like.${encodePostgrestLikeValue(`${prefix}*`)}&order=updated_at.desc&limit=1000`,
   );
   return rows
     .map(validatorChannelFromStateRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
+}
+
+async function fetchValidatorChannelStateChannel(env: unknown, userId: string, channelId: string) {
+  if (!getSupabasePersistenceConfig(env)) return null;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedChannelId = readString(channelId);
+  if (!normalizedUserId || !normalizedChannelId) return null;
+  const deletedState = await loadDurableLiveStateById(
+    env,
+    validatorChannelDeletedStateId(normalizedUserId, normalizedChannelId),
+  );
+  if (deletedState && hasRecordFields(deletedState)) return null;
+  const state = await loadDurableLiveStateById(env, validatorChannelStateId(normalizedUserId, normalizedChannelId));
+  return state ? validatorChannelFromStateRecord(state) : null;
 }
 
 async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
@@ -7175,7 +7335,7 @@ async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
   const rows = await fetchSupabaseRows(
     env,
     LIVE_STATE_TABLE,
-    `select=id,state&id=like.${encodeURIComponent(`${prefix}*`)}&order=updated_at.desc&limit=1000`,
+    `select=id,state&id=like.${encodePostgrestLikeValue(`${prefix}*`)}&order=updated_at.desc&limit=1000`,
   );
   for (const row of rows) {
     const state = readRecord(row.state);
@@ -7191,6 +7351,10 @@ function validatorChannelStateId(userId: string, channelId: string) {
 
 function validatorChannelDeletedStateId(userId: string, channelId: string) {
   return `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
+}
+
+function encodePostgrestLikeValue(value: string) {
+  return encodeURIComponent(value).replace(/%2A/gi, "*");
 }
 
 async function persistValidatorNotification(env: unknown, notification: Record<string, unknown>) {
@@ -7301,7 +7465,10 @@ function validatorChannelFromRow(row: Record<string, unknown>) {
 }
 
 function validatorChannelFromStateRow(row: Record<string, unknown>) {
-  const state = readRecord(row.state);
+  return validatorChannelFromStateRecord(readRecord(row.state));
+}
+
+function validatorChannelFromStateRecord(state: Record<string, unknown>) {
   const channelRecord = readRecord(state.channel || state.validatorChannel);
   const idFromState = readString(channelRecord, "id") || readString(state, "channelId");
   const userIdFromState = readString(channelRecord, "userId") || readString(state, "userId");
@@ -7747,19 +7914,19 @@ function validatorEntrySide(entryType: ValidatorEntryType): Round["result"] | nu
 }
 
 function formatServerTelegramPattern(pattern: ValidatorPatternToken[]) {
-  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join(" â†’ ");
+  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join(" ??? ");
 }
 
 function formatServerTelegramSide(side: Round["result"]) {
-  if (side === "B") return "ðŸ”´ Banker";
-  if (side === "P") return "ðŸ”µ Player";
-  return "ðŸŸ¡ Tie";
+  if (side === "B") return "???? Banker";
+  if (side === "P") return "???? Player";
+  return "???? Tie";
 }
 
 function serverSideCircle(side: Round["result"]) {
-  if (side === "B") return "ðŸ”´";
-  if (side === "P") return "ðŸ”µ";
-  return "ðŸŸ¡";
+  if (side === "B") return "????";
+  if (side === "P") return "????";
+  return "????";
 }
 
 function formatServerPercent(value?: number) {
@@ -7843,10 +8010,10 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
   if (url.pathname !== "/adaptive-strategy/sync") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "M??todo n??o permitido." }, 405);
 
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const config = getSupabasePersistenceConfig(env);
@@ -7856,7 +8023,7 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
       storage: "local",
       lastSyncedAt: new Date().toISOString(),
       message:
-        "Supabase service role nÃ£o configurado no backend. Adaptive Engine mantido no histÃ³rico local.",
+        "Supabase service role n??o configurado no backend. Adaptive Engine mantido no hist??rico local.",
     });
   }
 
@@ -7877,7 +8044,7 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
         mode: "error",
         storage: "error",
         lastSyncedAt: new Date().toISOString(),
-        error: "NÃ£o foi possÃ­vel salvar todos os dados do Adaptive Engine no Supabase.",
+        error: "N??o foi poss??vel salvar todos os dados do Adaptive Engine no Supabase.",
       },
       502,
     );
@@ -8016,7 +8183,7 @@ async function saveSupabaseRows(
     }
     return true;
   } catch (error) {
-    console.warn(`Adaptive Engine: falha de conexÃ£o ao salvar ${table}.`, error);
+    console.warn(`Adaptive Engine: falha de conex??o ao salvar ${table}.`, error);
     return false;
   }
 }
@@ -9802,7 +9969,7 @@ function normalizeServerModeList(value: unknown) {
       .trim()
       .toLowerCase();
     if (text === "sniper") selected.add("sniper");
-    if (text === "hunter" || text === "cacador" || text === "caÃ§ador") selected.add("hunter");
+    if (text === "hunter" || text === "cacador" || text === "ca??ador") selected.add("hunter");
     if (text === "aggressive" || text === "agressivo") selected.add("aggressive");
   }
   return ACTIVE_ENTRY_MODES.filter((mode) => selected.has(mode));
@@ -11493,14 +11660,14 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
-      console.warn(`NÃ£o foi possÃ­vel carregar ${table} (${response.status}).`);
+      console.warn(`N??o foi poss??vel carregar ${table} (${response.status}).`);
       return [];
     }
 
     const rows = await response.json().catch(() => null);
     return Array.isArray(rows) ? rows.map(readRecord).filter(hasRecordFields) : [];
   } catch (error) {
-    console.warn(`NÃ£o foi possÃ­vel carregar ${table}.`, error);
+    console.warn(`N??o foi poss??vel carregar ${table}.`, error);
     return [];
   }
 }
@@ -11544,14 +11711,14 @@ async function fetchSupabaseRowsRange(
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
-      console.warn(`NÃƒÂ£o foi possÃƒÂ­vel carregar ${table} (${response.status}).`);
+      console.warn(`N????o foi poss????vel carregar ${table} (${response.status}).`);
       return [];
     }
 
     const rows = await response.json().catch(() => null);
     return Array.isArray(rows) ? rows.map(readRecord).filter(hasRecordFields) : [];
   } catch (error) {
-    console.warn(`NÃƒÂ£o foi possÃƒÂ­vel carregar ${table}.`, error);
+    console.warn(`N????o foi poss????vel carregar ${table}.`, error);
     return [];
   }
 }
@@ -11579,12 +11746,12 @@ async function persistSupabaseRow(
       },
     );
     if (!response.ok && response.status !== 404) {
-      console.warn(`NÃ£o foi possÃ­vel salvar ${table} (${response.status}).`);
+      console.warn(`N??o foi poss??vel salvar ${table} (${response.status}).`);
       return false;
     }
     return response.ok;
   } catch (error) {
-    console.warn(`NÃ£o foi possÃ­vel salvar ${table}.`, error);
+    console.warn(`N??o foi poss??vel salvar ${table}.`, error);
     return false;
   }
 }
@@ -11613,12 +11780,12 @@ async function persistSupabaseRows(
       },
     );
     if (!response.ok && response.status !== 404) {
-      console.warn(`NÃƒÂ£o foi possÃƒÂ­vel salvar lote em ${table} (${response.status}).`);
+      console.warn(`N????o foi poss????vel salvar lote em ${table} (${response.status}).`);
       return false;
     }
     return response.ok;
   } catch (error) {
-    console.warn(`NÃƒÂ£o foi possÃƒÂ­vel salvar lote em ${table}.`, error);
+    console.warn(`N????o foi poss????vel salvar lote em ${table}.`, error);
     return false;
   }
 }
@@ -11636,10 +11803,10 @@ async function deleteSupabaseRows(env: unknown, table: string, query: string) {
       },
     });
     if (!response.ok && response.status !== 404) {
-      console.warn(`NÃ£o foi possÃ­vel apagar ${table} (${response.status}).`);
+      console.warn(`N??o foi poss??vel apagar ${table} (${response.status}).`);
     }
   } catch (error) {
-    console.warn(`NÃ£o foi possÃ­vel apagar ${table}.`, error);
+    console.warn(`N??o foi poss??vel apagar ${table}.`, error);
   }
 }
 
@@ -11764,10 +11931,10 @@ function elevenLabsErrorStatus(status: number) {
 
 function elevenLabsErrorPayload(status: number) {
   if (status === 401 || status === 403) {
-    return { error: "API key ElevenLabs invÃ¡lida ou sem permissÃ£o." };
+    return { error: "API key ElevenLabs inv??lida ou sem permiss??o." };
   }
   if (status === 404 || status === 422) {
-    return { error: "ELEVENLABS_VOICE_ID invÃ¡lido ou indisponÃ­vel." };
+    return { error: "ELEVENLABS_VOICE_ID inv??lido ou indispon??vel." };
   }
   if (status === 429) {
     return { error: "Quota ou limite da ElevenLabs atingido." };
@@ -12274,7 +12441,7 @@ async function clientAccess(
       recordAccessEvent("client_session_replaced", {
         ...client,
         risk: "medium",
-        detail: "Nova sessÃ£o derrubou a sessÃ£o anterior.",
+        detail: "Nova sess??o derrubou a sess??o anterior.",
         ip_hash: binding.ipHash,
         user_agent_hash: binding.userAgentHash,
       });
@@ -12323,7 +12490,7 @@ async function clientAccess(
         ? "Teste gratuito ativo por tempo limitado."
         : enabled
           ? "Acesso liberado pelo administrador."
-          : "Aguardando liberaÃ§Ã£o do administrador.",
+          : "Aguardando libera????o do administrador.",
     client_token: token,
   };
 }
@@ -12718,7 +12885,7 @@ async function extendAdminManagedUser(
   reason: string,
 ) {
   if (!Number.isFinite(days) || days <= 0 || days > 365) {
-    return { ok: false as const, status: 400, error: "Quantidade de dias invÃ¡lida." };
+    return { ok: false as const, status: 400, error: "Quantidade de dias inv??lida." };
   }
   const before = normalizeAdminManagedUser(target, env);
   const baseMs = Date.parse(before.currentPeriodEnd);
@@ -12739,7 +12906,7 @@ async function extendAdminManagedUser(
       currentPeriodEnd,
       subscriptionStatus: status,
       isBlocked: false,
-      reason: reason || `ProrrogaÃ§Ã£o de ${days} dias`,
+      reason: reason || `Prorroga????o de ${days} dias`,
     },
     "EXTEND_ACCESS",
   );
@@ -12789,7 +12956,7 @@ async function unblockAdminManagedUser(
     {
       isBlocked: false,
       subscriptionStatus: nextStatus,
-      reason: reason || "ReativaÃ§Ã£o manual",
+      reason: reason || "Reativa????o manual",
     },
     "UNBLOCK_USER",
   );
@@ -12817,7 +12984,7 @@ async function deleteAdminManagedUser(
     action: "DELETE_USER",
     beforeJson: before,
     afterJson: { deleted: true },
-    reason: reason || "ExclusÃ£o manual de cadastro",
+    reason: reason || "Exclus??o manual de cadastro",
   });
   await deletePersistedBillingUser(env, before);
   return { ok: true, user: before };
@@ -12839,7 +13006,7 @@ function canDeleteAdminManagedUser(
       (user) => normalizeManagedUserRole(user.role) === "owner",
     ).length;
     if (ownerCount <= 1) {
-      return { ok: false, status: 403, error: "NÃ£o Ã© permitido excluir o Ãºnico owner ativo." };
+      return { ok: false, status: 403, error: "N??o ?? permitido excluir o ??nico owner ativo." };
     }
   }
 
@@ -12847,7 +13014,7 @@ function canDeleteAdminManagedUser(
     return {
       ok: false,
       status: 403,
-      error: "NÃ£o Ã© permitido excluir o prÃ³prio cadastro por esta rota.",
+      error: "N??o ?? permitido excluir o pr??prio cadastro por esta rota.",
     };
   }
 
@@ -12863,7 +13030,7 @@ function canEditAdminManagedUser(
   const targetRole = normalizeManagedUserRole(target.role);
   const targetEmail = readString(target, "email").toLowerCase();
   if (adminRole !== "owner" && targetRole !== "user") {
-    return { ok: false, status: 403, error: "Admin nÃ£o pode alterar outro admin ou owner." };
+    return { ok: false, status: 403, error: "Admin n??o pode alterar outro admin ou owner." };
   }
   if (change.changingRole && adminRole !== "owner") {
     return {
@@ -12873,7 +13040,7 @@ function canEditAdminManagedUser(
     };
   }
   if (targetRole === "owner" && adminRole !== "owner") {
-    return { ok: false, status: 403, error: "Admin nÃ£o pode alterar owner." };
+    return { ok: false, status: 403, error: "Admin n??o pode alterar owner." };
   }
   if (
     adminRole !== "owner" &&
@@ -12883,7 +13050,7 @@ function canEditAdminManagedUser(
     return {
       ok: false,
       status: 403,
-      error: "Admin nÃ£o pode remover o prÃ³prio acesso por esta rota.",
+      error: "Admin n??o pode remover o pr??prio acesso por esta rota.",
     };
   }
   if (
@@ -12895,7 +13062,7 @@ function canEditAdminManagedUser(
       (user) => normalizeManagedUserRole(user.role) === "owner",
     ).length;
     if (ownerCount <= 1) {
-      return { ok: false, status: 403, error: "NÃ£o Ã© permitido remover o Ãºnico owner ativo." };
+      return { ok: false, status: 403, error: "N??o ?? permitido remover o ??nico owner ativo." };
     }
   }
   return { ok: true };
@@ -13232,7 +13399,7 @@ function mockAdminManagedUsers() {
     },
     {
       id: "3",
-      name: "UsuÃ¡rio Vencido",
+      name: "Usu??rio Vencido",
       email: "vencido@email.com",
       role: "user",
       plan: "monthly",
@@ -13246,7 +13413,7 @@ function mockAdminManagedUsers() {
     },
     {
       id: "4",
-      name: "UsuÃ¡rio Bloqueado",
+      name: "Usu??rio Bloqueado",
       email: "bloqueado@email.com",
       role: "user",
       plan: "premium",
@@ -13277,7 +13444,7 @@ function buildLocationBreakdown(
 ) {
   const counts = new Map<string, number>();
   for (const record of records) {
-    const label = readString(record, field) || "NÃ£o informado";
+    const label = readString(record, field) || "N??o informado";
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   return [...counts.entries()]
@@ -13557,7 +13724,7 @@ async function loadLiveStateCache() {
 
     return readRecord(await response.json().catch(() => null));
   } catch (error) {
-    console.warn("NÃ£o foi possÃ­vel carregar estado vivo do cache.", error);
+    console.warn("N??o foi poss??vel carregar estado vivo do cache.", error);
     return null;
   }
 }
@@ -14506,7 +14673,7 @@ async function saveLiveStateCache(state: Record<string, unknown>) {
     );
     return true;
   } catch (error) {
-    console.warn("NÃ£o foi possÃ­vel salvar estado vivo no cache.", error);
+    console.warn("N??o foi poss??vel salvar estado vivo no cache.", error);
     return false;
   }
 }
@@ -14531,7 +14698,7 @@ async function loadDurableLiveStateById(env: unknown, id: string) {
     );
     if (response.status === 404 || response.status === 406) return null;
     if (!response.ok) {
-      console.warn(`Estado durÃ¡vel indisponÃ­vel (${response.status}).`);
+      console.warn(`Estado dur??vel indispon??vel (${response.status}).`);
       return null;
     }
 
@@ -14540,7 +14707,7 @@ async function loadDurableLiveStateById(env: unknown, id: string) {
     const state = readRecord(row.state);
     return Object.keys(state).length > 0 ? state : null;
   } catch (error) {
-    console.warn("NÃ£o foi possÃ­vel carregar estado durÃ¡vel.", error);
+    console.warn("N??o foi poss??vel carregar estado dur??vel.", error);
     return null;
   } finally {
     clearTimeout(timeout);
@@ -14577,12 +14744,12 @@ async function saveDurableLiveStateById(
       signal: controller.signal,
     });
     if (!response.ok) {
-      console.warn(`NÃ£o foi possÃ­vel salvar estado durÃ¡vel (${response.status}).`);
+      console.warn(`N??o foi poss??vel salvar estado dur??vel (${response.status}).`);
       return false;
     }
     return true;
   } catch (error) {
-    console.warn("NÃ£o foi possÃ­vel salvar estado durÃ¡vel.", error);
+    console.warn("N??o foi poss??vel salvar estado dur??vel.", error);
     return false;
   } finally {
     clearTimeout(timeout);
@@ -14727,9 +14894,9 @@ function adminSalesSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
     : saveStatus.durableConfigured;
   const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
   const warning = !durableConfigured
-    ? "PersistÃªncia fixa nÃ£o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para a chave nÃ£o voltar sozinha."
+    ? "Persist??ncia fixa n??o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para a chave n??o voltar sozinha."
     : saveStatus.saved_at && !saveStatus.durable
-      ? "NÃ£o foi possÃ­vel confirmar o salvamento durÃ¡vel. Verifique a tabela sniper_live_state no Supabase."
+      ? "N??o foi poss??vel confirmar o salvamento dur??vel. Verifique a tabela sniper_live_state no Supabase."
       : "";
   return {
     ...publicSalesSettings(),
@@ -14747,9 +14914,9 @@ function adminSiteContentSettings(env?: unknown, saveStatus = liveStateSaveStatu
     : saveStatus.durableConfigured;
   const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
   const warning = !durableConfigured
-    ? "PersistÃªncia fixa nÃ£o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar definitivo."
+    ? "Persist??ncia fixa n??o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar definitivo."
     : saveStatus.saved_at && !saveStatus.durable
-      ? "NÃ£o foi possÃ­vel confirmar o salvamento durÃ¡vel. Verifique a tabela sniper_live_state no Supabase."
+      ? "N??o foi poss??vel confirmar o salvamento dur??vel. Verifique a tabela sniper_live_state no Supabase."
       : "";
   return {
     ...liveSiteContentSettings,

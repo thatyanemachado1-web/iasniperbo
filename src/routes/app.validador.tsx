@@ -215,9 +215,8 @@ function NeuralValidatorPage() {
         ]);
         if (cancelled) return;
 
-        const localChannels = readNotificationChannels();
         const localPatterns = readSavedPatterns();
-        const mergedChannels = mergeValidatorItems(serverChannels, localChannels);
+        const mergedChannels = mergeValidatorChannels(serverChannels);
         const mergedPatterns = autoPrepareAdminTelegramDelivery(
           mergeValidatorItems(serverPatterns, localPatterns),
           mergedChannels,
@@ -229,10 +228,8 @@ function NeuralValidatorPage() {
         setChannels(mergedChannels);
 
         const patternsToSync = mergedPatterns.filter((item) => shouldSyncValidatorItem(item, serverPatterns));
-        const channelsToSync = mergedChannels.filter((item) => shouldSyncValidatorItem(item, serverChannels));
         await Promise.all([
           ...patternsToSync.map((item) => saveServerValidatorPattern(item).catch(() => null)),
-          ...channelsToSync.map((item) => saveServerValidatorChannel(item).catch(() => null)),
         ]);
       } catch {
         // Local storage remains the fallback when backend sync is unavailable.
@@ -534,6 +531,16 @@ function NeuralValidatorPage() {
       const sameChat = chatId ? channel.chatId === chatId || !channel.chatId : true;
       return sameName && sameChat;
     });
+    const duplicateChannel = chatId
+      ? channels.find((channel) =>
+          normalizeValidatorChannelCode(channel.chatId) === normalizeValidatorChannelCode(chatId) &&
+          channel.id !== matchingChannel?.id
+        )
+      : null;
+    if (duplicateChannel) {
+      showNotice("Ja existe um canal com este Chat ID/codigo.");
+      return;
+    }
     if (channels.length >= planLimits.channels && !matchingChannel) {
       showNotice(`Seu plano permite ate ${planLimits.channels} canais.`);
       return;
@@ -637,8 +644,8 @@ function NeuralValidatorPage() {
         message:
           "ENTRADA CONFIRMADA\n" +
           "Mesa: Bac Bo\n" +
-          "Padrao: 🔴10 → 🔵7 → 🟡6\n" +
-          "Entrada: 🔴 Banker\n" +
+          "Padrao: ??10 ? ??7 ? ??6\n" +
+          "Entrada: ?? Banker\n" +
           "Gale: Ate G1\n" +
           "Protecao Tie: Ativa\n" +
           `Canal: ${channel.name}`,
@@ -653,9 +660,22 @@ function NeuralValidatorPage() {
   }
 
   function removeChannel(id: string) {
-    setChannels(removeNotificationChannel(id));
-    void deleteServerValidatorChannel(id);
-    showNotice("Canal removido.");
+    const channel = channels.find((item) => item.id === id);
+    const idsToRemove = new Set([id]);
+    if (channel) {
+      const channelKey = validatorChannelDedupeKey(channel);
+      for (const item of channels) {
+        if (validatorChannelDedupeKey(item) === channelKey) idsToRemove.add(item.id);
+      }
+    }
+    const next = channels.filter((item) => !idsToRemove.has(item.id));
+    writeNotificationChannels(next);
+    setChannels(next);
+    for (const channelId of idsToRemove) {
+      removeNotificationChannel(channelId);
+      void deleteServerValidatorChannel(channelId);
+    }
+    showNotice(idsToRemove.size > 1 ? `${idsToRemove.size} canais duplicados removidos.` : "Canal removido.");
   }
 
   function showNotice(message: string) {
@@ -1739,7 +1759,7 @@ function ValidationDetailsPanel({ result, config }: { result: ValidatorResult | 
         <div className="text-sm font-black">Detalhes da validacao</div>
         <div className="flex flex-wrap gap-2 text-xs">
           <ResultChip label="Entrada" side={selectedEntry ?? result.entry} />
-          <ResultChip label="Empate" value={config.tieProtection ? "🟡 coberto" : "🟡 sem cobertura"} />
+          <ResultChip label="Empate" value={config.tieProtection ? "?? coberto" : "?? sem cobertura"} />
           <ResultChip label="Rodadas" value={result.analyzedRounds.toLocaleString("pt-BR")} />
         </div>
       </div>
@@ -1843,7 +1863,7 @@ function PatternLine({
       {pattern.map((token, index) => (
         <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1">
           <TokenPill token={token} />
-          {index < pattern.length - 1 && <span className="text-muted-foreground">→</span>}
+          {index < pattern.length - 1 && <span className="text-muted-foreground">?</span>}
         </span>
       ))}
       <span className="text-muted-foreground">= puxou</span>
@@ -1902,7 +1922,7 @@ function CompactPatternLine({
               </button>
             ) : null}
           </span>
-          {index < pattern.length - 1 && <span className="text-muted-foreground">→</span>}
+          {index < pattern.length - 1 && <span className="text-muted-foreground">?</span>}
         </span>
       ))}
     </div>
@@ -2225,6 +2245,29 @@ function mergeValidatorItems<T extends { id: string; updatedAt: string }>(primar
   return [...byId.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
+function mergeValidatorChannels(primary: ValidatorNotificationChannel[], secondary: ValidatorNotificationChannel[] = []) {
+  const byKey = new Map<string, ValidatorNotificationChannel>();
+  for (const channel of [...secondary, ...primary]) {
+    const key = validatorChannelDedupeKey(channel);
+    const existing = byKey.get(key);
+    if (!existing || Date.parse(channel.updatedAt || "") >= Date.parse(existing.updatedAt || "")) {
+      byKey.set(key, existing ? { ...existing, ...channel } : channel);
+    }
+  }
+  return [...byKey.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+}
+
+function validatorChannelDedupeKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
+  const userId = (channel.userId || currentUserId()).trim().toLowerCase();
+  const chatId = normalizeValidatorChannelCode(channel.chatId);
+  if (chatId) return `${userId}:chat:${chatId}`;
+  return `${userId}:name:${channel.name.trim().toLowerCase() || channel.id}`;
+}
+
+function normalizeValidatorChannelCode(value: string) {
+  return value.trim().replace(/\s+/g, "").toLowerCase();
+}
+
 function shouldSyncValidatorItem<T extends { id: string; updatedAt: string }>(item: T, serverItems: T[]) {
   const serverItem = serverItems.find((candidate) => candidate.id === item.id);
   if (!serverItem) return true;
@@ -2443,9 +2486,9 @@ function invertToken(token: ValidatorPatternToken): ValidatorPatternToken {
 }
 
 function sideEmoji(side: RoundResult) {
-  if (side === "B") return "🔴";
-  if (side === "P") return "🔵";
-  return "🟡";
+  if (side === "B") return "??";
+  if (side === "P") return "??";
+  return "??";
 }
 
 function entryTypeToSide(entryType: ValidatorEntryType): RoundResult | null {
