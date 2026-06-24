@@ -2028,7 +2028,9 @@ function recipientToEditForm(recipient: SignalRecipient): RecipientEditForm {
     chat_id: recipient.chat_id || "",
     kind: recipient.kind || "user",
     plan: recipient.plan || "free",
-    access_status: recipient.access_status || (recipient.enabled ? "approved" : "paused"),
+    access_status: (recipient.access_status === "approved" || recipient.access_status === "paused" || recipient.access_status === "pending")
+      ? recipient.access_status
+      : (recipient.enabled ? "approved" : "paused"),
     starts_at: dateInputValue(recipient.starts_at) || todayIso(),
     validity_months: "",
     validity_days: String(recipient.validity_days || 30),

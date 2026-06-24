@@ -254,7 +254,7 @@ export function AdminUserEditModal({
               </p>
             </div>
             <AdminQuickActions
-              disabled={busy || (!adminCanEditTarget && currentAdminRole !== "owner")}
+              disabled={busy || !adminCanEditTarget}
               onAction={(action) => onQuickAction(action, user)}
             />
           </div>
