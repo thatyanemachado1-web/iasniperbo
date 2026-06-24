@@ -63,7 +63,7 @@ function localAiUrl() {
   return `${window.location.origin}/api/ai/local-commentary`;
 }
 
-function authHeaders() {
+function authHeaders(): Record<string, string> {
   const admin = readAdminSession();
   if (admin?.token) return { Authorization: `Bearer ${admin.token}` };
   const user = readUserSession();
