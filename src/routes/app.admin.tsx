@@ -81,10 +81,14 @@ const planLabels: Record<RecipientPlan, string> = {
   vip: "VIP",
 };
 
-const accessStatusLabels = {
+const accessStatusLabels: Record<NonNullable<SignalRecipient["access_status"]>, string> = {
   approved: "Aprovado",
   paused: "Pausado",
   pending: "Pendente",
+  expired: "Expirado",
+  blocked: "Bloqueado",
+  trial: "Teste",
+  manual_vip: "VIP manual",
 };
 
 const ADMIN_RECIPIENTS_BACKUP_KEY = "sniper_admin_recipients_backup_v1";
@@ -98,7 +102,7 @@ type RecipientEditForm = {
   chat_id: string;
   kind: RecipientKind;
   plan: RecipientPlan;
-  access_status: "approved" | "paused" | "pending";
+  access_status: NonNullable<SignalRecipient["access_status"]>;
   starts_at: string;
   validity_months: string;
   validity_days: string;

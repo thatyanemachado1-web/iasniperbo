@@ -311,6 +311,7 @@ const VALIDATOR_ROUNDS_TABLE = "validator_rounds";
 const VALIDATOR_PATTERNS_TABLE = "validator_saved_patterns";
 const VALIDATOR_CHANNELS_TABLE = "validator_channels";
 const VALIDATOR_NOTIFICATIONS_TABLE = "validator_notifications";
+const BANKROLL_MONTHLY_TABLE = "bankroll_monthly";
 const VALIDATOR_CHANNEL_STATE_PREFIX = "validator_channel:";
 const VALIDATOR_CHANNEL_DELETED_STATE_PREFIX = "validator_channel_deleted:";
 const LEGACY_PATTERN_LIVE_HITS_TABLE = "pattern_live_hits";
@@ -1581,7 +1582,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
           error:
             "Sess??o expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
         },
-        auth.status,
+        auth.ok ? 401 : auth.status,
       );
     }
     return createMercadoPagoCheckout(request, env, client, plan);
@@ -2664,8 +2665,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         targetUserId: "site-content",
         targetEmail: "global",
         action: "UPDATE_USER",
-        beforeJson: before,
-        afterJson: liveSiteContentSettings,
+        beforeJson: { ...before },
+        afterJson: { ...liveSiteContentSettings },
         reason: "Conteudo visual do site atualizado.",
       });
       const saveStatus = await saveLiveState(env);
@@ -3104,10 +3105,11 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
-    const sourceRounds = Array.isArray(body.rounds)
+    const dashboardBody = readRecord(body.dashboard);
+    const sourceRounds: unknown[] = Array.isArray(body.rounds)
       ? body.rounds
-      : Array.isArray(readRecord(body.dashboard).rounds)
-        ? readRecord(body.dashboard).rounds
+      : Array.isArray(dashboardBody.rounds)
+        ? dashboardBody.rounds
         : [];
     const incomingRounds = normalizeRounds(sourceRounds, MAX_SERVER_ROUND_HISTORY);
     if (incomingRounds.length) {
