@@ -13945,11 +13945,9 @@ function applyLiveState(state: Record<string, unknown>) {
       .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
   }
 
-  if (Array.isArray(state.validatorChannels)) {
-    liveValidatorChannels = state.validatorChannels
-      .map((channel) => normalizeServerNotificationChannel(channel, readString(readRecord(channel), "userId")))
-      .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  }
+  // Telegram channels are isolated in dedicated channel storage. Do not hydrate
+  // them from the broad live-state snapshot, otherwise deleted channels can
+  // return from an older cache/durable payload.
 
   if (Array.isArray(state.validatorNotifications)) {
     liveValidatorNotifications = state.validatorNotifications
@@ -14184,12 +14182,7 @@ function mergeLiveStates(
       durableSavedAt,
       cacheSavedAt,
     ),
-    validatorChannels: mergeEntityStateArrays(
-      durable.validatorChannels,
-      cache.validatorChannels,
-      durableSavedAt,
-      cacheSavedAt,
-    ),
+    validatorChannels: [],
     validatorNotifications: mergeStateArrays(
       durable.validatorNotifications,
       cache.validatorNotifications,
@@ -14581,7 +14574,7 @@ function buildLiveStateSnapshot(env?: unknown) {
     dashboard: liveDashboardData,
     validatorRoundHistory: liveValidatorRoundHistory.slice(-MAX_MONITOR_ROUND_HISTORY),
     validatorPatterns: liveValidatorPatterns,
-    validatorChannels: liveValidatorChannels,
+    validatorChannels: [],
     validatorNotifications: liveValidatorNotifications.slice(0, 1000),
     neuralCalendarVersion: NEURAL_CALENDAR_AGGREGATE_VERSION,
     neuralCalendarDailyStats: liveNeuralCalendarDailyStats,
