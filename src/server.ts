@@ -1,4 +1,3 @@
-// @ts-nocheck
 import "./lib/error-capture";
 
 import bcrypt from "bcryptjs";
@@ -323,7 +322,6 @@ const ENGINE_WEEKLY_STATS_TABLE = "engine_weekly_stats";
 const ENGINE_MONTHLY_STATS_TABLE = "engine_monthly_stats";
 const ENGINE_YEARLY_STATS_TABLE = "engine_yearly_stats";
 const ENGINE_SIGNAL_EVENTS_TABLE = "engine_signal_events";
-const BANKROLL_MONTHLY_TABLE = "bankroll_monthly";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const DEFAULT_CALENDAR_ENGINE_KEY: CalendarEngineKey = "todos";
 const CALENDAR_ENGINE_KEYS: CalendarEngineKey[] = [
@@ -6373,41 +6371,15 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
   if (isChannelsRoute || isNotificationsRoute) {
-    // Cloudflare Telegram Engine eh a UNICA fonte da verdade.
-    // Nao caimos mais no armazenamento local antigo para evitar mensagens duplicadas.
-    const engineUrlExists = Boolean(
-      readServerEnvString(env, "TELEGRAM_ENGINE_URL", "") ||
-        readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL", ""),
-    );
-    const engineSecretExists = Boolean(
-      readServerEnvString(env, "TELEGRAM_ENGINE_SECRET", "") ||
-        readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_SECRET", ""),
-    );
-    console.log("[telegram-engine]", {
-      path: url.pathname,
-      method: request.method,
-      TELEGRAM_ENGINE_URL_EXISTS: engineUrlExists,
-      TELEGRAM_ENGINE_SECRET_EXISTS: engineSecretExists,
-      validatorUserId: userId,
+    if (!getTelegramEngineConfig(env)) {
+      return json({ error: "Telegram Engine secrets missing" }, 500);
+    }
+    const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId).catch((error) => {
+      console.warn("Cloudflare Telegram Engine indisponivel.", error);
+      return null;
     });
-    if (!engineUrlExists || !engineSecretExists) {
-      return json(
-        {
-          error: "Telegram Engine secrets missing",
-          TELEGRAM_ENGINE_URL_EXISTS: engineUrlExists,
-          TELEGRAM_ENGINE_SECRET_EXISTS: engineSecretExists,
-        },
-        500,
-      );
-    }
-    try {
-      const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId);
-      if (cloudResponse) return cloudResponse;
-      return json({ error: "Motor do Telegram indisponivel." }, 502);
-    } catch (error) {
-      console.warn("[telegram-engine] proxy error", error);
-      return json({ error: "Motor do Telegram indisponivel." }, 502);
-    }
+    if (cloudResponse) return cloudResponse;
+    return json({ error: "Telegram Engine unavailable" }, 502);
   }
   await withTimeout(
     hydrateValidatorUserCache(env, userId),
@@ -16272,14 +16244,25 @@ function getSupabasePersistenceConfig(env: unknown) {
   return { url, key };
 }
 
+const DEFAULT_TELEGRAM_ENGINE_URL = "https://sniperbo-telegram-engine.sniperboia.workers.dev";
+const TELEGRAM_ENGINE_SECRET_NAMES = [
+  "TELEGRAM_ENGINE_SECRET",
+  "CLOUDFLARE_TELEGRAM_ENGINE_SECRET",
+  "ENGINE_API_SECRET",
+  "SNIPER_PUBLISHER_TOKEN",
+  "SNIPER_DASHBOARD_TOKEN",
+  "SNIPER_ADMIN_TOKEN",
+] as const;
+
 function getTelegramEngineConfig(env: unknown) {
   const url = (
     readServerEnvString(env, "TELEGRAM_ENGINE_URL", "") ||
-    readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL", "")
+    readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL", "") ||
+    DEFAULT_TELEGRAM_ENGINE_URL
   ).replace(/\/+$/, "");
-  const secret =
-    readServerEnvString(env, "TELEGRAM_ENGINE_SECRET", "") ||
-    readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_SECRET", "");
+  const secret = TELEGRAM_ENGINE_SECRET_NAMES
+    .map((name) => readServerEnvString(env, name, ""))
+    .find(Boolean) || "";
   if (!url || !secret) return null;
   return { url, secret };
 }
@@ -16295,30 +16278,10 @@ async function forwardTelegramEngineRequest(request: Request, url: URL, env: unk
     headers: telegramEngineHeaders(config.secret, userId, Boolean(body)),
     body,
   });
-  let channelsCount: number | undefined;
-  let passthroughBody: BodyInit | null = response.body;
-  const contentType = response.headers.get("content-type") || "application/json; charset=utf-8";
-  if (url.pathname === "/validator/channels" && request.method === "GET") {
-    const text = await response.clone().text();
-    passthroughBody = text;
-    try {
-      const parsed = JSON.parse(text);
-      if (Array.isArray(parsed?.channels)) channelsCount = parsed.channels.length;
-    } catch {
-      // ignore
-    }
-  }
-  console.log("[telegram-engine] proxy", {
-    path: url.pathname,
-    method: request.method,
-    validatorUserId: userId,
-    engineStatus: response.status,
-    ...(channelsCount !== undefined ? { channelsCount } : {}),
-  });
-  return new Response(passthroughBody, {
+  return new Response(response.body, {
     status: response.status,
     headers: {
-      "content-type": contentType,
+      "content-type": response.headers.get("content-type") || "application/json; charset=utf-8",
       "cache-control": "no-store",
     },
   });
@@ -16370,7 +16333,6 @@ function telegramEngineHeaders(secret: string, userId: string, withJson = false)
   return {
     Accept: "application/json",
     Authorization: `Bearer ${secret}`,
-    "User-Agent": "sniperbo-site-proxy",
     ...(userId ? { "X-Validator-User-Id": userId } : {}),
     ...(withJson ? { "Content-Type": "application/json" } : {}),
   };
