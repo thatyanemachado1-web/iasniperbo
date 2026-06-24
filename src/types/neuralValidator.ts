@@ -107,6 +107,7 @@ export interface ValidatorMessageTemplates {
   scoreboard: string;
   greenStreak: string;
   preAlert: string;
+  analyzing: string;
 }
 
 export interface ValidatorNotificationChannel {
@@ -118,7 +119,10 @@ export interface ValidatorNotificationChannel {
   chatId: string;
   buttonLink: string;
   isActive: boolean;
+  analyzingEnabled?: boolean;
+  analyzingCooldownRounds?: number;
   templates: ValidatorMessageTemplates;
+  signalModules?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
