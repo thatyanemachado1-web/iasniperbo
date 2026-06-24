@@ -6451,7 +6451,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       const persisted = await persistValidatorChannel(env, channel);
       const saveStatus = await saveLiveState(env);
       if (getSupabasePersistenceConfig(env) && !persisted && !saveStatus.durable && !saveStatus.cache) {
-        return json({ error: "Falha ao salvar canal no servidor." }, 502);
+        console.warn("Canal do Validador salvo apenas em memoria; armazenamento duravel indisponivel.");
       }
       return json({ channel: publicValidatorChannel(channel), persisted }, 201);
     }
