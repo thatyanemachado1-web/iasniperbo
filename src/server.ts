@@ -8214,7 +8214,7 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
   }
   const resultChanged = await processValidatorTelegramResultMessages(env, latestRound, options);
   changed = changed || resultChanged;
-  const analysisChanged = await sendValidatorAnalyzingMessages(latestRound, entryChannelKeys, options);
+  const analysisChanged = await sendValidatorAnalyzingMessages(env, latestRound, entryChannelKeys, options);
   changed = changed || analysisChanged;
 
   return changed;
@@ -9187,6 +9187,7 @@ function normalizeCloudTelegramEntry(value: unknown) {
 }
 
 async function sendValidatorAnalyzingMessages(
+  env: unknown,
   latestRound: Round,
   entryChannelKeys: Set<string>,
   options: ValidatorMonitorOptions,
@@ -9196,14 +9197,25 @@ async function sendValidatorAnalyzingMessages(
     if (!shouldSendValidatorAnalyzingMessage(channel, latestRound, entryChannelKeys)) continue;
     const notificationKey = `analysis:${channel.userId}:${channel.id}:${latestRound.id}`;
     const sentAt = new Date().toISOString();
-    const result = await sendTelegramMessage({
-      botToken: decodeServerToken(channel.botTokenEncoded),
-      chatId: channel.chatId,
-      message: buildServerValidatorAnalyzingMessage(channel),
-      buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-      allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-    });
+    const message = buildServerValidatorAnalyzingMessage(channel);
+    const result = isCloudValidatorTelegramChannel(channel)
+      ? await sendTelegramEngineSignal(env, {
+          userId: channel.userId,
+          channelId: channel.id,
+          moduleKey: "validator",
+          signalKey: notificationKey,
+          roundId: latestRound.id,
+          entry: "",
+          message,
+        })
+      : await sendTelegramMessage({
+          botToken: decodeServerToken(channel.botTokenEncoded),
+          chatId: channel.chatId,
+          message,
+          buttonLabel: "Abrir Sniper Bo IA",
+          buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+          allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+        });
     const notification = {
       id: notificationKey,
       type: "analysis",
@@ -9231,7 +9243,7 @@ function shouldSendValidatorAnalyzingMessage(
   entryChannelKeys: Set<string>,
 ) {
   if (!channel.isActive || !channel.analyzingEnabled) return false;
-  if (!channel.chatId || !decodeServerToken(channel.botTokenEncoded)) return false;
+  if (!channel.chatId || (!isCloudValidatorTelegramChannel(channel) && !decodeServerToken(channel.botTokenEncoded))) return false;
   if (entryChannelKeys.has(validatorChannelKey(channel))) return false;
   if (!validatorChannelHasActivePattern(channel)) return false;
   const notificationKey = `analysis:${channel.userId}:${channel.id}:${latestRound.id}`;
