@@ -412,6 +412,51 @@ const DEFAULT_VALIDATOR_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
   preAlert: "Padrao quase formado\nMesa: {{table}}\nCondicao: {{pattern}}\nPossivel entrada: {{entry}}",
   analyzing: "ANALISANDO PADRAO\nMesa: {{table}}\nAguardando entrada validada",
 };
+type ValidatorTelegramModuleKey =
+  | "ai_patterns"
+  | "paying_numbers"
+  | "surf_alert"
+  | "ties_only"
+  | "validator";
+type ValidatorTelegramModuleConfig = {
+  enabled: boolean;
+  galeLimit: number;
+  tieCoverage: number;
+  cooldownSeconds: number;
+  template: string;
+};
+type ValidatorChannelWithModules = ValidatorNotificationChannel & {
+  signalModules?: Partial<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>;
+};
+type ValidatorTelegramModuleSignal = {
+  moduleKey: ValidatorTelegramModuleKey;
+  channel: ValidatorNotificationChannel;
+  notificationKey: string;
+  signalKey: string;
+  roundId: number;
+  message: string;
+  detectedAt: string;
+  matchedAtMs: number;
+  payloadJson?: Record<string, unknown>;
+};
+const VALIDATOR_TELEGRAM_MODULE_KEYS: ValidatorTelegramModuleKey[] = [
+  "ai_patterns",
+  "paying_numbers",
+  "surf_alert",
+  "ties_only",
+  "validator",
+];
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns:
+    "PADRAO IA CONFIRMADO\nMesa: {{table}}\nPadrao: {{pattern}}\nEntrada: {{entry}}\nGale: {{gale}}\nAssertividade: {{confidence}}",
+  paying_numbers:
+    "NUMERO PAGANTE CONFIRMADO\nNumero: {{number}}\nEntrada: {{entry}}\nGale: {{gale}}\nStatus: {{status}}",
+  surf_alert:
+    "AVISO DE SURF CONFIRMADO\nEntrada: {{entry}}\nRisco: {{risk}}\nConfianca: {{confidence}}\nGale: {{gale}}",
+  ties_only:
+    "POSSIVEL EMPATE\nCobrir empate seco ate G{{tieCoverage}}\nNivel: {{level}}\nMesa: {{table}}",
+  validator: DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry,
+};
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 let liveDashboardData: LiveDashboardData = resetDashboardDailyCycle(mockDashboardData);
@@ -7016,6 +7061,17 @@ function normalizeServerNotificationChannel(
   const tokenEncoded =
     incomingToken ? encodeServerToken(incomingToken) : readString(record, "botTokenEncoded") || existing?.botTokenEncoded || "";
   const decodedToken = decodeServerToken(tokenEncoded);
+  const templatesRecord = readRecord(record.templates);
+  const existingModules = validatorChannelSignalModules(existing);
+  const signalModulesSource = readRecord(record.signalModules);
+  const templateModulesSource = readRecord(templatesRecord.signalModules);
+  const signalModules = normalizeValidatorChannelSignalModules(
+    hasRecordFields(signalModulesSource)
+      ? signalModulesSource
+      : hasRecordFields(templateModulesSource)
+        ? templateModulesSource
+        : existingModules,
+  );
   return {
     id: readString(record, "id") || crypto.randomUUID(),
     userId: normalizedUserId,
@@ -7029,11 +7085,78 @@ function normalizeServerNotificationChannel(
     analyzingCooldownRounds: Math.max(1, Math.floor(Number(record.analyzingCooldownRounds) || 3)),
     templates: {
       ...DEFAULT_VALIDATOR_MESSAGE_TEMPLATES,
-      ...readRecord(record.templates),
+      ...templatesRecord,
     },
+    signalModules,
     createdAt: readString(record, "createdAt") || now,
     updatedAt: readString(record, "updatedAt") || now,
+  } as ValidatorNotificationChannel;
+}
+
+function normalizeValidatorChannelSignalModules(value: unknown) {
+  const record = readRecord(value);
+  return VALIDATOR_TELEGRAM_MODULE_KEYS.reduce<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>(
+    (acc, key) => {
+      const defaults = defaultValidatorTelegramModuleConfig(key);
+      const raw = readRecord(record[key]);
+      const hasEnabled = Object.prototype.hasOwnProperty.call(raw, "enabled");
+      acc[key] = {
+        enabled: hasEnabled ? readBooleanField(raw, "enabled") : defaults.enabled,
+        galeLimit: clampValidatorModuleNumber(raw.galeLimit, defaults.galeLimit, 0, 4),
+        tieCoverage: clampValidatorModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
+        cooldownSeconds: clampValidatorModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
+        template: readString(raw, "template") || defaults.template,
+      };
+      return acc;
+    },
+    {} as Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>,
+  );
+}
+
+function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
+  return {
+    enabled: key === "validator",
+    galeLimit: key === "ties_only" ? 0 : 1,
+    tieCoverage: key === "ties_only" ? 4 : 1,
+    cooldownSeconds: key === "validator" ? 0 : 2,
+    template: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES[key],
   };
+}
+
+function validatorChannelSignalModules(channel?: ValidatorNotificationChannel | null) {
+  if (!channel) return normalizeValidatorChannelSignalModules({});
+  const record = channel as ValidatorChannelWithModules;
+  const templatesRecord = readRecord(channel.templates);
+  const modulesRecord = readRecord(record.signalModules);
+  const templateModulesRecord = readRecord(templatesRecord.signalModules);
+  return normalizeValidatorChannelSignalModules(
+    hasRecordFields(modulesRecord) ? modulesRecord : templateModulesRecord,
+  );
+}
+
+function validatorChannelModuleConfig(
+  channel: ValidatorNotificationChannel,
+  key: ValidatorTelegramModuleKey,
+) {
+  return validatorChannelSignalModules(channel)[key] || defaultValidatorTelegramModuleConfig(key);
+}
+
+function validatorChannelModuleEnabled(
+  channel: ValidatorNotificationChannel,
+  key: ValidatorTelegramModuleKey,
+  fallbackEnabled = false,
+) {
+  const rawModules = readRecord((channel as ValidatorChannelWithModules).signalModules);
+  const templateModules = readRecord(readRecord(channel.templates).signalModules);
+  const hasConfig = hasRecordFields(rawModules) || hasRecordFields(templateModules);
+  if (!hasConfig) return fallbackEnabled;
+  return Boolean(validatorChannelModuleConfig(channel, key).enabled);
+}
+
+function clampValidatorModuleNumber(value: unknown, fallback: number, min: number, max: number) {
+  const number = Math.floor(Number(value));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
 }
 
 function normalizeServerPatternTokens(value: unknown): ValidatorPatternToken[] {
@@ -7733,6 +7856,7 @@ function validatorPatternFromRow(row: Record<string, unknown>) {
 }
 
 function validatorChannelToRow(channel: ValidatorNotificationChannel) {
+  const signalModules = validatorChannelSignalModules(channel);
   return {
     id: channel.id,
     user_id: channel.userId,
@@ -7744,7 +7868,10 @@ function validatorChannelToRow(channel: ValidatorNotificationChannel) {
     is_active: Boolean(channel.isActive),
     analyzing_enabled: Boolean(channel.analyzingEnabled),
     analyzing_cooldown_rounds: Math.max(1, Math.floor(Number(channel.analyzingCooldownRounds) || 3)),
-    templates_json: channel.templates,
+    templates_json: {
+      ...channel.templates,
+      signalModules,
+    },
     created_at: channel.createdAt || new Date().toISOString(),
     updated_at: channel.updatedAt || new Date().toISOString(),
   };
@@ -7754,6 +7881,7 @@ function validatorChannelFromRow(row: Record<string, unknown>) {
   const id = readString(row, "id");
   const userId = readString(row, "user_id") || readString(row, "userId");
   if (!id || !userId) return null;
+  const templatesRecord = readRecord(row.templates_json);
   return normalizeServerNotificationChannel(
     {
       id,
@@ -7766,7 +7894,8 @@ function validatorChannelFromRow(row: Record<string, unknown>) {
       isActive: row.is_active,
       analyzingEnabled: row.analyzing_enabled,
       analyzingCooldownRounds: row.analyzing_cooldown_rounds,
-      templates: row.templates_json,
+      templates: templatesRecord,
+      signalModules: templatesRecord.signalModules,
       createdAt: readString(row, "created_at"),
       updatedAt: readString(row, "updated_at"),
     },
@@ -7788,6 +7917,7 @@ function validatorChannelFromStateRecord(state: Record<string, unknown>) {
       ...channelRecord,
       id: idFromState,
       userId: userIdFromState,
+      signalModules: channelRecord.signalModules || readRecord(channelRecord.templates).signalModules,
     },
     userIdFromState,
   );
@@ -7882,11 +8012,16 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
   }
   const latestRound = liveValidatorRoundHistory.at(-1);
-  if (!latestRound || !liveValidatorPatterns.length) return false;
+  if (!latestRound) return false;
 
   let changed = false;
   const entryChannelKeys = new Set<string>();
-  const entrySendTasks: Array<() => Promise<boolean>> = [];
+  const entrySendTasks: Array<() => Promise<boolean>> = buildValidatorModuleTelegramSendTasks(
+    env,
+    latestRound,
+    entryChannelKeys,
+    options,
+  );
   for (const pattern of liveValidatorPatterns) {
     if (!shouldMonitorValidatorPattern(pattern, latestRound)) continue;
     const matchedRounds = liveValidatorRoundHistory.slice(-pattern.pattern.length);
@@ -7903,6 +8038,8 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     if (!validatorPatternAllowsTelegramForward(pattern)) continue;
     const channel = findValidatorTelegramChannelForPattern(pattern);
     if (!channel) continue;
+    if (!validatorChannelModuleEnabled(channel, "validator", true)) continue;
+    if (validatorChannelModuleCoolingDown(channel, "validator", matchedAtMs)) continue;
     entryChannelKeys.add(validatorChannelKey(channel));
     const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${latestRound.id}`;
     if (validatorNotificationAlreadySent(notificationKey)) continue;
@@ -7985,6 +8122,334 @@ async function sendValidatorEntryTelegramNotification(
   ].slice(0, 1000);
   void persistValidatorNotification(env, notification);
   return true;
+}
+
+function buildValidatorModuleTelegramSendTasks(
+  env: unknown,
+  latestRound: Round,
+  entryChannelKeys: Set<string>,
+  options: ValidatorMonitorOptions,
+) {
+  const tasks: Array<() => Promise<boolean>> = [];
+  for (const channel of liveValidatorChannels) {
+    if (!isUsableValidatorTelegramChannel(channel)) continue;
+    for (const moduleKey of VALIDATOR_TELEGRAM_MODULE_KEYS) {
+      if (moduleKey === "validator") continue;
+      if (!validatorChannelModuleEnabled(channel, moduleKey, false)) continue;
+      const signal = buildValidatorChannelModuleSignal(channel, moduleKey, latestRound);
+      if (!signal) continue;
+      if (validatorNotificationAlreadySent(signal.notificationKey)) continue;
+      if (validatorChannelModuleCoolingDown(channel, moduleKey, signal.matchedAtMs)) continue;
+      entryChannelKeys.add(validatorChannelKey(channel));
+      tasks.push(() => sendValidatorModuleTelegramNotification(env, signal, options));
+    }
+  }
+  return tasks;
+}
+
+function buildValidatorChannelModuleSignal(
+  channel: ValidatorNotificationChannel,
+  moduleKey: ValidatorTelegramModuleKey,
+  latestRound: Round,
+): ValidatorTelegramModuleSignal | null {
+  if (moduleKey === "ai_patterns") return buildAiPatternsModuleSignal(channel, latestRound);
+  if (moduleKey === "paying_numbers") return buildPayingNumbersModuleSignal(channel, latestRound);
+  if (moduleKey === "surf_alert") return buildSurfAlertModuleSignal(channel, latestRound);
+  if (moduleKey === "ties_only") return buildTiesOnlyModuleSignal(channel, latestRound);
+  return null;
+}
+
+function buildAiPatternsModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
+  if (liveValidatorRoundHistory.length < 20) return null;
+  const moduleConfig = validatorChannelModuleConfig(channel, "ai_patterns");
+  const galeLimit = Math.max(0, Math.min(2, moduleConfig.galeLimit)) as ValidatorGaleLimit;
+  const historySize = Math.min(5000, liveValidatorRoundHistory.length);
+  const suggestions = serverValidatorEngine.minePatterns(liveValidatorRoundHistory, {
+    historySize,
+    patternLength: 3,
+    entryType: "AI",
+    galeLimit,
+    minAccuracy: 70,
+    minOccurrences: 5,
+    includeTie: true,
+    includeNumbers: true,
+    includeOpposite: true,
+    hotOnly: false,
+    lowRedOnly: false,
+  });
+  const suggestion = suggestions.find((item) => (
+    item.pulledSide &&
+    matchesServerValidatorPattern(liveValidatorRoundHistory.slice(-item.pattern.length), item.pattern)
+  ));
+  if (!suggestion || !suggestion.pulledSide) return null;
+  return createValidatorModuleSignal(
+    channel,
+    "ai_patterns",
+    latestRound,
+    `ai:${suggestion.id}:${latestRound.id}:${suggestion.pulledSide}`,
+    {
+      table: "Bac Bo",
+      pattern: formatServerTelegramPattern(suggestion.pattern),
+      entry: formatServerTelegramSide(suggestion.pulledSide),
+      gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      tieCoverage: String(moduleConfig.tieCoverage),
+      confidence: formatServerPercent(suggestion.validation.accuracy),
+      percentage: formatServerPercent(suggestion.validation.accuracy),
+      status: suggestion.status,
+      risk: suggestion.risk,
+      number: "",
+      level: "",
+      round: String(latestRound.id),
+      module: "Padroes IA",
+    },
+    {
+      pattern: suggestion.pattern,
+      entry: suggestion.pulledSide,
+      accuracy: suggestion.validation.accuracy ?? null,
+      status: suggestion.status,
+    },
+  );
+}
+
+function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
+  const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
+  const reading = state?.readingSnapshot ?? liveDashboardData.neuralReading ?? null;
+  if (!reading || (reading.mode !== "ACTIVE" && !state)) return null;
+  const expectedSide = state?.expectedSide ?? readServerNeuralSide(reading.direcao ?? reading.origem);
+  if (!expectedSide) return null;
+  const key = state?.key || serverNeuralEntryKey(reading);
+  if (!key) return null;
+  const moduleConfig = validatorChannelModuleConfig(channel, "paying_numbers");
+  const status = String(reading.paganteStatus || (state?.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"));
+  return createValidatorModuleSignal(
+    channel,
+    "paying_numbers",
+    latestRound,
+    `paying:${key}:${state?.triggerRoundKey || latestRound.id}`,
+    {
+      table: "Bac Bo",
+      pattern: "",
+      entry: formatServerSignalSide(expectedSide),
+      gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      tieCoverage: String(moduleConfig.tieCoverage),
+      confidence: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
+      percentage: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
+      status,
+      risk: serverReadPaganteKind(reading),
+      number: typeof reading.numero === "number" ? String(reading.numero) : "",
+      level: "",
+      round: String(latestRound.id),
+      module: "Numeros Pagantes",
+    },
+    {
+      key,
+      numero: reading.numero ?? null,
+      expectedSide,
+      status,
+    },
+  );
+}
+
+function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
+  const alert = readRecord(liveDashboardData.currentSurfAlert);
+  if (!hasRecordFields(alert)) return null;
+  const side = normalizeSignalSide(alert.surf_prediction_side || alert.surf_side || alert.side || alert.entry);
+  if (!isServerEntrySide(side)) return null;
+  const risk = clampPercent(alert.surf_break_risk ?? alert.surf_risk ?? alert.risk ?? 0);
+  const confidence = clampPercent(alert.surf_confidence ?? alert.confidence ?? alert.confianca ?? risk);
+  const statusText = serverNormalizeText(alert.surf_status || alert.status || alert.phase || alert.surf_phase);
+  const active = Boolean(
+    readBooleanField(alert, "surf_alert") ||
+      statusText.includes("ATIVO") ||
+      statusText.includes("ACTIVE") ||
+      statusText.includes("CONFIRM") ||
+      statusText.includes("ALERTA") ||
+      risk >= 70,
+  );
+  if (!active) return null;
+  const moduleConfig = validatorChannelModuleConfig(channel, "surf_alert");
+  return createValidatorModuleSignal(
+    channel,
+    "surf_alert",
+    latestRound,
+    `surf:${readString(alert, "id") || latestRound.id}:${side}:${Math.round(risk)}`,
+    {
+      table: "Bac Bo",
+      pattern: "",
+      entry: formatServerSignalSide(side),
+      gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      tieCoverage: String(moduleConfig.tieCoverage),
+      confidence: formatServerPercent(confidence),
+      percentage: formatServerPercent(confidence),
+      status: statusText || "CONFIRMADO",
+      risk: formatServerPercent(risk),
+      number: "",
+      level: statusText || "",
+      round: String(latestRound.id),
+      module: "Aviso de Surf",
+    },
+    {
+      side,
+      risk,
+      confidence,
+      status: statusText,
+    },
+  );
+}
+
+function buildTiesOnlyModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
+  const alert = readRecord(liveDashboardData.currentTieAlert);
+  if (!hasRecordFields(alert)) return null;
+  const status = readString(alert, "status");
+  if (status !== "active") return null;
+  const moduleConfig = validatorChannelModuleConfig(channel, "ties_only");
+  const confidence = clampPercent(alert.confidence ?? alert.confianca ?? 0);
+  const level = readString(alert, "level") || readString(alert, "nivel") || "ativo";
+  return createValidatorModuleSignal(
+    channel,
+    "ties_only",
+    latestRound,
+    `tie:${readString(alert, "id") || latestRound.id}:${level}:${Math.round(confidence)}`,
+    {
+      table: "Bac Bo",
+      pattern: "",
+      entry: "Tie",
+      gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      tieCoverage: String(moduleConfig.tieCoverage),
+      confidence: formatServerPercent(confidence),
+      percentage: formatServerPercent(confidence),
+      status,
+      risk: level,
+      number: "",
+      level,
+      round: String(latestRound.id),
+      module: "Somente Empates",
+    },
+    {
+      level,
+      confidence,
+      tieCoverage: moduleConfig.tieCoverage,
+    },
+  );
+}
+
+function createValidatorModuleSignal(
+  channel: ValidatorNotificationChannel,
+  moduleKey: ValidatorTelegramModuleKey,
+  latestRound: Round,
+  signalKey: string,
+  variables: Record<string, string>,
+  payloadJson: Record<string, unknown>,
+): ValidatorTelegramModuleSignal {
+  const moduleConfig = validatorChannelModuleConfig(channel, moduleKey);
+  const matchedAtMs = Date.now();
+  const detectedAt = new Date(matchedAtMs).toISOString();
+  const signalHash = hashServerText(signalKey);
+  return {
+    moduleKey,
+    channel,
+    signalKey,
+    notificationKey: `module:${moduleKey}:${channel.userId}:${channel.id}:${latestRound.id}:${signalHash}`,
+    roundId: latestRound.id,
+    message: renderValidatorTelegramTemplate(moduleConfig.template, variables),
+    detectedAt,
+    matchedAtMs,
+    payloadJson: {
+      moduleKey,
+      signalKey,
+      ...payloadJson,
+    },
+  };
+}
+
+async function sendValidatorModuleTelegramNotification(
+  env: unknown,
+  signal: ValidatorTelegramModuleSignal,
+  options: ValidatorMonitorOptions,
+) {
+  const telegramSendStartedAtMs = Date.now();
+  const result = await sendTelegramMessage({
+    botToken: decodeServerToken(signal.channel.botTokenEncoded),
+    chatId: signal.channel.chatId,
+    message: signal.message,
+    buttonLabel: "Abrir Sniper Bo IA",
+    buttonUrl: normalizeTelegramButtonUrl(signal.channel.buttonLink),
+    allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+  });
+  const telegramRespondedAtMs = Date.now();
+  const latency = {
+    roundReceivedAt: options.roundReceivedAtMs ? new Date(options.roundReceivedAtMs).toISOString() : "",
+    moduleMatchedAt: new Date(signal.matchedAtMs).toISOString(),
+    telegramSendStartedAt: new Date(telegramSendStartedAtMs).toISOString(),
+    telegramRespondedAt: new Date(telegramRespondedAtMs).toISOString(),
+    matchToTelegramStartMs: Math.max(0, telegramSendStartedAtMs - signal.matchedAtMs),
+    telegramApiMs: Math.max(0, telegramRespondedAtMs - telegramSendStartedAtMs),
+  };
+  const notification = {
+    id: signal.notificationKey,
+    type: `module:${signal.moduleKey}`,
+    userId: signal.channel.userId,
+    channelId: signal.channel.id,
+    roundId: signal.roundId,
+    status: result.ok ? "sent" : "error",
+    error: result.ok ? "" : result.error,
+    payloadJson: {
+      ...signal.payloadJson,
+      latency,
+      telegramMessageId: result.ok ? result.messageId : null,
+    },
+    sentAt: signal.detectedAt,
+    updatedAt: new Date(telegramRespondedAtMs).toISOString(),
+  };
+  liveValidatorNotifications = [
+    notification,
+    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== signal.notificationKey),
+  ].slice(0, 1000);
+  void persistValidatorNotification(env, notification);
+  return true;
+}
+
+function validatorChannelModuleCoolingDown(
+  channel: ValidatorNotificationChannel,
+  moduleKey: ValidatorTelegramModuleKey,
+  nowMs = Date.now(),
+) {
+  const cooldownSeconds = Math.max(0, Number(validatorChannelModuleConfig(channel, moduleKey).cooldownSeconds) || 0);
+  if (!cooldownSeconds) return false;
+  const cooldownMs = cooldownSeconds * 1000;
+  return liveValidatorNotifications.some((notification) => {
+    if (readString(notification, "status") !== "sent") return false;
+    if (readString(notification, "userId") !== channel.userId) return false;
+    if (readString(notification, "channelId") !== channel.id) return false;
+    if (!validatorNotificationMatchesModule(notification, moduleKey)) return false;
+    const sentAt = Date.parse(readString(notification, "sentAt") || readString(notification, "sent_at"));
+    return Number.isFinite(sentAt) && nowMs - sentAt < cooldownMs;
+  });
+}
+
+function validatorNotificationMatchesModule(
+  notification: Record<string, unknown>,
+  moduleKey: ValidatorTelegramModuleKey,
+) {
+  const type = readString(notification, "type");
+  if (moduleKey === "validator") return !type || type === "entry" || type === "module:validator";
+  return type === `module:${moduleKey}`;
+}
+
+function renderValidatorTelegramTemplate(template: string, variables: Record<string, string>) {
+  return (template || "").replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
+}
+
+function formatValidatorModuleGale(value: unknown) {
+  const gale = Math.max(0, Math.min(4, Math.floor(Number(value) || 0)));
+  return gale <= 0 ? "SG" : `G${gale}`;
+}
+
+function formatServerSignalSide(side: CurrentSignalSide | NonNullable<NeuralEntryState["expectedSide"]>) {
+  if (side === "BANKER") return "Banker";
+  if (side === "PLAYER") return "Player";
+  if (side === "TIE") return "Tie";
+  return "Aguardando";
 }
 
 async function runLimitedValidatorTelegramSends(tasks: Array<() => Promise<boolean>>) {
