@@ -361,7 +361,8 @@ const MAX_MONITOR_ROUND_HISTORY = 300;
 const MAX_VALIDATOR_ROUND_WRITE_BATCH = 500;
 const MAX_VALIDATOR_DETAIL_RESPONSE = 200;
 const VALIDATOR_ROUND_PRUNE_MIN_INTERVAL_MS = 10 * 60_000;
-const VALIDATOR_MONITOR_CACHE_TTL_MS = 1_000;
+const VALIDATOR_MONITOR_CACHE_TTL_MS = 30_000;
+const VALIDATOR_TELEGRAM_MAX_PARALLEL_SENDS = 80;
 const NEURAL_PANEL_CYCLE_RESET_VERSION = "2026-06-11-manual-reset-v1";
 const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -372,6 +373,7 @@ const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
 const CLIENT_REGISTRY_PROTECTION_INTERVAL_MS = 60_000;
 const CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS = 5 * 60_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
+const VALIDATOR_TELEGRAM_TARGET_MS = 200;
 const LIVE_FEED_STALE_MS = 150_000;
 const FREE_TRIAL_MINUTES = 30;
 const ELEVENLABS_API_KEY_SECRET_NAMES = [
@@ -3219,6 +3221,7 @@ async function persistDashboardRoundIngestion(
   engineCalendarChange: EngineCalendarAggregateChangeSet,
   allowInsecureTelegramFallback: boolean,
 ) {
+  const roundReceivedAtMs = Date.now();
   const writes = [
     withTimeout(
       persistValidatorRounds(env, incomingRounds),
@@ -3247,10 +3250,10 @@ async function persistDashboardRoundIngestion(
       ),
     );
   }
-  await Promise.all(writes);
-  if (incomingRounds.length) {
-    await processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback });
-  }
+  const monitorTask = incomingRounds.length
+    ? processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback, fast: true, roundReceivedAtMs })
+    : Promise.resolve(false);
+  await Promise.all([...writes, monitorTask]);
   await saveLiveState(env);
 }
 
@@ -6444,8 +6447,11 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       );
       const channel = normalizeServerNotificationChannel(incoming, userId, existing);
       if (!channel) return json({ error: "Canal invalido." }, 400);
+      const persisted = await persistValidatorChannel(env, channel);
+      if (getSupabasePersistenceConfig(env) && !persisted) {
+        return json({ error: "Falha ao salvar canal no servidor." }, 502);
+      }
       liveValidatorChannels = upsertValidatorChannel(channel);
-      await persistValidatorChannel(env, channel);
       await saveLiveState(env);
       return json({ channel: publicValidatorChannel(channel) }, 201);
     }
@@ -6454,12 +6460,14 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   if (request.method === "POST" && url.pathname === "/validator/channels/test") {
     const body = readRecord(await request.json().catch(() => ({})));
     const channelId = readString(body, "channelId");
-    const channel = liveValidatorChannels.find(
-      (item) => item.userId === userId && item.id === channelId,
-    );
+    const channel = await findValidatorChannelForUser(env, userId, channelId);
     if (!channel) return json({ error: "Canal nao encontrado." }, 404);
+    const botToken = decodeServerToken(channel.botTokenEncoded);
+    if (!botToken || !channel.chatId) {
+      return json({ error: "Canal Telegram sem Bot Token ou Chat ID. Salve o canal novamente." }, 400);
+    }
     const result = await sendTelegramMessage({
-      botToken: decodeServerToken(channel.botTokenEncoded),
+      botToken,
       chatId: channel.chatId,
       message:
         "ENTRADA CONFIRMADA\n" +
@@ -6480,9 +6488,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   const channelMatch = url.pathname.match(/^\/validator\/channels\/([^/]+)$/);
   if (channelMatch) {
     const channelId = decodeURIComponent(channelMatch[1] || "");
-    const current = liveValidatorChannels.find(
-      (channel) => channel.userId === userId && channel.id === channelId,
-    );
+    const current = await findValidatorChannelForUser(env, userId, channelId);
     if (!current) return json({ error: "Canal nao encontrado." }, 404);
 
     if (request.method === "PATCH") {
@@ -6516,6 +6522,24 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   }
 
   return json({ error: "Rota do Validador nao encontrada." }, 404);
+}
+
+async function findValidatorChannelForUser(env: unknown, userId: string, channelId: string) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedChannelId = readString(channelId);
+  if (!normalizedUserId || !normalizedChannelId) return null;
+
+  const cached = liveValidatorChannels.find(
+    (channel) => channel.userId === normalizedUserId && channel.id === normalizedChannelId,
+  );
+  if (cached) return cached;
+
+  const storedChannels = await fetchStoredValidatorChannels(env, normalizedUserId);
+  const stored = storedChannels.find((channel) => channel.id === normalizedChannelId) || null;
+  if (stored) {
+    liveValidatorChannels = upsertValidatorChannel(stored);
+  }
+  return stored;
 }
 
 async function sendTelegramMessage({
@@ -7222,16 +7246,22 @@ function maskServerBotToken(token: string) {
   return `${clean.slice(0, 6)}...${clean.slice(-4)}`;
 }
 
-async function processValidatorLiveMonitoring(
-  env: unknown,
-  options: { allowInsecureTelegramFallback?: boolean } = {},
-) {
-  await withTimeout(
-    refreshValidatorMonitorCache(env),
-    LIVE_STATE_IO_TIMEOUT_MS,
-    "carregar monitor do Validador",
-    undefined,
-  );
+type ValidatorMonitorOptions = {
+  allowInsecureTelegramFallback?: boolean;
+  fast?: boolean;
+  roundReceivedAtMs?: number;
+};
+
+async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMonitorOptions = {}) {
+  const hasWarmMonitorCache = liveValidatorPatterns.length > 0 || liveValidatorChannels.length > 0;
+  if (!options.fast || !hasWarmMonitorCache) {
+    await withTimeout(
+      refreshValidatorMonitorCache(env),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "carregar monitor do Validador",
+      undefined,
+    );
+  }
   if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
     liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
   }
@@ -7240,12 +7270,14 @@ async function processValidatorLiveMonitoring(
 
   let changed = false;
   const entryChannelKeys = new Set<string>();
+  const entrySendTasks: Array<() => Promise<boolean>> = [];
   for (const pattern of liveValidatorPatterns) {
     if (!shouldMonitorValidatorPattern(pattern, latestRound)) continue;
     const matchedRounds = liveValidatorRoundHistory.slice(-pattern.pattern.length);
     if (!matchesServerValidatorPattern(matchedRounds, pattern.pattern)) continue;
 
-    const detectedAt = new Date().toISOString();
+    const matchedAtMs = Date.now();
+    const detectedAt = new Date(matchedAtMs).toISOString();
     pattern.lastDetectedAt = detectedAt;
     pattern.lastDetectedRoundId = latestRound.id;
     pattern.updatedAt = detectedAt;
@@ -7258,38 +7290,141 @@ async function processValidatorLiveMonitoring(
     entryChannelKeys.add(validatorChannelKey(channel));
     const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${latestRound.id}`;
     if (validatorNotificationAlreadySent(notificationKey)) continue;
-
-    const result = await sendTelegramMessage({
-      botToken: decodeServerToken(channel.botTokenEncoded),
-      chatId: channel.chatId,
-      message: buildServerValidatorTelegramMessage(pattern, channel),
-      buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-      allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-    });
-    const notification = {
-      id: notificationKey,
-      userId: pattern.userId,
-      patternId: pattern.id,
-      channelId: channel.id,
-      roundId: latestRound.id,
-      status: result.ok ? "sent" : "error",
-      error: result.ok ? "" : result.error,
-      sentAt: detectedAt,
-      updatedAt: detectedAt,
-    };
-    liveValidatorNotifications = [
-      notification,
-      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== notificationKey),
-    ].slice(0, 1000);
-    void persistValidatorNotification(env, notification);
-    changed = true;
+    entrySendTasks.push(() =>
+      sendValidatorEntryTelegramNotification(
+        env,
+        pattern,
+        channel,
+        latestRound.id,
+        notificationKey,
+        detectedAt,
+        matchedAtMs,
+        options,
+      ),
+    );
   }
 
+  if (entrySendTasks.length) {
+    const results = await runLimitedValidatorTelegramSends(entrySendTasks);
+    changed = results.some(Boolean) || changed;
+  }
   const analysisChanged = await sendValidatorAnalyzingMessages(latestRound, entryChannelKeys, options);
   changed = changed || analysisChanged;
 
   return changed;
+}
+
+async function sendValidatorEntryTelegramNotification(
+  env: unknown,
+  pattern: SavedValidatorPattern,
+  channel: ValidatorNotificationChannel,
+  roundId: number,
+  notificationKey: string,
+  detectedAt: string,
+  matchedAtMs: number,
+  options: ValidatorMonitorOptions,
+) {
+  const roundReceivedAtMs = options.roundReceivedAtMs || matchedAtMs;
+  const telegramSendStartedAtMs = Date.now();
+  const result = await sendTelegramMessage({
+    botToken: decodeServerToken(channel.botTokenEncoded),
+    chatId: channel.chatId,
+    message: buildServerValidatorTelegramMessage(pattern, channel),
+    buttonLabel: "Abrir Sniper Bo IA",
+    buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+    allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+  });
+  const telegramRespondedAtMs = Date.now();
+  const latency = {
+    roundReceivedAt: new Date(roundReceivedAtMs).toISOString(),
+    patternMatchedAt: new Date(matchedAtMs).toISOString(),
+    telegramSendStartedAt: new Date(telegramSendStartedAtMs).toISOString(),
+    telegramRespondedAt: new Date(telegramRespondedAtMs).toISOString(),
+    roundToMatchMs: Math.max(0, matchedAtMs - roundReceivedAtMs),
+    matchToTelegramStartMs: Math.max(0, telegramSendStartedAtMs - matchedAtMs),
+    telegramApiMs: Math.max(0, telegramRespondedAtMs - telegramSendStartedAtMs),
+    totalMs: Math.max(0, telegramRespondedAtMs - roundReceivedAtMs),
+    targetMs: VALIDATOR_TELEGRAM_TARGET_MS,
+  };
+  logValidatorTelegramLatency(pattern, channel, roundId, result.ok ? "sent" : "error", latency);
+  const notification = {
+    id: notificationKey,
+    userId: pattern.userId,
+    patternId: pattern.id,
+    channelId: channel.id,
+    roundId,
+    status: result.ok ? "sent" : "error",
+    error: result.ok ? "" : result.error,
+    payloadJson: {
+      latency,
+      telegramMessageId: result.ok ? result.messageId : null,
+      targetExceeded: latency.totalMs > VALIDATOR_TELEGRAM_TARGET_MS,
+    },
+    sentAt: detectedAt,
+    updatedAt: new Date(telegramRespondedAtMs).toISOString(),
+  };
+  liveValidatorNotifications = [
+    notification,
+    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== notificationKey),
+  ].slice(0, 1000);
+  void persistValidatorNotification(env, notification);
+  return true;
+}
+
+async function runLimitedValidatorTelegramSends(tasks: Array<() => Promise<boolean>>) {
+  const results: boolean[] = [];
+  let cursor = 0;
+  const workerCount = Math.min(VALIDATOR_TELEGRAM_MAX_PARALLEL_SENDS, tasks.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (cursor < tasks.length) {
+        const task = tasks[cursor++];
+        if (!task) continue;
+        try {
+          results.push(await task());
+        } catch (error) {
+          console.warn("Falha ao enviar alerta Telegram do Validador.", error);
+          results.push(false);
+        }
+      }
+    }),
+  );
+  return results;
+}
+
+function logValidatorTelegramLatency(
+  pattern: SavedValidatorPattern,
+  channel: ValidatorNotificationChannel,
+  roundId: number,
+  status: "sent" | "error",
+  latency: Record<string, unknown>,
+) {
+  const summary = {
+    event: "validator_telegram_latency",
+    status,
+    roundId,
+    user: maskTelemetryUserId(pattern.userId),
+    patternId: pattern.id,
+    channelId: channel.id,
+    roundToMatchMs: Math.floor(Number(latency.roundToMatchMs) || 0),
+    matchToTelegramStartMs: Math.floor(Number(latency.matchToTelegramStartMs) || 0),
+    telegramApiMs: Math.floor(Number(latency.telegramApiMs) || 0),
+    totalMs: Math.floor(Number(latency.totalMs) || 0),
+    targetMs: VALIDATOR_TELEGRAM_TARGET_MS,
+  };
+  const line = JSON.stringify(summary);
+  if (summary.totalMs > VALIDATOR_TELEGRAM_TARGET_MS) {
+    console.warn(line);
+    return;
+  }
+  console.info(line);
+}
+
+function maskTelemetryUserId(userId: string) {
+  const clean = String(userId || "").trim().toLowerCase();
+  const [name, domain] = clean.split("@");
+  if (!name || !domain) return clean ? "***" : "";
+  return `${name.slice(0, 1)}***@${domain}`;
 }
 
 function shouldMonitorValidatorPattern(pattern: SavedValidatorPattern, latestRound: Round) {
@@ -7322,7 +7457,7 @@ function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel
 async function sendValidatorAnalyzingMessages(
   latestRound: Round,
   entryChannelKeys: Set<string>,
-  options: { allowInsecureTelegramFallback?: boolean },
+  options: ValidatorMonitorOptions,
 ) {
   let changed = false;
   for (const channel of liveValidatorChannels) {
