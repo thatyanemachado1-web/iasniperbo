@@ -322,6 +322,7 @@ const ENGINE_WEEKLY_STATS_TABLE = "engine_weekly_stats";
 const ENGINE_MONTHLY_STATS_TABLE = "engine_monthly_stats";
 const ENGINE_YEARLY_STATS_TABLE = "engine_yearly_stats";
 const ENGINE_SIGNAL_EVENTS_TABLE = "engine_signal_events";
+const BANKROLL_MONTHLY_TABLE = "bankroll_monthly";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const DEFAULT_CALENDAR_ENGINE_KEY: CalendarEngineKey = "todos";
 const CALENDAR_ENGINE_KEYS: CalendarEngineKey[] = [
