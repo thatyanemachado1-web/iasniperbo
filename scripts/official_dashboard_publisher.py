@@ -37,6 +37,7 @@ USER_AGENT = "Mozilla/5.0 SNIPERBO-Official-Publisher/1.0"
 POST_TIMEOUT = (3.0, 5.0)
 UPLOAD_WARNING_MS = 2000.0
 DIRECT_TELEGRAM_TARGET_MS = 300.0
+DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 1.2
 DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS = {
     "duplicate_signal",
     "entry_not_allowed",
@@ -1569,6 +1570,7 @@ def main() -> int:
     direct_telegram_sent_keys: set[str] = set()
     direct_telegram_pending: list[dict[str, Any]] = []
     direct_telegram_result_keys: set[str] = set()
+    direct_telegram_module_hold_until: dict[str, float] = {}
     direct_pattern_bank_file = direct_pattern_bank_path(args, env)
     direct_pattern_round_bank = load_direct_pattern_round_bank(direct_pattern_bank_file)
     direct_pattern_bank_last_save = 0.0
@@ -1678,6 +1680,11 @@ def main() -> int:
                     if result_ok or result_reason == "duplicate_signal":
                         direct_telegram_result_keys.add(result_key)
                         direct_telegram_result_keys.add(aggregate_result_key)
+                        module_key = str(pending.get("moduleKey") or "")
+                        if module_key:
+                            direct_telegram_module_hold_until[module_key] = (
+                                time.monotonic() + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
+                            )
                     else:
                         next_direct_pending.append(pending)
                 except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
@@ -1690,6 +1697,9 @@ def main() -> int:
                 if not direct_key or direct_key in direct_telegram_sent_keys:
                     continue
                 direct_module_key = str(direct_signal.get("moduleKey") or "")
+                module_hold_until = direct_telegram_module_hold_until.get(direct_module_key, 0.0)
+                if module_hold_until and time.monotonic() < module_hold_until:
+                    continue
                 if direct_module_has_pending(direct_telegram_pending, direct_module_key):
                     logging.info(
                         "direct telegram skipped: module=%s entry=%s round=%s reason=pending_module_open",
@@ -1708,11 +1718,12 @@ def main() -> int:
                         continue
                     log_fn = logging.info if direct_ok and direct_ms <= DIRECT_TELEGRAM_TARGET_MS else logging.warning
                     log_fn(
-                        "direct telegram %s: module=%s entry=%s round=%s upload_ms=%.0f status_code=%s reason=%s",
+                        "direct telegram %s: module=%s entry=%s round=%s pattern=%s upload_ms=%.0f status_code=%s reason=%s",
                         "sent" if direct_ok else "blocked",
                         direct_signal.get("moduleKey"),
                         direct_signal.get("entry"),
                         direct_signal.get("roundId"),
+                        (direct_signal.get("variables") if isinstance(direct_signal.get("variables"), dict) else {}).get("pattern"),
                         direct_ms,
                         direct_status,
                         direct_reason,
