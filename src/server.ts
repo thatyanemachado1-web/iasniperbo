@@ -7583,7 +7583,9 @@ async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
 async function fetchValidatorChannelDeletedRefs(env: unknown, userId?: string) {
   const ids = new Set<string>();
   const codes = new Set<string>();
-  if (!getSupabasePersistenceConfig(env)) return { ids, codes };
+  const idTimes = new Map<string, number>();
+  const codeTimes = new Map<string, number>();
+  if (!getSupabasePersistenceConfig(env)) return { ids, codes, idTimes, codeTimes };
   const normalizedUserId = normalizeValidatorUserId(userId || "");
   const prefix = normalizedUserId
     ? `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizedUserId}:`
@@ -7603,18 +7605,44 @@ async function fetchValidatorChannelDeletedRefs(env: unknown, userId?: string) {
     const code = normalizeValidatorChannelCode(
       readString(state, "code") || readString(state, "chatId") || codeFromId,
     );
-    if (channelId) ids.add(channelId);
-    if (code) codes.add(code);
+    const deletedAt = Date.parse(
+      readString(state, "deletedAt") ||
+        readString(state, "deleted_at") ||
+        readString(row, "updated_at") ||
+        "",
+    );
+    const deletedAtMs = Number.isFinite(deletedAt) ? deletedAt : Date.now();
+    if (channelId) {
+      ids.add(channelId);
+      idTimes.set(channelId, Math.max(idTimes.get(channelId) || 0, deletedAtMs));
+    }
+    if (code) {
+      codes.add(code);
+      codeTimes.set(code, Math.max(codeTimes.get(code) || 0, deletedAtMs));
+    }
   }
-  return { ids, codes };
+  return { ids, codes, idTimes, codeTimes };
 }
 
 function isValidatorChannelDeleted(
   channel: ValidatorNotificationChannel,
-  deletedRefs: { ids: Set<string>; codes: Set<string> },
+  deletedRefs: {
+    ids: Set<string>;
+    codes: Set<string>;
+    idTimes?: Map<string, number>;
+    codeTimes?: Map<string, number>;
+  },
 ) {
   const code = normalizeValidatorChannelCode(channel.chatId);
-  return deletedRefs.ids.has(channel.id) || Boolean(code && deletedRefs.codes.has(code));
+  const channelTime = stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>);
+  const idDeletedAt = deletedRefs.idTimes?.get(channel.id) || (deletedRefs.ids.has(channel.id) ? Number.MAX_SAFE_INTEGER : 0);
+  const codeDeletedAt = code
+    ? deletedRefs.codeTimes?.get(code) || (deletedRefs.codes.has(code) ? Number.MAX_SAFE_INTEGER : 0)
+    : 0;
+  return Boolean(
+    (idDeletedAt && (!channelTime || channelTime <= idDeletedAt)) ||
+      (codeDeletedAt && (!channelTime || channelTime <= codeDeletedAt)),
+  );
 }
 
 function validatorChannelStateId(userId: string, channelId: string) {
