@@ -17,7 +17,7 @@ export function DashboardMainCardsGrid({
   onModuleTogglesChange,
 }: {
   data: DashboardData;
-  surfAlert: SurfAlert;
+  surfAlert?: SurfAlert;
   dailySurfMax: DailySurfMaxSnapshot;
   patternMinerSnapshot: PatternMinerSnapshot;
   patternMinerIsUsingRealData: boolean;

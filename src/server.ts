@@ -104,7 +104,7 @@ type CalendarEngineCounterSnapshot = {
 type EngineCalendarAggregateKind = "hourly" | "daily" | "weekly" | "monthly" | "yearly";
 type EngineCalendarAggregateStat = {
   id: string;
-  engineKey: CalendarEngineKey;
+  engineKey: CalendarSignalEngineKey;
   periodKind: EngineCalendarAggregateKind;
   periodStart: string;
   periodEnd: string;
@@ -177,7 +177,15 @@ type EngineCalendarBackfillDashboardSnapshot = {
   data: Record<string, unknown>;
 };
 type NeuralCalendarForce = "BANKER" | "PLAYER" | "TIE" | "NONE";
-type NeuralCalendarModule = "Neural Pagante" | "Surf Analyzer" | "Tendencia" | "Validador";
+type NeuralCalendarModule =
+  | "Neural Pagante"
+  | "Surf Analyzer"
+  | "Tendencia"
+  | "Validador"
+  | "Padroes IA"
+  | "Radar de Empates"
+  | "Todos os motores"
+  | "Personalizado";
 type NeuralCalendarDailyStat = {
   id: string;
   date: string;
@@ -6471,7 +6479,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       const normalizedIncoming = existing && !existingById
         ? { ...incoming, id: existing.id, createdAt: existing.createdAt }
         : incoming;
-      const channel = normalizeServerNotificationChannel(normalizedIncoming, userId, existing);
+      const channel = normalizeServerNotificationChannel(normalizedIncoming, userId, existing ?? undefined);
       if (!channel) return json({ error: "Canal invalido." }, 400);
       const duplicateIds = validatorChannelRelatedIds(liveValidatorChannels, channel)
         .filter((channelId) => channelId !== channel.id);
@@ -6585,7 +6593,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
 async function findValidatorChannelForUser(env: unknown, userId: string, channelId: string) {
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedChannelId = readString(channelId);
+  const normalizedChannelId = String(channelId || "").trim();
   if (!normalizedUserId || !normalizedChannelId) return null;
 
   const cached = liveValidatorChannels.find(
@@ -6952,7 +6960,9 @@ function normalizeValidatorResult(value: unknown): ValidatorResult | null {
     bestGreenStreak: Math.max(0, Math.floor(Number(record.bestGreenStreak) || 0)),
     bestLossStreak: Math.max(0, Math.floor(Number(record.bestLossStreak) || 0)),
     lastPatternResult: readString(record, "lastPatternResult") || "Sem validacao",
-    details: Array.isArray(record.details) ? record.details.map(readRecord) as ValidatorResult["details"] : [],
+    details: Array.isArray(record.details)
+      ? (record.details.map(readRecord) as unknown as ValidatorResult["details"])
+      : [],
     entry: normalizeRoundResult(record.entry),
     pulledSide: normalizeRoundResult(record.pulledSide),
     risk: ["baixo", "medio", "alto"].includes(readString(record, "risk"))
@@ -7077,8 +7087,8 @@ function validatorChannelUniqueKey(channel: Pick<ValidatorNotificationChannel, "
   const userId = normalizeValidatorUserId(channel.userId);
   const chatId = normalizeValidatorChannelCode(channel.chatId);
   if (chatId) return `${userId}:chat:${chatId}`;
-  const name = readString(channel.name).trim().toLowerCase();
-  return `${userId}:name:${name || readString(channel.id)}`;
+  const name = String(channel.name || "").trim().toLowerCase();
+  return `${userId}:name:${name || String(channel.id || "").trim()}`;
 }
 
 function normalizeValidatorChannelCode(value: unknown) {
@@ -7167,7 +7177,7 @@ async function fetchStoredActiveValidatorPatterns(env: unknown) {
 async function fetchStoredValidatorChannel(env: unknown, userId: string, channelId: string) {
   if (!getSupabasePersistenceConfig(env)) return null;
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedChannelId = readString(channelId);
+  const normalizedChannelId = String(channelId || "").trim();
   if (!normalizedUserId || !normalizedChannelId) return null;
 
   const [rows, stateChannel, deletedState] = await Promise.all([
@@ -7268,7 +7278,7 @@ async function deleteValidatorChannelRow(env: unknown, userId: string, channelId
 async function deleteValidatorChannelRows(env: unknown, userId: string, channelIds: string[]) {
   if (!getSupabasePersistenceConfig(env)) return false;
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const ids = [...new Set(channelIds.map(readString).filter(Boolean))];
+  const ids = [...new Set(channelIds.map((channelId) => String(channelId || "").trim()).filter(Boolean))];
   if (!normalizedUserId || !ids.length) return false;
   const results = await Promise.allSettled(
     ids.map(async (channelId) => {
@@ -7295,7 +7305,7 @@ async function persistValidatorChannelState(env: unknown, channel: ValidatorNoti
 
 async function deleteValidatorChannelState(env: unknown, userId: string, channelId: string) {
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedChannelId = readString(channelId);
+  const normalizedChannelId = String(channelId || "").trim();
   if (!normalizedUserId || !normalizedChannelId) return false;
   await deleteSupabaseRows(
     env,
@@ -7328,7 +7338,7 @@ async function fetchValidatorChannelStateChannels(env: unknown, userId?: string)
 async function fetchValidatorChannelStateChannel(env: unknown, userId: string, channelId: string) {
   if (!getSupabasePersistenceConfig(env)) return null;
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedChannelId = readString(channelId);
+  const normalizedChannelId = String(channelId || "").trim();
   if (!normalizedUserId || !normalizedChannelId) return null;
   const deletedState = await loadDurableLiveStateById(
     env,
@@ -7359,11 +7369,11 @@ async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
 }
 
 function validatorChannelStateId(userId: string, channelId: string) {
-  return `${VALIDATOR_CHANNEL_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
+  return `${VALIDATOR_CHANNEL_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${String(channelId || "").trim()}`;
 }
 
 function validatorChannelDeletedStateId(userId: string, channelId: string) {
-  return `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
+  return `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${String(channelId || "").trim()}`;
 }
 
 function encodePostgrestLikeValue(value: string) {
@@ -7627,7 +7637,7 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     const results = await runLimitedValidatorTelegramSends(entrySendTasks);
     changed = results.some(Boolean) || changed;
   }
-  const analysisChanged = await sendValidatorAnalyzingMessages(latestRound, entryChannelKeys, options);
+  const analysisChanged = await sendValidatorAnalyzingMessages(env, latestRound, entryChannelKeys, options);
   changed = changed || analysisChanged;
 
   return changed;
@@ -7774,6 +7784,7 @@ function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel
 }
 
 async function sendValidatorAnalyzingMessages(
+  env: unknown,
   latestRound: Round,
   entryChannelKeys: Set<string>,
   options: ValidatorMonitorOptions,
@@ -8100,7 +8111,7 @@ function normalizeAdaptiveRoundRows(value: unknown[] | undefined) {
         captured_at: capturedAt,
       };
     })
-    .filter((row): row is Record<string, unknown> => Boolean(row));
+    .filter(Boolean) as Record<string, unknown>[];
 }
 
 function normalizeAdaptivePatternRows(value: unknown[] | undefined) {
@@ -8142,7 +8153,7 @@ function normalizeAdaptivePatternRows(value: unknown[] | undefined) {
         updated_at: new Date().toISOString(),
       };
     })
-    .filter((row): row is Record<string, unknown> => Boolean(row));
+    .filter(Boolean) as Record<string, unknown>[];
 }
 
 function normalizeAdaptiveDecisionRow(
@@ -10293,7 +10304,7 @@ function normalizeSignalStatus(
   return "waiting";
 }
 
-function normalizeRoundResult(value: unknown) {
+function normalizeRoundResult(value: unknown): Round["result"] | null {
   const text = String(value || "")
     .trim()
     .toUpperCase();
