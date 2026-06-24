@@ -118,6 +118,9 @@ type ValidatorTelegramModuleConfig = {
   tieCoverage: number;
   cooldownSeconds: number;
   template: string;
+  greenTemplate: string;
+  redTemplate: string;
+  tieTemplate: string;
 };
 type ValidatorChannelWithModules = ValidatorNotificationChannel & {
   signalModules?: Partial<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>;
@@ -155,14 +158,36 @@ const TELEGRAM_MODULE_OPTIONS: Array<{ key: ValidatorTelegramModuleKey; label: s
 ];
 const DEFAULT_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
-    "PADRAO IA CONFIRMADO\nMesa: {{table}}\nPadrao: {{pattern}}\nEntrada: {{entry}}\nGale: {{gale}}\nAssertividade: {{confidence}}",
+    "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "NUMERO PAGANTE CONFIRMADO\nNumero: {{number}}\nEntrada: {{entry}}\nGale: {{gale}}\nStatus: {{status}}",
+    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
   surf_alert:
-    "AVISO DE SURF CONFIRMADO\nEntrada: {{entry}}\nRisco: {{risk}}\nConfianca: {{confidence}}\nGale: {{gale}}",
+    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "POSSIVEL EMPATE\nCobrir empate seco ate G{{tieCoverage}}\nNivel: {{level}}\nMesa: {{table}}",
-  validator: DEFAULT_MESSAGE_TEMPLATES.entry,
+    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🛡️ <b>Cobrir empate:</b> até G{{tieCoverage}}\n📌 <b>Nível:</b> {{level}}",
+  validator:
+    "🎯 <b>ENTRADA CONFIRMADA</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{percentage}}",
+};
+const DEFAULT_TELEGRAM_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  paying_numbers: "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>",
+  validator: "✅ <b>{{result}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+};
+const DEFAULT_TELEGRAM_RED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "❌ <b>RED</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  paying_numbers: "❌ <b>RED</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate não confirmou</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+  validator: "❌ <b>RED</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+};
+const DEFAULT_TELEGRAM_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  paying_numbers: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n✅ <b>Empate confirmado</b>",
+  validator: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
 };
 
 function NeuralValidatorPage() {
@@ -1868,7 +1893,18 @@ function TelegramModuleConfigPanel({
 
   useEffect(() => {
     setDraft(normalizeTelegramModuleConfig(moduleKey, config));
-  }, [moduleKey, config.enabled, config.entryType, config.galeLimit, config.coverTie, config.cooldownSeconds, config.template]);
+  }, [
+    moduleKey,
+    config.enabled,
+    config.entryType,
+    config.galeLimit,
+    config.coverTie,
+    config.cooldownSeconds,
+    config.template,
+    config.greenTemplate,
+    config.redTemplate,
+    config.tieTemplate,
+  ]);
 
   return (
     <div className="mt-4 space-y-3">
@@ -1931,15 +1967,36 @@ function TelegramModuleConfigPanel({
           </div>
         </Field>
       </div>
-      <Field label="Modelo da mensagem Telegram">
+      <Field label="Mensagem de entrada">
         <Textarea
           value={draft.template}
           onChange={(event) => setDraft({ ...draft, template: event.target.value })}
           className="min-h-28"
         />
       </Field>
+      <Field label="Mensagem Green">
+        <Textarea
+          value={draft.greenTemplate}
+          onChange={(event) => setDraft({ ...draft, greenTemplate: event.target.value })}
+          className="min-h-24"
+        />
+      </Field>
+      <Field label="Mensagem Red">
+        <Textarea
+          value={draft.redTemplate}
+          onChange={(event) => setDraft({ ...draft, redTemplate: event.target.value })}
+          className="min-h-24"
+        />
+      </Field>
+      <Field label="Mensagem Empate">
+        <Textarea
+          value={draft.tieTemplate}
+          onChange={(event) => setDraft({ ...draft, tieTemplate: event.target.value })}
+          className="min-h-24"
+        />
+      </Field>
       <div className="rounded-xl border border-border/70 bg-secondary/15 p-3 text-xs">
-        <div className="font-black">Preview da mensagem</div>
+        <div className="font-black">Preview da entrada</div>
         <pre className="mt-2 whitespace-pre-wrap font-sans text-muted-foreground">{telegramModulePreview(moduleKey, draft)}</pre>
       </div>
       <Button
@@ -2505,6 +2562,9 @@ function normalizeTelegramModuleConfigs(value: unknown) {
         tieCoverage: clampTelegramModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
         cooldownSeconds: clampTelegramModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
         template: moduleString(raw.template) || defaults.template,
+        greenTemplate: moduleString(raw.greenTemplate) || defaults.greenTemplate,
+        redTemplate: moduleString(raw.redTemplate) || defaults.redTemplate,
+        tieTemplate: moduleString(raw.tieTemplate) || defaults.tieTemplate,
       };
       return acc;
     },
@@ -2521,6 +2581,9 @@ function defaultTelegramModuleConfig(key: ValidatorTelegramModuleKey): Validator
     tieCoverage: key === "ties_only" ? 4 : 1,
     cooldownSeconds: key === "validator" ? 0 : 2,
     template: DEFAULT_TELEGRAM_MODULE_TEMPLATES[key],
+    greenTemplate: DEFAULT_TELEGRAM_GREEN_TEMPLATES[key],
+    redTemplate: DEFAULT_TELEGRAM_RED_TEMPLATES[key],
+    tieTemplate: DEFAULT_TELEGRAM_TIE_TEMPLATES[key],
   };
 }
 
@@ -2591,6 +2654,8 @@ function telegramModulePreview(key: ValidatorTelegramModuleKey, config: Validato
     level: "alto",
     round: "123456",
     module: moduleDisplayName(key),
+    result: "Green G1",
+    tieMultiplier: "4x",
   };
   return config.template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, variable: string) => variables[variable] ?? "");
 }
