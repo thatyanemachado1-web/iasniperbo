@@ -6371,11 +6371,16 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
   if (getTelegramEngineConfig(env) && (isChannelsRoute || isNotificationsRoute)) {
-    const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId).catch((error) => {
+    // Cloudflare Telegram Engine eh a fonte unica da verdade quando configurado.
+    // Nao caimos mais no armazenamento local antigo para evitar mensagens duplicadas.
+    try {
+      const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId);
+      if (cloudResponse) return cloudResponse;
+      return json({ error: "Motor do Telegram indisponivel." }, 502);
+    } catch (error) {
       console.warn("Cloudflare Telegram Engine indisponivel.", error);
-      return null;
-    });
-    if (cloudResponse) return cloudResponse;
+      return json({ error: "Motor do Telegram indisponivel." }, 502);
+    }
   }
   await withTimeout(
     hydrateValidatorUserCache(env, userId),
