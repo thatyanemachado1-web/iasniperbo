@@ -7167,6 +7167,26 @@ function validatorChannelModuleConfig(
   return validatorChannelSignalModules(channel)[key] || defaultValidatorTelegramModuleConfig(key);
 }
 
+function validatorChannelModuleConfigState(
+  channel: ValidatorNotificationChannel,
+  key: ValidatorTelegramModuleKey,
+) {
+  const record = channel as ValidatorChannelWithModules;
+  const templatesRecord = readRecord(channel.templates);
+  const modulesRecord = readRecord(record.signalModules);
+  const templateModulesRecord = readRecord(templatesRecord.signalModules);
+  const source = hasRecordFields(modulesRecord)
+    ? modulesRecord
+    : hasRecordFields(templateModulesRecord)
+      ? templateModulesRecord
+      : null;
+  if (!source || !Object.prototype.hasOwnProperty.call(source, key)) return null;
+  return {
+    source: hasRecordFields(modulesRecord) ? "channel" : "templates",
+    config: normalizeValidatorChannelSignalModules(source)[key],
+  };
+}
+
 function validatorChannelModuleEnabled(
   channel: ValidatorNotificationChannel,
   key: ValidatorTelegramModuleKey,
@@ -8213,11 +8233,28 @@ function buildValidatorModuleTelegramSendTasks(
     if (!isUsableValidatorTelegramChannel(channel)) continue;
     for (const moduleKey of VALIDATOR_TELEGRAM_MODULE_KEYS) {
       if (moduleKey === "validator") continue;
-      if (!validatorChannelModuleEnabled(channel, moduleKey, false)) continue;
+      if (moduleKey !== "paying_numbers" && !validatorChannelModuleEnabled(channel, moduleKey, false)) continue;
       const signal = buildValidatorChannelModuleSignal(channel, moduleKey, latestRound);
       if (!signal) continue;
-      if (validatorNotificationAlreadySent(signal.notificationKey)) continue;
-      if (validatorChannelModuleCoolingDown(channel, moduleKey, signal.matchedAtMs)) continue;
+      if (validatorNotificationAlreadySent(signal.notificationKey)) {
+        if (moduleKey === "paying_numbers") {
+          logPayingNumbersTelegramDecision(channel, "blocked", "duplicate_signal", {
+            roundId: latestRound.id,
+            signalKey: signal.signalKey,
+          });
+        }
+        continue;
+      }
+      if (validatorChannelModuleCoolingDown(channel, moduleKey, signal.matchedAtMs)) {
+        if (moduleKey === "paying_numbers") {
+          logPayingNumbersTelegramDecision(channel, "blocked", "cooldown_active", {
+            roundId: latestRound.id,
+            signalKey: signal.signalKey,
+            cooldownSeconds: validatorChannelModuleConfig(channel, moduleKey).cooldownSeconds,
+          });
+        }
+        continue;
+      }
       entryChannelKeys.add(validatorChannelKey(channel));
       tasks.push(() => sendValidatorModuleTelegramNotification(env, signal, options));
     }
@@ -8297,12 +8334,49 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
   const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
   const reading = state?.readingSnapshot ?? liveDashboardData.neuralReading ?? null;
   if (!reading || (reading.mode !== "ACTIVE" && !state)) return null;
-  const moduleConfig = validatorChannelModuleConfig(channel, "paying_numbers");
+  const moduleState = validatorChannelModuleConfigState(channel, "paying_numbers");
+  if (!moduleState) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "missing_channel_config", {
+      roundId: latestRound.id,
+      numero: reading.numero ?? null,
+    });
+    return null;
+  }
+  const moduleConfig = moduleState.config;
   const expectedSide = state?.expectedSide ?? readServerNeuralSide(reading.direcao ?? reading.origem);
-  if (!expectedSide) return null;
-  if (!validatorModuleAllowsSignalEntry(moduleConfig, expectedSide)) return null;
+  if (!expectedSide) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "missing_detected_entry", {
+      roundId: latestRound.id,
+      numero: reading.numero ?? null,
+    });
+    return null;
+  }
   const key = state?.key || serverNeuralEntryKey(reading);
-  if (!key) return null;
+  if (!key) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "missing_signal_key", {
+      roundId: latestRound.id,
+      expectedSide,
+      numero: reading.numero ?? null,
+    });
+    return null;
+  }
+  if (!moduleConfig.enabled) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "module_inactive", {
+      roundId: latestRound.id,
+      signalKey: key,
+      expectedSide,
+    });
+    return null;
+  }
+  if (!validatorModuleAllowsSignalEntry(moduleConfig, expectedSide)) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "entry_not_allowed", {
+      roundId: latestRound.id,
+      signalKey: key,
+      expectedSide,
+      allowedEntry: moduleConfig.entryType,
+    });
+    return null;
+  }
   const status = String(reading.paganteStatus || (state?.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"));
   return createValidatorModuleSignal(
     channel,
@@ -8314,7 +8388,8 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
       pattern: "",
       entry: formatServerSignalSide(expectedSide),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
-      tieCoverage: String(moduleConfig.tieCoverage),
+      tieCoverage: moduleConfig.coverTie ? String(moduleConfig.tieCoverage) : "0",
+      tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
       confidence: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
       percentage: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
       status,
@@ -8330,6 +8405,8 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
       expectedSide,
       entryText: formatServerSignalSide(expectedSide),
       protection: formatValidatorModuleGale(moduleConfig.galeLimit),
+      coverTie: moduleConfig.coverTie,
+      tieCoverage: moduleConfig.coverTie ? moduleConfig.tieCoverage : 0,
       result: "Aguardando resultado",
       status,
     },
@@ -8503,6 +8580,14 @@ async function sendValidatorModuleTelegramNotification(
     ...liveValidatorNotifications.filter((item) => readString(item, "id") !== signal.notificationKey),
   ].slice(0, 1000);
   void persistValidatorNotification(env, notification);
+  if (signal.moduleKey === "paying_numbers") {
+    logPayingNumbersTelegramDecision(signal.channel, result.ok ? "sent" : "blocked", result.ok ? "sent_to_telegram" : "telegram_error", {
+      roundId: signal.roundId,
+      signalKey: signal.signalKey,
+      telegramMessageId: result.ok ? result.messageId : null,
+      error: result.ok ? "" : result.error,
+    });
+  }
   return true;
 }
 
@@ -8621,6 +8706,28 @@ function maskTelemetryUserId(userId: string) {
   const [name, domain] = clean.split("@");
   if (!name || !domain) return clean ? "***" : "";
   return `${name.slice(0, 1)}***@${domain}`;
+}
+
+function logPayingNumbersTelegramDecision(
+  channel: ValidatorNotificationChannel,
+  status: "sent" | "blocked",
+  reason: string,
+  details: Record<string, unknown> = {},
+) {
+  const summary = {
+    event: "telegram_paying_numbers_decision",
+    status,
+    reason,
+    user: maskTelemetryUserId(channel.userId),
+    channelId: channel.id,
+    ...details,
+  };
+  const line = JSON.stringify(summary);
+  if (status === "blocked") {
+    console.info(line);
+    return;
+  }
+  console.info(line);
 }
 
 function shouldMonitorValidatorPattern(pattern: SavedValidatorPattern, latestRound: Round) {
