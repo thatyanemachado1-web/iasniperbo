@@ -2749,7 +2749,7 @@ async function fetchValidatorRoundHistory(limit: number) {
   url.searchParams.set("limit", String(limit));
   const session = readUserSession();
   const adminSession = readAdminSession();
-  const tokens = [adminSession?.token, session.clientToken].filter(
+  const tokens = [session.clientToken, adminSession?.token].filter(
     (token, index, values): token is string => Boolean(token) && values.indexOf(token) === index,
   );
   const requestTokens = tokens.length ? tokens : [""];
