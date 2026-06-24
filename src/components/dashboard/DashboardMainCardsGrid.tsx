@@ -23,7 +23,7 @@ export function DashboardMainCardsGrid({
   patternMinerIsUsingRealData: boolean;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
 }) {
-  const safeSurfAlert = surfAlert ?? mockDashboardData.currentSurfAlert;
+  const safeSurfAlert = (surfAlert ?? mockDashboardData.currentSurfAlert) as SurfAlert;
 
   return (
     <div className="space-y-3">

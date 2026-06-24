@@ -104,7 +104,7 @@ type CalendarEngineCounterSnapshot = {
 type EngineCalendarAggregateKind = "hourly" | "daily" | "weekly" | "monthly" | "yearly";
 type EngineCalendarAggregateStat = {
   id: string;
-  engineKey: CalendarSignalEngineKey;
+  engineKey: CalendarEngineKey;
   periodKind: EngineCalendarAggregateKind;
   periodStart: string;
   periodEnd: string;
@@ -4791,6 +4791,7 @@ function deriveEngineDailyRowsFromHourly(
       };
       byDate.set(row.date, daily);
     }
+    if (!daily) continue;
 
     daily.greens += row.greens;
     daily.reds += row.reds;
@@ -6046,7 +6047,7 @@ function combineEngineCalendarAggregateRows(rows: EngineCalendarAggregateStat[])
   return [...byPeriod.values()];
 }
 
-function normalizeCalendarEngineSelection(value: CalendarEngineKey[] | "todos" | undefined) {
+function normalizeCalendarEngineSelection(value: CalendarEngineKey[] | "todos" | undefined): CalendarEngineKey[] {
   if (!value || value === "todos") return [...CALENDAR_SIGNAL_ENGINE_KEYS];
   const selected = value
     .map(normalizeCalendarEngineKey)
@@ -7969,7 +7970,7 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
 }
 
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
-  const updatedAt = Date.parse(readString(dashboard, "updatedAt"));
+  const updatedAt = Date.parse(readString(dashboard as unknown as Record<string, unknown>, "updatedAt"));
   if (!Number.isFinite(updatedAt)) return !Array.isArray(dashboard.rounds) || dashboard.rounds.length === 0;
   return Date.now() - updatedAt > LIVE_FEED_STALE_MS;
 }
@@ -10072,7 +10073,7 @@ function normalizeTieAlert(value: unknown, fallback: DashboardData["currentTieAl
   };
 }
 
-function normalizeRounds(rounds: unknown[], limit = 30) {
+function normalizeRounds(rounds: unknown[], limit = 30): Round[] {
   return rounds
     .map((round, index) => {
       const item = readRecord(round);
@@ -10086,9 +10087,9 @@ function normalizeRounds(rounds: unknown[], limit = 30) {
         tieMultiplier: readNullableNumber(item.tieMultiplier ?? item.tie_multiplier ?? item.multiplier),
         time: String(item.time || item.createdAt || "--:--"),
         recordedAt: normalizeRoundRecordedAt(item),
-      };
+      } as Round;
     })
-    .filter((round): round is DashboardData["rounds"][number] => Boolean(round))
+    .filter((round): round is Round => Boolean(round))
     .sort(compareRoundHistory)
     .slice(-Math.max(1, limit));
 }
