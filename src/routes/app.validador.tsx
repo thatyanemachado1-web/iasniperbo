@@ -525,20 +525,28 @@ function NeuralValidatorPage() {
       showNotice("Telegram fica bloqueado para o plano Free.");
       return;
     }
-    if (channels.length >= planLimits.channels) {
+    const name = channelForm.name.trim() || "Canal Telegram";
+    const token = channelForm.botToken.trim();
+    const chatId = channelForm.chatId.trim();
+    const buttonLink = channelForm.buttonLink.trim();
+    const matchingChannel = channels.find((channel) => {
+      const sameName = channel.name.trim().toLowerCase() === name.toLowerCase();
+      const sameChat = chatId ? channel.chatId === chatId || !channel.chatId : true;
+      return sameName && sameChat;
+    });
+    if (channels.length >= planLimits.channels && !matchingChannel) {
       showNotice(`Seu plano permite ate ${planLimits.channels} canais.`);
       return;
     }
     const now = new Date().toISOString();
-    const token = channelForm.botToken.trim();
     const channel: ValidatorNotificationChannel = {
-      id: createStorageId("channel"),
+      id: matchingChannel?.id || createStorageId("channel"),
       userId: currentUserId(),
-      name: channelForm.name || "Canal Telegram",
-      botTokenMasked: maskBotToken(token),
+      name,
+      botTokenMasked: token ? maskBotToken(token) : matchingChannel?.botTokenMasked || "",
       botTokenEncoded: "",
-      chatId: channelForm.chatId.trim(),
-      buttonLink: channelForm.buttonLink.trim(),
+      chatId: chatId || matchingChannel?.chatId || "",
+      buttonLink: buttonLink || matchingChannel?.buttonLink || "",
       isActive: channelForm.isActive,
       analyzingEnabled: channelForm.analyzingEnabled,
       analyzingCooldownRounds: Math.max(1, Number(channelForm.analyzingCooldownRounds) || 3),
@@ -547,7 +555,7 @@ function NeuralValidatorPage() {
         entry: channelForm.entryTemplate || DEFAULT_MESSAGE_TEMPLATES.entry,
         analyzing: channelForm.analyzingTemplate || DEFAULT_MESSAGE_TEMPLATES.analyzing,
       },
-      createdAt: now,
+      createdAt: matchingChannel?.createdAt || now,
       updatedAt: now,
     };
     const next = upsertNotificationChannel(channel);
