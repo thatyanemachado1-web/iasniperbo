@@ -104,6 +104,53 @@ const DESTINATION_OPTIONS: Array<{ value: ValidatorDestination; label: string }>
   { value: "disabled", label: "Desativado" },
 ];
 
+type ValidatorTelegramModuleKey =
+  | "ai_patterns"
+  | "paying_numbers"
+  | "surf_alert"
+  | "ties_only"
+  | "validator";
+type ValidatorTelegramModuleConfig = {
+  enabled: boolean;
+  galeLimit: number;
+  tieCoverage: number;
+  cooldownSeconds: number;
+  template: string;
+};
+type ValidatorChannelWithModules = ValidatorNotificationChannel & {
+  signalModules?: Partial<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>;
+};
+type ChannelFormState = {
+  name: string;
+  botToken: string;
+  chatId: string;
+  buttonLink: string;
+  isActive: boolean;
+  entryTemplate: string;
+  analyzingEnabled: boolean;
+  analyzingCooldownRounds: number;
+  analyzingTemplate: string;
+  signalModules: Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>;
+};
+const TELEGRAM_MODULE_OPTIONS: Array<{ key: ValidatorTelegramModuleKey; label: string }> = [
+  { key: "ai_patterns", label: "SEGUIR PADROES IA" },
+  { key: "paying_numbers", label: "SEGUIR NUMEROS PAGANTES" },
+  { key: "surf_alert", label: "SEGUIR AVISO DE SURF" },
+  { key: "ties_only", label: "SEGUIR SOMENTE EMPATES" },
+  { key: "validator", label: "SEGUIR VALIDADOR" },
+];
+const DEFAULT_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns:
+    "PADRAO IA CONFIRMADO\nMesa: {{table}}\nPadrao: {{pattern}}\nEntrada: {{entry}}\nGale: {{gale}}\nAssertividade: {{confidence}}",
+  paying_numbers:
+    "NUMERO PAGANTE CONFIRMADO\nNumero: {{number}}\nEntrada: {{entry}}\nGale: {{gale}}\nStatus: {{status}}",
+  surf_alert:
+    "AVISO DE SURF CONFIRMADO\nEntrada: {{entry}}\nRisco: {{risk}}\nConfianca: {{confidence}}\nGale: {{gale}}",
+  ties_only:
+    "POSSIVEL EMPATE\nCobrir empate seco ate G{{tieCoverage}}\nNivel: {{level}}\nMesa: {{table}}",
+  validator: DEFAULT_MESSAGE_TEMPLATES.entry,
+};
+
 function NeuralValidatorPage() {
   const { data, mode } = useDashboardData();
   const session = readUserSession();
@@ -145,7 +192,7 @@ function NeuralValidatorPage() {
   });
   const [siteAlerts, setSiteAlerts] = useState<LiveValidatorHit[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
-  const [channelForm, setChannelForm] = useState({
+  const [channelForm, setChannelForm] = useState<ChannelFormState>({
     name: "Sala Premium",
     botToken: "",
     chatId: "",
@@ -155,6 +202,7 @@ function NeuralValidatorPage() {
     analyzingEnabled: false,
     analyzingCooldownRounds: 3,
     analyzingTemplate: DEFAULT_MESSAGE_TEMPLATES.analyzing,
+    signalModules: defaultTelegramModuleConfigs(),
   });
   const [filters, setFilters] = useState<PatternMiningFilters>({
     historySize: Math.min(5000, planLimits.history),
@@ -594,9 +642,10 @@ function NeuralValidatorPage() {
         entry: channelForm.entryTemplate || DEFAULT_MESSAGE_TEMPLATES.entry,
         analyzing: channelForm.analyzingTemplate || DEFAULT_MESSAGE_TEMPLATES.analyzing,
       },
+      signalModules: normalizeTelegramModuleConfigs(channelForm.signalModules),
       createdAt: matchingChannel?.createdAt || now,
       updatedAt: now,
-    };
+    } as ValidatorNotificationChannel;
     setSavingChannel(true);
     void saveServerValidatorChannel(channel, token, channelValidation.key === validationKey ? channelValidation.code : "")
       .then((serverChannel) => {
@@ -1550,28 +1599,8 @@ function ChannelsTab({
   testingTelegramId,
 }: {
   channels: ValidatorNotificationChannel[];
-  channelForm: {
-    name: string;
-    botToken: string;
-    chatId: string;
-    buttonLink: string;
-    isActive: boolean;
-    entryTemplate: string;
-    analyzingEnabled: boolean;
-    analyzingCooldownRounds: number;
-    analyzingTemplate: string;
-  };
-  setChannelForm: (form: {
-    name: string;
-    botToken: string;
-    chatId: string;
-    buttonLink: string;
-    isActive: boolean;
-    entryTemplate: string;
-    analyzingEnabled: boolean;
-    analyzingCooldownRounds: number;
-    analyzingTemplate: string;
-  }) => void;
+  channelForm: ChannelFormState;
+  setChannelForm: (form: ChannelFormState) => void;
   onSave: () => void;
   onRemove: (id: string) => void;
   onTestForm: () => void;
@@ -1624,6 +1653,15 @@ function ChannelsTab({
               <Switch checked={channelForm.isActive} onCheckedChange={(checked) => setChannelForm({ ...channelForm, isActive: checked })} />
             </div>
           </Field>
+          <div className="rounded-xl border border-border/70 bg-secondary/15 p-3">
+            <div className="text-sm font-black">Modos automaticos</div>
+            <div className="mt-3">
+              <TelegramModulesEditor
+                modules={channelForm.signalModules}
+                onChange={(signalModules) => setChannelForm({ ...channelForm, signalModules })}
+              />
+            </div>
+          </div>
           <Field label="Modelo entrada">
             <Textarea value={channelForm.entryTemplate} onChange={(event) => setChannelForm({ ...channelForm, entryTemplate: event.target.value })} className="min-h-36" />
           </Field>
@@ -1703,13 +1741,21 @@ function ChannelsTab({
       <GlassCard>
         <SectionTitle title="Canais cadastrados" subtitle="Tokens ficam mascarados depois de salvos." />
         <div className="mt-4 space-y-3">
-          {channels.map((channel) => (
+          {channels.map((channel) => {
+            const signalModules = channelSignalModules(channel);
+            const activeModules = TELEGRAM_MODULE_OPTIONS
+              .filter((option) => signalModules[option.key]?.enabled)
+              .map((option) => option.label.replace("SEGUIR ", ""));
+            return (
             <div key={channel.id} className="rounded-xl border border-border/70 bg-secondary/20 p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="font-bold">{channel.name}</div>
                   <div className="mt-1 text-xs text-muted-foreground">Token: {channel.botTokenMasked || "sem token"} | Chat: {channel.chatId || "sem chat"}</div>
                   <div className="mt-1 text-xs text-muted-foreground">Status: {channel.isActive ? "ativo" : "inativo"}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Modos: {activeModules.length ? activeModules.join(", ") : "nenhum ativo"}
+                  </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     Sem entrada: {channel.analyzingEnabled ? `ativo a cada ${channel.analyzingCooldownRounds || 3} rodadas` : "inativo"}
                   </div>
@@ -1730,6 +1776,17 @@ function ChannelsTab({
                   </Button>
                 </div>
               </div>
+              <details className="mt-3 rounded-xl border border-border/60 bg-background/25 p-3 text-xs">
+                <summary className="cursor-pointer font-bold text-muted-foreground">Configurar modos automaticos</summary>
+                <div className="mt-3">
+                  <TelegramModulesEditor
+                    modules={signalModules}
+                    onChange={(nextModules) => onUpdateChannel(channel, {
+                      signalModules: nextModules,
+                    } as Partial<ValidatorNotificationChannel>)}
+                  />
+                </div>
+              </details>
               <details className="mt-3 rounded-xl border border-border/60 bg-background/25 p-3 text-xs">
                 <summary className="cursor-pointer font-bold text-muted-foreground">Configurar analisando padrao</summary>
                 <div className="mt-3 space-y-3">
@@ -1765,7 +1822,8 @@ function ChannelsTab({
                 </div>
               </details>
             </div>
-          ))}
+            );
+          })}
           {!channels.length && (
             <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
               Nenhum canal salvo para este usuario.
@@ -2176,6 +2234,156 @@ function FilterSwitch({ label, checked, onCheckedChange }: { label: string; chec
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </label>
   );
+}
+
+function TelegramModulesEditor({
+  modules,
+  onChange,
+}: {
+  modules: Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>;
+  onChange: (modules: Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>) => void;
+}) {
+  const normalized = normalizeTelegramModuleConfigs(modules);
+
+  function patchModule(key: ValidatorTelegramModuleKey, patch: Partial<ValidatorTelegramModuleConfig>) {
+    onChange({
+      ...normalized,
+      [key]: {
+        ...normalized[key],
+        ...patch,
+      },
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      {TELEGRAM_MODULE_OPTIONS.map((option) => {
+        const moduleConfig = normalized[option.key];
+        return (
+          <div key={option.key} className="rounded-lg border border-border/60 bg-background/25 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-black">{option.label}</span>
+              <Switch
+                checked={moduleConfig.enabled}
+                onCheckedChange={(checked) => patchModule(option.key, { enabled: checked })}
+              />
+            </div>
+            {moduleConfig.enabled && (
+              <div className="mt-3 grid gap-2 lg:grid-cols-[110px_130px_130px_minmax(0,1fr)]">
+                <Field label="Gale">
+                  <Select
+                    value={String(moduleConfig.galeLimit)}
+                    onValueChange={(value) => patchModule(option.key, { galeLimit: Number(value) || 0 })}
+                  >
+                    <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">SG</SelectItem>
+                      <SelectItem value="1">G1</SelectItem>
+                      <SelectItem value="2">G2</SelectItem>
+                      <SelectItem value="3">G3</SelectItem>
+                      <SelectItem value="4">G4</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Empate">
+                  <Select
+                    value={String(moduleConfig.tieCoverage)}
+                    onValueChange={(value) => patchModule(option.key, { tieCoverage: Number(value) || 0 })}
+                  >
+                    <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">Seco</SelectItem>
+                      <SelectItem value="1">G1</SelectItem>
+                      <SelectItem value="2">G2</SelectItem>
+                      <SelectItem value="3">G3</SelectItem>
+                      <SelectItem value="4">G4</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Intervalo seg.">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={300}
+                    value={moduleConfig.cooldownSeconds}
+                    onChange={(event) => patchModule(option.key, {
+                      cooldownSeconds: clampTelegramModuleNumber(event.target.value, 0, 0, 300),
+                    })}
+                  />
+                </Field>
+                <Field label="Template">
+                  <Textarea
+                    value={moduleConfig.template}
+                    onChange={(event) => patchModule(option.key, { template: event.target.value })}
+                    className="min-h-20"
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function defaultTelegramModuleConfigs() {
+  return normalizeTelegramModuleConfigs({});
+}
+
+function normalizeTelegramModuleConfigs(value: unknown) {
+  const record = moduleRecord(value);
+  return TELEGRAM_MODULE_OPTIONS.reduce<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>(
+    (acc, option) => {
+      const defaults = defaultTelegramModuleConfig(option.key);
+      const raw = moduleRecord(record[option.key]);
+      const hasEnabled = Object.prototype.hasOwnProperty.call(raw, "enabled");
+      acc[option.key] = {
+        enabled: hasEnabled ? moduleBoolean(raw.enabled) : defaults.enabled,
+        galeLimit: clampTelegramModuleNumber(raw.galeLimit, defaults.galeLimit, 0, 4),
+        tieCoverage: clampTelegramModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
+        cooldownSeconds: clampTelegramModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
+        template: moduleString(raw.template) || defaults.template,
+      };
+      return acc;
+    },
+    {} as Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>,
+  );
+}
+
+function defaultTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
+  return {
+    enabled: key === "validator",
+    galeLimit: key === "ties_only" ? 0 : 1,
+    tieCoverage: key === "ties_only" ? 4 : 1,
+    cooldownSeconds: key === "validator" ? 0 : 2,
+    template: DEFAULT_TELEGRAM_MODULE_TEMPLATES[key],
+  };
+}
+
+function channelSignalModules(channel: ValidatorNotificationChannel) {
+  const channelRecord = channel as ValidatorChannelWithModules;
+  const templatesRecord = moduleRecord(channel.templates);
+  return normalizeTelegramModuleConfigs(channelRecord.signalModules || templatesRecord.signalModules);
+}
+
+function moduleRecord(value: unknown) {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function moduleString(value: unknown) {
+  return String(value || "").trim();
+}
+
+function moduleBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  return ["1", "true", "sim", "yes", "on", "active", "ativo"].includes(moduleString(value).toLowerCase());
+}
+
+function clampTelegramModuleNumber(value: unknown, fallback: number, min: number, max: number) {
+  const number = Math.floor(Number(value));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
 }
 
 async function fetchValidatorRoundHistory(limit: number) {
