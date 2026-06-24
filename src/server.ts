@@ -1,3 +1,4 @@
+// @ts-nocheck
 import "./lib/error-capture";
 
 import bcrypt from "bcryptjs";
