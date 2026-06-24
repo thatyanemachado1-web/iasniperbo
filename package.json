@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "node --stack-size=16000 --max-old-space-size=8192 ./node_modules/vite/bin/vite.js build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "ports:audit": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sniper_port_guard.ps1 -NoKill",
