@@ -426,6 +426,9 @@ type ValidatorTelegramModuleConfig = {
   tieCoverage: number;
   cooldownSeconds: number;
   template: string;
+  greenTemplate: string;
+  redTemplate: string;
+  tieTemplate: string;
 };
 type ValidatorChannelWithModules = ValidatorNotificationChannel & {
   signalModules?: Partial<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>;
@@ -450,14 +453,36 @@ const VALIDATOR_TELEGRAM_MODULE_KEYS: ValidatorTelegramModuleKey[] = [
 ];
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
-    "PADRAO IA CONFIRMADO\nMesa: {{table}}\nPadrao: {{pattern}}\nEntrada: {{entry}}\nGale: {{gale}}\nAssertividade: {{confidence}}",
+    "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "NUMERO PAGANTE CONFIRMADO\nNumero: {{number}}\nEntrada: {{entry}}\nGale: {{gale}}\nStatus: {{status}}",
+    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
   surf_alert:
-    "AVISO DE SURF CONFIRMADO\nEntrada: {{entry}}\nRisco: {{risk}}\nConfianca: {{confidence}}\nGale: {{gale}}",
+    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "POSSIVEL EMPATE\nCobrir empate seco ate G{{tieCoverage}}\nNivel: {{level}}\nMesa: {{table}}",
-  validator: DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry,
+    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🛡️ <b>Cobrir empate:</b> até G{{tieCoverage}}\n📌 <b>Nível:</b> {{level}}",
+  validator:
+    "🎯 <b>ENTRADA CONFIRMADA</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{percentage}}",
+};
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  paying_numbers: "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>",
+  validator: "✅ <b>{{result}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+};
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "❌ <b>RED</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  paying_numbers: "❌ <b>RED</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate não confirmou</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+  validator: "❌ <b>RED</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+};
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  paying_numbers: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n✅ <b>Empate confirmado</b>",
+  validator: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
@@ -6363,6 +6388,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       : [];
     const notifications = mergeValidatorNotifications(storedNotifications, liveValidatorNotifications)
       .filter((notification) => normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id")) === userId)
+      .filter((notification) => !isValidatorResultNotification(notification))
       .sort((a, b) => validatorNotificationTimeMs(b) - validatorNotificationTimeMs(a))
       .slice(0, 50)
       .map(publicValidatorNotification);
@@ -6401,12 +6427,22 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
     const notification = {
       id: notificationKey,
+      type: "entry",
       userId: pattern.userId,
       patternId: pattern.id,
       channelId: channel.id,
       roundId,
       status: result.ok ? "sent" : "error",
       error: result.ok ? "" : result.error,
+      payloadJson: {
+        moduleKey: "validator",
+        entry: pattern.pulledSide ? formatServerTelegramSide(pattern.pulledSide) : formatServerTelegramSide(validatorEntrySide(pattern.entryType) || "B"),
+        protection: formatValidatorModuleGale(pattern.galeLimit),
+        result: "Aguardando resultado",
+        pattern: pattern.pattern,
+        percentage: formatServerPercent(pattern.validation?.accuracy),
+        telegramMessageId: result.ok ? result.messageId : null,
+      },
       sentAt,
       updatedAt: sentAt,
     };
@@ -6809,6 +6845,7 @@ async function sendTelegramMessage({
   const payload: Record<string, unknown> = {
     chat_id: chatId,
     text: message,
+    parse_mode: "HTML",
     disable_web_page_preview: true,
   };
 
@@ -7130,6 +7167,9 @@ function normalizeValidatorChannelSignalModules(value: unknown) {
         tieCoverage: clampValidatorModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
         cooldownSeconds: clampValidatorModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
         template: readString(raw, "template") || defaults.template,
+        greenTemplate: readString(raw, "greenTemplate") || defaults.greenTemplate,
+        redTemplate: readString(raw, "redTemplate") || defaults.redTemplate,
+        tieTemplate: readString(raw, "tieTemplate") || defaults.tieTemplate,
       };
       return acc;
     },
@@ -7146,6 +7186,9 @@ function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): 
     tieCoverage: key === "ties_only" ? 4 : 1,
     cooldownSeconds: key === "validator" ? 0 : 2,
     template: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES[key],
+    greenTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES[key],
+    redTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES[key],
+    tieTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES[key],
   };
 }
 
@@ -8027,7 +8070,11 @@ function mergeValidatorNotifications(
 }
 
 function validatorNotificationTimeMs(notification: Record<string, unknown>) {
-  const sentAt = readString(notification, "sentAt") || readString(notification, "sent_at") || readString(notification, "updatedAt");
+  const sentAt =
+    readString(notification, "updatedAt") ||
+    readString(notification, "updated_at") ||
+    readString(notification, "sentAt") ||
+    readString(notification, "sent_at");
   const time = Date.parse(sentAt);
   return Number.isFinite(time) ? time : 0;
 }
@@ -8154,6 +8201,8 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     const results = await runLimitedValidatorTelegramSends(entrySendTasks);
     changed = results.some(Boolean) || changed;
   }
+  const resultChanged = await processValidatorTelegramResultMessages(env, latestRound, options);
+  changed = changed || resultChanged;
   const analysisChanged = await sendValidatorAnalyzingMessages(latestRound, entryChannelKeys, options);
   changed = changed || analysisChanged;
 
@@ -8207,6 +8256,8 @@ async function sendValidatorEntryTelegramNotification(
       entry: pattern.pulledSide ? formatServerTelegramSide(pattern.pulledSide) : formatServerTelegramSide(validatorEntrySide(pattern.entryType) || "B"),
       protection: formatValidatorModuleGale(pattern.galeLimit),
       result: "Aguardando resultado",
+      pattern: pattern.pattern,
+      percentage: formatServerPercent(pattern.validation?.accuracy),
       latency,
       telegramMessageId: result.ok ? result.messageId : null,
       targetExceeded: latency.totalMs > VALIDATOR_TELEGRAM_TARGET_MS,
@@ -8591,6 +8642,279 @@ async function sendValidatorModuleTelegramNotification(
   return true;
 }
 
+async function processValidatorTelegramResultMessages(
+  env: unknown,
+  latestRound: Round,
+  options: ValidatorMonitorOptions,
+) {
+  const tasks: Array<() => Promise<boolean>> = [];
+  for (const notification of liveValidatorNotifications) {
+    const pending = readPendingValidatorTelegramEntry(notification);
+    if (!pending) continue;
+    const outcome = resolveValidatorTelegramEntryOutcome(notification);
+    if (!outcome) continue;
+    const channel = findValidatorTelegramChannelForNotification(notification);
+    if (!channel) continue;
+    const resultNotificationKey = `${pending.id}:result:${outcome.status}:${outcome.roundId}`;
+    if (validatorNotificationAlreadySent(resultNotificationKey)) continue;
+    tasks.push(() =>
+      sendValidatorTelegramResultNotification(
+        env,
+        notification,
+        channel,
+        outcome,
+        resultNotificationKey,
+        latestRound,
+        options,
+      ),
+    );
+  }
+  if (!tasks.length) return false;
+  const results = await runLimitedValidatorTelegramSends(tasks);
+  return results.some(Boolean);
+}
+
+function readPendingValidatorTelegramEntry(notification: Record<string, unknown>) {
+  const id = readString(notification, "id");
+  const type = readString(notification, "type") || "entry";
+  const status = readString(notification, "status");
+  const payloadJson = readRecord(notification.payloadJson || notification.payload_json);
+  if (!id || status !== "sent") return null;
+  if (isValidatorResultNotification(notification)) return null;
+  if (type !== "entry" && !type.startsWith("module:")) return null;
+  const result = readString(payloadJson, "result").toLowerCase();
+  if (result && !result.includes("aguardando")) return null;
+  return { id, type, payloadJson };
+}
+
+function resolveValidatorTelegramEntryOutcome(notification: Record<string, unknown>) {
+  const payloadJson = readRecord(notification.payloadJson || notification.payload_json);
+  const entry = readValidatorTelegramEntrySide(payloadJson);
+  if (!entry) return null;
+  const triggerRoundId = Math.floor(Number(notification.roundId ?? notification.round_id) || 0);
+  const triggerIndex = findValidatorRoundIndexById(triggerRoundId);
+  if (triggerIndex < 0) return null;
+  const maxGale = readValidatorProtectionGale(payloadJson.protection || payloadJson.gale);
+  let attempts = 0;
+  for (const round of liveValidatorRoundHistory.slice(triggerIndex + 1)) {
+    if (round.result === "T") {
+      const tieMultiplier = formatServerTieMultiplier(round);
+      return {
+        status: "TIE",
+        label: tieMultiplier ? `Empate ${tieMultiplier}` : "Empate",
+        roundId: round.id,
+        galeUsed: attempts,
+        tieMultiplier,
+      };
+    }
+    if (round.result === entry) {
+      return {
+        status: attempts <= 0 ? "GREEN_SG" : `GREEN_G${Math.min(4, attempts)}`,
+        label: attempts <= 0 ? "Green" : `Green G${Math.min(4, attempts)}`,
+        roundId: round.id,
+        galeUsed: attempts,
+        tieMultiplier: "",
+      };
+    }
+    attempts += 1;
+    if (attempts > maxGale) {
+      return {
+        status: "RED",
+        label: "Red",
+        roundId: round.id,
+        galeUsed: maxGale,
+        tieMultiplier: "",
+      };
+    }
+  }
+  return null;
+}
+
+async function sendValidatorTelegramResultNotification(
+  env: unknown,
+  originalNotification: Record<string, unknown>,
+  channel: ValidatorNotificationChannel,
+  outcome: {
+    status: string;
+    label: string;
+    roundId: number;
+    galeUsed: number;
+    tieMultiplier: string;
+  },
+  resultNotificationKey: string,
+  latestRound: Round,
+  options: ValidatorMonitorOptions,
+) {
+  const payloadJson = readRecord(originalNotification.payloadJson || originalNotification.payload_json);
+  const moduleKey = readValidatorNotificationModuleKey(originalNotification);
+  const moduleConfig = validatorChannelModuleConfig(channel, moduleKey);
+  const variables = validatorTelegramResultVariables(moduleKey, payloadJson, outcome, latestRound);
+  const template = outcome.status === "RED"
+    ? moduleConfig.redTemplate
+    : outcome.status === "TIE"
+      ? moduleConfig.tieTemplate
+      : moduleConfig.greenTemplate;
+  const sentAt = new Date().toISOString();
+  const result = await sendTelegramMessage({
+    botToken: decodeServerToken(channel.botTokenEncoded),
+    chatId: channel.chatId,
+    message: renderValidatorTelegramTemplate(template, variables),
+    buttonLabel: "Abrir Sniper Bo IA",
+    buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+    allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+  });
+  const resultNotification = {
+    id: resultNotificationKey,
+    type: `result:${moduleKey}`,
+    userId: readString(originalNotification, "userId") || readString(originalNotification, "user_id"),
+    channelId: channel.id,
+    roundId: outcome.roundId,
+    status: result.ok ? "sent" : "error",
+    error: result.ok ? "" : result.error,
+    payloadJson: {
+      moduleKey,
+      originalNotificationId: readString(originalNotification, "id"),
+      result: outcome.label,
+      resultStatus: outcome.status,
+      resultRoundId: outcome.roundId,
+      tieMultiplier: outcome.tieMultiplier,
+      telegramMessageId: result.ok ? result.messageId : null,
+    },
+    sentAt,
+    updatedAt: sentAt,
+  };
+  liveValidatorNotifications = [
+    resultNotification,
+    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== resultNotificationKey),
+  ].slice(0, 1000);
+  void persistValidatorNotification(env, resultNotification);
+  if (!result.ok) return false;
+
+  const updatedOriginal = {
+    ...originalNotification,
+    payloadJson: {
+      ...payloadJson,
+      result: outcome.label,
+      resultStatus: outcome.status,
+      resultRoundId: outcome.roundId,
+      resultSentAt: sentAt,
+      resultNotificationId: resultNotificationKey,
+      tieMultiplier: outcome.tieMultiplier,
+    },
+    updatedAt: sentAt,
+  };
+  liveValidatorNotifications = [
+    updatedOriginal,
+    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== readString(originalNotification, "id")),
+  ].slice(0, 1000);
+  void persistValidatorNotification(env, updatedOriginal);
+  return true;
+}
+
+function validatorTelegramResultVariables(
+  moduleKey: ValidatorTelegramModuleKey,
+  payloadJson: Record<string, unknown>,
+  outcome: {
+    status: string;
+    label: string;
+    roundId: number;
+    galeUsed: number;
+    tieMultiplier: string;
+  },
+  latestRound: Round,
+) {
+  const entry = readString(payloadJson, "entryText") || readString(payloadJson, "entry") || "Entrada";
+  const protection = readString(payloadJson, "protection") || readString(payloadJson, "gale") || "";
+  return {
+    table: "Bac Bo",
+    module: formatValidatorModuleName(moduleKey),
+    pattern: formatValidatorPayloadPattern(payloadJson.pattern),
+    entry,
+    gale: protection,
+    protection,
+    result: outcome.label,
+    status: outcome.status,
+    round: String(outcome.roundId || latestRound.id),
+    number: String(payloadJson.numero ?? payloadJson.number ?? ""),
+    percentage: readString(payloadJson, "percentage"),
+    confidence: readString(payloadJson, "confidence"),
+    tieMultiplier: outcome.tieMultiplier,
+  };
+}
+
+function findValidatorTelegramChannelForNotification(notification: Record<string, unknown>) {
+  const userId = normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id"));
+  const channelId = readString(notification, "channelId") || readString(notification, "channel_id");
+  return liveValidatorChannels.find(
+    (channel) => channel.userId === userId && channel.id === channelId && isUsableValidatorTelegramChannel(channel),
+  ) || null;
+}
+
+function readValidatorNotificationModuleKey(notification: Record<string, unknown>): ValidatorTelegramModuleKey {
+  const payloadJson = readRecord(notification.payloadJson || notification.payload_json);
+  const payloadModule = readString(payloadJson, "moduleKey");
+  if (VALIDATOR_TELEGRAM_MODULE_KEYS.includes(payloadModule as ValidatorTelegramModuleKey)) {
+    return payloadModule as ValidatorTelegramModuleKey;
+  }
+  const type = readString(notification, "type");
+  const fromType = type.replace(/^module:/, "").replace(/^result:/, "").replace(/:result$/, "");
+  if (VALIDATOR_TELEGRAM_MODULE_KEYS.includes(fromType as ValidatorTelegramModuleKey)) {
+    return fromType as ValidatorTelegramModuleKey;
+  }
+  return "validator";
+}
+
+function isValidatorResultNotification(notification: Record<string, unknown>) {
+  const type = readString(notification, "type");
+  return type.startsWith("result:") || type.endsWith(":result");
+}
+
+function readValidatorTelegramEntrySide(payloadJson: Record<string, unknown>): Round["result"] | null {
+  const text = String(payloadJson.entryText || payloadJson.entry || payloadJson.expectedSide || "")
+    .trim()
+    .toUpperCase();
+  if (text === "B" || text === "BANKER" || text.includes("BANKER")) return "B";
+  if (text === "P" || text === "PLAYER" || text.includes("PLAYER")) return "P";
+  if (text === "T" || text === "TIE" || text.includes("TIE") || text.includes("EMPATE")) return "T";
+  return null;
+}
+
+function readValidatorProtectionGale(value: unknown) {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "SG" || text === "SEM GALE") return 0;
+  const match = text.match(/G([0-4])/);
+  if (match) return Number(match[1]);
+  const number = Math.floor(Number(value) || 0);
+  return Math.max(0, Math.min(4, number));
+}
+
+function findValidatorRoundIndexById(roundId: number) {
+  if (!roundId) return -1;
+  for (let index = liveValidatorRoundHistory.length - 1; index >= 0; index -= 1) {
+    if (liveValidatorRoundHistory[index]?.id === roundId) return index;
+  }
+  return -1;
+}
+
+function formatServerTieMultiplier(round: Round) {
+  const multiplier = Number(round.tieMultiplier ?? serverTieMultiplierFromRound(round));
+  if (!Number.isFinite(multiplier) || multiplier <= 0) return "";
+  return `${multiplier}x`;
+}
+
+function formatValidatorModuleName(moduleKey: ValidatorTelegramModuleKey) {
+  if (moduleKey === "ai_patterns") return "Padroes IA";
+  if (moduleKey === "paying_numbers") return "Numeros Pagantes";
+  if (moduleKey === "surf_alert") return "Aviso de Surf";
+  if (moduleKey === "ties_only") return "Somente Empates";
+  return "Validador";
+}
+
+function formatValidatorPayloadPattern(value: unknown) {
+  const pattern = normalizeServerPatternTokens(value);
+  return pattern.length ? formatServerTelegramPattern(pattern) : "";
+}
+
 function validatorChannelModuleCoolingDown(
   channel: ValidatorNotificationChannel,
   moduleKey: ValidatorTelegramModuleKey,
@@ -8862,10 +9186,11 @@ function buildServerValidatorTelegramMessage(
   channel: ValidatorNotificationChannel,
 ) {
   const entry = pattern.pulledSide || validatorEntrySide(pattern.entryType);
+  const moduleConfig = validatorChannelModuleConfig(channel, "validator");
   const variables: Record<string, string> = {
     pattern: formatServerTelegramPattern(pattern.pattern),
     entry: entry ? formatServerTelegramSide(entry) : "Aguardando",
-    gale: `G${Number(pattern.galeLimit)}`,
+    gale: formatValidatorModuleGale(pattern.galeLimit),
     wins: String(pattern.wins),
     loss: String(pattern.losses),
     losses: String(pattern.losses),
@@ -8878,7 +9203,7 @@ function buildServerValidatorTelegramMessage(
     risk: pattern.validation?.risk ?? "",
     mode: "Validador Neural",
   };
-  const template = pattern.messageOverride?.trim() || channel.templates.entry || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry;
+  const template = pattern.messageOverride?.trim() || moduleConfig.template || channel.templates.entry || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry;
   return template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
 }
 
