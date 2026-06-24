@@ -3,6 +3,7 @@ import { NeuralPayingDashboardCard } from "@/components/dashboard/NeuralPayingDa
 import { SurfAnalyzerDashboardCard } from "@/components/dashboard/SurfAnalyzerDashboardCard";
 import { TieRadarDashboardCard } from "@/components/dashboard/TieRadarDashboardCard";
 import { SurfRoadPanelsStrip } from "@/components/dashboard/SurfRoadPanelsStrip";
+import { mockDashboardData } from "@/data/mockDashboardData";
 import type { DashboardData, ModuleToggles, SurfAlert } from "@/types/dashboard";
 import type { PatternMinerSnapshot } from "@/types/patternMiner";
 import type { DailySurfMaxSnapshot } from "@/surf/DailySurfMaxEngine";
@@ -16,18 +17,20 @@ export function DashboardMainCardsGrid({
   onModuleTogglesChange,
 }: {
   data: DashboardData;
-  surfAlert: SurfAlert;
+  surfAlert?: SurfAlert;
   dailySurfMax: DailySurfMaxSnapshot;
   patternMinerSnapshot: PatternMinerSnapshot;
   patternMinerIsUsingRealData: boolean;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
 }) {
+  const safeSurfAlert = (surfAlert ?? mockDashboardData.currentSurfAlert) as SurfAlert;
+
   return (
     <div className="space-y-3">
       <section className="main-cards-grid grid w-full grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
         <NeuralPayingDashboardCard data={data} />
         <SurfAnalyzerDashboardCard
-          alert={surfAlert}
+          alert={safeSurfAlert}
           dailySurfMax={dailySurfMax}
           toggles={data.moduleToggles}
           onModuleTogglesChange={onModuleTogglesChange}
@@ -45,7 +48,7 @@ export function DashboardMainCardsGrid({
           isUsingRealData={patternMinerIsUsingRealData}
         />
       </section>
-      <SurfRoadPanelsStrip alert={surfAlert} />
+      <SurfRoadPanelsStrip alert={safeSurfAlert} />
     </div>
   );
 }

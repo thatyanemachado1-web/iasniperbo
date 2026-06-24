@@ -22,6 +22,7 @@ export interface Round {
   playerScore: number;
   tieMultiplier?: number | null;
   time: string;
+  recordedAt?: string;
 }
 
 export type SignalSide = "BANKER" | "PLAYER";
@@ -302,6 +303,8 @@ export interface NeuralResult {
   assertiveness: number;
   sequencePositive: number;
   sequenceNegative: number;
+  maxSequencePositive: number;
+  maxSequenceNegative: number;
   breakdown: string;
 }
 

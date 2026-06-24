@@ -36,12 +36,13 @@ export interface LocalAiCommentaryResponse {
 }
 
 export async function requestLocalAiCommentary(payload: LocalAiCommentaryRequest) {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    ...authHeaders(),
+  };
   const response = await fetch(localAiUrl(), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-    },
+    headers,
     body: JSON.stringify(payload),
   });
   const data = (await response.json().catch(() => ({}))) as Partial<LocalAiCommentaryResponse>;
@@ -63,7 +64,7 @@ function localAiUrl() {
   return `${window.location.origin}/api/ai/local-commentary`;
 }
 
-function authHeaders() {
+function authHeaders(): Record<string, string> {
   const admin = readAdminSession();
   if (admin?.token) return { Authorization: `Bearer ${admin.token}` };
   const user = readUserSession();

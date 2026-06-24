@@ -1712,6 +1712,7 @@ function ValidationSummaryPanel({
       </div>
     );
   }
+  if (!result) return null;
 
   const greens = result.sgWins + result.g1Wins + result.g2Wins;
 

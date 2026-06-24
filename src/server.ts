@@ -177,7 +177,15 @@ type EngineCalendarBackfillDashboardSnapshot = {
   data: Record<string, unknown>;
 };
 type NeuralCalendarForce = "BANKER" | "PLAYER" | "TIE" | "NONE";
-type NeuralCalendarModule = "Neural Pagante" | "Surf Analyzer" | "Tendencia" | "Validador";
+type NeuralCalendarModule =
+  | "Neural Pagante"
+  | "Surf Analyzer"
+  | "Tendencia"
+  | "Validador"
+  | "Padroes IA"
+  | "Radar de Empates"
+  | "Todos os motores"
+  | "Personalizado";
 type NeuralCalendarDailyStat = {
   id: string;
   date: string;
@@ -311,6 +319,7 @@ const VALIDATOR_ROUNDS_TABLE = "validator_rounds";
 const VALIDATOR_PATTERNS_TABLE = "validator_saved_patterns";
 const VALIDATOR_CHANNELS_TABLE = "validator_channels";
 const VALIDATOR_NOTIFICATIONS_TABLE = "validator_notifications";
+const BANKROLL_MONTHLY_TABLE = "bankroll_monthly";
 const VALIDATOR_CHANNEL_STATE_PREFIX = "validator_channel:";
 const VALIDATOR_CHANNEL_DELETED_STATE_PREFIX = "validator_channel_deleted:";
 const LEGACY_PATTERN_LIVE_HITS_TABLE = "pattern_live_hits";
@@ -1343,49 +1352,60 @@ function cleanLocalAiResponse(value: string) {
 }
 
 function beautifyPortugueseText(value: string) {
-  const mojibakeFixed = value
-    .replaceAll("n????o", "n??o")
-    .replaceAll("N????o", "N??o")
-    .replaceAll("aten????????o", "aten????o")
-    .replaceAll("Aten????????o", "Aten????o")
-    .replaceAll("pain????is", "pain??is")
-    .replaceAll("indispon????vel", "indispon??vel");
+  const mojibakeReplacements: Array<[string, string]> = [
+    ["n????o", "não"],
+    ["N????o", "Não"],
+    ["aten????????o", "atenção"],
+    ["Aten????????o", "Atenção"],
+    ["pain????is", "painéis"],
+    ["indispon????vel", "indisponível"],
+  ];
 
-  return [
-    ["voce", "voc??"],
-    ["nao", "n??o"],
-    ["atencao", "aten????o"],
-    ["observacao", "observa????o"],
-    ["narracao", "narra????o"],
-    ["comentario", "coment??rio"],
-    ["analise", "an??lise"],
-    ["numero", "n??mero"],
-    ["padrao", "padr??o"],
-    ["gestao", "gest??o"],
-    ["confianca", "confian??a"],
-    ["direcao", "dire????o"],
-    ["protecao", "prote????o"],
-    ["confirmacao", "confirma????o"],
-    ["proxima", "pr??xima"],
-    ["forcar", "for??ar"],
-    ["modulos", "m??dulos"],
-    ["metricas", "m??tricas"],
-    ["estatisticas", "estat??sticas"],
-    ["usuario", "usu??rio"],
-    ["usuarios", "usu??rios"],
-    ["responsavel", "respons??vel"],
-    ["prejuizo", "preju??zo"],
-    ["apos", "ap??s"],
-    ["ate", "at??"],
-    ["esta", "est??"],
-    ["ta", "t??"],
-    ["so", "s??"],
-    ["mao", "m??o"],
-    ["tambem", "tamb??m"],
-    ["valida", "v??lida"],
-    ["possivel", "poss??vel"],
-    ["saida", "sa??da"],
-  ].reduce((text, [plain, accented]) => replacePortugueseWord(text, plain, accented), mojibakeFixed);
+  let text = value;
+  for (const [broken, fixed] of mojibakeReplacements) {
+    text = text.split(broken).join(fixed);
+  }
+
+  const portugueseWords: Array<[string, string]> = [
+    ["voce", "você"],
+    ["nao", "não"],
+    ["atencao", "atenção"],
+    ["observacao", "observação"],
+    ["narracao", "narração"],
+    ["comentario", "comentário"],
+    ["analise", "análise"],
+    ["numero", "número"],
+    ["padrao", "padrão"],
+    ["gestao", "gestão"],
+    ["confianca", "confiança"],
+    ["direcao", "direção"],
+    ["protecao", "proteção"],
+    ["confirmacao", "confirmação"],
+    ["proxima", "próxima"],
+    ["forcar", "forçar"],
+    ["modulos", "módulos"],
+    ["metricas", "métricas"],
+    ["estatisticas", "estatísticas"],
+    ["usuario", "usuário"],
+    ["usuarios", "usuários"],
+    ["responsavel", "responsável"],
+    ["prejuizo", "prejuízo"],
+    ["apos", "após"],
+    ["ate", "até"],
+    ["esta", "está"],
+    ["ta", "tá"],
+    ["so", "só"],
+    ["mao", "mão"],
+    ["tambem", "também"],
+    ["valida", "válida"],
+    ["possivel", "possível"],
+    ["saida", "saída"],
+  ];
+
+  for (const [plain, accented] of portugueseWords) {
+    text = replacePortugueseWord(text, plain, accented);
+  }
+  return text;
 }
 
 function replacePortugueseWord(text: string, plain: string, accented: string) {
@@ -1570,7 +1590,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
           error:
             "Sess??o expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
         },
-        auth.status,
+        auth.ok ? 401 : auth.status,
       );
     }
     return createMercadoPagoCheckout(request, env, client, plan);
@@ -2653,8 +2673,8 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         targetUserId: "site-content",
         targetEmail: "global",
         action: "UPDATE_USER",
-        beforeJson: before,
-        afterJson: liveSiteContentSettings,
+        beforeJson: { ...before },
+        afterJson: { ...liveSiteContentSettings },
         reason: "Conteudo visual do site atualizado.",
       });
       const saveStatus = await saveLiveState(env);
@@ -3093,10 +3113,11 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
-    const sourceRounds = Array.isArray(body.rounds)
+    const dashboardBody = readRecord(body.dashboard);
+    const sourceRounds: unknown[] = Array.isArray(body.rounds)
       ? body.rounds
-      : Array.isArray(readRecord(body.dashboard).rounds)
-        ? readRecord(body.dashboard).rounds
+      : Array.isArray(dashboardBody.rounds)
+        ? dashboardBody.rounds
         : [];
     const incomingRounds = normalizeRounds(sourceRounds, MAX_SERVER_ROUND_HISTORY);
     if (incomingRounds.length) {
@@ -4770,6 +4791,7 @@ function deriveEngineDailyRowsFromHourly(
       };
       byDate.set(row.date, daily);
     }
+    if (!daily) continue;
 
     daily.greens += row.greens;
     daily.reds += row.reds;
@@ -6025,7 +6047,7 @@ function combineEngineCalendarAggregateRows(rows: EngineCalendarAggregateStat[])
   return [...byPeriod.values()];
 }
 
-function normalizeCalendarEngineSelection(value: CalendarEngineKey[] | "todos" | undefined) {
+function normalizeCalendarEngineSelection(value: CalendarEngineKey[] | "todos" | undefined): CalendarEngineKey[] {
   if (!value || value === "todos") return [...CALENDAR_SIGNAL_ENGINE_KEYS];
   const selected = value
     .map(normalizeCalendarEngineKey)
@@ -6458,7 +6480,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       const normalizedIncoming = existing && !existingById
         ? { ...incoming, id: existing.id, createdAt: existing.createdAt }
         : incoming;
-      const channel = normalizeServerNotificationChannel(normalizedIncoming, userId, existing);
+      const channel = normalizeServerNotificationChannel(normalizedIncoming, userId, existing ?? undefined);
       if (!channel) return json({ error: "Canal invalido." }, 400);
       const duplicateIds = validatorChannelRelatedIds(liveValidatorChannels, channel)
         .filter((channelId) => channelId !== channel.id);
@@ -6572,7 +6594,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
 async function findValidatorChannelForUser(env: unknown, userId: string, channelId: string) {
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedChannelId = readString(channelId);
+  const normalizedChannelId = String(channelId || "").trim();
   if (!normalizedUserId || !normalizedChannelId) return null;
 
   const cached = liveValidatorChannels.find(
@@ -6939,7 +6961,9 @@ function normalizeValidatorResult(value: unknown): ValidatorResult | null {
     bestGreenStreak: Math.max(0, Math.floor(Number(record.bestGreenStreak) || 0)),
     bestLossStreak: Math.max(0, Math.floor(Number(record.bestLossStreak) || 0)),
     lastPatternResult: readString(record, "lastPatternResult") || "Sem validacao",
-    details: Array.isArray(record.details) ? record.details.map(readRecord) as ValidatorResult["details"] : [],
+    details: Array.isArray(record.details)
+      ? (record.details.map(readRecord) as unknown as ValidatorResult["details"])
+      : [],
     entry: normalizeRoundResult(record.entry),
     pulledSide: normalizeRoundResult(record.pulledSide),
     risk: ["baixo", "medio", "alto"].includes(readString(record, "risk"))
@@ -7064,8 +7088,8 @@ function validatorChannelUniqueKey(channel: Pick<ValidatorNotificationChannel, "
   const userId = normalizeValidatorUserId(channel.userId);
   const chatId = normalizeValidatorChannelCode(channel.chatId);
   if (chatId) return `${userId}:chat:${chatId}`;
-  const name = readString(channel.name).trim().toLowerCase();
-  return `${userId}:name:${name || readString(channel.id)}`;
+  const name = String(channel.name || "").trim().toLowerCase();
+  return `${userId}:name:${name || String(channel.id || "").trim()}`;
 }
 
 function normalizeValidatorChannelCode(value: unknown) {
@@ -7154,7 +7178,7 @@ async function fetchStoredActiveValidatorPatterns(env: unknown) {
 async function fetchStoredValidatorChannel(env: unknown, userId: string, channelId: string) {
   if (!getSupabasePersistenceConfig(env)) return null;
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedChannelId = readString(channelId);
+  const normalizedChannelId = String(channelId || "").trim();
   if (!normalizedUserId || !normalizedChannelId) return null;
 
   const [rows, stateChannel, deletedState] = await Promise.all([
@@ -7255,7 +7279,7 @@ async function deleteValidatorChannelRow(env: unknown, userId: string, channelId
 async function deleteValidatorChannelRows(env: unknown, userId: string, channelIds: string[]) {
   if (!getSupabasePersistenceConfig(env)) return false;
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const ids = [...new Set(channelIds.map(readString).filter(Boolean))];
+  const ids = [...new Set(channelIds.map((channelId) => String(channelId || "").trim()).filter(Boolean))];
   if (!normalizedUserId || !ids.length) return false;
   const results = await Promise.allSettled(
     ids.map(async (channelId) => {
@@ -7282,7 +7306,7 @@ async function persistValidatorChannelState(env: unknown, channel: ValidatorNoti
 
 async function deleteValidatorChannelState(env: unknown, userId: string, channelId: string) {
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedChannelId = readString(channelId);
+  const normalizedChannelId = String(channelId || "").trim();
   if (!normalizedUserId || !normalizedChannelId) return false;
   await deleteSupabaseRows(
     env,
@@ -7315,7 +7339,7 @@ async function fetchValidatorChannelStateChannels(env: unknown, userId?: string)
 async function fetchValidatorChannelStateChannel(env: unknown, userId: string, channelId: string) {
   if (!getSupabasePersistenceConfig(env)) return null;
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedChannelId = readString(channelId);
+  const normalizedChannelId = String(channelId || "").trim();
   if (!normalizedUserId || !normalizedChannelId) return null;
   const deletedState = await loadDurableLiveStateById(
     env,
@@ -7346,11 +7370,11 @@ async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
 }
 
 function validatorChannelStateId(userId: string, channelId: string) {
-  return `${VALIDATOR_CHANNEL_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
+  return `${VALIDATOR_CHANNEL_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${String(channelId || "").trim()}`;
 }
 
 function validatorChannelDeletedStateId(userId: string, channelId: string) {
-  return `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
+  return `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${String(channelId || "").trim()}`;
 }
 
 function encodePostgrestLikeValue(value: string) {
@@ -7614,7 +7638,7 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     const results = await runLimitedValidatorTelegramSends(entrySendTasks);
     changed = results.some(Boolean) || changed;
   }
-  const analysisChanged = await sendValidatorAnalyzingMessages(latestRound, entryChannelKeys, options);
+  const analysisChanged = await sendValidatorAnalyzingMessages(env, latestRound, entryChannelKeys, options);
   changed = changed || analysisChanged;
 
   return changed;
@@ -7761,6 +7785,7 @@ function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel
 }
 
 async function sendValidatorAnalyzingMessages(
+  env: unknown,
   latestRound: Round,
   entryChannelKeys: Set<string>,
   options: ValidatorMonitorOptions,
@@ -7945,7 +7970,7 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
 }
 
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
-  const updatedAt = Date.parse(readString(dashboard, "updatedAt"));
+  const updatedAt = Date.parse(readString(dashboard as unknown as Record<string, unknown>, "updatedAt"));
   if (!Number.isFinite(updatedAt)) return !Array.isArray(dashboard.rounds) || dashboard.rounds.length === 0;
   return Date.now() - updatedAt > LIVE_FEED_STALE_MS;
 }
@@ -8087,7 +8112,7 @@ function normalizeAdaptiveRoundRows(value: unknown[] | undefined) {
         captured_at: capturedAt,
       };
     })
-    .filter((row): row is Record<string, unknown> => Boolean(row));
+    .filter(Boolean) as Record<string, unknown>[];
 }
 
 function normalizeAdaptivePatternRows(value: unknown[] | undefined) {
@@ -8129,7 +8154,7 @@ function normalizeAdaptivePatternRows(value: unknown[] | undefined) {
         updated_at: new Date().toISOString(),
       };
     })
-    .filter((row): row is Record<string, unknown> => Boolean(row));
+    .filter(Boolean) as Record<string, unknown>[];
 }
 
 function normalizeAdaptiveDecisionRow(
@@ -8296,7 +8321,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     ? resolveSignalImmediatelyFromRound(
         currentDashboard.currentSignal,
         normalizedSignal,
-        incomingLatestRound,
+        incomingLatestRound ?? undefined,
         receivedNewRound,
       )
     : currentDashboard.currentSignal;
@@ -8305,7 +8330,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     const heldResolution = resolveSignalImmediatelyFromRound(
       lateSignalHold,
       normalizedSignal,
-      incomingLatestRound,
+      incomingLatestRound ?? undefined,
       receivedNewRound,
     );
     if (heldResolution.status === "g1") {
@@ -8363,7 +8388,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     : trackServerNeuralEntryLifecycle(
         nextDashboard,
         currentDashboard,
-        incomingLatestRound,
+        incomingLatestRound ?? undefined,
         receivedNewRound,
       );
   const dashboardWithVisibleNeuralSignal = hasIncomingNeuralLifecycle
@@ -8483,7 +8508,7 @@ function exposeServerNeuralEntryAsCurrentSignal(dashboard: LiveDashboardData): L
   const snapshot = state.readingSnapshot ?? dashboard.neuralReading;
   const protection = String(snapshot?.validade || currentSignal?.protection || "G1");
   const strength = clampPercent(
-    snapshot?.assertividade ?? snapshot?.confidence ?? currentSignal?.strength ?? 0,
+    snapshot?.assertividade ?? readRecord(snapshot).confidence ?? currentSignal?.strength ?? 0,
   );
 
   return {
@@ -9484,7 +9509,7 @@ function normalizeSignal(
       ),
       lastResult: {
         ...incomingLastResult,
-        side,
+        side: side as SignalSide,
         protection: resolvedProtection,
       },
     };
@@ -9975,13 +10000,13 @@ function normalizeServerModeList(value: unknown) {
   return ACTIVE_ENTRY_MODES.filter((mode) => selected.has(mode));
 }
 
-function normalizeServerCountedResults(value: unknown) {
+function normalizeServerCountedResults(value: unknown): Record<string, true> {
   const record = readRecord(value);
   return Object.fromEntries(
     Object.keys(record)
       .filter(Boolean)
       .map((key) => [key, true]),
-  );
+  ) as Record<string, true>;
 }
 
 function sameServerModeList(left: ActiveEntryMode[] | undefined, right: ActiveEntryMode[]) {
@@ -9996,10 +10021,10 @@ function pruneServerSignalModes(signalModes: Record<string, ActiveEntryMode[]>) 
   return Object.fromEntries(keys.slice(-220).map((key) => [key, signalModes[key]]));
 }
 
-function pruneServerCountedResults(countedResults: Record<string, true>) {
+function pruneServerCountedResults(countedResults: Record<string, true>): Record<string, true> {
   const keys = Object.keys(countedResults);
   if (keys.length <= 300) return countedResults;
-  return Object.fromEntries(keys.slice(-220).map((key) => [key, true]));
+  return Object.fromEntries(keys.slice(-220).map((key) => [key, true])) as Record<string, true>;
 }
 
 function serverFirstDefined(...values: unknown[]) {
@@ -10048,7 +10073,7 @@ function normalizeTieAlert(value: unknown, fallback: DashboardData["currentTieAl
   };
 }
 
-function normalizeRounds(rounds: unknown[], limit = 30) {
+function normalizeRounds(rounds: unknown[], limit = 30): Round[] {
   return rounds
     .map((round, index) => {
       const item = readRecord(round);
@@ -10062,9 +10087,9 @@ function normalizeRounds(rounds: unknown[], limit = 30) {
         tieMultiplier: readNullableNumber(item.tieMultiplier ?? item.tie_multiplier ?? item.multiplier),
         time: String(item.time || item.createdAt || "--:--"),
         recordedAt: normalizeRoundRecordedAt(item),
-      };
+      } as Round;
     })
-    .filter((round): round is DashboardData["rounds"][number] => Boolean(round))
+    .filter((round): round is Round => Boolean(round))
     .sort(compareRoundHistory)
     .slice(-Math.max(1, limit));
 }
@@ -10280,7 +10305,7 @@ function normalizeSignalStatus(
   return "waiting";
 }
 
-function normalizeRoundResult(value: unknown) {
+function normalizeRoundResult(value: unknown): Round["result"] | null {
   const text = String(value || "")
     .trim()
     .toUpperCase();
@@ -12580,11 +12605,12 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
     (user) =>
       readString(user, "plan") === "trial" || readString(user, "subscriptionStatus") === "trial",
   );
-  const currentSignal = readRecord((liveDashboardData as Record<string, unknown>).currentSignal);
+  const dashboardRecord = liveDashboardData as unknown as Record<string, unknown>;
+  const currentSignal = readRecord(dashboardRecord.currentSignal);
   const side =
     readString(currentSignal, "side") ||
-    readString((liveDashboardData as Record<string, unknown>).entrySide) ||
-    readString((liveDashboardData as Record<string, unknown>).recommendedSide) ||
+    readString(dashboardRecord, "entrySide") ||
+    readString(dashboardRecord, "recommendedSide") ||
     "BANKER";
 
   return {
@@ -12597,7 +12623,7 @@ function buildAdminPanelOverview(users = syncAdminManagedUsers()) {
     onlineNow: countOnlineClientUsers(now),
     lastSignal: side.toUpperCase(),
     lastSignalAt: relativeTimeFromIso(
-      readString(liveDashboardData as Record<string, unknown>, "updatedAt"),
+      readString(dashboardRecord, "updatedAt"),
     ),
   };
 }

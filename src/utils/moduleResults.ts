@@ -11,6 +11,7 @@ import type {
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 
 export function calculateMainResult(scoreboard: MainScoreboard): MainResult {
+  const scoreboardRecord = scoreboard as unknown as Record<string, unknown>;
   const greenSemGale = safeNumber(scoreboard.greens);
   const greenG1 = safeNumber(scoreboard.greensG1);
   const reds = safeNumber(scoreboard.reds);
@@ -25,6 +26,8 @@ export function calculateMainResult(scoreboard: MainScoreboard): MainResult {
     assertiveness: calculateAssertiveness(greens, reds),
     sequencePositive: safeNumber(scoreboard.sequencePositive),
     sequenceNegative: safeNumber(scoreboard.sequenceNegative),
+    maxSequencePositive: safeNumber(scoreboardRecord.maxSequencePositive ?? scoreboard.sequencePositive),
+    maxSequenceNegative: safeNumber(scoreboardRecord.maxSequenceNegative ?? scoreboard.sequenceNegative),
     breakdown: `SG ${greenSemGale} / G1 ${greenG1} / RED ${reds}`,
   };
 }
