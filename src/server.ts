@@ -16295,10 +16295,30 @@ async function forwardTelegramEngineRequest(request: Request, url: URL, env: unk
     headers: telegramEngineHeaders(config.secret, userId, Boolean(body)),
     body,
   });
-  return new Response(response.body, {
+  let channelsCount: number | undefined;
+  let passthroughBody: BodyInit | null = response.body;
+  const contentType = response.headers.get("content-type") || "application/json; charset=utf-8";
+  if (url.pathname === "/validator/channels" && request.method === "GET") {
+    const text = await response.clone().text();
+    passthroughBody = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed?.channels)) channelsCount = parsed.channels.length;
+    } catch {
+      // ignore
+    }
+  }
+  console.log("[telegram-engine] proxy", {
+    path: url.pathname,
+    method: request.method,
+    validatorUserId: userId,
+    engineStatus: response.status,
+    ...(channelsCount !== undefined ? { channelsCount } : {}),
+  });
+  return new Response(passthroughBody, {
     status: response.status,
     headers: {
-      "content-type": response.headers.get("content-type") || "application/json; charset=utf-8",
+      "content-type": contentType,
       "cache-control": "no-store",
     },
   });
@@ -16350,6 +16370,7 @@ function telegramEngineHeaders(secret: string, userId: string, withJson = false)
   return {
     Accept: "application/json",
     Authorization: `Bearer ${secret}`,
+    "User-Agent": "sniperbo-site-proxy",
     ...(userId ? { "X-Validator-User-Id": userId } : {}),
     ...(withJson ? { "Content-Type": "application/json" } : {}),
   };
