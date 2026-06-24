@@ -1697,6 +1697,7 @@ def main() -> int:
                         direct_signal.get("entry"),
                         direct_signal.get("roundId"),
                     )
+                    direct_telegram_sent_keys.add(direct_key)
                     continue
                 try:
                     direct_ok, direct_status, direct_ms, direct_reason = publish_direct_telegram_signal(
