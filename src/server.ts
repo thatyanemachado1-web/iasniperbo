@@ -6439,7 +6439,10 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
         : null;
       const userChannels = mergeValidatorChannelList(
         durableChannelsEnabled
-          ? storedUserChannels ?? []
+          ? [
+              ...(storedUserChannels ?? []),
+              ...liveValidatorChannels.filter((channel) => channel.userId === userId),
+            ]
           : liveValidatorChannels.filter((channel) => channel.userId === userId),
       );
       liveValidatorChannels = [
@@ -7370,7 +7373,7 @@ async function fetchStoredActiveValidatorChannels(env: unknown) {
   const storedChannels = rows
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  return mergeValidatorChannelList(storedChannels, stateChannels)
+  return mergeValidatorChannelList(storedChannels, stateChannels, liveValidatorChannels)
     .filter((channel) => channel.isActive && !isValidatorChannelDeleted(channel, deletedRefs));
 }
 
@@ -7402,9 +7405,11 @@ async function deleteValidatorPatternRow(env: unknown, userId: string, patternId
 async function persistValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
   if (!getSupabasePersistenceConfig(env)) return false;
   await clearValidatorChannelDeletedState(env, channel);
-  const dedicated = await persistSupabaseRow(env, VALIDATOR_CHANNELS_TABLE, validatorChannelToRow(channel), "id");
-  if (dedicated) return true;
-  return persistValidatorChannelState(env, channel);
+  const [dedicated, state] = await Promise.all([
+    persistSupabaseRow(env, VALIDATOR_CHANNELS_TABLE, validatorChannelToRow(channel), "id"),
+    persistValidatorChannelState(env, channel),
+  ]);
+  return dedicated || state;
 }
 
 async function deleteValidatorChannelRow(env: unknown, userId: string, channelId: string) {
