@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "node --stack-size=16000 --max-old-space-size=8192 ./node_modules/vite/bin/vite.js build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "ports:audit": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sniper_port_guard.ps1 -NoKill",
@@ -88,9 +88,14 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "prettier": "^3.7.3",
+    "rollup": "4.62.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "rollup": "4.62.0",
     "vite": "7.3.2"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "^4.0.0",
+    "@tailwindcss/oxide-linux-x64-gnu": "^4.0.0",
+    "lightningcss-linux-x64-gnu": "^1.0.0"
   }
 }
