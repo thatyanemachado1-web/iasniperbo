@@ -6447,13 +6447,13 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       );
       const channel = normalizeServerNotificationChannel(incoming, userId, existing);
       if (!channel) return json({ error: "Canal invalido." }, 400);
+      liveValidatorChannels = upsertValidatorChannel(channel);
       const persisted = await persistValidatorChannel(env, channel);
-      if (getSupabasePersistenceConfig(env) && !persisted) {
+      const saveStatus = await saveLiveState(env);
+      if (getSupabasePersistenceConfig(env) && !persisted && !saveStatus.durable && !saveStatus.cache) {
         return json({ error: "Falha ao salvar canal no servidor." }, 502);
       }
-      liveValidatorChannels = upsertValidatorChannel(channel);
-      await saveLiveState(env);
-      return json({ channel: publicValidatorChannel(channel) }, 201);
+      return json({ channel: publicValidatorChannel(channel), persisted }, 201);
     }
   }
 
@@ -14071,13 +14071,12 @@ function stateSavedAtMs(state: Record<string, unknown>) {
 }
 
 function buildLiveStateSnapshot(env?: unknown) {
-  const validatorUsesDedicatedTables = Boolean(getSupabasePersistenceConfig(env));
   return {
     dashboard: liveDashboardData,
     validatorRoundHistory: liveValidatorRoundHistory.slice(-MAX_MONITOR_ROUND_HISTORY),
-    validatorPatterns: validatorUsesDedicatedTables ? [] : liveValidatorPatterns,
-    validatorChannels: validatorUsesDedicatedTables ? [] : liveValidatorChannels,
-    validatorNotifications: validatorUsesDedicatedTables ? [] : liveValidatorNotifications.slice(0, 1000),
+    validatorPatterns: liveValidatorPatterns,
+    validatorChannels: liveValidatorChannels,
+    validatorNotifications: liveValidatorNotifications.slice(0, 1000),
     neuralCalendarVersion: NEURAL_CALENDAR_AGGREGATE_VERSION,
     neuralCalendarDailyStats: liveNeuralCalendarDailyStats,
     neuralCalendarHourlyStats: liveNeuralCalendarHourlyStats,
