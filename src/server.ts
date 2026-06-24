@@ -6453,7 +6453,15 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       if (getSupabasePersistenceConfig(env) && !persisted && !saveStatus.durable && !saveStatus.cache) {
         console.warn("Canal do Validador salvo apenas em memoria; armazenamento duravel indisponivel.");
       }
-      return json({ channel: publicValidatorChannel(channel), persisted }, 201);
+      return json({
+        channel: publicValidatorChannel(channel),
+        persisted,
+        storage: {
+          dedicated: persisted,
+          durable: saveStatus.durable,
+          cache: saveStatus.cache,
+        },
+      }, 201);
     }
   }
 
@@ -6937,8 +6945,8 @@ async function hydrateValidatorUserCache(env: unknown, userId: string) {
     fetchStoredValidatorPatterns(env, userId),
     fetchStoredValidatorChannels(env, userId),
   ]);
-  const patterns = storedPatterns.length ? storedPatterns : legacyPatterns;
-  const channels = storedChannels.length ? storedChannels : legacyChannels;
+  const patterns = mergeValidatorEntityList(storedPatterns, legacyPatterns);
+  const channels = mergeValidatorEntityList(storedChannels, legacyChannels);
 
   if (!storedPatterns.length && legacyPatterns.length) {
     void Promise.all(legacyPatterns.map((pattern) => persistValidatorPattern(env, pattern)));
@@ -6955,6 +6963,31 @@ async function hydrateValidatorUserCache(env: unknown, userId: string) {
     ...channels,
     ...liveValidatorChannels.filter((channel) => channel.userId !== userId),
   ].slice(0, 1000);
+}
+
+function mergeValidatorEntityList<T extends { id: string }>(stored: T[], legacy: T[]) {
+  const byId = new Map<string, T>();
+  for (const item of [...legacy, ...stored]) {
+    if (!item.id) continue;
+    const existing = byId.get(item.id);
+    if (!existing) {
+      byId.set(item.id, item);
+      continue;
+    }
+
+    const itemIsNewer = stateEntityUpdatedAtMs(item as Record<string, unknown>) >=
+      stateEntityUpdatedAtMs(existing as Record<string, unknown>);
+    const merged = itemIsNewer
+      ? mergeStateEntityRecord(existing as Record<string, unknown>, item as Record<string, unknown>)
+      : mergeStateEntityRecord(item as Record<string, unknown>, existing as Record<string, unknown>);
+    byId.set(item.id, merged as T);
+  }
+
+  return [...byId.values()].sort(
+    (left, right) =>
+      stateEntityUpdatedAtMs(right as Record<string, unknown>) -
+      stateEntityUpdatedAtMs(left as Record<string, unknown>),
+  );
 }
 
 async function refreshValidatorMonitorCache(env: unknown) {
