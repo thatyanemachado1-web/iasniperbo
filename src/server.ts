@@ -420,7 +420,9 @@ type ValidatorTelegramModuleKey =
   | "validator";
 type ValidatorTelegramModuleConfig = {
   enabled: boolean;
+  entryType: "AUTO" | "BANKER" | "PLAYER" | "TIE";
   galeLimit: number;
+  coverTie: boolean;
   tieCoverage: number;
   cooldownSeconds: number;
   template: string;
@@ -6338,7 +6340,8 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     url.pathname.startsWith("/validator/channels/") ||
     url.pathname === "/validator/channels/test";
   const isLiveHitRoute = url.pathname === "/validator/live-hit/send";
-  if (!isPatternsRoute && !isChannelsRoute && !isLiveHitRoute) return null;
+  const isNotificationsRoute = url.pathname === "/validator/notifications";
+  if (!isPatternsRoute && !isChannelsRoute && !isLiveHitRoute && !isNotificationsRoute) return null;
 
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
@@ -6348,6 +6351,23 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     "carregar dados do Validador",
     undefined,
   );
+
+  if (request.method === "GET" && isNotificationsRoute) {
+    const storedNotifications = getSupabasePersistenceConfig(env)
+      ? await withTimeout(
+          fetchStoredRecentValidatorNotifications(env),
+          LIVE_STATE_IO_TIMEOUT_MS,
+          "carregar notificacoes do Validador",
+          [] as Array<Record<string, unknown>>,
+        )
+      : [];
+    const notifications = mergeValidatorNotifications(storedNotifications, liveValidatorNotifications)
+      .filter((notification) => normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id")) === userId)
+      .sort((a, b) => validatorNotificationTimeMs(b) - validatorNotificationTimeMs(a))
+      .slice(0, 50)
+      .map(publicValidatorNotification);
+    return json({ notifications });
+  }
 
   if (request.method === "POST" && isLiveHitRoute) {
     const body = readRecord(await request.json().catch(() => ({})));
@@ -7102,7 +7122,11 @@ function normalizeValidatorChannelSignalModules(value: unknown) {
       const hasEnabled = Object.prototype.hasOwnProperty.call(raw, "enabled");
       acc[key] = {
         enabled: hasEnabled ? readBooleanField(raw, "enabled") : defaults.enabled,
+        entryType: normalizeValidatorModuleEntryType(raw.entryType, defaults.entryType),
         galeLimit: clampValidatorModuleNumber(raw.galeLimit, defaults.galeLimit, 0, 4),
+        coverTie: Object.prototype.hasOwnProperty.call(raw, "coverTie")
+          ? readBooleanField(raw, "coverTie")
+          : defaults.coverTie,
         tieCoverage: clampValidatorModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
         cooldownSeconds: clampValidatorModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
         template: readString(raw, "template") || defaults.template,
@@ -7116,7 +7140,9 @@ function normalizeValidatorChannelSignalModules(value: unknown) {
 function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
   return {
     enabled: key === "validator",
+    entryType: "AUTO",
     galeLimit: key === "ties_only" ? 0 : 1,
+    coverTie: key === "ties_only",
     tieCoverage: key === "ties_only" ? 4 : 1,
     cooldownSeconds: key === "validator" ? 0 : 2,
     template: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES[key],
@@ -7157,6 +7183,14 @@ function clampValidatorModuleNumber(value: unknown, fallback: number, min: numbe
   const number = Math.floor(Number(value));
   if (!Number.isFinite(number)) return fallback;
   return Math.max(min, Math.min(max, number));
+}
+
+function normalizeValidatorModuleEntryType(value: unknown, fallback: ValidatorTelegramModuleConfig["entryType"]) {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "AUTO" || text === "BANKER" || text === "PLAYER" || text === "TIE") {
+    return text as ValidatorTelegramModuleConfig["entryType"];
+  }
+  return fallback;
 }
 
 function normalizeServerPatternTokens(value: unknown): ValidatorPatternToken[] {
@@ -7950,8 +7984,47 @@ function validatorNotificationFromRow(row: Record<string, unknown>) {
     roundId: Math.floor(Number(row.round_id) || 0),
     status: readString(row, "status"),
     error: readString(row, "error"),
+    payloadJson: readRecord(row.payload_json || row.payloadJson),
     sentAt: readString(row, "sent_at"),
     updatedAt: readString(row, "updated_at"),
+  };
+}
+
+function mergeValidatorNotifications(
+  primary: Array<Record<string, unknown>>,
+  secondary: Array<Record<string, unknown>>,
+) {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const notification of [...secondary, ...primary].map(readRecord)) {
+    const id = readString(notification, "id");
+    if (!id) continue;
+    const existing = byId.get(id);
+    if (!existing || validatorNotificationTimeMs(notification) >= validatorNotificationTimeMs(existing)) {
+      byId.set(id, notification);
+    }
+  }
+  return [...byId.values()];
+}
+
+function validatorNotificationTimeMs(notification: Record<string, unknown>) {
+  const sentAt = readString(notification, "sentAt") || readString(notification, "sent_at") || readString(notification, "updatedAt");
+  const time = Date.parse(sentAt);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function publicValidatorNotification(notification: Record<string, unknown>) {
+  const payloadJson = readRecord(notification.payloadJson || notification.payload_json);
+  return {
+    id: readString(notification, "id"),
+    type: readString(notification, "type") || "entry",
+    userId: normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id")),
+    channelId: readString(notification, "channelId") || readString(notification, "channel_id"),
+    roundId: Math.floor(Number(notification.roundId ?? notification.round_id) || 0),
+    status: readString(notification, "status"),
+    error: readString(notification, "error"),
+    payloadJson,
+    sentAt: readString(notification, "sentAt") || readString(notification, "sent_at"),
+    updatedAt: readString(notification, "updatedAt") || readString(notification, "updated_at"),
   };
 }
 
@@ -8102,6 +8175,7 @@ async function sendValidatorEntryTelegramNotification(
   logValidatorTelegramLatency(pattern, channel, roundId, result.ok ? "sent" : "error", latency);
   const notification = {
     id: notificationKey,
+    type: "entry",
     userId: pattern.userId,
     patternId: pattern.id,
     channelId: channel.id,
@@ -8109,6 +8183,10 @@ async function sendValidatorEntryTelegramNotification(
     status: result.ok ? "sent" : "error",
     error: result.ok ? "" : result.error,
     payloadJson: {
+      moduleKey: "validator",
+      entry: pattern.pulledSide ? formatServerTelegramSide(pattern.pulledSide) : formatServerTelegramSide(validatorEntrySide(pattern.entryType) || "B"),
+      protection: formatValidatorModuleGale(pattern.galeLimit),
+      result: "Aguardando resultado",
       latency,
       telegramMessageId: result.ok ? result.messageId : null,
       targetExceeded: latency.totalMs > VALIDATOR_TELEGRAM_TARGET_MS,
@@ -8179,6 +8257,7 @@ function buildAiPatternsModuleSignal(channel: ValidatorNotificationChannel, late
   });
   const suggestion = suggestions.find((item) => (
     item.pulledSide &&
+    validatorModuleAllowsRoundEntry(moduleConfig, item.pulledSide) &&
     matchesServerValidatorPattern(liveValidatorRoundHistory.slice(-item.pattern.length), item.pattern)
   ));
   if (!suggestion || !suggestion.pulledSide) return null;
@@ -8205,6 +8284,9 @@ function buildAiPatternsModuleSignal(channel: ValidatorNotificationChannel, late
     {
       pattern: suggestion.pattern,
       entry: suggestion.pulledSide,
+      entryText: formatServerTelegramSide(suggestion.pulledSide),
+      protection: formatValidatorModuleGale(moduleConfig.galeLimit),
+      result: "Aguardando resultado",
       accuracy: suggestion.validation.accuracy ?? null,
       status: suggestion.status,
     },
@@ -8215,11 +8297,12 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
   const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
   const reading = state?.readingSnapshot ?? liveDashboardData.neuralReading ?? null;
   if (!reading || (reading.mode !== "ACTIVE" && !state)) return null;
+  const moduleConfig = validatorChannelModuleConfig(channel, "paying_numbers");
   const expectedSide = state?.expectedSide ?? readServerNeuralSide(reading.direcao ?? reading.origem);
   if (!expectedSide) return null;
+  if (!validatorModuleAllowsSignalEntry(moduleConfig, expectedSide)) return null;
   const key = state?.key || serverNeuralEntryKey(reading);
   if (!key) return null;
-  const moduleConfig = validatorChannelModuleConfig(channel, "paying_numbers");
   const status = String(reading.paganteStatus || (state?.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"));
   return createValidatorModuleSignal(
     channel,
@@ -8245,6 +8328,9 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
       key,
       numero: reading.numero ?? null,
       expectedSide,
+      entryText: formatServerSignalSide(expectedSide),
+      protection: formatValidatorModuleGale(moduleConfig.galeLimit),
+      result: "Aguardando resultado",
       status,
     },
   );
@@ -8255,6 +8341,8 @@ function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, lates
   if (!hasRecordFields(alert)) return null;
   const side = normalizeSignalSide(alert.surf_prediction_side || alert.surf_side || alert.side || alert.entry);
   if (!isServerEntrySide(side)) return null;
+  const moduleConfig = validatorChannelModuleConfig(channel, "surf_alert");
+  if (!validatorModuleAllowsSignalEntry(moduleConfig, side)) return null;
   const risk = clampPercent(alert.surf_break_risk ?? alert.surf_risk ?? alert.risk ?? 0);
   const confidence = clampPercent(alert.surf_confidence ?? alert.confidence ?? alert.confianca ?? risk);
   const statusText = serverNormalizeText(alert.surf_status || alert.status || alert.phase || alert.surf_phase);
@@ -8267,7 +8355,6 @@ function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, lates
       risk >= 70,
   );
   if (!active) return null;
-  const moduleConfig = validatorChannelModuleConfig(channel, "surf_alert");
   return createValidatorModuleSignal(
     channel,
     "surf_alert",
@@ -8290,6 +8377,9 @@ function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, lates
     },
     {
       side,
+      entryText: formatServerSignalSide(side),
+      protection: formatValidatorModuleGale(moduleConfig.galeLimit),
+      result: "Aguardando resultado",
       risk,
       confidence,
       status: statusText,
@@ -8303,6 +8393,7 @@ function buildTiesOnlyModuleSignal(channel: ValidatorNotificationChannel, latest
   const status = readString(alert, "status");
   if (status !== "active") return null;
   const moduleConfig = validatorChannelModuleConfig(channel, "ties_only");
+  if (!validatorModuleAllowsSignalEntry(moduleConfig, "TIE")) return null;
   const confidence = clampPercent(alert.confidence ?? alert.confianca ?? 0);
   const level = readString(alert, "level") || readString(alert, "nivel") || "ativo";
   return createValidatorModuleSignal(
@@ -8328,6 +8419,9 @@ function buildTiesOnlyModuleSignal(channel: ValidatorNotificationChannel, latest
     {
       level,
       confidence,
+      entryText: "Tie",
+      protection: moduleConfig.coverTie ? `G${moduleConfig.tieCoverage}` : "SG",
+      result: "Aguardando resultado",
       tieCoverage: moduleConfig.tieCoverage,
     },
   );
@@ -8357,6 +8451,9 @@ function createValidatorModuleSignal(
     payloadJson: {
       moduleKey,
       signalKey,
+      entry: variables.entry,
+      protection: variables.gale,
+      result: "Aguardando resultado",
       ...payloadJson,
     },
   };
@@ -8450,6 +8547,24 @@ function formatServerSignalSide(side: CurrentSignalSide | NonNullable<NeuralEntr
   if (side === "PLAYER") return "Player";
   if (side === "TIE") return "Tie";
   return "Aguardando";
+}
+
+function validatorModuleAllowsRoundEntry(
+  moduleConfig: ValidatorTelegramModuleConfig,
+  side: Round["result"],
+) {
+  if (moduleConfig.entryType === "AUTO") return true;
+  if (moduleConfig.entryType === "BANKER") return side === "B";
+  if (moduleConfig.entryType === "PLAYER") return side === "P";
+  return side === "T";
+}
+
+function validatorModuleAllowsSignalEntry(
+  moduleConfig: ValidatorTelegramModuleConfig,
+  side: CurrentSignalSide | NonNullable<NeuralEntryState["expectedSide"]>,
+) {
+  if (moduleConfig.entryType === "AUTO") return true;
+  return moduleConfig.entryType === side;
 }
 
 async function runLimitedValidatorTelegramSends(tasks: Array<() => Promise<boolean>>) {
