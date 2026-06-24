@@ -6370,6 +6370,13 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
+  if (getTelegramEngineConfig(env) && (isChannelsRoute || isNotificationsRoute)) {
+    const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId).catch((error) => {
+      console.warn("Cloudflare Telegram Engine indisponivel.", error);
+      return null;
+    });
+    if (cloudResponse) return cloudResponse;
+  }
   await withTimeout(
     hydrateValidatorUserCache(env, userId),
     LIVE_STATE_IO_TIMEOUT_MS,
@@ -7500,6 +7507,8 @@ async function fetchStoredActiveValidatorPatterns(env: unknown) {
 }
 
 async function fetchStoredValidatorChannel(env: unknown, userId: string, channelId: string) {
+  const cloudChannel = (await fetchCloudValidatorChannels(env, userId)).find((channel) => channel.id === channelId);
+  if (cloudChannel) return cloudChannel;
   if (!getSupabasePersistenceConfig(env)) return null;
   const normalizedUserId = normalizeValidatorUserId(userId);
   const normalizedChannelId = readString(channelId);
@@ -7524,7 +7533,8 @@ async function fetchStoredValidatorChannel(env: unknown, userId: string, channel
 }
 
 async function fetchStoredValidatorChannels(env: unknown, userId: string) {
-  if (!getSupabasePersistenceConfig(env)) return [];
+  const cloudChannels = await fetchCloudValidatorChannels(env, userId);
+  if (!getSupabasePersistenceConfig(env)) return cloudChannels;
   const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
@@ -7537,7 +7547,7 @@ async function fetchStoredValidatorChannels(env: unknown, userId: string) {
   const storedChannels = rows
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  return mergeValidatorChannelList(storedChannels, stateChannels)
+  return mergeValidatorChannelList(cloudChannels, storedChannels, stateChannels)
     .filter((channel) => !isValidatorChannelDeleted(channel, deletedRefs));
 }
 
@@ -7580,7 +7590,8 @@ async function findStoredValidatorChannelRelatedIds(
 }
 
 async function fetchStoredActiveValidatorChannels(env: unknown) {
-  if (!getSupabasePersistenceConfig(env)) return [];
+  const cloudChannels = await fetchCloudValidatorChannels(env);
+  if (!getSupabasePersistenceConfig(env)) return cloudChannels;
   const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
@@ -7593,7 +7604,7 @@ async function fetchStoredActiveValidatorChannels(env: unknown) {
   const storedChannels = rows
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  return mergeValidatorChannelList(storedChannels, stateChannels, liveValidatorChannels)
+  return mergeValidatorChannelList(cloudChannels, storedChannels, stateChannels, liveValidatorChannels)
     .filter((channel) => channel.isActive && !isValidatorChannelDeleted(channel, deletedRefs));
 }
 
@@ -8221,14 +8232,26 @@ async function sendValidatorEntryTelegramNotification(
 ) {
   const roundReceivedAtMs = options.roundReceivedAtMs || matchedAtMs;
   const telegramSendStartedAtMs = Date.now();
-  const result = await sendTelegramMessage({
-    botToken: decodeServerToken(channel.botTokenEncoded),
-    chatId: channel.chatId,
-    message: buildServerValidatorTelegramMessage(pattern, channel),
-    buttonLabel: "Abrir Sniper Bo IA",
-    buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-    allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-  });
+  const message = buildServerValidatorTelegramMessage(pattern, channel);
+  const entrySide = pattern.pulledSide || validatorEntrySide(pattern.entryType) || "B";
+  const result = isCloudValidatorTelegramChannel(channel)
+    ? await sendTelegramEngineSignal(env, {
+        userId: pattern.userId,
+        channelId: channel.id,
+        moduleKey: "validator",
+        signalKey: notificationKey,
+        roundId,
+        entry: entrySide,
+        message,
+      })
+    : await sendTelegramMessage({
+        botToken: decodeServerToken(channel.botTokenEncoded),
+        chatId: channel.chatId,
+        message,
+        buttonLabel: "Abrir Sniper Bo IA",
+        buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+        allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+      });
   const telegramRespondedAtMs = Date.now();
   const latency = {
     roundReceivedAt: new Date(roundReceivedAtMs).toISOString(),
@@ -8593,14 +8616,24 @@ async function sendValidatorModuleTelegramNotification(
   options: ValidatorMonitorOptions,
 ) {
   const telegramSendStartedAtMs = Date.now();
-  const result = await sendTelegramMessage({
-    botToken: decodeServerToken(signal.channel.botTokenEncoded),
-    chatId: signal.channel.chatId,
-    message: signal.message,
-    buttonLabel: "Abrir Sniper Bo IA",
-    buttonUrl: normalizeTelegramButtonUrl(signal.channel.buttonLink),
-    allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-  });
+  const result = isCloudValidatorTelegramChannel(signal.channel)
+    ? await sendTelegramEngineSignal(env, {
+        userId: signal.channel.userId,
+        channelId: signal.channel.id,
+        moduleKey: signal.moduleKey,
+        signalKey: signal.signalKey,
+        roundId: signal.roundId,
+        entry: readString(signal.payloadJson, "expectedSide") || readString(signal.payloadJson, "side") || readString(signal.payloadJson, "entry"),
+        message: signal.message,
+      })
+    : await sendTelegramMessage({
+        botToken: decodeServerToken(signal.channel.botTokenEncoded),
+        chatId: signal.channel.chatId,
+        message: signal.message,
+        buttonLabel: "Abrir Sniper Bo IA",
+        buttonUrl: normalizeTelegramButtonUrl(signal.channel.buttonLink),
+        allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+      });
   const telegramRespondedAtMs = Date.now();
   const latency = {
     roundReceivedAt: options.roundReceivedAtMs ? new Date(options.roundReceivedAtMs).toISOString() : "",
@@ -8755,14 +8788,25 @@ async function sendValidatorTelegramResultNotification(
       ? moduleConfig.tieTemplate
       : moduleConfig.greenTemplate;
   const sentAt = new Date().toISOString();
-  const result = await sendTelegramMessage({
-    botToken: decodeServerToken(channel.botTokenEncoded),
-    chatId: channel.chatId,
-    message: renderValidatorTelegramTemplate(template, variables),
-    buttonLabel: "Abrir Sniper Bo IA",
-    buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-    allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-  });
+  const message = renderValidatorTelegramTemplate(template, variables);
+  const result = isCloudValidatorTelegramChannel(channel)
+    ? await sendTelegramEngineSignal(env, {
+        userId: readString(originalNotification, "userId") || readString(originalNotification, "user_id"),
+        channelId: channel.id,
+        moduleKey,
+        signalKey: resultNotificationKey,
+        roundId: outcome.roundId,
+        entry: readString(payloadJson, "expectedSide") || readString(payloadJson, "side") || readString(payloadJson, "entry"),
+        message,
+      })
+    : await sendTelegramMessage({
+        botToken: decodeServerToken(channel.botTokenEncoded),
+        chatId: channel.chatId,
+        message,
+        buttonLabel: "Abrir Sniper Bo IA",
+        buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+        allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+      });
   const resultNotification = {
     id: resultNotificationKey,
     type: `result:${moduleKey}`,
@@ -9078,7 +9122,68 @@ function findValidatorTelegramChannelForPattern(pattern: SavedValidatorPattern) 
 }
 
 function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel) {
-  return Boolean(channel?.isActive && channel.chatId && decodeServerToken(channel.botTokenEncoded));
+  return Boolean(channel?.isActive && channel.chatId && (isCloudValidatorTelegramChannel(channel) || decodeServerToken(channel.botTokenEncoded)));
+}
+
+function isCloudValidatorTelegramChannel(channel?: ValidatorNotificationChannel | null) {
+  return channel?.botTokenEncoded === "__cloudflare__";
+}
+
+async function sendTelegramEngineSignal(
+  env: unknown,
+  input: {
+    userId: string;
+    channelId: string;
+    moduleKey: ValidatorTelegramModuleKey;
+    signalKey: string;
+    roundId: number;
+    entry: unknown;
+    message: string;
+  },
+) {
+  const config = getTelegramEngineConfig(env);
+  if (!config) return { ok: false, status: 503, error: "Cloudflare Telegram Engine nao configurado." };
+  const response = await fetch(`${config.url}/engine/signal`, {
+    method: "POST",
+    cache: "no-store",
+    headers: telegramEngineHeaders(config.secret, "", true),
+    body: JSON.stringify({
+      userId: normalizeValidatorUserId(input.userId),
+      channelId: input.channelId,
+      moduleKey: input.moduleKey,
+      signalKey: input.signalKey,
+      roundId: input.roundId,
+      entry: normalizeCloudTelegramEntry(input.entry),
+      message: input.message,
+      buttonLabel: "Abrir Sniper Bo IA",
+    }),
+  }).catch((error) => {
+    console.warn("Falha ao chamar Cloudflare Telegram Engine.", error);
+    return null;
+  });
+  if (!response) return { ok: false, status: 502, error: "Cloudflare Telegram Engine indisponivel." };
+  const data = await response.json().catch(() => null) as {
+    sent?: Array<Record<string, unknown>>;
+    blocked?: Array<Record<string, unknown>>;
+    error?: string;
+  } | null;
+  if (!response.ok) {
+    return { ok: false, status: response.status, error: data?.error || `Cloudflare Telegram retornou ${response.status}.` };
+  }
+  const sent = Array.isArray(data?.sent) ? data.sent : [];
+  const match = sent.find((item) => readString(item, "channelId") === input.channelId) || sent[0];
+  if (match) return { ok: true, status: 200, messageId: readString(match, "notificationId") || null };
+  const blocked = Array.isArray(data?.blocked) ? data.blocked : [];
+  const reason = readString(blocked.find((item) => readString(item, "channelId") === input.channelId) || blocked[0], "reason");
+  return { ok: false, status: 409, error: reason || "Cloudflare Telegram nao enviou o sinal." };
+}
+
+function normalizeCloudTelegramEntry(value: unknown) {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "B" || text.includes("BANKER")) return "BANKER";
+  if (text === "P" || text.includes("PLAYER")) return "PLAYER";
+  if (text === "T" || text.includes("TIE")) return "TIE";
+  return "";
 }
 
 async function sendValidatorAnalyzingMessages(
@@ -16121,6 +16226,89 @@ function getSupabasePersistenceConfig(env: unknown) {
 
   if (!url || !key) return null;
   return { url, key };
+}
+
+function getTelegramEngineConfig(env: unknown) {
+  const url = (
+    readServerEnvString(env, "TELEGRAM_ENGINE_URL", "") ||
+    readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL", "")
+  ).replace(/\/+$/, "");
+  const secret =
+    readServerEnvString(env, "TELEGRAM_ENGINE_SECRET", "") ||
+    readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_SECRET", "");
+  if (!url || !secret) return null;
+  return { url, secret };
+}
+
+async function forwardTelegramEngineRequest(request: Request, url: URL, env: unknown, userId: string) {
+  const config = getTelegramEngineConfig(env);
+  if (!config) return null;
+  const body = request.method === "GET" || request.method === "HEAD"
+    ? undefined
+    : await request.clone().text();
+  const response = await fetch(`${config.url}${url.pathname}${url.search}`, {
+    method: request.method,
+    headers: telegramEngineHeaders(config.secret, userId, Boolean(body)),
+    body,
+  });
+  return new Response(response.body, {
+    status: response.status,
+    headers: {
+      "content-type": response.headers.get("content-type") || "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
+}
+
+async function fetchCloudValidatorChannels(env: unknown, userId = "") {
+  const config = getTelegramEngineConfig(env);
+  if (!config) return [];
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const path = normalizedUserId ? "/validator/channels" : "/engine/channels/active";
+  const response = await fetch(`${config.url}${path}`, {
+    cache: "no-store",
+    headers: telegramEngineHeaders(config.secret, normalizedUserId),
+  }).catch(() => null);
+  if (!response?.ok) return [];
+  const data = await response.json().catch(() => null) as { channels?: unknown[] } | null;
+  return Array.isArray(data?.channels)
+    ? data.channels
+        .map((channel) => normalizeCloudValidatorChannel(channel, normalizedUserId))
+        .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel))
+    : [];
+}
+
+function normalizeCloudValidatorChannel(value: unknown, fallbackUserId = "") {
+  const record = readRecord(value);
+  const userId = normalizeValidatorUserId(readString(record, "userId") || fallbackUserId);
+  const id = readString(record, "id");
+  if (!userId || !id) return null;
+  const templates = readRecord(record.templates);
+  return {
+    id,
+    userId,
+    name: readString(record, "name") || "Canal Telegram",
+    botTokenMasked: readString(record, "botTokenMasked"),
+    botTokenEncoded: "__cloudflare__",
+    chatId: readString(record, "chatId"),
+    buttonLink: readString(record, "buttonLink"),
+    isActive: record.isActive !== false,
+    analyzingEnabled: readBooleanField(record, "analyzingEnabled"),
+    analyzingCooldownRounds: Math.max(1, Math.floor(Number(record.analyzingCooldownRounds) || 3)),
+    templates,
+    signalModules: normalizeValidatorChannelSignalModules(record.signalModules || templates.signalModules),
+    createdAt: readString(record, "createdAt") || new Date().toISOString(),
+    updatedAt: readString(record, "updatedAt") || new Date().toISOString(),
+  } as ValidatorNotificationChannel;
+}
+
+function telegramEngineHeaders(secret: string, userId: string, withJson = false) {
+  return {
+    Accept: "application/json",
+    Authorization: `Bearer ${secret}`,
+    ...(userId ? { "X-Validator-User-Id": userId } : {}),
+    ...(withJson ? { "Content-Type": "application/json" } : {}),
+  };
 }
 
 function supabasePersistenceHeaders(key: string) {

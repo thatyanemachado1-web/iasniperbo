@@ -2,6 +2,12 @@
 
 Worker independente para guardar canais Telegram por cliente e disparar sinais sem depender do notebook, Chrome, Lovable runtime ou site aberto.
 
+URL publicada:
+
+```text
+https://sniperbo-telegram-engine.sniperboia.workers.dev
+```
+
 ## O que ele faz
 
 - Salva canais por `userId` em Durable Object.

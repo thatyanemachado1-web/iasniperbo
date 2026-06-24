@@ -234,8 +234,10 @@ export class TelegramEngine {
     if (!moduleKey) return json({ error: "Modulo invalido." }, 400, this.env);
     const entry = normalizeEntry(body.entry);
     const targetUserId = normalizeUserId(body.userId || "");
+    const targetChannelId = String(body.channelId || "").trim();
     const signalKey = String(body.signalKey || body.id || `${moduleKey}:${Date.now()}`);
-    const channels = targetUserId ? await this.channelsForUser(targetUserId) : await this.activeChannels();
+    const channels = (targetUserId ? await this.channelsForUser(targetUserId) : await this.activeChannels())
+      .filter((channel) => !targetChannelId || channel.id === targetChannelId);
     const sent = [];
     const blocked = [];
 
@@ -463,7 +465,7 @@ function publicChannel(channel) {
     userId: channel.userId,
     name: channel.name,
     botTokenMasked: channel.botTokenMasked,
-    botTokenEncoded: "",
+    botTokenEncoded: "__cloudflare__",
     chatId: channel.chatId,
     buttonLink: channel.buttonLink,
     isActive: channel.isActive,

@@ -2,6 +2,8 @@ name = "sniperbo-telegram-engine"
 main = "src/index.js"
 compatibility_date = "2026-06-24"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = false
 
 [vars]
 ALLOWED_ORIGIN = "https://sniperbo.com"
