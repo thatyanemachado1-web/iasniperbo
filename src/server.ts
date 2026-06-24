@@ -1343,49 +1343,60 @@ function cleanLocalAiResponse(value: string) {
 }
 
 function beautifyPortugueseText(value: string) {
-  const mojibakeFixed = value
-    .replaceAll("n????o", "n??o")
-    .replaceAll("N????o", "N??o")
-    .replaceAll("aten????????o", "aten????o")
-    .replaceAll("Aten????????o", "Aten????o")
-    .replaceAll("pain????is", "pain??is")
-    .replaceAll("indispon????vel", "indispon??vel");
+  const mojibakeReplacements: Array<[string, string]> = [
+    ["n????o", "não"],
+    ["N????o", "Não"],
+    ["aten????????o", "atenção"],
+    ["Aten????????o", "Atenção"],
+    ["pain????is", "painéis"],
+    ["indispon????vel", "indisponível"],
+  ];
 
-  return [
-    ["voce", "voc??"],
-    ["nao", "n??o"],
-    ["atencao", "aten????o"],
-    ["observacao", "observa????o"],
-    ["narracao", "narra????o"],
-    ["comentario", "coment??rio"],
-    ["analise", "an??lise"],
-    ["numero", "n??mero"],
-    ["padrao", "padr??o"],
-    ["gestao", "gest??o"],
-    ["confianca", "confian??a"],
-    ["direcao", "dire????o"],
-    ["protecao", "prote????o"],
-    ["confirmacao", "confirma????o"],
-    ["proxima", "pr??xima"],
-    ["forcar", "for??ar"],
-    ["modulos", "m??dulos"],
-    ["metricas", "m??tricas"],
-    ["estatisticas", "estat??sticas"],
-    ["usuario", "usu??rio"],
-    ["usuarios", "usu??rios"],
-    ["responsavel", "respons??vel"],
-    ["prejuizo", "preju??zo"],
-    ["apos", "ap??s"],
-    ["ate", "at??"],
-    ["esta", "est??"],
-    ["ta", "t??"],
-    ["so", "s??"],
-    ["mao", "m??o"],
-    ["tambem", "tamb??m"],
-    ["valida", "v??lida"],
-    ["possivel", "poss??vel"],
-    ["saida", "sa??da"],
-  ].reduce((text, [plain, accented]) => replacePortugueseWord(text, plain, accented), mojibakeFixed);
+  let text = value;
+  for (const [broken, fixed] of mojibakeReplacements) {
+    text = text.split(broken).join(fixed);
+  }
+
+  const portugueseWords: Array<[string, string]> = [
+    ["voce", "você"],
+    ["nao", "não"],
+    ["atencao", "atenção"],
+    ["observacao", "observação"],
+    ["narracao", "narração"],
+    ["comentario", "comentário"],
+    ["analise", "análise"],
+    ["numero", "número"],
+    ["padrao", "padrão"],
+    ["gestao", "gestão"],
+    ["confianca", "confiança"],
+    ["direcao", "direção"],
+    ["protecao", "proteção"],
+    ["confirmacao", "confirmação"],
+    ["proxima", "próxima"],
+    ["forcar", "forçar"],
+    ["modulos", "módulos"],
+    ["metricas", "métricas"],
+    ["estatisticas", "estatísticas"],
+    ["usuario", "usuário"],
+    ["usuarios", "usuários"],
+    ["responsavel", "responsável"],
+    ["prejuizo", "prejuízo"],
+    ["apos", "após"],
+    ["ate", "até"],
+    ["esta", "está"],
+    ["ta", "tá"],
+    ["so", "só"],
+    ["mao", "mão"],
+    ["tambem", "também"],
+    ["valida", "válida"],
+    ["possivel", "possível"],
+    ["saida", "saída"],
+  ];
+
+  for (const [plain, accented] of portugueseWords) {
+    text = replacePortugueseWord(text, plain, accented);
+  }
+  return text;
 }
 
 function replacePortugueseWord(text: string, plain: string, accented: string) {
