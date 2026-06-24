@@ -6428,16 +6428,19 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   if (url.pathname === "/validator/channels") {
     if (request.method === "GET") {
-      const storedUserChannels = getSupabasePersistenceConfig(env)
+      const durableChannelsEnabled = Boolean(getSupabasePersistenceConfig(env));
+      const storedUserChannels = durableChannelsEnabled
         ? await withTimeout(
             fetchStoredValidatorChannels(env, userId),
             LIVE_STATE_IO_TIMEOUT_MS,
             "carregar canais do Validador",
-            null as ValidatorNotificationChannel[] | null,
+            [] as ValidatorNotificationChannel[],
           )
         : null;
       const userChannels = mergeValidatorChannelList(
-        storedUserChannels ?? liveValidatorChannels.filter((channel) => channel.userId === userId),
+        durableChannelsEnabled
+          ? storedUserChannels ?? []
+          : liveValidatorChannels.filter((channel) => channel.userId === userId),
       );
       liveValidatorChannels = [
         ...userChannels,
