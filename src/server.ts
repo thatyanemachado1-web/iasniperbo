@@ -322,6 +322,7 @@ const ENGINE_WEEKLY_STATS_TABLE = "engine_weekly_stats";
 const ENGINE_MONTHLY_STATS_TABLE = "engine_monthly_stats";
 const ENGINE_YEARLY_STATS_TABLE = "engine_yearly_stats";
 const ENGINE_SIGNAL_EVENTS_TABLE = "engine_signal_events";
+const BANKROLL_MONTHLY_TABLE = "bankroll_monthly";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const DEFAULT_CALENDAR_ENGINE_KEY: CalendarEngineKey = "todos";
 const CALENDAR_ENGINE_KEYS: CalendarEngineKey[] = [
@@ -6371,11 +6372,16 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
   if (getTelegramEngineConfig(env) && (isChannelsRoute || isNotificationsRoute)) {
-    const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId).catch((error) => {
+    // Cloudflare Telegram Engine eh a fonte unica da verdade quando configurado.
+    // Nao caimos mais no armazenamento local antigo para evitar mensagens duplicadas.
+    try {
+      const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId);
+      if (cloudResponse) return cloudResponse;
+      return json({ error: "Motor do Telegram indisponivel." }, 502);
+    } catch (error) {
       console.warn("Cloudflare Telegram Engine indisponivel.", error);
-      return null;
-    });
-    if (cloudResponse) return cloudResponse;
+      return json({ error: "Motor do Telegram indisponivel." }, 502);
+    }
   }
   await withTimeout(
     hydrateValidatorUserCache(env, userId),
