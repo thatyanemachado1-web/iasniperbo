@@ -2440,6 +2440,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       (await hydrateClientFromBilling(env, email)) ||
       syncClientFromRecipientEmail(email) ||
       syncClientFromAdminUserEmail(env, email);
+    if (!client) {
+      await recoverClientRegistryForAuth(env, email, "auth_check");
+      client =
+        findClientByEmail(email) ||
+        (await hydrateClientFromBilling(env, email)) ||
+        syncClientFromRecipientEmail(email) ||
+        syncClientFromAdminUserEmail(env, email);
+    }
     if (!client && password) {
       client = await ensureBlockedTrialClientForLogin(env, request, email, password);
     }
@@ -2533,6 +2541,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       (item) => readString(item, "email").toLowerCase() === email,
     );
     if (existingIndex < 0) {
+      await hydrateClientFromBilling(env, email);
+      syncClientFromRecipientEmail(email) || syncClientFromAdminUserEmail(env, email);
+      existingIndex = liveClients.findIndex(
+        (item) => readString(item, "email").toLowerCase() === email,
+      );
+    }
+    if (existingIndex < 0) {
+      await recoverClientRegistryForAuth(env, email, "auth_register");
       await hydrateClientFromBilling(env, email);
       syncClientFromRecipientEmail(email) || syncClientFromAdminUserEmail(env, email);
       existingIndex = liveClients.findIndex(
@@ -2640,6 +2656,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       (await hydrateClientFromBilling(env, session.email)) ||
       syncClientFromRecipientEmail(session.email) ||
       syncClientFromAdminUserEmail(env, session.email);
+    if (!client) {
+      await recoverClientRegistryForAuth(env, session.email, "auth_verify");
+      client =
+        findClientByEmail(session.email) ||
+        (await hydrateClientFromBilling(env, session.email)) ||
+        syncClientFromRecipientEmail(session.email) ||
+        syncClientFromAdminUserEmail(env, session.email);
+    }
     if (!client && session.scope === "client") {
       client = await ensureSessionClientForExpiredTrial(env, request, session);
     }
@@ -12995,6 +13019,54 @@ async function hydrateClientsFromBillingUsers(env: unknown) {
     changed = true;
   }
   return changed;
+}
+
+async function recoverClientRegistryForAuth(env: unknown, email: string, reason: string) {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || !getSupabasePersistenceConfig(env)) return false;
+  if (findClientByEmail(cleanEmail) || findRecipientByEmail(cleanEmail)) return true;
+
+  let recovered = false;
+  const dailyId = clientRegistryDailySnapshotId();
+  const candidates = await withTimeout(
+    Promise.all([
+      loadDurableLiveStateById(env, LIVE_STATE_ID),
+      loadDurableLiveStateById(env, CLIENT_REGISTRY_SNAPSHOT_LATEST_ID),
+      loadDurableLiveStateById(env, dailyId),
+    ]),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "recuperar cadastro de clientes para login",
+    [null, null, null] as Array<Record<string, unknown> | null>,
+  );
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const registry = extractClientRegistryState(candidate);
+    if (clientRegistryProtectedCount(registry) <= 0) continue;
+    applyClientRegistryState(registry, env);
+    recovered = true;
+    if (findClientByEmail(cleanEmail) || findRecipientByEmail(cleanEmail)) break;
+  }
+
+  if (!findClientByEmail(cleanEmail) && !findRecipientByEmail(cleanEmail)) {
+    recovered = (await hydrateClientsFromBillingUsers(env)) || recovered;
+  }
+
+  const client =
+    findClientByEmail(cleanEmail) ||
+    syncClientFromRecipientEmail(cleanEmail) ||
+    syncClientFromAdminUserEmail(env, cleanEmail);
+
+  if (recovered || client) {
+    recordAccessEvent("client_registry_recovered_for_auth", {
+      email: cleanEmail,
+      full_name: readString(client || {}, "full_name") || nameFromEmail(cleanEmail),
+      detail: reason,
+    });
+    await saveLiveState(env);
+  }
+
+  return Boolean(client || findClientByEmail(cleanEmail));
 }
 
 function billingClientFromPersistedRows(
