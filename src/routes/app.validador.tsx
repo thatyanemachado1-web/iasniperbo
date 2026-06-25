@@ -82,6 +82,13 @@ const engine = new NeuralValidatorEngine();
 const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
 const VALIDATOR_CLIENT_HISTORY_LIMIT = 200;
 
+type TelegramGroupOption = {
+  chatId: string;
+  title: string;
+  type: string;
+  username: string;
+};
+
 const ENTRY_OPTIONS: Array<{ value: ValidatorEntryType; label: string }> = [
   { value: "AI", label: "Entrada sugerida pela IA" },
   { value: "BANKER", label: "Entrar no Banker" },
@@ -134,6 +141,8 @@ function NeuralValidatorPage() {
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>([]);
   const [testingTelegramId, setTestingTelegramId] = useState("");
   const [savingChannel, setSavingChannel] = useState(false);
+  const [discoveringTelegramGroups, setDiscoveringTelegramGroups] = useState(false);
+  const [telegramGroupOptions, setTelegramGroupOptions] = useState<TelegramGroupOption[]>([]);
   const [siteAlerts, setSiteAlerts] = useState<LiveValidatorHit[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
   const deletedPatternIdsRef = useRef(new Set<string>());
@@ -525,6 +534,43 @@ function NeuralValidatorPage() {
     }
   }
 
+  async function discoverTelegramGroupsFromForm() {
+    if (!planLimits.telegram) {
+      showNotice("Telegram fica bloqueado para o plano Free.");
+      return;
+    }
+    const botToken = channelForm.botToken.trim();
+    if (!botToken) {
+      showNotice("Informe o Bot Token. Depois adicione o bot no grupo e mande oi.");
+      return;
+    }
+    setDiscoveringTelegramGroups(true);
+    setTelegramGroupOptions([]);
+    try {
+      const groups = await fetchTelegramGroupOptions(botToken);
+      setTelegramGroupOptions(groups);
+      if (!groups.length) {
+        showNotice("Nenhum grupo encontrado. Adicione o bot no grupo e mande oi antes de procurar.");
+        return;
+      }
+      if (groups.length === 1) {
+        const group = groups[0];
+        setChannelForm((current) => ({
+          ...current,
+          name: current.name.trim() && current.name !== "Sala Premium" ? current.name : group.title,
+          chatId: group.chatId,
+        }));
+        showNotice(`Grupo encontrado: ${group.title}. Agora clique em Procurar e salvar grupo.`);
+        return;
+      }
+      showNotice("Escolha o grupo encontrado e depois salve.");
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Falha ao procurar grupos no Telegram.");
+    } finally {
+      setDiscoveringTelegramGroups(false);
+    }
+  }
+
   async function saveChannel() {
     if (!planLimits.telegram) {
       showNotice("Telegram fica bloqueado para o plano Free.");
@@ -593,6 +639,7 @@ function NeuralValidatorPage() {
         return next;
       });
       setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
+      setTelegramGroupOptions([]);
       showNotice("Grupo validado no Telegram e canal salvo para este usuario.");
       return true;
     } catch (error) {
@@ -834,11 +881,14 @@ function NeuralValidatorPage() {
             onSave={saveChannel}
             onRemove={removeChannel}
             onTestForm={testChannelFromForm}
+            onDiscoverGroups={discoverTelegramGroupsFromForm}
             onTestChannel={testSavedChannel}
             onUpdateChannel={updateNotificationChannel}
             telegramEnabled={planLimits.telegram}
             testingTelegramId={testingTelegramId}
             savingChannel={savingChannel}
+            discoveringTelegramGroups={discoveringTelegramGroups}
+            telegramGroupOptions={telegramGroupOptions}
           />
         </TabsContent>
       </Tabs>
@@ -1508,11 +1558,14 @@ function ChannelsTab({
   onSave,
   onRemove,
   onTestForm,
+  onDiscoverGroups,
   onTestChannel,
   onUpdateChannel,
   telegramEnabled,
   testingTelegramId,
   savingChannel,
+  discoveringTelegramGroups,
+  telegramGroupOptions,
 }: {
   channels: ValidatorNotificationChannel[];
   channelForm: {
@@ -1540,11 +1593,14 @@ function ChannelsTab({
   onSave: () => void;
   onRemove: (id: string) => void;
   onTestForm: () => void;
+  onDiscoverGroups: () => void;
   onTestChannel: (channel: ValidatorNotificationChannel) => void;
   onUpdateChannel: (channel: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>) => void;
   telegramEnabled: boolean;
   testingTelegramId: string;
   savingChannel: boolean;
+  discoveringTelegramGroups: boolean;
+  telegramGroupOptions: TelegramGroupOption[];
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
@@ -1565,6 +1621,43 @@ function ChannelsTab({
           <Field label="Chat ID">
             <Input value={channelForm.chatId} onChange={(event) => setChannelForm({ ...channelForm, chatId: event.target.value })} />
           </Field>
+          <div className="rounded-xl border border-border/70 bg-secondary/15 p-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-xs text-muted-foreground">
+                Adicione o bot no grupo, mande oi la dentro e clique para procurar.
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onDiscoverGroups}
+                disabled={!telegramEnabled || savingChannel || discoveringTelegramGroups}
+              >
+                <Eye className="size-4" /> {discoveringTelegramGroups ? "Procurando..." : "Procurar grupos"}
+              </Button>
+            </div>
+            {telegramGroupOptions.length > 0 && (
+              <div className="mt-3 grid gap-2">
+                {telegramGroupOptions.map((group) => (
+                  <button
+                    key={group.chatId}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/30 px-3 py-2 text-left text-sm transition hover:border-neon-cyan hover:bg-neon-cyan/10"
+                    onClick={() => setChannelForm({
+                      ...channelForm,
+                      name: channelForm.name.trim() && channelForm.name !== "Sala Premium" ? channelForm.name : group.title,
+                      chatId: group.chatId,
+                    })}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-bold">{group.title}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{group.type} | {group.chatId}</span>
+                    </span>
+                    <span className="shrink-0 text-xs font-black text-neon-cyan">Usar</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <Field label="Link do botao">
             <Input value={channelForm.buttonLink} onChange={(event) => setChannelForm({ ...channelForm, buttonLink: event.target.value })} />
           </Field>
@@ -2195,6 +2288,18 @@ async function fetchServerValidatorChannels() {
   if (!response.ok) throw new Error("Backend do Validador indisponivel.");
   const data = await response.json().catch(() => null) as { channels?: ValidatorNotificationChannel[] } | null;
   return Array.isArray(data?.channels) ? data.channels : [];
+}
+
+async function fetchTelegramGroupOptions(botToken: string) {
+  const response = await fetch("/validator/telegram/resolve", {
+    method: "POST",
+    cache: "no-store",
+    headers: validatorApiHeaders(true),
+    body: JSON.stringify({ botToken }),
+  });
+  const data = await response.json().catch(() => null) as { groups?: TelegramGroupOption[]; error?: string } | null;
+  if (!response.ok) throw new Error(data?.error || "Falha ao procurar grupos no Telegram.");
+  return Array.isArray(data?.groups) ? data.groups : [];
 }
 
 async function saveServerValidatorChannel(channel: ValidatorNotificationChannel, botToken?: string) {
