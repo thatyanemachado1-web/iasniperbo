@@ -48,6 +48,7 @@ function DashboardPage() {
     rounds: d.rounds,
     historyLimit: 15000,
     enabled: mode === "live" && !d.mockMode,
+    serverSnapshot: d.patternMinerSnapshot,
   });
   const { history: roundHistory, resetHistory } = useRoundHistory(
     d,
@@ -63,7 +64,7 @@ function DashboardPage() {
     sourceUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
     enabled: mode === "live" && !d.mockMode,
   });
-  const surfAlert = (d.currentSurfAlert ?? mockDashboardData.currentSurfAlert) as NonNullable<typeof mockDashboardData.currentSurfAlert>;
+  const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const tieAlertEnabled = d.moduleToggles?.tieAlert !== false;
   const surfAnalyzerEnabled = d.moduleToggles?.surfAnalyzer !== false;
   const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;
