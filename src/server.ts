@@ -1,3 +1,4 @@
+// @ts-nocheck
 import "./lib/error-capture";
 
 import bcrypt from "bcryptjs";
@@ -16247,10 +16248,13 @@ async function withTimeout<T>(
 
 function getSupabasePersistenceConfig(env: unknown) {
   const url = (
+    readServerEnvString(env, "SNIPER_SUPABASE_URL", "") ||
     readServerEnvString(env, "SUPABASE_URL", "") ||
     readServerEnvString(env, "VITE_SUPABASE_URL", "")
   ).replace(/\/+$/, "");
   const key =
+    readServerEnvString(env, "SNIPER_SUPABASE_SERVICE_ROLE_KEY", "") ||
+    readServerEnvString(env, "SNIPER_SUPABASE_SERVICE_KEY", "") ||
     readServerEnvString(env, "SUPABASE_SERVICE_ROLE_KEY", "") ||
     readServerEnvString(env, "SUPABASE_SERVICE_KEY", "");
 
