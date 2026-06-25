@@ -232,7 +232,8 @@ function NeuralValidatorPage() {
           ...patternsToSync.map((item) => saveServerValidatorPattern(item).catch(() => null)),
         ]);
       } catch {
-        // Local storage remains the fallback when backend sync is unavailable.
+        writeNotificationChannels([]);
+        setChannels([]);
       }
     }
 

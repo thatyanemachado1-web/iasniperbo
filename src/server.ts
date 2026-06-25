@@ -6577,8 +6577,20 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       ].slice(0, 1000);
       const persisted = await persistValidatorChannel(env, channel);
       const saveStatus = await saveLiveState(env);
-      if (getSupabasePersistenceConfig(env) && !persisted && !saveStatus.durable && !saveStatus.cache) {
-        console.warn("Canal do Validador salvo apenas em memoria; armazenamento duravel indisponivel.");
+      if (!persisted && !saveStatus.durable) {
+        liveValidatorChannels = liveValidatorChannels.filter(
+          (item) => !(item.userId === userId && item.id === channel.id),
+        );
+        await saveLiveState(env);
+        return json({
+          error: "Persistencia Telegram nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar canais definitivos.",
+          storage: {
+            dedicated: persisted,
+            durable: saveStatus.durable,
+            cache: saveStatus.cache,
+            deduped: duplicateIds.length,
+          },
+        }, 500);
       }
       return json({
         channel: publicValidatorChannel(channel),
