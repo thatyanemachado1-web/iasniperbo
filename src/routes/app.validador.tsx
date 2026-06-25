@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+﻿import { createFileRoute } from "@tanstack/react-router";
 import {
   Activity,
   BellRing,
@@ -585,8 +585,16 @@ function NeuralValidatorPage() {
     setSavingChannel(true);
     setTestingTelegramId("form");
     try {
+      if (token) {
+        await postValidatorTelegramMessage({
+          botToken: token,
+          chatId: channel.chatId,
+          buttonLink: channel.buttonLink || `${window.location.origin}/app/validador`,
+          message: buildValidatorChannelTestMessage(channel.name),
+          buttonLabel: "Abrir Sniper Bo IA",
+        });
+      }
       serverChannel = await saveServerValidatorChannel(channel, token);
-      await testServerValidatorChannel(serverChannel.id);
       setChannels((current) => {
         const next = upsertValidatorChannelList(current, serverChannel!);
         writeNotificationChannels(next);
@@ -662,14 +670,7 @@ function NeuralValidatorPage() {
         botToken: channel.botToken,
         chatId: channel.chatId,
         buttonLink: channel.buttonLink || `${window.location.origin}/app/validador`,
-        message:
-          "ENTRADA CONFIRMADA\n" +
-          "Mesa: Bac Bo\n" +
-          "Padrao: ??10 ? ??7 ? ??6\n" +
-          "Entrada: ?? Banker\n" +
-          "Gale: Ate G1\n" +
-          "Protecao Tie: Ativa\n" +
-          `Canal: ${channel.name}`,
+        message: buildValidatorChannelTestMessage(channel.name),
         buttonLabel: "Abrir Sniper Bo IA",
       });
       showNotice("Teste enviado no Telegram.");
@@ -1783,7 +1784,7 @@ function ValidationDetailsPanel({ result, config }: { result: ValidatorResult | 
         <div className="text-sm font-black">Detalhes da validacao</div>
         <div className="flex flex-wrap gap-2 text-xs">
           <ResultChip label="Entrada" side={selectedEntry ?? result.entry} />
-          <ResultChip label="Empate" value={config.tieProtection ? "?? coberto" : "?? sem cobertura"} />
+          <ResultChip label="Empate" value={config.tieProtection ? "ðŸŸ¡ coberto" : "ðŸŸ¡ sem cobertura"} />
           <ResultChip label="Rodadas" value={result.analyzedRounds.toLocaleString("pt-BR")} />
         </div>
       </div>
@@ -1887,7 +1888,7 @@ function PatternLine({
       {pattern.map((token, index) => (
         <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1">
           <TokenPill token={token} />
-          {index < pattern.length - 1 && <span className="text-muted-foreground">?</span>}
+          {index < pattern.length - 1 && <span className="text-muted-foreground">â†’</span>}
         </span>
       ))}
       <span className="text-muted-foreground">= puxou</span>
@@ -1946,7 +1947,7 @@ function CompactPatternLine({
               </button>
             ) : null}
           </span>
-          {index < pattern.length - 1 && <span className="text-muted-foreground">?</span>}
+          {index < pattern.length - 1 && <span className="text-muted-foreground">â†’</span>}
         </span>
       ))}
     </div>
@@ -2103,6 +2104,17 @@ function FilterSwitch({ label, checked, onCheckedChange }: { label: string; chec
   );
 }
 
+function buildValidatorChannelTestMessage(channelName: string) {
+  return (
+    "\u{1F916} ENTRADA CONFIRMADA\n" +
+    "\u{1F3B2} Mesa: Bac Bo\n" +
+    "\u{1F9E9} Padrao: \u{1F534}10 \u{2192} \u{1F535}7 \u{2192} \u{1F7E1}6\n" +
+    "\u{1F3AF} Entrada: \u{1F534} Banker\n" +
+    "\u{1F6E1}\u{FE0F} Protecao: Ate G1\n" +
+    "\u{1F91D} Protecao Tie: Ativa\n" +
+    `\u{1F4E1} Canal: ${channelName}`
+  );
+}
 async function fetchValidatorRoundHistory(limit: number) {
   if (typeof window === "undefined") return [];
 
@@ -2532,9 +2544,9 @@ function invertToken(token: ValidatorPatternToken): ValidatorPatternToken {
 }
 
 function sideEmoji(side: RoundResult) {
-  if (side === "B") return "??";
-  if (side === "P") return "??";
-  return "??";
+  if (side === "B") return "ðŸ”´";
+  if (side === "P") return "ðŸ”µ";
+  return "ðŸŸ¡";
 }
 
 function entryTypeToSide(entryType: ValidatorEntryType): RoundResult | null {
@@ -2574,3 +2586,4 @@ function availableHistoryOptions(limit: number) {
   const options = VALIDATOR_HISTORY_OPTIONS.filter((option) => option <= limit);
   return options.length ? options : [limit];
 }
+
