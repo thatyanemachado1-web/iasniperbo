@@ -194,7 +194,7 @@ export class TelegramEngine {
       isActive: incoming.isActive !== false,
       analyzingEnabled: Boolean(incoming.analyzingEnabled ?? existing?.analyzingEnabled ?? false),
       analyzingCooldownRounds: clampInt(incoming.analyzingCooldownRounds ?? existing?.analyzingCooldownRounds ?? 3, 1, 20),
-      templates: readRecord(incoming.templates || existing?.templates || {}),
+      templates: sanitizeTemplateRecord(incoming.templates || existing?.templates || {}),
       signalModules: normalizeModuleConfigs(incoming.signalModules || incoming.templates?.signalModules || existing?.signalModules || {}),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
@@ -257,6 +257,7 @@ export class TelegramEngine {
       botTokenMasked: current.botTokenMasked,
       chatId: String(patch.chatId || current.chatId).trim(),
       chatCode: normalizeChannelCode(patch.chatId || current.chatId),
+      templates: sanitizeTemplateRecord(patch.templates || current.templates || {}),
       signalModules: normalizeModuleConfigs(patch.signalModules || patch.templates?.signalModules || current.signalModules || {}),
       updatedAt: new Date().toISOString(),
     };
@@ -714,13 +715,23 @@ function normalizeModuleConfigs(value) {
       coverTie: Object.prototype.hasOwnProperty.call(raw, "coverTie") ? Boolean(raw.coverTie) : key === "ties_only",
       tieCoverage: clampInt(raw.tieCoverage ?? (key === "ties_only" ? 4 : 1), 0, 4),
       cooldownSeconds: clampInt(raw.cooldownSeconds ?? (key === "validator" ? 0 : 2), 0, 300),
-      template: String(raw.template || ""),
-      greenTemplate: String(raw.greenTemplate || ""),
-      redTemplate: String(raw.redTemplate || ""),
-      tieTemplate: String(raw.tieTemplate || ""),
+      template: repairTelegramEncodingArtifacts(raw.template || ""),
+      greenTemplate: repairTelegramEncodingArtifacts(raw.greenTemplate || ""),
+      redTemplate: repairTelegramEncodingArtifacts(raw.redTemplate || ""),
+      tieTemplate: repairTelegramEncodingArtifacts(raw.tieTemplate || ""),
     };
     return acc;
   }, {});
+}
+
+function sanitizeTemplateRecord(value) {
+  const record = readRecord(value);
+  const next = {};
+  for (const [key, item] of Object.entries(record)) {
+    next[key] = typeof item === "string" ? repairTelegramEncodingArtifacts(item) : item;
+  }
+  if (record.signalModules) next.signalModules = normalizeModuleConfigs(record.signalModules);
+  return next;
 }
 
 function publicChannel(channel) {
@@ -735,7 +746,7 @@ function publicChannel(channel) {
     isActive: channel.isActive,
     analyzingEnabled: channel.analyzingEnabled,
     analyzingCooldownRounds: channel.analyzingCooldownRounds,
-    templates: channel.templates || {},
+    templates: sanitizeTemplateRecord(channel.templates || {}),
     signalModules: normalizeModuleConfigs(channel.signalModules || {}),
     createdAt: channel.createdAt,
     updatedAt: channel.updatedAt,
@@ -995,12 +1006,38 @@ function normalizeDedupeText(value) {
 }
 
 function formatTelegramMessageText(value) {
+  const repaired = repairTelegramEncodingArtifacts(value);
   return decorateScoreTokens(
-    String(value || "")
+    String(repaired || "")
       .replace(/\bB\s+Banker\b/gi, formatEntry("BANKER"))
       .replace(/\bP\s+Player\b/gi, formatEntry("PLAYER"))
       .replace(/\bT\s+Tie\b/gi, formatEntry("TIE")),
   );
+}
+
+function repairTelegramEncodingArtifacts(value) {
+  return String(value || "")
+    .replace(/ðŸ¤–/g, "🤖")
+    .replace(/ðŸŽ²/g, "🎲")
+    .replace(/ðŸ§©/g, "🧩")
+    .replace(/ðŸŽ¯/g, "🎯")
+    .replace(/ðŸ›¡ï¸/g, "🛡️")
+    .replace(/ðŸ“Š/g, "📊")
+    .replace(/ðŸ’Ž/g, "💎")
+    .replace(/ðŸ”¢/g, "🔢")
+    .replace(/ðŸ“Œ/g, "📌")
+    .replace(/ðŸŒŠ/g, "🌊")
+    .replace(/ðŸŸ¡/g, "🟡")
+    .replace(/âœ…/g, "✅")
+    .replace(/âŒ/g, "❌")
+    .replace(/Padr(?:Ã£|�)o/gi, "Padrao")
+    .replace(/PADR(?:Ãƒ|�)O/g, "PADRAO")
+    .replace(/Prote(?:Ã§Ã£|��)o/gi, "Protecao")
+    .replace(/M(?:Ã³|�)dulo/gi, "Modulo")
+    .replace(/N(?:Ãº|�)mero/gi, "Numero")
+    .replace(/Confian(?:Ã§|�)a/gi, "Confianca")
+    .replace(/Assertividade:\s*$/gim, "Assertividade:")
+    .replace(/^\?{1,4}\s*(?=(?:<b>)?(?:PADRAO|Padrao|Mesa|Modulo|Entrada|Protecao|Assertividade|Numero|Status|Green|Red|RED|Empate|N[Uu]MERO|AVISO))/gim, "");
 }
 
 function decorateScoreTokens(message) {
