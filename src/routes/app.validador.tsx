@@ -217,11 +217,10 @@ function NeuralValidatorPage() {
         ]);
         if (cancelled) return;
 
-        const localPatterns = readSavedPatterns();
         const mergedChannels = mergeValidatorChannels(serverChannels);
         const deletedPatternIds = deletedPatternIdsRef.current;
         const mergedPatterns = autoPrepareAdminTelegramDelivery(
-          mergeValidatorItems(serverPatterns, localPatterns).filter((item) => !deletedPatternIds.has(item.id)),
+          serverPatterns.filter((item) => !deletedPatternIds.has(item.id)),
           mergedChannels,
           adminAccess,
         );
@@ -230,9 +229,7 @@ function NeuralValidatorPage() {
         setSavedPatterns(mergedPatterns);
         setChannels(mergedChannels);
 
-        const patternsToSync = mergedPatterns.filter((item) =>
-          !deletedPatternIds.has(item.id) && shouldSyncValidatorItem(item, serverPatterns)
-        );
+        const patternsToSync = mergedPatterns.filter((item) => shouldSyncValidatorItem(item, serverPatterns));
         await Promise.all([
           ...patternsToSync.map((item) => saveServerValidatorPattern(item).catch(() => null)),
         ]);
