@@ -22,6 +22,7 @@ export const DEFAULT_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
   scoreboard: "{{wins}} GREEN / {{loss}} RED / {{percentage}}",
   greenStreak: "{{wins}} GREENS SEGUIDOS",
   preAlert: "Padrao quase formado\nMesa: {{table}}\nCondicao: {{pattern}}\nPossivel entrada: {{entry}}",
+  analyzing: "Analisando padrao\nMesa: {{table}}\nPadrao: {{pattern}}",
 };
 
 interface StoredHistory {
