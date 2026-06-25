@@ -292,7 +292,7 @@ type AdminActionType =
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
 const LIVE_STATE_TABLE = "sniper_live_state";
-const SNIPER_DEPLOY_MARKER = "2026-06-25-validator-telegram-persistence-v2";
+const SNIPER_DEPLOY_MARKER = "2026-06-25-client-registration-persistence-v3";
 const CLIENT_REGISTRY_SNAPSHOT_LATEST_ID = `${LIVE_STATE_ID}:client_registry_latest`;
 const CLIENT_REGISTRY_SNAPSHOT_PREFIX = `${LIVE_STATE_ID}:client_registry:`;
 const CRM_CLIENTS_TABLE = "crm_clients";
@@ -13024,7 +13024,7 @@ async function persistClientRegistryAfterClientChange(env: unknown, client: Reco
   const userPersisted = await persistBillingUser(env, client);
   const saveStatus = await saveLiveState(env);
   const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
-  const ok = !durableConfigured || (userPersisted && saveStatus.durable);
+  const ok = !durableConfigured || saveStatus.durable || userPersisted;
 
   if (!ok) {
     console.warn(`Cadastro nao foi gravado de forma duravel: ${reason}.`);
@@ -13032,6 +13032,14 @@ async function persistClientRegistryAfterClientChange(env: unknown, client: Reco
       ...client,
       risk: "high",
       detail: reason,
+    });
+  } else if (durableConfigured && (!userPersisted || !saveStatus.durable)) {
+    recordAccessEvent("client_registry_partial_durable_save", {
+      ...client,
+      risk: "medium",
+      detail: reason,
+      userPersisted,
+      liveStateDurable: saveStatus.durable,
     });
   }
 
