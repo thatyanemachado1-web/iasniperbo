@@ -8,17 +8,19 @@ interface UsePatternMinerParams {
   rounds: Round[];
   historyLimit?: PatternMinerHistoryLimit;
   enabled: boolean;
+  serverSnapshot?: PatternMinerSnapshot;
 }
 
-export function usePatternMiner({ rounds, historyLimit = 15000, enabled }: UsePatternMinerParams) {
+export function usePatternMiner({ rounds, historyLimit = 15000, enabled, serverSnapshot }: UsePatternMinerParams) {
   const snapshot = useMemo(() => {
+    if (serverSnapshot) return serverSnapshot;
     if (!enabled || typeof window === "undefined") return buildEmptySnapshot(historyLimit);
     const agent = new PatternMinerAgent({
       ...DEFAULT_PATTERN_MINER_CONFIG,
       historyLimit,
     });
     return agent.scan(rounds);
-  }, [enabled, historyLimit, rounds]);
+  }, [enabled, historyLimit, rounds, serverSnapshot]);
 
   return {
     snapshot,
