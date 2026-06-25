@@ -292,6 +292,7 @@ type AdminActionType =
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
 const LIVE_STATE_TABLE = "sniper_live_state";
+const SNIPER_DEPLOY_MARKER = "2026-06-25-admin-backend-repair-v1";
 const CLIENT_REGISTRY_SNAPSHOT_LATEST_ID = `${LIVE_STATE_ID}:client_registry_latest`;
 const CLIENT_REGISTRY_SNAPSHOT_PREFIX = `${LIVE_STATE_ID}:client_registry:`;
 const CRM_CLIENTS_TABLE = "crm_clients";
@@ -2239,6 +2240,18 @@ async function applyMercadoPagoPayment(env: unknown, payment: Record<string, unk
 
 async function handleAdminApiRequest(request: Request, env: unknown) {
   const url = new URL(request.url);
+
+  if (request.method === "GET" && url.pathname === "/__sniperbo/version") {
+    return json({
+      ok: true,
+      marker: SNIPER_DEPLOY_MARKER,
+      hasAdminEmail: getAdminEmails(env).length > 0,
+      hasAdminPasswordConfig: hasAdminPasswordConfig(env),
+      hasSessionSecret: Boolean(getSessionSecret(env)),
+      hasDurableClientStorage: Boolean(getSupabasePersistenceConfig(env)),
+    });
+  }
+
   const isAdminApiPath =
     url.pathname === "/admin/login" ||
     url.pathname === "/auth/check" ||
