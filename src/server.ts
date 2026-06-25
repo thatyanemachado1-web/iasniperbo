@@ -2345,7 +2345,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     return json({
       hasAdminEmail: getAdminEmails(env).length > 0,
       hasAdminApproverEmail: getAdminApproverEmails(env).length > 0,
-      hasAdminPasswordHash: Boolean(getAdminPasswordHash(env)),
+      hasAdminPasswordHash: hasAdminPasswordConfig(env),
       hasSessionSecret: Boolean(getSessionSecret(env)),
       hasDurableClientStorage: Boolean(getSupabasePersistenceConfig(env)),
       durableClientStorageTable: LIVE_STATE_TABLE,
@@ -2356,13 +2356,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = await request.json().catch(() => ({}));
     const loginEmail = readString(body, "email").toLowerCase();
     const adminRole = getAdminRoleForEmail(env, loginEmail);
-    const adminPasswordHash = getAdminPasswordHash(env);
+    const adminPasswordConfigured = hasAdminPasswordConfig(env);
 
-    if (!adminPasswordHash || !getSessionSecret(env)) {
+    if (!adminPasswordConfigured || !getSessionSecret(env)) {
       return json({ error: "Credenciais admin nao configuradas no servidor." }, 503);
     }
 
-    if (adminRole && await verifyPassword(readString(body, "password"), adminPasswordHash)) {
+    if (adminRole && await verifyConfiguredAdminPassword(env, readString(body, "password"))) {
       const binding = await requestSessionBinding(env, request);
       recordAccessEvent("admin_login", {
         email: loginEmail,
@@ -2395,14 +2395,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = readRecord(await request.json().catch(() => ({})));
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
-    const adminPasswordHash = getAdminPasswordHash(env);
+    const adminPasswordConfigured = hasAdminPasswordConfig(env);
     const adminRole = getAdminRoleForEmail(env, email);
 
     if (!getSessionSecret(env)) {
       return json({ error: "Sessao nao configurada no servidor." }, 503);
     }
 
-    if (adminRole === "owner" && adminPasswordHash && await verifyPassword(password, adminPasswordHash)) {
+    if (adminRole === "owner" && adminPasswordConfigured && await verifyConfiguredAdminPassword(env, password)) {
       recordAccessEvent("owner_login", {
         email,
         full_name: nameFromEmail(email),
@@ -2413,7 +2413,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ access: await ownerAccess(env, email, request) });
     }
 
-    if (adminRole === "admin" && adminPasswordHash && await verifyPassword(password, adminPasswordHash)) {
+    if (adminRole === "admin" && adminPasswordConfigured && await verifyConfiguredAdminPassword(env, password)) {
       recordAccessEvent("admin_login", {
         email,
         full_name: nameFromEmail(email),
@@ -2427,11 +2427,11 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (adminRole) {
       return json(
         {
-          error: adminPasswordHash
+          error: adminPasswordConfigured
             ? "Senha admin invalida."
             : "Senha admin nao configurada no servidor.",
         },
-        adminPasswordHash ? 401 : 503,
+        adminPasswordConfigured ? 401 : 503,
       );
     }
 
@@ -2492,8 +2492,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       client.updated_at = new Date().toISOString();
       upsertLiveClient(client);
       upsertRecipientFromClient(client);
-      await persistBillingUser(env, client);
-      await saveLiveState(env);
+      const persisted = await persistClientRegistryAfterClientChange(
+        env,
+        client,
+        "auth_check_password_bind",
+      );
+      if (!persisted.ok) return clientRegistryDurableSaveError();
       recordAccessEvent("client_password_bound_after_migration", {
         ...client,
         risk: "medium",
@@ -2618,9 +2622,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     upsertRecipientFromClient(client);
     recordAccessEvent(existingIndex >= 0 ? "client_update" : "client_register", client);
+    const persisted = await persistClientRegistryAfterClientChange(
+      env,
+      client,
+      existingIndex >= 0 ? "auth_register_update" : "auth_register_new",
+    );
+    if (!persisted.ok) return clientRegistryDurableSaveError();
     const access = await clientAccess(env, client, request);
-    await saveLiveState(env);
-    await persistBillingUser(env, client);
     return json({ access }, existingIndex >= 0 ? 200 : 201);
   }
 
@@ -11948,9 +11956,8 @@ async function isOfficialDashboardPublisherAuthorized(request: Request, env: unk
   const email = (request.headers.get("x-sniper-admin-email") || "").trim().toLowerCase();
   const password = request.headers.get("x-sniper-admin-password") || "";
   const adminRole = email ? getAdminRoleForEmail(env, email) : null;
-  const adminPasswordHash = getAdminPasswordHash(env);
-  if (!adminRole || !password || !adminPasswordHash) return false;
-  return verifyPassword(password, adminPasswordHash);
+  if (!adminRole || !password || !hasAdminPasswordConfig(env)) return false;
+  return verifyConfiguredAdminPassword(env, password);
 }
 
 function isOfficialDashboardPublisherRequest(request: Request) {
@@ -12006,8 +12013,9 @@ function getBearerToken(request: Request) {
 }
 
 function getAdminEmails(env: unknown) {
+  const defaultOwnerEmails = "gabrielmendespromove@gmail.com";
   return parseEmailList(
-    `${readNamedServerSecret(env, "SNIPER_ADMIN_EMAIL", "")},${readNamedServerSecret(
+    `${defaultOwnerEmails},${readNamedServerSecret(env, "SNIPER_ADMIN_EMAIL", "")},${readNamedServerSecret(
       env,
       "SNIPER_ADMIN_EMAILS",
       "",
@@ -12036,6 +12044,40 @@ function getAdminPasswordHash(env: unknown) {
   return readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD_HASH", "")
     .replace(/\\\$/g, "$")
     .replace(/\s+/g, "");
+}
+
+function getAdminPlainPassword(env: unknown) {
+  return (
+    readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD", "") ||
+    readNamedServerSecret(env, "ADMIN_PASSWORD", "")
+  );
+}
+
+function hasAdminPasswordConfig(env: unknown) {
+  return Boolean(getAdminPasswordHash(env) || getAdminPlainPassword(env));
+}
+
+function looksLikePasswordHash(value: string) {
+  return (
+    value.startsWith("$2a$") ||
+    value.startsWith("$2b$") ||
+    value.startsWith("$2y$") ||
+    value.startsWith("pbkdf2$")
+  );
+}
+
+async function verifyConfiguredAdminPassword(env: unknown, password: string) {
+  const hashOrMaybePlain = getAdminPasswordHash(env);
+  if (hashOrMaybePlain) {
+    if (looksLikePasswordHash(hashOrMaybePlain)) {
+      if (await verifyPassword(password, hashOrMaybePlain)) return true;
+    } else if (constantTimeStringEqual(password, hashOrMaybePlain)) {
+      return true;
+    }
+  }
+
+  const plainPassword = getAdminPlainPassword(env);
+  return Boolean(plainPassword && constantTimeStringEqual(password, plainPassword));
 }
 
 function getMercadoPagoAccessToken(env: unknown) {
@@ -13228,7 +13270,7 @@ async function persistBillingRecords(
 
 async function persistBillingUser(env: unknown, client: Record<string, unknown>) {
   const email = readString(client, "email").toLowerCase();
-  if (!email) return;
+  if (!email) return false;
   const baseRow = {
     id: readString(client, "id") || crypto.randomUUID(),
     email,
@@ -13257,7 +13299,40 @@ async function persistBillingUser(env: unknown, client: Record<string, unknown>)
     admin_note: readString(client, "adminNote") || readString(client, "notes"),
   };
   const savedFull = await persistSupabaseRow(env, "users", fullRow);
-  if (!savedFull) await persistSupabaseRow(env, "users", baseRow);
+  if (savedFull) return true;
+  return persistSupabaseRow(env, "users", baseRow);
+}
+
+async function persistClientRegistryAfterClientChange(
+  env: unknown,
+  client: Record<string, unknown>,
+  reason: string,
+) {
+  const userPersisted = await persistBillingUser(env, client);
+  const saveStatus = await saveLiveState(env);
+  const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
+  const ok = !durableConfigured || (userPersisted && saveStatus.durable);
+
+  if (!ok) {
+    console.warn(`Cadastro nao foi gravado de forma duravel: ${reason}.`);
+    recordAccessEvent("client_registry_durable_save_failed", {
+      ...client,
+      risk: "high",
+      detail: reason,
+    });
+  }
+
+  return { ok, userPersisted, saveStatus };
+}
+
+function clientRegistryDurableSaveError() {
+  return json(
+    {
+      error:
+        "Cadastro nao foi gravado com seguranca no banco. Tente novamente em alguns segundos ou avise o suporte.",
+    },
+    503,
+  );
 }
 
 async function deletePersistedBillingUser(env: unknown, user: Record<string, unknown>) {
@@ -13602,8 +13677,17 @@ function readConfigString(value: unknown, fallback: string) {
 }
 
 function normalizeRecipient(recipient: Record<string, unknown>) {
-  const startsAt = readString(recipient, "starts_at") || todayIso();
+  const startsAt =
+    normalizeDateInputIso(
+      readFirstString(recipient, ["starts_at", "startsAt", "currentPeriodStart"]),
+      false,
+    ) || todayIso();
   const validityDays = Number(recipient.validity_days || 30);
+  const expiresAt =
+    normalizeDateInputIso(
+      readFirstString(recipient, ["expires_at", "expiresAt", "currentPeriodEnd", "validade"]),
+      true,
+    ) || addDaysIso(startsAt, validityDays || 30);
   const enabled = Boolean(recipient.enabled);
   const accessStatus = normalizeRecipientAccessStatus(
     readString(recipient, "access_status"),
@@ -13631,7 +13715,7 @@ function normalizeRecipient(recipient: Record<string, unknown>) {
     access_status: accessStatus,
     starts_at: startsAt,
     validity_days: Number.isFinite(validityDays) ? validityDays : 30,
-    expires_at: readString(recipient, "expires_at") || addDaysIso(startsAt, validityDays || 30),
+    expires_at: expiresAt,
     notes: readString(recipient, "notes"),
     created_at: readString(recipient, "created_at") || new Date().toISOString(),
     updated_at: readString(recipient, "updated_at") || new Date().toISOString(),
@@ -13650,9 +13734,15 @@ function approverPatchForPendingApproval(
 
   if (currentStatus !== "pending" || !wantsApproval) return null;
 
-  const startsAt = readString(body, "starts_at") || todayIso();
-  const validityDays = Number(body.validity_days || 30);
-  const expiresAt = readString(body, "expires_at") || addDaysIso(startsAt, validityDays || 30);
+  const startsAt =
+    normalizeDateInputIso(readFirstString(body, ["starts_at", "startsAt"]), false) || todayIso();
+  const validityDays =
+    readFirstPositiveNumber(body, ["validity_days", "validityDays", "days"]) || 30;
+  const expiresAt =
+    normalizeDateInputIso(
+      readFirstString(body, ["expires_at", "expiresAt", "currentPeriodEnd", "validade"]),
+      true,
+    ) || addDaysIso(startsAt, validityDays || 30);
 
   return {
     enabled: true,
@@ -14458,9 +14548,17 @@ function adminManagedUserFromClient(client: Record<string, unknown>, env?: unkno
 function normalizeAdminManagedUser(user: Record<string, unknown>, env?: unknown) {
   const email = readString(user, "email").toLowerCase();
   const currentPeriodEnd =
-    readString(user, "currentPeriodEnd") ||
-    readString(user, "current_period_end") ||
-    readString(user, "expires_at") ||
+    normalizeDateInputIso(
+      readFirstString(user, [
+        "currentPeriodEnd",
+        "current_period_end",
+        "expires_at",
+        "expiresAt",
+        "validade",
+        "validUntil",
+      ]),
+      true,
+    ) ||
     addDaysIso(new Date().toISOString(), 7);
   const rawStatus = normalizeAdminSubscriptionStatus(
     readString(user, "subscriptionStatus") ||
@@ -14492,9 +14590,15 @@ function normalizeAdminManagedUser(user: Record<string, unknown>, env?: unknown)
     plan: normalizeAdminPlan(readString(user, "plan")),
     subscriptionStatus: status,
     currentPeriodStart:
-      readString(user, "currentPeriodStart") ||
-      readString(user, "current_period_start") ||
-      readString(user, "starts_at") ||
+      normalizeDateInputIso(
+        readFirstString(user, [
+          "currentPeriodStart",
+          "current_period_start",
+          "starts_at",
+          "startsAt",
+        ]),
+        false,
+      ) ||
       readString(user, "created_at") ||
       new Date().toISOString(),
     currentPeriodEnd,
@@ -14542,6 +14646,60 @@ async function updateAdminManagedUser(
   if (requestedPlan === "free" && ["active", "manual_vip", "trial"].includes(status)) {
     status = "canceled";
   }
+  const currentPeriodStart =
+    normalizeDateInputIso(
+      readFirstString(body, [
+        "currentPeriodStart",
+        "current_period_start",
+        "starts_at",
+        "startsAt",
+      ]),
+      false,
+    ) || before.currentPeriodStart;
+  const validityDays = readFirstPositiveNumber(body, [
+    "validityDays",
+    "validity_days",
+    "days",
+    "durationDays",
+  ]);
+  const explicitPeriodEnd = normalizeDateInputIso(
+    readFirstString(body, [
+      "currentPeriodEnd",
+      "current_period_end",
+      "expires_at",
+      "expiresAt",
+      "validade",
+      "validUntil",
+    ]),
+    true,
+  );
+  let currentPeriodEnd =
+    explicitPeriodEnd ||
+    (validityDays ? addDaysIso(currentPeriodStart || new Date().toISOString(), validityDays) : before.currentPeriodEnd);
+  if (
+    requestedPlan !== "free" &&
+    status !== "blocked" &&
+    status !== "canceled" &&
+    status !== "expired" &&
+    (!currentPeriodEnd || isExpiredIso(currentPeriodEnd))
+  ) {
+    currentPeriodEnd = addDaysIso(
+      new Date().toISOString(),
+      validityDays || planDurationDaysForAdminPlan(requestedPlan) || 30,
+    );
+  }
+  if (!Object.hasOwn(body, "subscriptionStatus") && requestedPlan === "vip_manual") {
+    status = "manual_vip";
+  } else if (
+    !Object.hasOwn(body, "subscriptionStatus") &&
+    requestedPlan !== "free" &&
+    requestedPlan !== "trial" &&
+    !isExpiredIso(currentPeriodEnd)
+  ) {
+    status = "active";
+  } else if (!Object.hasOwn(body, "subscriptionStatus") && requestedPlan === "trial") {
+    status = "trial";
+  }
   const updated = normalizeAdminManagedUser(
     {
       ...before,
@@ -14563,12 +14721,8 @@ async function updateAdminManagedUser(
       role: nextRole,
       plan: requestedPlan,
       subscriptionStatus: requestedBlocked ? "blocked" : status,
-      currentPeriodStart: Object.hasOwn(body, "currentPeriodStart")
-        ? readString(body, "currentPeriodStart")
-        : before.currentPeriodStart,
-      currentPeriodEnd: Object.hasOwn(body, "currentPeriodEnd")
-        ? readString(body, "currentPeriodEnd")
-        : before.currentPeriodEnd,
+      currentPeriodStart,
+      currentPeriodEnd,
       isBlocked: requestedBlocked,
       adminNote: Object.hasOwn(body, "adminNote")
         ? readString(body, "adminNote")
@@ -14591,7 +14745,35 @@ async function updateAdminManagedUser(
     afterJson: updated,
     reason: readString(body, "reason"),
   });
+  const persisted = await persistAdminManagedUserChange(env, updated, preferredAction);
+  if (!persisted.ok) {
+    return {
+      ok: false,
+      status: 503,
+      error: "Alteracao do cliente nao foi gravada com seguranca no banco.",
+    };
+  }
   return { ok: true, user: updated };
+}
+
+async function persistAdminManagedUserChange(
+  env: unknown,
+  user: Record<string, unknown>,
+  reason: string,
+) {
+  const email = readString(user, "email").toLowerCase();
+  const client = email ? findClientByEmail(email) || syncClientFromAdminUserEmail(env, email) : null;
+  if (client) {
+    return persistClientRegistryAfterClientChange(env, client, `admin_${reason}`);
+  }
+
+  const saveStatus = await saveLiveState(env);
+  const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
+  return {
+    ok: !durableConfigured || saveStatus.durable,
+    userPersisted: false,
+    saveStatus,
+  };
 }
 
 async function extendAdminManagedUser(
@@ -14705,6 +14887,14 @@ async function deleteAdminManagedUser(
     reason: reason || "Exclusao manual de cadastro",
   });
   await deletePersistedBillingUser(env, before);
+  const saveStatus = await saveLiveState(env);
+  if (getSupabasePersistenceConfig(env) && !saveStatus.durable) {
+    return {
+      ok: false,
+      status: 503,
+      error: "Exclusao do cliente nao foi gravada com seguranca no banco.",
+    };
+  }
   return { ok: true, user: before };
 }
 
@@ -14839,6 +15029,10 @@ function adminManagedUserToClient(user: Record<string, unknown>) {
   const status = normalizeAdminSubscriptionStatus(readString(user, "subscriptionStatus"));
   const blocked = Boolean(user.isBlocked) || status === "blocked";
   const expiresAt = readString(user, "currentPeriodEnd");
+  const startsAt = readString(user, "currentPeriodStart");
+  const validityDays =
+    readFirstPositiveNumber(user, ["validityDays", "validity_days"]) ||
+    daysBetweenIso(startsAt, expiresAt, planDurationDaysForAdminPlan(normalizeAdminPlan(readString(user, "plan"))));
   const active =
     !blocked && ["active", "manual_vip", "trial"].includes(status) && !isExpiredIso(expiresAt);
   return {
@@ -14855,7 +15049,8 @@ function adminManagedUserToClient(user: Record<string, unknown>) {
     access_status: blocked ? "blocked" : active ? "approved" : status,
     enabled: active,
     isBlocked: blocked,
-    starts_at: readString(user, "currentPeriodStart"),
+    starts_at: startsAt,
+    validity_days: validityDays,
     expires_at: expiresAt,
     notes: readString(user, "adminNote"),
     adminNote: readString(user, "adminNote"),
@@ -15351,6 +15546,70 @@ function addDaysIso(startIso: string, days: number) {
   return hasTime ? date.toISOString() : date.toISOString().slice(0, 10);
 }
 
+function normalizeDateInputIso(value: unknown, endOfDay = false) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const brDate = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if (brDate) {
+    const day = Number(brDate[1]);
+    const month = Number(brDate[2]);
+    const year = Number(brDate[3].length === 2 ? `20${brDate[3]}` : brDate[3]);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2020) {
+      return new Date(Date.UTC(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0)).toISOString();
+    }
+  }
+
+  const isoDateOnly = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateOnly) {
+    const year = Number(isoDateOnly[1]);
+    const month = Number(isoDateOnly[2]);
+    const day = Number(isoDateOnly[3]);
+    return new Date(Date.UTC(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0)).toISOString();
+  }
+
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    if (endOfDay && !text.includes("T")) {
+      parsed.setUTCHours(23, 59, 59, 0);
+    }
+    return parsed.toISOString();
+  }
+
+  return "";
+}
+
+function readFirstString(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = readString(record, key);
+    if (value) return value;
+  }
+  return "";
+}
+
+function readFirstPositiveNumber(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    if (!Object.hasOwn(record, key)) continue;
+    const value = Number(record[key]);
+    if (Number.isFinite(value) && value > 0) return Math.floor(value);
+  }
+  return 0;
+}
+
+function planDurationDaysForAdminPlan(plan: AdminManagedUserPlan) {
+  if (plan === "vip_manual") return 3650;
+  if (plan === "trial") return 7;
+  if (plan === "premium" || plan === "monthly") return 30;
+  return 0;
+}
+
+function daysBetweenIso(startIso: string, endIso: string, fallback = 0) {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return fallback;
+  return Math.max(1, Math.ceil((end - start) / 86_400_000));
+}
+
 function addMinutesIso(startIso: string, minutes: number) {
   const date = new Date(startIso.trim() || new Date().toISOString());
   const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
@@ -15427,7 +15686,8 @@ async function loadLiveStateFresh(env: unknown) {
       if (isSiteContentSettingsNewer(currentSiteContentSettings, liveSiteContentSettings)) {
         liveSiteContentSettings = currentSiteContentSettings;
       }
-      if (shouldPersistRecoveredRegistry) {
+      const recoveredFromBillingUsers = await recoverEmptyClientRegistryFromBillingUsers(env, state);
+      if (shouldPersistRecoveredRegistry || recoveredFromBillingUsers) {
         void saveLiveState(env);
       }
     }
@@ -15450,6 +15710,26 @@ function shouldPersistRecoveredClientRegistry(
   const mergedCount = clientRegistryProtectedCount(extractClientRegistryState(mergedState));
 
   return cacheCount > 0 && mergedCount >= cacheCount && durableCount < cacheCount;
+}
+
+async function recoverEmptyClientRegistryFromBillingUsers(
+  env: unknown,
+  loadedState: Record<string, unknown>,
+) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const loadedCount = clientRegistryProtectedCount(extractClientRegistryState(loadedState));
+  if (loadedCount > 0) return false;
+
+  const currentCount = clientRegistryProtectedCount(
+    extractClientRegistryState(buildLiveStateSnapshot(env)),
+  );
+  if (currentCount > 0) return false;
+
+  const hydrated = await hydrateClientsFromBillingUsers(env);
+  if (hydrated) {
+    console.warn("Cadastro reconstruido a partir da tabela users apos estado vivo vazio.");
+  }
+  return hydrated;
 }
 
 async function loadLiveStateCache() {
@@ -16542,19 +16822,63 @@ async function withTimeout<T>(
 }
 
 function getSupabasePersistenceConfig(env: unknown) {
-  const url = (
-    readServerEnvString(env, "SNIPER_SUPABASE_URL", "") ||
-    readServerEnvString(env, "SUPABASE_URL", "") ||
-    readServerEnvString(env, "VITE_SUPABASE_URL", "")
-  ).replace(/\/+$/, "");
-  const key =
-    readServerEnvString(env, "SNIPER_SUPABASE_SERVICE_ROLE_KEY", "") ||
-    readServerEnvString(env, "SNIPER_SUPABASE_SERVICE_KEY", "") ||
-    readServerEnvString(env, "SUPABASE_SERVICE_ROLE_KEY", "") ||
-    readServerEnvString(env, "SUPABASE_SERVICE_KEY", "");
+  const urls = [
+    readNamedServerSecret(env, "SNIPER_SUPABASE_URL", ""),
+    readNamedServerSecret(env, "SUPABASE_URL", ""),
+    readNamedServerSecret(env, "VITE_SUPABASE_URL", ""),
+  ]
+    .map((value) => value.replace(/\/+$/, ""))
+    .filter(Boolean);
+  const keys = [
+    readNamedServerSecret(env, "SNIPER_SUPABASE_SERVICE_ROLE_KEY", ""),
+    readNamedServerSecret(env, "SNIPER_SUPABASE_SERVICE_KEY", ""),
+    readNamedServerSecret(env, "SUPABASE_SERVICE_ROLE_KEY", ""),
+    readNamedServerSecret(env, "SUPABASE_SERVICE_KEY", ""),
+  ].filter(Boolean);
 
-  if (!url || !key) return null;
-  return { url, key };
+  for (const url of urls) {
+    for (const key of keys) {
+      if (supabaseConfigPairMatches(url, key)) return { url, key };
+    }
+  }
+
+  if (urls.length && keys.length) {
+    console.warn("Supabase URL e service key parecem pertencer a projetos diferentes.");
+  }
+  return null;
+}
+
+function supabaseConfigPairMatches(url: string, key: string) {
+  const urlRef = supabaseProjectRefFromUrl(url);
+  const keyRef = supabaseProjectRefFromJwt(key);
+  if (urlRef && keyRef && urlRef !== keyRef) return false;
+  return true;
+}
+
+function supabaseProjectRefFromUrl(value: string) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    const [ref, domain] = host.split(".");
+    return domain === "supabase" ? ref : "";
+  } catch {
+    return "";
+  }
+}
+
+function supabaseProjectRefFromJwt(value: string) {
+  const parts = String(value || "").split(".");
+  if (parts.length < 2) return "";
+  try {
+    const payload = JSON.parse(base64UrlDecodeToString(parts[1]));
+    return typeof payload?.ref === "string" ? payload.ref.toLowerCase() : "";
+  } catch {
+    return "";
+  }
+}
+
+function base64UrlDecodeToString(value: string) {
+  const pad = value.length % 4 === 0 ? "" : "=".repeat(4 - (value.length % 4));
+  return atob(value.replace(/-/g, "+").replace(/_/g, "/") + pad);
 }
 
 const DEFAULT_TELEGRAM_ENGINE_URL = "https://sniperbo-telegram-engine.sniperboia.workers.dev";
