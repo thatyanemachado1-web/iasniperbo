@@ -11765,7 +11765,15 @@ function getAdminRoleForEmail(env: unknown, email: string): AdminRole | null {
 }
 
 function getAdminPasswordHash(env: unknown) {
-  return readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD_HASH", "").replace(/\\\$/g, "$").replace(/\s+/g, "");
+  const raw = readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD_HASH", "")
+    .replace(/\\\$/g, "$")
+    .replace(/%24/g, "$")
+    .trim();
+  const bcryptMatch = raw.match(/\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}/);
+  if (bcryptMatch) return bcryptMatch[0];
+  const pbkdf2Match = raw.match(/pbkdf2\$[^\s"'<>]+/i);
+  if (pbkdf2Match) return pbkdf2Match[0];
+  return raw.replace(/\s+/g, "");
 }
 
 function getAdminPlainPassword(env: unknown) {
