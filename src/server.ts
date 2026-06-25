@@ -1,4 +1,3 @@
-// @ts-nocheck
 import "./lib/error-capture";
 
 import bcrypt from "bcryptjs";
@@ -454,36 +453,36 @@ const VALIDATOR_TELEGRAM_MODULE_KEYS: ValidatorTelegramModuleKey[] = [
 ];
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
-    "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
+    "ðŸ¤– <b>PADRÃƒO IA CONFIRMADO</b>\n\nðŸŽ² <b>Mesa:</b> {{table}}\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}\nðŸ“Š <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
+    "ðŸ’Ž <b>NÃšMERO PAGANTE CONFIRMADO</b>\n\nðŸ”¢ <b>NÃºmero:</b> {{number}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}\nðŸ“Œ <b>Status:</b> {{status}}",
   surf_alert:
-    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
+    "ðŸŒŠ <b>AVISO DE SURF CONFIRMADO</b>\n\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nâš ï¸ <b>Risco:</b> {{risk}}\nðŸ“Š <b>ConfianÃ§a:</b> {{confidence}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
   ties_only:
-    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🛡️ <b>Cobrir empate:</b> até G{{tieCoverage}}\n📌 <b>Nível:</b> {{level}}",
+    "ðŸŸ¡ <b>POSSÃVEL EMPATE</b>\n\nðŸŽ² <b>Mesa:</b> {{table}}\nðŸ›¡ï¸ <b>Cobrir empate:</b> atÃ© G{{tieCoverage}}\nðŸ“Œ <b>NÃ­vel:</b> {{level}}",
   validator:
-    "🎯 <b>ENTRADA CONFIRMADA</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{percentage}}",
+    "ðŸŽ¯ <b>ENTRADA CONFIRMADA</b>\n\nðŸŽ² <b>Mesa:</b> {{table}}\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}\nðŸ“Š <b>Assertividade:</b> {{percentage}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
-  paying_numbers: "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
-  surf_alert: "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
-  ties_only: "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>",
-  validator: "✅ <b>{{result}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ai_patterns: "âœ… <b>{{result}}</b>\n\nðŸ¤– <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
+  paying_numbers: "âœ… <b>{{result}}</b>\n\nðŸ’Ž <b>NÃºmero:</b> {{number}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
+  surf_alert: "âœ… <b>{{result}}</b>\n\nðŸŒŠ <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
+  ties_only: "âœ… <b>{{result}}</b>\n\nðŸŸ¡ <b>Empate confirmado</b>",
+  validator: "âœ… <b>{{result}}</b>\n\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "❌ <b>RED</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-  paying_numbers: "❌ <b>RED</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-  surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate não confirmou</b>\n🛡️ <b>Proteção:</b> {{gale}}",
-  validator: "❌ <b>RED</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ai_patterns: "âŒ <b>RED</b>\n\nðŸ¤– <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
+  paying_numbers: "âŒ <b>RED</b>\n\nðŸ’Ž <b>NÃºmero:</b> {{number}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
+  surf_alert: "âŒ <b>RED</b>\n\nðŸŒŠ <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
+  ties_only: "âŒ <b>RED</b>\n\nðŸŸ¡ <b>Empate nÃ£o confirmou</b>\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
+  validator: "âŒ <b>RED</b>\n\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
-  paying_numbers: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
-  surf_alert: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
-  ties_only: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n✅ <b>Empate confirmado</b>",
-  validator: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ai_patterns: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nðŸ¤– <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
+  paying_numbers: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nðŸ’Ž <b>NÃºmero:</b> {{number}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
+  surf_alert: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nðŸŒŠ <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
+  ties_only: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nâœ… <b>Empate confirmado</b>",
+  validator: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
@@ -15154,6 +15153,12 @@ async function loadLiveStateFresh(env: unknown) {
     );
     const state = mergeLiveStates(durableState, cacheState);
     if (state) {
+      const shouldPersistRecoveredRegistry = shouldPersistRecoveredClientRegistry(
+        env,
+        durableState,
+        cacheState,
+        state,
+      );
       applyLiveState(state);
       if (isSalesSettingsNewer(currentSalesSettings, liveSalesSettings)) {
         liveSalesSettings = currentSalesSettings;
@@ -15161,10 +15166,29 @@ async function loadLiveStateFresh(env: unknown) {
       if (isSiteContentSettingsNewer(currentSiteContentSettings, liveSiteContentSettings)) {
         liveSiteContentSettings = currentSiteContentSettings;
       }
+      if (shouldPersistRecoveredRegistry) {
+        void saveLiveState(env);
+      }
     }
   } finally {
     liveStateLoadedAt = Date.now();
   }
+}
+
+function shouldPersistRecoveredClientRegistry(
+  env: unknown,
+  durableState: Record<string, unknown> | null,
+  cacheState: Record<string, unknown> | null,
+  mergedState: Record<string, unknown>,
+) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  if (!cacheState) return false;
+
+  const durableCount = clientRegistryProtectedCount(extractClientRegistryState(durableState || {}));
+  const cacheCount = clientRegistryProtectedCount(extractClientRegistryState(cacheState));
+  const mergedCount = clientRegistryProtectedCount(extractClientRegistryState(mergedState));
+
+  return cacheCount > 0 && mergedCount >= cacheCount && durableCount < cacheCount;
 }
 
 async function loadLiveStateCache() {
