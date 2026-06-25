@@ -13636,12 +13636,24 @@ function clientHasLiveAccess(client: Record<string, unknown>) {
   return enabled && !isExpiredIso(readString(client, "expires_at"));
 }
 
+function normalizeMigrationPaidPlanId(rawPlan: unknown, rawStatus: unknown): BillingPlanId | null {
+  const planText = String(rawPlan || "").trim().toLowerCase();
+  const statusText = String(rawStatus || "").trim().toLowerCase();
+  const plan = normalizeBillingPlanId(planText);
+  if (plan && plan !== "free") return plan;
+  if (["monthly", "mensal", "vip_manual", "manual_vip"].includes(planText)) return "vip";
+  if (planText.includes("premium") || planText.includes("liberado")) return "premium";
+  if (statusText === "manual_vip") return "vip";
+  if (["approved", "active"].includes(statusText)) return "premium";
+  return null;
+}
+
 function clientCanBindPasswordDuringMigration(client: Record<string, unknown>) {
   if (readString(client, "password_hash") || readString(client, "password")) return false;
   if (Boolean(client.isBlocked) || Boolean(client.is_blocked)) return false;
-  const plan = normalizeBillingPlanId(readString(client, "plan"));
+  const rawPlan = readString(client, "plan").toLowerCase();
   const status = readString(client, "access_status").toLowerCase();
-  if (!plan || plan === "free") return false;
+  if (!normalizeMigrationPaidPlanId(rawPlan, status)) return false;
   if (status === "expired" || status === "blocked" || isExpiredIso(readString(client, "expires_at"))) {
     return false;
   }
@@ -13656,7 +13668,7 @@ function buildRegistrationTrialAccess(
   now: string,
 ) {
   const existingStatus = readString(existingClient, "access_status").toLowerCase();
-  const existingPlan = normalizeBillingPlanId(readString(existingClient, "plan"));
+  const existingPlan = normalizeMigrationPaidPlanId(readString(existingClient, "plan"), existingStatus);
   const existingExpiresAt = readString(existingClient, "expires_at");
   const existingTrialExpiresAt =
     readString(existingClient, "trial_expires_at") || existingExpiresAt;
@@ -13873,7 +13885,7 @@ async function restoreClientFromApprovedSession(
   request: Request,
   session: SessionPayload,
 ) {
-  if (!(await sessionMatchesRequestBinding(env, request, session))) return null;
+  if (!(await approvedClientSessionMatchesRequestBinding(env, request, session))) return null;
   const now = new Date().toISOString();
   const plan = session.plan === "vip" ? "vip" : "premium";
   const client: Record<string, unknown> = {
@@ -13909,6 +13921,16 @@ async function restoreClientFromApprovedSession(
   await persistBillingUser(env, client);
   await saveLiveState(env);
   return findClientByEmail(session.email) || client;
+}
+
+async function approvedClientSessionMatchesRequestBinding(
+  env: unknown,
+  request: Request,
+  session: SessionPayload,
+) {
+  if (!session.ua) return false;
+  const binding = await requestSessionBinding(env, request);
+  return session.ua === binding.userAgentHash;
 }
 
 async function validateClientSessionBinding(
