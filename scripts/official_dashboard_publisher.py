@@ -50,6 +50,7 @@ PATTERN_MINER_MIN_OCCURRENCES = 3
 PATTERN_MINER_MIN_VALIDATED = 2
 PATTERN_MINER_LENGTHS = (3, 4, 5)
 PATTERN_MINER_TOP_SCAN = 150
+PATTERN_MINER_TOP_STRATEGIES_LIMIT = 30
 PATTERN_MINER_BANK_SAVE_INTERVAL = 15.0
 PENDING_ENTRY_STATUSES = {
     "pending",
@@ -700,6 +701,8 @@ def direct_pattern_text_from_decision(decision: dict[str, Any], signal: dict[str
 
 DIRECT_PATTERN_MINER_CACHE_KEY = ""
 DIRECT_PATTERN_MINER_CACHE_ALERTS: list[dict[str, Any]] = []
+DIRECT_PATTERN_MINER_SNAPSHOT_CACHE_KEY = ""
+DIRECT_PATTERN_MINER_SNAPSHOT_CACHE: dict[str, Any] | None = None
 
 
 def direct_pattern_bank_path(args: argparse.Namespace, env: dict[str, str]) -> Path:
@@ -839,23 +842,149 @@ def direct_pattern_miner_entry_alerts(rounds: list[dict[str, Any]]) -> list[dict
         return DIRECT_PATTERN_MINER_CACHE_ALERTS
 
     strategies = direct_pattern_miner_rank_strategies(rounds)
-    alerts: list[dict[str, Any]] = []
-    for strategy in [item for item in strategies if not item.get("insufficientSample")][:PATTERN_MINER_TOP_SCAN]:
-        sequence = strategy.get("sequence") if isinstance(strategy.get("sequence"), list) else []
-        length = len(sequence)
-        if length and len(rounds) >= length and direct_matches_sequence(rounds[-length:], sequence):
-            alerts.append({
-                "id": f"validated-{strategy.get('id')}",
-                "kind": "validated",
-                "strategy": strategy,
-                "progress": 1,
-                "title": "PADRAO VALIDADO",
-            })
-
-    alerts.sort(key=lambda alert: -direct_float((alert.get("strategy") or {}).get("assertiveness")))
+    alerts = [
+        alert
+        for alert in direct_pattern_miner_realtime_alerts(rounds, strategies)
+        if alert.get("kind") == "validated"
+    ]
     DIRECT_PATTERN_MINER_CACHE_KEY = cache_key
     DIRECT_PATTERN_MINER_CACHE_ALERTS = alerts[:40]
     return DIRECT_PATTERN_MINER_CACHE_ALERTS
+
+
+def attach_direct_pattern_miner_snapshot(
+    payload: dict[str, Any],
+    pattern_round_bank: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    payload_rounds = direct_payload_pattern_rounds(payload)
+    if not payload_rounds:
+        return payload
+    payload_last_key = direct_pattern_round_key(payload_rounds[-1])
+    bank_rounds = pattern_round_bank if isinstance(pattern_round_bank, list) else []
+    bank_last_key = direct_pattern_round_key(bank_rounds[-1]) if bank_rounds else ""
+    rounds = bank_rounds if bank_rounds and bank_last_key == payload_last_key else payload_rounds
+    next_payload = dict(payload)
+    next_payload["patternMinerSnapshot"] = direct_pattern_miner_snapshot(rounds)
+    return next_payload
+
+
+def direct_pattern_miner_snapshot(rounds: list[dict[str, Any]]) -> dict[str, Any]:
+    global DIRECT_PATTERN_MINER_SNAPSHOT_CACHE_KEY, DIRECT_PATTERN_MINER_SNAPSHOT_CACHE
+    last_key = direct_pattern_round_key(rounds[-1]) if rounds else ""
+    cache_key = f"{len(rounds)}:{last_key}"
+    if cache_key == DIRECT_PATTERN_MINER_SNAPSHOT_CACHE_KEY and DIRECT_PATTERN_MINER_SNAPSHOT_CACHE:
+        return DIRECT_PATTERN_MINER_SNAPSHOT_CACHE
+    updated_at = iso_now_ms()
+    ranking = [
+        direct_pattern_strategy_snapshot(strategy, updated_at)
+        for strategy in direct_pattern_miner_rank_strategies(rounds)
+    ]
+    strict_hot = [
+        strategy for strategy in ranking
+        if strategy.get("status") in {"VERY_HOT", "HOT"}
+    ]
+    if len(strict_hot) >= 20:
+        hot_strategies = strict_hot[:PATTERN_MINER_TOP_STRATEGIES_LIMIT]
+    else:
+        hot_strategies = [
+            strategy for strategy in ranking
+            if not strategy.get("insufficientSample")
+        ][:PATTERN_MINER_TOP_STRATEGIES_LIMIT]
+    alerts = direct_pattern_miner_realtime_alerts(rounds, ranking)
+    valid_strategies = [strategy for strategy in ranking if not strategy.get("insufficientSample")]
+    total_validated = sum(int(strategy.get("totalValidated") or 0) for strategy in valid_strategies)
+    sg = sum(int(strategy.get("sg") or 0) for strategy in valid_strategies)
+    g1 = sum(int(strategy.get("g1") or 0) for strategy in valid_strategies)
+    scoreboard = {
+        "sg": sg,
+        "g1": g1,
+        "red": sum(int(strategy.get("red") or 0) for strategy in valid_strategies),
+        "tie": sum(int(strategy.get("tie") or 0) for strategy in valid_strategies),
+        "totalValidated": total_validated,
+        "sequencePositive": max([int(strategy.get("sequencePositive") or 0) for strategy in valid_strategies] or [0]),
+        "sequenceNegative": max([int(strategy.get("sequenceNegative") or 0) for strategy in valid_strategies] or [0]),
+        "maxSequencePositive": max([int(strategy.get("maxSequencePositive") or 0) for strategy in valid_strategies] or [0]),
+        "maxSequenceNegative": max([int(strategy.get("maxSequenceNegative") or 0) for strategy in valid_strategies] or [0]),
+    }
+    if total_validated:
+        scoreboard["assertiveness"] = ((sg + g1) / total_validated) * 100
+    snapshot = {
+        "strategies": ranking,
+        "ranking": ranking,
+        "hotStrategies": hot_strategies,
+        "formingAlerts": [alert for alert in alerts if alert.get("kind") == "forming"],
+        "entryAlerts": [alert for alert in alerts if alert.get("kind") == "validated"],
+        "scoreboard": scoreboard,
+        "agent": {
+            "catalogedStrategies": len(ranking),
+            "hotStrategies": len(hot_strategies),
+            "observedStrategies": len([strategy for strategy in ranking if strategy.get("status") == "OBSERVATION"]),
+            "lastDiscovery": next((strategy for strategy in ranking if not strategy.get("insufficientSample")), None),
+            "updatedAt": updated_at,
+        },
+        "analyzedRounds": len(rounds),
+        "historyLimit": PATTERN_MINER_HISTORY_LIMIT,
+        "updatedAt": updated_at,
+    }
+    DIRECT_PATTERN_MINER_SNAPSHOT_CACHE_KEY = cache_key
+    DIRECT_PATTERN_MINER_SNAPSHOT_CACHE = snapshot
+    return snapshot
+
+
+def direct_pattern_strategy_snapshot(strategy: dict[str, Any], updated_at: str) -> dict[str, Any]:
+    item = dict(strategy)
+    if not item.get("expectedResult"):
+        item.pop("expectedResult", None)
+    item.setdefault("createdAt", updated_at)
+    item.setdefault("updatedAt", updated_at)
+    return item
+
+
+def direct_pattern_miner_realtime_alerts(
+    rounds: list[dict[str, Any]],
+    ranking: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    alerts: list[dict[str, Any]] = []
+    if not rounds:
+        return alerts
+    for strategy in [item for item in ranking if not item.get("insufficientSample")][:PATTERN_MINER_TOP_SCAN]:
+        sequence = strategy.get("sequence") if isinstance(strategy.get("sequence"), list) else []
+        length = len(sequence)
+        if length and len(rounds) >= length:
+            completed_rounds = rounds[-length:]
+            if direct_matches_sequence(completed_rounds, sequence):
+                alerts.append({
+                    "id": f"validated-{strategy.get('id')}",
+                    "kind": "validated",
+                    "strategy": strategy,
+                    "matchedRounds": completed_rounds,
+                    "progress": 1,
+                    "missingTokens": [],
+                    "title": "PADRAO VALIDADO",
+                })
+                continue
+        for matched in range(length - 1, 0, -1):
+            if len(rounds) < matched:
+                continue
+            partial_rounds = rounds[-matched:]
+            partial_sequence = sequence[:matched]
+            if direct_matches_sequence(partial_rounds, partial_sequence):
+                alerts.append({
+                    "id": f"forming-{strategy.get('id')}-{matched}",
+                    "kind": "forming",
+                    "strategy": strategy,
+                    "matchedRounds": partial_rounds,
+                    "progress": matched / length if length else 0,
+                    "missingTokens": sequence[matched:],
+                    "title": "PADRAO EM FORMACAO",
+                })
+                break
+    alerts.sort(key=lambda alert: (
+        0 if alert.get("kind") == "validated" else 1,
+        -direct_float(alert.get("progress")),
+        -direct_float((alert.get("strategy") or {}).get("assertiveness")),
+    ))
+    return alerts[:40]
 
 
 def direct_pattern_miner_rank_strategies(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1238,8 +1367,6 @@ def direct_telegram_signals(payload: dict[str, Any], pattern_round_bank: list[di
         })
 
     ai_candidate = direct_first_ai_candidate(direct_ai_patterns_from_alerts(payload, round_id))
-    if not ai_candidate:
-        ai_candidate = direct_first_ai_candidate(direct_ai_patterns_from_round_bank(direct_payload_pattern_rounds(payload), round_id))
     if ai_candidate:
         candidates.append(ai_candidate)
 
@@ -1610,6 +1737,7 @@ def main() -> int:
                 raise
             local_read_backoff_until = 0.0
             local_payload, g1_blocked, blocked_round = apply_g1_publication_lock(raw_local_payload, last_published_payload)
+            local_payload = attach_direct_pattern_miner_snapshot(local_payload, direct_pattern_round_bank)
             direct_pattern_round_bank = update_direct_pattern_round_bank(direct_pattern_round_bank, local_payload)
             if time.monotonic() - direct_pattern_bank_last_save >= PATTERN_MINER_BANK_SAVE_INTERVAL:
                 save_direct_pattern_round_bank(direct_pattern_bank_file, direct_pattern_round_bank)
@@ -1687,7 +1815,28 @@ def main() -> int:
                     next_direct_pending.append(pending)
             direct_telegram_pending = next_direct_pending[-100:]
 
-            for direct_signal in direct_telegram_signals(local_payload, direct_pattern_round_bank):
+            telegram_entry_payload = (
+                last_published_payload
+                if isinstance(last_published_payload, dict) and last_published_payload
+                else None
+            )
+            telegram_entry_round_id = direct_round_id(telegram_entry_payload) if telegram_entry_payload else 0
+            local_round_id = direct_round_id(local_payload)
+            telegram_entry_ready = bool(
+                telegram_entry_payload
+                and (not telegram_entry_round_id or not local_round_id or telegram_entry_round_id == local_round_id)
+            )
+            if telegram_entry_payload and not telegram_entry_ready:
+                logging.info(
+                    "direct telegram entries skipped: reason=published_payload_stale published_round=%s local_round=%s",
+                    telegram_entry_round_id,
+                    local_round_id,
+                )
+
+            for direct_signal in direct_telegram_signals(
+                telegram_entry_payload if telegram_entry_ready else {},
+                direct_pattern_round_bank,
+            ):
                 direct_key = str(direct_signal.get("signalKey") or "")
                 if not direct_key or direct_key in direct_telegram_sent_keys:
                     continue
