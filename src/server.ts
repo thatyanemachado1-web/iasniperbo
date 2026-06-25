@@ -12047,10 +12047,11 @@ function getAdminPasswordHash(env: unknown) {
 }
 
 function getAdminPlainPassword(env: unknown) {
-  return (
+  const plainPassword =
     readNamedServerSecret(env, "SNIPER_ADMIN_PASSWORD", "") ||
-    readNamedServerSecret(env, "ADMIN_PASSWORD", "")
-  );
+    readNamedServerSecret(env, "ADMIN_PASSWORD", "");
+
+  return plainPassword.trim();
 }
 
 function hasAdminPasswordConfig(env: unknown) {
