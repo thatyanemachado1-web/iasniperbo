@@ -8,7 +8,7 @@ import type {
 } from "@/types/neuralValidator";
 
 const SAVED_PATTERNS_KEY = "sniper_neural_validator_patterns_v1";
-const DELETED_PATTERNS_KEY = "sniper_neural_validator_deleted_patterns_v1";
+const LEGACY_DELETED_PATTERNS_KEY = "sniper_neural_validator_deleted_patterns_v1";
 const CHANNELS_KEY = "sniper_neural_validator_channels_v1";
 const DRAFT_KEY = "sniper_neural_validator_draft_v1";
 const ROUND_HISTORY_KEY = "sniper_round_history_v1";
@@ -42,16 +42,16 @@ export function readValidatorHistory(fallbackRounds: Round[]) {
 }
 
 export function readSavedPatterns() {
-  const deletedIds = readDeletedPatternIds();
+  clearLegacyDeletedPatternsCache();
   return readUserList<SavedValidatorPattern>(SAVED_PATTERNS_KEY).map((pattern) => ({
     ...pattern,
     pattern: Array.isArray(pattern.pattern) ? pattern.pattern.filter(isPatternToken) : [],
-  })).filter((pattern) => !deletedIds.has(pattern.id));
+  }));
 }
 
 export function writeSavedPatterns(patterns: SavedValidatorPattern[]) {
-  const deletedIds = readDeletedPatternIds();
-  writeUserList(SAVED_PATTERNS_KEY, patterns.filter((pattern) => !deletedIds.has(pattern.id)));
+  clearLegacyDeletedPatternsCache();
+  writeUserList(SAVED_PATTERNS_KEY, patterns);
 }
 
 export function upsertSavedPattern(pattern: SavedValidatorPattern) {
@@ -65,29 +65,8 @@ export function upsertSavedPattern(pattern: SavedValidatorPattern) {
 }
 
 export function removeSavedPattern(patternId: string) {
-  markSavedPatternDeleted(patternId);
-  const next = readSavedPatterns().filter((pattern) => pattern.id !== patternId);
-  writeSavedPatterns(next);
-  return next;
-}
-
-export function readDeletedPatternIds() {
-  return new Set(readDeletedPatternRecords().map((record) => record.id).filter(Boolean));
-}
-
-export function isSavedPatternDeleted(patternId: string) {
-  return readDeletedPatternIds().has(patternId);
-}
-
-export function markSavedPatternDeleted(patternId: string) {
-  if (typeof window === "undefined") return;
-  const id = patternId.trim();
-  if (!id) return;
-  const current = readDeletedPatternRecords().filter((record) => record.id !== id);
-  writeUserList(DELETED_PATTERNS_KEY, [
-    { id, deletedAt: new Date().toISOString() },
-    ...current,
-  ].slice(0, 1000));
+  purgeSavedPatternLocal(patternId);
+  return readSavedPatterns();
 }
 
 export function readNotificationChannels() {
@@ -173,15 +152,6 @@ function readUserList<T>(key: string): T[] {
   return Array.isArray(payload?.items) ? payload.items : [];
 }
 
-function readDeletedPatternRecords() {
-  return readUserList<{ id: string; deletedAt: string }>(DELETED_PATTERNS_KEY)
-    .filter((record) => typeof record.id === "string" && record.id.trim())
-    .map((record) => ({
-      id: record.id.trim(),
-      deletedAt: typeof record.deletedAt === "string" ? record.deletedAt : "",
-    }));
-}
-
 function writeUserList<T>(key: string, items: T[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(
@@ -193,6 +163,41 @@ function writeUserList<T>(key: string, items: T[]) {
 function userStorageKey(key: string) {
   const userId = currentUserId();
   return `${key}:${userId}`;
+}
+
+function purgeSavedPatternLocal(patternId: string) {
+  if (typeof window === "undefined") return;
+  const id = patternId.trim();
+  if (!id) return;
+  for (const key of Object.keys(window.localStorage)) {
+    if (key === SAVED_PATTERNS_KEY || key.startsWith(`${SAVED_PATTERNS_KEY}:`)) {
+      rewriteStoredListWithoutId<SavedValidatorPattern>(key, id);
+    }
+    if (key === LEGACY_DELETED_PATTERNS_KEY || key.startsWith(`${LEGACY_DELETED_PATTERNS_KEY}:`)) {
+      window.localStorage.removeItem(key);
+    }
+  }
+}
+
+function clearLegacyDeletedPatternsCache() {
+  if (typeof window === "undefined") return;
+  for (const key of Object.keys(window.localStorage)) {
+    if (key === LEGACY_DELETED_PATTERNS_KEY || key.startsWith(`${LEGACY_DELETED_PATTERNS_KEY}:`)) {
+      window.localStorage.removeItem(key);
+    }
+  }
+}
+
+function rewriteStoredListWithoutId<T extends { id?: string }>(key: string, patternId: string) {
+  const payload = readJson<{ userId?: string; items?: T[] }>(key);
+  if (!Array.isArray(payload?.items)) return;
+  const nextItems = payload.items.filter((item) => item.id !== patternId);
+  if (nextItems.length === payload.items.length) return;
+  if (!nextItems.length) {
+    window.localStorage.removeItem(key);
+    return;
+  }
+  window.localStorage.setItem(key, JSON.stringify({ ...payload, items: nextItems }));
 }
 
 function readJson<T>(key: string): T | null {
