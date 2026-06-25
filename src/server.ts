@@ -833,18 +833,18 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
   }
 
   if (request.method !== "POST") {
-    return json({ error: "M??todo n??o permitido." }, 405);
+    return json({ error: "Metodo nao permitido." }, 405);
   }
 
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "N??o autorizado." }, 401);
+    return json({ error: "Nao autorizado." }, 401);
   }
 
   const body = readRecord(await request.json().catch(() => ({})));
   const rawText = String(body.text || body.narration || "");
   const text = normalizeNarrationText(rawText);
   if (!text) {
-    return json({ error: "Texto de voz obrigat??rio." }, 400);
+    return json({ error: "Texto de voz obrigatorio." }, 400);
   }
   if (text.length > MAX_NARRATION_CHARS) {
     return json(
@@ -862,12 +862,12 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
 
   const apiKeys = getElevenLabsApiKeys(env);
   if (!apiKeys.length) {
-    return json({ error: "ELEVENLABS_API_KEY n??o configurada no backend." }, 503);
+    return json({ error: "ELEVENLABS_API_KEY nao configurada no backend." }, 503);
   }
 
   const voiceId = getElevenLabsVoiceId(env);
   if (!voiceId) {
-    return json({ error: "ELEVENLABS_VOICE_ID n??o configurado no backend." }, 503);
+    return json({ error: "ELEVENLABS_VOICE_ID nao configurado no backend." }, 503);
   }
 
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
@@ -907,7 +907,7 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
       console.warn(`Falha ao gerar voz ElevenLabs (${lastFailureStatus}) em todas as chaves configuradas.`);
       return json(elevenLabsErrorPayload(lastFailureStatus), elevenLabsErrorStatus(lastFailureStatus));
     }
-    return json({ error: "Falha de conex??o ao gerar voz ElevenLabs." }, 502);
+    return json({ error: "Falha de conexao ao gerar voz ElevenLabs." }, 502);
   }
 
   recordElevenLabsStatus("ok");
@@ -929,10 +929,10 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
   if (url.pathname !== "/voice/diagnostics") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "GET") return json({ error: "M??todo n??o permitido." }, 405);
+  if (request.method !== "GET") return json({ error: "Metodo nao permitido." }, 405);
 
   if (!(await isDashboardAuthorized(request, url, env))) {
-    return json({ error: "N??o autorizado." }, 401);
+    return json({ error: "Nao autorizado." }, 401);
   }
 
   const apiKeys = getElevenLabsApiKeys(env);
@@ -981,14 +981,14 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
   if (url.pathname !== "/api/voice/speak") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "M??todo n??o permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "N??o autorizado." }, 401);
+    return json({ error: "Nao autorizado." }, 401);
   }
 
   const body = readRecord(await request.json().catch(() => ({})));
   const text = normalizeNarrationText(readString(body, "text"));
-  if (!text) return json({ error: "Texto de voz obrigat??rio." }, 400);
+  if (!text) return json({ error: "Texto de voz obrigatorio." }, 400);
   if (text.length > MAX_NARRATION_CHARS) {
     return json({ error: `Texto de voz muito longo. Limite: ${MAX_NARRATION_CHARS} caracteres.` }, 413);
   }
@@ -999,12 +999,12 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
     return generateElevenLabsVoiceResponse(text, env);
   }
   if (provider !== "edge-tts") {
-    return json({ fallback: "browser", reason: "Provedor local ainda n??o ativo no backend." });
+    return json({ fallback: "browser", reason: "Provedor local ainda nao ativo no backend." });
   }
 
   const edgeTtsUrl = readServerEnvString(env, "EDGE_TTS_URL", "").replace(/\/+$/, "");
   if (!edgeTtsUrl) {
-    return json({ fallback: "browser", reason: "EDGE_TTS_URL n??o configurado no backend." });
+    return json({ fallback: "browser", reason: "EDGE_TTS_URL nao configurado no backend." });
   }
 
   try {
@@ -1021,7 +1021,7 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
       }),
     });
     if (!response.ok) {
-      return json({ fallback: "browser", reason: `Edge TTS indispon??vel (${response.status}).` });
+      return json({ fallback: "browser", reason: `Edge TTS indisponivel (${response.status}).` });
     }
 
     return new Response(await response.arrayBuffer(), {
@@ -1036,20 +1036,20 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
       },
     });
   } catch (error) {
-    console.warn("Edge TTS indispon??vel.", error);
-    return json({ fallback: "browser", reason: "Falha de conex??o com Edge TTS." });
+    console.warn("Edge TTS indisponivel.", error);
+    return json({ fallback: "browser", reason: "Falha de conexao com Edge TTS." });
   }
 }
 
 async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
   const apiKeys = getElevenLabsApiKeys(env);
   if (!apiKeys.length) {
-    return json({ error: "ELEVENLABS_API_KEY n??o configurada no backend." }, 503);
+    return json({ error: "ELEVENLABS_API_KEY nao configurada no backend." }, 503);
   }
 
   const voiceId = getElevenLabsVoiceId(env);
   if (!voiceId) {
-    return json({ error: "ELEVENLABS_VOICE_ID n??o configurado no backend." }, 503);
+    return json({ error: "ELEVENLABS_VOICE_ID nao configurado no backend." }, 503);
   }
 
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
@@ -1088,7 +1088,7 @@ async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
     if (typeof lastFailureStatus === "number") {
       return json(elevenLabsErrorPayload(lastFailureStatus), elevenLabsErrorStatus(lastFailureStatus));
     }
-    return json({ error: "Falha de conex??o ao gerar voz ElevenLabs." }, 502);
+    return json({ error: "Falha de conexao ao gerar voz ElevenLabs." }, 502);
   }
 
   recordElevenLabsStatus("ok");
@@ -1111,7 +1111,7 @@ async function handleLocalAiRequest(request: Request, env: unknown) {
   if (url.pathname === "/admin/local-ai") {
     if (request.method === "OPTIONS") return json(null, 204);
     const role = await getAdminRequestRole(request, env);
-    if (!role) return json({ error: "N??o autorizado." }, 401);
+    if (!role) return json({ error: "Nao autorizado." }, 401);
     if (request.method === "GET") {
       return json({
         settings: getLocalAiSettings(env),
@@ -1129,14 +1129,14 @@ async function handleLocalAiRequest(request: Request, env: unknown) {
         status: await probeOllamaStatus(env),
       });
     }
-    return json({ error: "M??todo n??o permitido." }, 405);
+    return json({ error: "Metodo nao permitido." }, 405);
   }
 
   if (url.pathname !== "/api/ai/local-commentary") return null;
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "M??todo n??o permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "N??o autorizado." }, 401);
+    return json({ error: "Nao autorizado." }, 401);
   }
 
   const startedAt = Date.now();
@@ -1308,17 +1308,17 @@ function buildLocalAiPrompt(
   summary: Record<string, unknown>,
 ) {
   return [
-    "Voc?? ?? o Sniper Voice IA, analista virtual de Bac Bo dentro do Sniper Bo IA.",
-    "Voc?? N??O decide entradas. As entradas j?? foram decididas pelos m??dulos internos.",
-    "Use somente os dados reais enviados em JSON. N??o invente porcentagens, estat??sticas ou fatos.",
+    "Voce e o Sniper Voice IA, analista virtual de Bac Bo dentro do Sniper Bo IA.",
+    "Voce NAO decide entradas. As entradas ja foram decididas pelos modulos internos.",
+    "Use somente os dados reais enviados em JSON. Nao invente porcentagens, estatisticas ou fatos.",
     "Nunca prometa lucro. Nunca diga certeza, garantida ou entrada garantida.",
-    "Se n??o houver dados suficientes, diga que a mesa est?? em observa????o.",
+    "Se nao houver dados suficientes, diga que a mesa esta em observacao.",
     "Tom: natural, agressivo, confiante, profissional, frases curtas, sala ao vivo.",
     "Sempre mencione risco quando o risco estiver alto.",
-    "Responda em portugu??s do Brasil com acentos corretos e no m??ximo 3 frases curtas.",
+    "Responda em portugues do Brasil, com no maximo 3 frases curtas.",
     `Evento: ${event || "chat"}`,
-    question ? `Pergunta do usu??rio: ${question}` : "",
-    fallbackText ? `Coment??rio base do sistema: ${fallbackText}` : "",
+    question ? `Pergunta do usuario: ${question}` : "",
+    fallbackText ? `Comentario base do sistema: ${fallbackText}` : "",
     `Dados reais do Sniper Bo IA: ${JSON.stringify(summary).slice(0, 6000)}`,
     "Resposta:",
   ]
@@ -1396,23 +1396,23 @@ function fallbackLocalAiCommentary(event: string, summary: Record<string, unknow
   const entry = readRecord(summary.entradaAtual);
   const side = readString(entry, "side");
   if (readString(risk, "nivel") === "alto") {
-    return "Cuidado. O mercado est?? pesado e o risco subiu. Melhor n??o for??ar entrada agora.";
+    return "Cuidado. O mercado esta pesado e o risco subiu. Melhor nao forcar entrada agora.";
   }
-  if (event.includes("green")) return "Bateu. Green confirmado. A leitura respeitou o padr??o.";
-  if (event.includes("red")) return "Red confirmado. O mercado quebrou a leitura. Gest??o primeiro.";
+  if (event.includes("green")) return "Bateu. Green confirmado. A leitura respeitou o padrao.";
+  if (event.includes("red")) return "Red confirmado. O mercado quebrou a leitura. Gestao primeiro.";
   if (side === "BANKER" || side === "PLAYER" || side === "TIE") {
-    return `Entrada confirmada em ${side}. A leitura veio dos m??dulos internos e o risco est?? monitorado.`;
+    return `Entrada confirmada em ${side}. A leitura veio dos modulos internos e o risco esta monitorado.`;
   }
-  return "Mesa ainda em observa????o. Tem movimento, mas n??o existe confirma????o limpa para entrada.";
+  return "Mesa ainda em observacao. Tem movimento, mas nao existe confirmacao limpa para entrada.";
 }
 
 function cleanLocalAiResponse(value: string) {
   const text = beautifyPortugueseText(sanitizeQuestion(value, 520))
-    .replace(/entrada\s+garantida/gi, "entrada confirmada pelos m??dulos")
+    .replace(/entrada\s+garantida/gi, "entrada confirmada pelos modulos")
     .replace(/\bgarantid[ao]\b/gi, "confirmado pelos dados")
     .replace(/\bcerteza\b/gi, "leitura")
     .replace(/lucro\s+certo/gi, "resultado ainda depende do mercado");
-  return text || "Mesa em observa????o. Ainda sem dados suficientes para coment??rio seguro.";
+  return text || "Mesa em observacao. Ainda sem dados suficientes para comentario seguro.";
 }
 
 function beautifyPortugueseText(value: string) {
@@ -1420,39 +1420,39 @@ function beautifyPortugueseText(value: string) {
 
 
   return [
-    ["voce", "voc??"],
-    ["nao", "n??o"],
-    ["atencao", "aten????o"],
-    ["observacao", "observa????o"],
-    ["narracao", "narra????o"],
-    ["comentario", "coment??rio"],
-    ["analise", "an??lise"],
-    ["numero", "n??mero"],
-    ["padrao", "padr??o"],
-    ["gestao", "gest??o"],
-    ["confianca", "confian??a"],
-    ["direcao", "dire????o"],
-    ["protecao", "prote????o"],
-    ["confirmacao", "confirma????o"],
-    ["proxima", "pr??xima"],
-    ["forcar", "for??ar"],
-    ["modulos", "m??dulos"],
-    ["metricas", "m??tricas"],
-    ["estatisticas", "estat??sticas"],
-    ["usuario", "usu??rio"],
-    ["usuarios", "usu??rios"],
-    ["responsavel", "respons??vel"],
-    ["prejuizo", "preju??zo"],
-    ["apos", "ap??s"],
-    ["ate", "at??"],
-    ["esta", "est??"],
-    ["ta", "t??"],
-    ["so", "s??"],
-    ["mao", "m??o"],
-    ["tambem", "tamb??m"],
-    ["valida", "v??lida"],
-    ["possivel", "poss??vel"],
-    ["saida", "sa??da"],
+    ["voce", "voce"],
+    ["nao", "nao"],
+    ["atencao", "atencao"],
+    ["observacao", "observacao"],
+    ["narracao", "narracao"],
+    ["comentario", "comentario"],
+    ["analise", "analise"],
+    ["numero", "numero"],
+    ["padrao", "padrao"],
+    ["gestao", "gestao"],
+    ["confianca", "confianca"],
+    ["direcao", "direcao"],
+    ["protecao", "protecao"],
+    ["confirmacao", "confirmacao"],
+    ["proxima", "proxima"],
+    ["forcar", "forcar"],
+    ["modulos", "modulos"],
+    ["metricas", "metricas"],
+    ["estatisticas", "estatisticas"],
+    ["usuario", "usuario"],
+    ["usuarios", "usuarios"],
+    ["responsavel", "responsavel"],
+    ["prejuizo", "prejuizo"],
+    ["apos", "apos"],
+    ["ate", "ate"],
+    ["esta", "esta"],
+    ["ta", "ta"],
+    ["so", "so"],
+    ["mao", "mao"],
+    ["tambem", "tambem"],
+    ["valida", "valida"],
+    ["possivel", "possivel"],
+    ["saida", "saida"],
   ].reduce((text, [plain, accented]) => replacePortugueseWord(text, plain, accented), mojibakeFixed);
 }
 
@@ -1568,7 +1568,7 @@ async function handleSalesSettingsRequest(request: Request) {
   if (url.pathname !== "/sales/settings") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "GET") return json({ error: "M??todo n??o permitido." }, 405);
+  if (request.method !== "GET") return json({ error: "Metodo nao permitido." }, 405);
 
   return json({ salesSettings: publicSalesSettings() });
 }
@@ -1578,7 +1578,7 @@ async function handleSiteContentRequest(request: Request) {
   if (url.pathname !== "/site-content") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "GET") return json({ error: "M??todo n??o permitido." }, 405);
+  if (request.method !== "GET") return json({ error: "Metodo nao permitido." }, 405);
 
   return json({ siteContent: publicSiteContentSettings() });
 }
@@ -1621,7 +1621,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
   if (request.method === "POST" && url.pathname === "/billing/checkout") {
     if (liveSalesSettings.salesClosed) {
       return json(
-        { error: "Vendas encerradas no momento. Entre na fila de espera para a pr??xima abertura." },
+        { error: "Vendas encerradas no momento. Entre na fila de espera para a proxima abertura." },
         403,
       );
     }
@@ -1636,7 +1636,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
       return json(
         {
           error:
-            "Sess??o expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
+            "Sessao expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
         },
         auth.status,
       );
@@ -1668,7 +1668,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
     });
   }
 
-  return json({ error: "Rota de assinatura n??o encontrada." }, 404);
+  return json({ error: "Rota de assinatura nao encontrada." }, 404);
 }
 
 async function requireClientBillingSession(
@@ -1679,17 +1679,17 @@ async function requireClientBillingSession(
   | { ok: false; status: number; error: string }
 > {
   const token = getBearerToken(request);
-  if (!token) return { ok: false, status: 401, error: "Sess??o obrigat??ria." };
+  if (!token) return { ok: false, status: 401, error: "Sessao obrigatoria." };
 
   const session = await verifySessionToken(env, token);
-  if (!session) return { ok: false, status: 401, error: "Sess??o expirada." };
+  if (!session) return { ok: false, status: 401, error: "Sessao expirada." };
   if (session.scope !== "client") {
     return { ok: false, status: 403, error: "Use uma conta de cliente para assinar." };
   }
 
   const client =
     findClientByEmail(session.email) || (await hydrateClientFromBilling(env, session.email));
-  if (!client) return { ok: false, status: 404, error: "Cliente n??o encontrado." };
+  if (!client) return { ok: false, status: 404, error: "Cliente nao encontrado." };
 
   const sessionCheck = await validateClientSessionBinding(env, request, session, client);
   if (!sessionCheck.ok) {
@@ -1701,7 +1701,7 @@ async function requireClientBillingSession(
       user_agent_hash: sessionCheck.userAgentHash || "",
     });
     await saveLiveState(env);
-    return { ok: false, status: 401, error: "Sess??o inv??lida ou usada em outro dispositivo." };
+    return { ok: false, status: 401, error: "Sessao invalida ou usada em outro dispositivo." };
   }
 
   return { ok: true, client, session };
@@ -1726,7 +1726,7 @@ async function recoverCheckoutClientFromBody(
   recordAccessEvent("checkout_session_recovered", {
     ...client,
     risk: auth.status >= 500 ? "medium" : "low",
-    detail: `Checkout liberado por e-mail ap??s falha de sess??o: ${auth.error}`,
+    detail: `Checkout liberado por e-mail apos falha de sessao: ${auth.error}`,
     ip_hash: binding.ipHash || "",
     user_agent_hash: binding.userAgentHash || "",
   });
@@ -1843,7 +1843,7 @@ async function createMercadoPagoCheckout(
     return json(
       {
         error:
-          "Checkout Hubla n??o configurado. Adicione HUBLA_CHECKOUT_URL ou o link do plano nos Secrets.",
+          "Checkout Hubla nao configurado. Adicione HUBLA_CHECKOUT_URL ou o link do plano nos Secrets.",
       },
       503,
     );
@@ -1851,7 +1851,7 @@ async function createMercadoPagoCheckout(
 
   const planConfig = getBillingPlan(plan, env);
   if (!planConfig || !planConfig.amount || planConfig.amount <= 0) {
-    return json({ error: "Valor do plano n??o configurado." }, 503);
+    return json({ error: "Valor do plano nao configurado." }, 503);
   }
 
   const now = new Date().toISOString();
@@ -1917,18 +1917,18 @@ async function createMercadoPagoCheckout(
     preference = readRecord(await response.json().catch(() => ({})));
     if (!response.ok) {
       console.warn(`Mercado Pago preference falhou (${response.status}).`);
-      return json({ error: "N??o foi poss??vel criar checkout no Mercado Pago." }, 502);
+      return json({ error: "Nao foi possivel criar checkout no Mercado Pago." }, 502);
     }
   } catch (error) {
     console.warn("Falha de rede ao criar checkout Mercado Pago.", error);
-    return json({ error: "Mercado Pago indispon??vel no momento." }, 502);
+    return json({ error: "Mercado Pago indisponivel no momento." }, 502);
   }
 
   const preferenceId = readString(preference, "id");
   const checkoutUrl =
     readString(preference, "init_point") || readString(preference, "sandbox_init_point");
   if (!preferenceId || !checkoutUrl) {
-    return json({ error: "Mercado Pago n??o retornou o link de checkout." }, 502);
+    return json({ error: "Mercado Pago nao retornou o link de checkout." }, 502);
   }
 
   const subscription = upsertSubscriptionRecord({
@@ -1988,7 +1988,7 @@ async function handleMercadoPagoWebhook(request: Request, url: URL, env: unknown
     paymentId,
   );
   if (!signatureOk) {
-    return json({ error: "Webhook Mercado Pago inv??lido." }, 401);
+    return json({ error: "Webhook Mercado Pago invalido." }, 401);
   }
 
   const payment = await fetchMercadoPagoPayment(env, paymentId);
@@ -2003,7 +2003,7 @@ async function handleMercadoPagoWebhook(request: Request, url: URL, env: unknown
 async function handleHublaWebhook(request: Request, env: unknown) {
   const rawBody = await request.text();
   if (!(await validateHublaWebhook(request, rawBody, env))) {
-    return json({ error: "Webhook Hubla inv??lido." }, 401);
+    return json({ error: "Webhook Hubla invalido." }, 401);
   }
 
   const payload = readRecord(parseJsonSafe(rawBody));
@@ -2178,7 +2178,7 @@ async function fetchMercadoPagoPayment(
 > {
   const accessToken = getMercadoPagoAccessToken(env);
   if (!accessToken) {
-    return { ok: false, status: 503, error: "Mercado Pago n??o configurado no servidor." };
+    return { ok: false, status: 503, error: "Mercado Pago nao configurado no servidor." };
   }
 
   try {
@@ -2191,12 +2191,12 @@ async function fetchMercadoPagoPayment(
     const payment = readRecord(await response.json().catch(() => ({})));
     if (!response.ok) {
       console.warn(`Consulta de pagamento Mercado Pago falhou (${response.status}).`);
-      return { ok: false, status: 502, error: "N??o foi poss??vel confirmar o pagamento." };
+      return { ok: false, status: 502, error: "Nao foi possivel confirmar o pagamento." };
     }
     return { ok: true, payment };
   } catch (error) {
     console.warn("Falha de rede ao consultar pagamento Mercado Pago.", error);
-    return { ok: false, status: 502, error: "Mercado Pago indispon??vel no momento." };
+    return { ok: false, status: 502, error: "Mercado Pago indisponivel no momento." };
   }
 }
 
@@ -2340,7 +2340,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (request.method === "GET" && url.pathname === "/auth/diagnostics") {
     if (!(await isDashboardAuthorized(request, url, env))) {
-      return json({ error: "N??o autorizado." }, 401);
+      return json({ error: "Nao autorizado." }, 401);
     }
     return json({
       hasAdminEmail: getAdminEmails(env).length > 0,
@@ -2359,7 +2359,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const adminPasswordHash = getAdminPasswordHash(env);
 
     if (!adminPasswordHash || !getSessionSecret(env)) {
-      return json({ error: "Credenciais admin n??o configuradas no servidor." }, 503);
+      return json({ error: "Credenciais admin nao configuradas no servidor." }, 503);
     }
 
     if (adminRole && await verifyPassword(readString(body, "password"), adminPasswordHash)) {
@@ -2388,7 +2388,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ token, email: loginEmail, role: adminRole });
     }
 
-    return json({ error: "E-mail ou senha admin inv??lidos." }, 401);
+    return json({ error: "E-mail ou senha admin invalidos." }, 401);
   }
 
   if (request.method === "POST" && url.pathname === "/auth/check") {
@@ -2399,7 +2399,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const adminRole = getAdminRoleForEmail(env, email);
 
     if (!getSessionSecret(env)) {
-      return json({ error: "Sess??o n??o configurada no servidor." }, 503);
+      return json({ error: "Sessao nao configurada no servidor." }, 503);
     }
 
     if (adminRole === "owner" && adminPasswordHash && await verifyPassword(password, adminPasswordHash)) {
@@ -2454,7 +2454,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
           email,
           full_name: "",
           expires_at: "",
-          reason: "E-mail ainda n??o cadastrado.",
+          reason: "E-mail ainda nao cadastrado.",
         },
       });
     }
@@ -2502,7 +2502,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       );
     }
     if (!ok) {
-      return json({ error: "Senha inv??lida." }, 401);
+      return json({ error: "Senha invalida." }, 401);
     }
 
     recordAccessEvent(client.enabled ? "client_login" : "client_pending_login", client);
@@ -2516,10 +2516,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
     if (!email || !password) {
-      return json({ error: "E-mail e senha s??o obrigat??rios." }, 400);
+      return json({ error: "E-mail e senha sao obrigatorios." }, 400);
     }
     if (!getSessionSecret(env)) {
-      return json({ error: "Sess??o n??o configurada no servidor." }, 503);
+      return json({ error: "Sessao nao configurada no servidor." }, 503);
     }
 
     if (getAdminRoleForEmail(env, email)) {
@@ -2618,7 +2618,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (session.scope === "owner") {
       if (!(await sessionMatchesRequestBinding(env, request, session))) {
         return json(
-          { valid: false, reason: "Sess??o inv??lida ou usada em outro dispositivo." },
+          { valid: false, reason: "Sessao invalida ou usada em outro dispositivo." },
           401,
         );
       }
@@ -2628,7 +2628,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (session.scope === "admin_approver") {
       if (!(await sessionMatchesRequestBinding(env, request, session))) {
         return json(
-          { valid: false, reason: "Sess??o inv??lida ou usada em outro dispositivo." },
+          { valid: false, reason: "Sessao invalida ou usada em outro dispositivo." },
           401,
         );
       }
@@ -2658,7 +2658,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
           email: session.email,
           full_name: "",
           expires_at: "",
-          reason: "E-mail ainda n??o cadastrado.",
+          reason: "E-mail ainda nao cadastrado.",
           client_token: "",
         },
       });
@@ -2674,7 +2674,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         user_agent_hash: sessionCheck.userAgentHash || "",
       });
       await saveLiveState(env);
-      return json({ valid: false, reason: "Sess??o inv??lida ou usada em outro dispositivo." }, 401);
+      return json({ valid: false, reason: "Sessao invalida ou usada em outro dispositivo." }, 401);
     }
 
     const access = await clientAccess(env, client, request, session);
@@ -2684,7 +2684,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   const adminRole = await getAdminRequestRole(request, env);
   if (!adminRole) {
-    return json({ error: "N??o autorizado." }, 401);
+    return json({ error: "Nao autorizado." }, 401);
   }
 
   if (url.pathname === "/admin/sales-settings") {
@@ -2713,7 +2713,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ salesSettings: adminSalesSettings(env, saveStatus) });
     }
 
-    return json({ error: "M??todo n??o permitido." }, 405);
+    return json({ error: "Metodo nao permitido." }, 405);
   }
 
   if (url.pathname === "/admin/site-content") {
@@ -2745,7 +2745,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ siteContent: adminSiteContentSettings(env, saveStatus) });
     }
 
-    return json({ error: "M??todo n??o permitido." }, 405);
+    return json({ error: "Metodo nao permitido." }, 405);
   }
 
   if (request.method === "GET" && url.pathname === "/admin/summary") {
@@ -2781,7 +2781,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const userId = decodeURIComponent(adminUserMatch[1]);
     const actionPath = adminUserMatch[2] || "";
     const target = findAdminManagedUser(userId, env);
-    if (!target) return json({ error: "Usu??rio n??o encontrado." }, 404);
+      if (!target) return json({ error: "Usuario nao encontrado." }, 404);
 
     if (request.method === "GET" && !actionPath) {
       return json({ user: target });
@@ -2903,7 +2903,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = readRecord(await request.json().catch(() => ({})));
     const title = readString(body, "title");
     const message = readString(body, "message");
-    if (!title || !message) return json({ error: "T??tulo e mensagem s??o obrigat??rios." }, 400);
+    if (!title || !message) return json({ error: "Titulo e mensagem sao obrigatorios." }, 400);
     const before = liveSiteContentSettings;
     liveSiteContentSettings = normalizeSiteContentSettings(
       {
@@ -2980,7 +2980,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       const clientIndex = liveClients.findIndex((client) => client.id === recipientId);
       if (clientIndex === -1) {
         if (syncChanged) await saveLiveState(env);
-        return json({ error: "Destinat??rio n??o encontrado." }, 404);
+        return json({ error: "Destinatario nao encontrado." }, 404);
       }
       upsertRecipientFromClient(liveClients[clientIndex]);
       await saveLiveState(env);
@@ -3063,7 +3063,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     });
   }
 
-  return json({ error: "Rota n??o encontrada." }, 404);
+  return json({ error: "Rota nao encontrada." }, 404);
 }
 
 async function handleDashboardRequest(request: Request, env: unknown, ctx?: unknown) {
@@ -3113,7 +3113,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     (url.pathname === "/validator/telegram/test" || url.pathname === "/validator/telegram/send")
   ) {
     if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "N????????o autorizado." }, 401);
+      return json({ error: "Nao autorizado." }, 401);
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
@@ -3145,7 +3145,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     (url.pathname === "/dashboard/round-history" || url.pathname === "/validator/round-history")
   ) {
     if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "N????o autorizado." }, 401);
+      return json({ error: "Nao autorizado." }, 401);
     }
 
     const limit = clampRoundHistoryLimit(url.searchParams.get("limit"));
@@ -3173,7 +3173,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   if (request.method === "POST" && url.pathname === "/validator/round-history") {
     if (!(await isDashboardWriteAuthorized(request, url, env))) {
-      return json({ error: "N????o autorizado." }, 401);
+      return json({ error: "Nao autorizado." }, 401);
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
@@ -3218,7 +3218,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   if (request.method === "GET" && url.pathname === "/dashboard") {
     if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "N??o autorizado." }, 401);
+      return json({ error: "Nao autorizado." }, 401);
     }
 
     await syncDashboardReadState(env);
@@ -3237,7 +3237,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/dashboard/publish")
   ) {
     if (!(await isDashboardWriteAuthorized(request, url, env))) {
-      return json({ error: "N??o autorizado." }, 401);
+      return json({ error: "Nao autorizado." }, 401);
     }
 
     const body = await request.json().catch(() => ({}));
@@ -9579,10 +9579,10 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
   if (url.pathname !== "/adaptive-strategy/sync") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "M??todo n??o permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
 
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "N??o autorizado." }, 401);
+    return json({ error: "Nao autorizado." }, 401);
   }
 
   const config = getSupabasePersistenceConfig(env);
@@ -9592,7 +9592,7 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
       storage: "local",
       lastSyncedAt: new Date().toISOString(),
       message:
-        "Supabase service role n??o configurado no backend. Adaptive Engine mantido no hist??rico local.",
+        "Supabase service role nao configurado no backend. Adaptive Engine mantido no historico local.",
     });
   }
 
@@ -9613,7 +9613,7 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
         mode: "error",
         storage: "error",
         lastSyncedAt: new Date().toISOString(),
-        error: "N??o foi poss??vel salvar todos os dados do Adaptive Engine no Supabase.",
+        error: "Nao foi possivel salvar todos os dados do Adaptive Engine no Supabase.",
       },
       502,
     );
@@ -9752,7 +9752,7 @@ async function saveSupabaseRows(
     }
     return true;
   } catch (error) {
-    console.warn(`Adaptive Engine: falha de conex??o ao salvar ${table}.`, error);
+    console.warn(`Adaptive Engine: falha de conexao ao salvar ${table}.`, error);
     return false;
   }
 }
@@ -11538,7 +11538,7 @@ function normalizeServerModeList(value: unknown) {
       .trim()
       .toLowerCase();
     if (text === "sniper") selected.add("sniper");
-    if (text === "hunter" || text === "cacador" || text === "ca??ador") selected.add("hunter");
+    if (text === "hunter" || text === "cacador") selected.add("hunter");
     if (text === "aggressive" || text === "agressivo") selected.add("aggressive");
   }
   return ACTIVE_ENTRY_MODES.filter((mode) => selected.has(mode));
@@ -13229,14 +13229,14 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
-      console.warn(`N??o foi poss??vel carregar ${table} (${response.status}).`);
+      console.warn(`Nao foi possivel carregar ${table} (${response.status}).`);
       return [];
     }
 
     const rows = await response.json().catch(() => null);
     return Array.isArray(rows) ? rows.map(readRecord).filter(hasRecordFields) : [];
   } catch (error) {
-    console.warn(`N??o foi poss??vel carregar ${table}.`, error);
+    console.warn(`Nao foi possivel carregar ${table}.`, error);
     return [];
   }
 }
@@ -13280,14 +13280,14 @@ async function fetchSupabaseRowsRange(
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
-      console.warn(`N????o foi poss????vel carregar ${table} (${response.status}).`);
+      console.warn(`Nao foi possivel carregar ${table} (${response.status}).`);
       return [];
     }
 
     const rows = await response.json().catch(() => null);
     return Array.isArray(rows) ? rows.map(readRecord).filter(hasRecordFields) : [];
   } catch (error) {
-    console.warn(`N????o foi poss????vel carregar ${table}.`, error);
+    console.warn(`Nao foi possivel carregar ${table}.`, error);
     return [];
   }
 }
@@ -13315,12 +13315,12 @@ async function persistSupabaseRow(
       },
     );
     if (!response.ok && response.status !== 404) {
-      console.warn(`N??o foi poss??vel salvar ${table} (${response.status}).`);
+      console.warn(`Nao foi possivel salvar ${table} (${response.status}).`);
       return false;
     }
     return response.ok;
   } catch (error) {
-    console.warn(`N??o foi poss??vel salvar ${table}.`, error);
+    console.warn(`Nao foi possivel salvar ${table}.`, error);
     return false;
   }
 }
@@ -13349,12 +13349,12 @@ async function persistSupabaseRows(
       },
     );
     if (!response.ok && response.status !== 404) {
-      console.warn(`N????o foi poss????vel salvar lote em ${table} (${response.status}).`);
+      console.warn(`Nao foi possivel salvar lote em ${table} (${response.status}).`);
       return false;
     }
     return response.ok;
   } catch (error) {
-    console.warn(`N????o foi poss????vel salvar lote em ${table}.`, error);
+    console.warn(`Nao foi possivel salvar lote em ${table}.`, error);
     return false;
   }
 }
@@ -13372,10 +13372,10 @@ async function deleteSupabaseRows(env: unknown, table: string, query: string) {
       },
     });
     if (!response.ok && response.status !== 404) {
-      console.warn(`N??o foi poss??vel apagar ${table} (${response.status}).`);
+      console.warn(`Nao foi possivel apagar ${table} (${response.status}).`);
     }
   } catch (error) {
-    console.warn(`N??o foi poss??vel apagar ${table}.`, error);
+    console.warn(`Nao foi possivel apagar ${table}.`, error);
   }
 }
 
@@ -13500,10 +13500,10 @@ function elevenLabsErrorStatus(status: number) {
 
 function elevenLabsErrorPayload(status: number) {
   if (status === 401 || status === 403) {
-    return { error: "API key ElevenLabs inv??lida ou sem permiss??o." };
+    return { error: "API key ElevenLabs invalida ou sem permissao." };
   }
   if (status === 404 || status === 422) {
-    return { error: "ELEVENLABS_VOICE_ID inv??lido ou indispon??vel." };
+    return { error: "ELEVENLABS_VOICE_ID invalido ou indisponivel." };
   }
   if (status === 429) {
     return { error: "Quota ou limite da ElevenLabs atingido." };
@@ -14065,7 +14065,7 @@ async function clientAccess(
       recordAccessEvent("client_session_replaced", {
         ...client,
         risk: "medium",
-        detail: "Nova sess??o derrubou a sess??o anterior.",
+        detail: "Nova sessao derrubou a sessao anterior.",
         ip_hash: binding.ipHash,
         user_agent_hash: binding.userAgentHash,
       });
@@ -14114,7 +14114,7 @@ async function clientAccess(
         ? "Teste gratuito ativo por tempo limitado."
         : enabled
           ? "Acesso liberado pelo administrador."
-          : "Aguardando libera????o do administrador.",
+          : "Aguardando liberacao do administrador.",
     client_token: token,
   };
 }
@@ -14509,7 +14509,7 @@ async function extendAdminManagedUser(
   reason: string,
 ) {
   if (!Number.isFinite(days) || days <= 0 || days > 365) {
-    return { ok: false as const, status: 400, error: "Quantidade de dias inv??lida." };
+    return { ok: false as const, status: 400, error: "Quantidade de dias invalida." };
   }
   const before = normalizeAdminManagedUser(target, env);
   const baseMs = Date.parse(before.currentPeriodEnd);
@@ -14530,7 +14530,7 @@ async function extendAdminManagedUser(
       currentPeriodEnd,
       subscriptionStatus: status,
       isBlocked: false,
-      reason: reason || `Prorroga????o de ${days} dias`,
+      reason: reason || `Prorrogacao de ${days} dias`,
     },
     "EXTEND_ACCESS",
   );
@@ -14580,7 +14580,7 @@ async function unblockAdminManagedUser(
     {
       isBlocked: false,
       subscriptionStatus: nextStatus,
-      reason: reason || "Reativa????o manual",
+      reason: reason || "Reativacao manual",
     },
     "UNBLOCK_USER",
   );
@@ -14608,7 +14608,7 @@ async function deleteAdminManagedUser(
     action: "DELETE_USER",
     beforeJson: before,
     afterJson: { deleted: true },
-    reason: reason || "Exclus??o manual de cadastro",
+    reason: reason || "Exclusao manual de cadastro",
   });
   await deletePersistedBillingUser(env, before);
   return { ok: true, user: before };
@@ -14630,7 +14630,7 @@ function canDeleteAdminManagedUser(
       (user) => normalizeManagedUserRole(user.role) === "owner",
     ).length;
     if (ownerCount <= 1) {
-      return { ok: false, status: 403, error: "N??o ?? permitido excluir o ??nico owner ativo." };
+      return { ok: false, status: 403, error: "Nao e permitido excluir o unico owner ativo." };
     }
   }
 
@@ -14638,7 +14638,7 @@ function canDeleteAdminManagedUser(
     return {
       ok: false,
       status: 403,
-      error: "N??o ?? permitido excluir o pr??prio cadastro por esta rota.",
+      error: "Nao e permitido excluir o proprio cadastro por esta rota.",
     };
   }
 
@@ -14654,7 +14654,7 @@ function canEditAdminManagedUser(
   const targetRole = normalizeManagedUserRole(target.role);
   const targetEmail = readString(target, "email").toLowerCase();
   if (adminRole !== "owner" && targetRole !== "user") {
-    return { ok: false, status: 403, error: "Admin n??o pode alterar outro admin ou owner." };
+    return { ok: false, status: 403, error: "Admin nao pode alterar outro admin ou owner." };
   }
   if (change.changingRole && adminRole !== "owner") {
     return {
@@ -14664,7 +14664,7 @@ function canEditAdminManagedUser(
     };
   }
   if (targetRole === "owner" && adminRole !== "owner") {
-    return { ok: false, status: 403, error: "Admin n??o pode alterar owner." };
+    return { ok: false, status: 403, error: "Admin nao pode alterar owner." };
   }
   if (
     adminRole !== "owner" &&
@@ -14674,7 +14674,7 @@ function canEditAdminManagedUser(
     return {
       ok: false,
       status: 403,
-      error: "Admin n??o pode remover o pr??prio acesso por esta rota.",
+      error: "Admin nao pode remover o proprio acesso por esta rota.",
     };
   }
   if (
@@ -14686,7 +14686,7 @@ function canEditAdminManagedUser(
       (user) => normalizeManagedUserRole(user.role) === "owner",
     ).length;
     if (ownerCount <= 1) {
-      return { ok: false, status: 403, error: "N??o ?? permitido remover o ??nico owner ativo." };
+      return { ok: false, status: 403, error: "Nao e permitido remover o unico owner ativo." };
     }
   }
   return { ok: true };
@@ -15023,7 +15023,7 @@ function mockAdminManagedUsers() {
     },
     {
       id: "3",
-      name: "Usu??rio Vencido",
+      name: "Usuario Vencido",
       email: "vencido@email.com",
       role: "user",
       plan: "monthly",
@@ -15037,7 +15037,7 @@ function mockAdminManagedUsers() {
     },
     {
       id: "4",
-      name: "Usu??rio Bloqueado",
+      name: "Usuario Bloqueado",
       email: "bloqueado@email.com",
       role: "user",
       plan: "premium",
@@ -15068,7 +15068,7 @@ function buildLocationBreakdown(
 ) {
   const counts = new Map<string, number>();
   for (const record of records) {
-    const label = readString(record, field) || "N??o informado";
+    const label = readString(record, field) || "Nao informado";
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   return [...counts.entries()]
@@ -15373,7 +15373,7 @@ async function loadLiveStateCache() {
 
     return readRecord(await response.json().catch(() => null));
   } catch (error) {
-    console.warn("N??o foi poss??vel carregar estado vivo do cache.", error);
+    console.warn("Nao foi possivel carregar estado vivo do cache.", error);
     return null;
   }
 }
@@ -16340,7 +16340,7 @@ async function saveLiveStateCache(state: Record<string, unknown>) {
     );
     return true;
   } catch (error) {
-    console.warn("N??o foi poss??vel salvar estado vivo no cache.", error);
+    console.warn("Nao foi possivel salvar estado vivo no cache.", error);
     return false;
   }
 }
@@ -16365,7 +16365,7 @@ async function loadDurableLiveStateById(env: unknown, id: string) {
     );
     if (response.status === 404 || response.status === 406) return null;
     if (!response.ok) {
-      console.warn(`Estado dur??vel indispon??vel (${response.status}).`);
+      console.warn(`Estado duravel indisponivel (${response.status}).`);
       return null;
     }
 
@@ -16374,7 +16374,7 @@ async function loadDurableLiveStateById(env: unknown, id: string) {
     const state = readRecord(row.state);
     return Object.keys(state).length > 0 ? state : null;
   } catch (error) {
-    console.warn("N??o foi poss??vel carregar estado dur??vel.", error);
+    console.warn("Nao foi possivel carregar estado duravel.", error);
     return null;
   } finally {
     clearTimeout(timeout);
@@ -16411,12 +16411,12 @@ async function saveDurableLiveStateById(
       signal: controller.signal,
     });
     if (!response.ok) {
-      console.warn(`N??o foi poss??vel salvar estado dur??vel (${response.status}).`);
+      console.warn(`Nao foi possivel salvar estado duravel (${response.status}).`);
       return false;
     }
     return true;
   } catch (error) {
-    console.warn("N??o foi poss??vel salvar estado dur??vel.", error);
+    console.warn("Nao foi possivel salvar estado duravel.", error);
     return false;
   } finally {
     clearTimeout(timeout);
@@ -16699,9 +16699,9 @@ function adminSalesSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
     : saveStatus.durableConfigured;
   const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
   const warning = !durableConfigured
-    ? "Persist??ncia fixa n??o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para a chave n??o voltar sozinha."
+    ? "Persistencia fixa nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para a chave nao voltar sozinha."
     : saveStatus.saved_at && !saveStatus.durable
-      ? "N??o foi poss??vel confirmar o salvamento dur??vel. Verifique a tabela sniper_live_state no Supabase."
+      ? "Nao foi possivel confirmar o salvamento duravel. Verifique a tabela sniper_live_state no Supabase."
       : "";
   return {
     ...publicSalesSettings(),
@@ -16719,9 +16719,9 @@ function adminSiteContentSettings(env?: unknown, saveStatus = liveStateSaveStatu
     : saveStatus.durableConfigured;
   const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
   const warning = !durableConfigured
-    ? "Persist??ncia fixa n??o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar definitivo."
+    ? "Persistencia fixa nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar definitivo."
     : saveStatus.saved_at && !saveStatus.durable
-      ? "N??o foi poss??vel confirmar o salvamento dur??vel. Verifique a tabela sniper_live_state no Supabase."
+      ? "Nao foi possivel confirmar o salvamento duravel. Verifique a tabela sniper_live_state no Supabase."
       : "";
   return {
     ...liveSiteContentSettings,
