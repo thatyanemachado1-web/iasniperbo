@@ -724,8 +724,7 @@ function rateLimitForRequest(method: string, pathname: string) {
   ) return 120;
   if (
     pathname === "/validator/telegram/test" ||
-    pathname === "/validator/telegram/send" ||
-    pathname === "/validator/telegram/resolve"
+    pathname === "/validator/telegram/send"
   ) return 30;
   if (pathname === "/adaptive-strategy/sync") return 240;
   if (
@@ -3009,8 +3008,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/validator/notifications" ||
       url.pathname === "/validator/live-hit/send" ||
       url.pathname === "/validator/telegram/test" ||
-      url.pathname === "/validator/telegram/send" ||
-      url.pathname === "/validator/telegram/resolve"
+      url.pathname === "/validator/telegram/send"
     )
   ) {
     return json(null, 204);
@@ -3030,20 +3028,6 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   const validatorValidationResponse = await handleValidatorValidationRequest(request, url, env);
   if (validatorValidationResponse) return validatorValidationResponse;
-
-  if (request.method === "POST" && url.pathname === "/validator/telegram/resolve") {
-    if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "N????????o autorizado." }, 401);
-    }
-
-    const body = readRecord(await request.json().catch(() => ({})));
-    const botToken = normalizeSecretValue(readString(body, "botToken"));
-    if (!botToken) return json({ error: "Bot Token obrigatorio." }, 400);
-
-    const result = await fetchTelegramChatCandidates(botToken);
-    if (!result.ok) return json({ error: result.error }, result.status);
-    return json({ groups: result.groups });
-  }
 
   if (
     request.method === "POST" &&
@@ -6699,97 +6683,6 @@ async function findValidatorChannelForUser(env: unknown, userId: string, channel
     liveValidatorChannels = upsertValidatorChannel(storedFromList);
   }
   return storedFromList;
-}
-
-async function fetchTelegramChatCandidates(botToken: string): Promise<{
-  ok: true;
-  groups: Array<{ chatId: string; title: string; type: string; username: string }>;
-} | { ok: false; status: number; error: string }> {
-  const allowedUpdates = encodeURIComponent(JSON.stringify([
-    "message",
-    "channel_post",
-    "my_chat_member",
-    "chat_member",
-  ]));
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), TELEGRAM_SEND_TIMEOUT_MS);
-
-  let response: Response;
-  try {
-    response = await fetch(
-      `https://api.telegram.org/bot${botToken}/getUpdates?limit=50&timeout=0&allowed_updates=${allowedUpdates}`,
-      { method: "GET", signal: controller.signal },
-    );
-  } catch {
-    return {
-      ok: false,
-      status: 502,
-      error: "Nao foi possivel consultar grupos no Telegram agora.",
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  const data = readRecord(await response.json().catch(() => ({})));
-  if (!response.ok || data.ok !== true) {
-    return {
-      ok: false,
-      status: telegramHttpStatus(response.status),
-      error: friendlyTelegramError(response.status, readString(data, "description")),
-    };
-  }
-
-  const byId = new Map<string, { chatId: string; title: string; type: string; username: string }>();
-  const updates = Array.isArray(data.result) ? data.result : [];
-  for (const rawUpdate of updates) {
-    const chat = telegramChatFromUpdate(readRecord(rawUpdate));
-    if (!chat) continue;
-    const chatId = telegramChatId(chat);
-    const type = readString(chat, "type");
-    if (!chatId || !["group", "supergroup", "channel"].includes(type)) continue;
-    byId.set(chatId, {
-      chatId,
-      title: readString(chat, "title") || readString(chat, "username") || chatId,
-      type,
-      username: readString(chat, "username"),
-    });
-  }
-
-  return {
-    ok: true,
-    groups: [...byId.values()].slice(-20).reverse(),
-  };
-}
-
-function telegramChatFromUpdate(update: Record<string, unknown>) {
-  const messageSources = [
-    readRecord(update.message),
-    readRecord(update.channel_post),
-    readRecord(update.edited_message),
-    readRecord(update.edited_channel_post),
-  ];
-  for (const source of messageSources) {
-    const chat = readRecord(source.chat);
-    if (Object.keys(chat).length) return chat;
-  }
-
-  const memberSources = [
-    readRecord(update.my_chat_member),
-    readRecord(update.chat_member),
-  ];
-  for (const source of memberSources) {
-    const chat = readRecord(source.chat);
-    if (Object.keys(chat).length) return chat;
-  }
-
-  return null;
-}
-
-function telegramChatId(chat: Record<string, unknown>) {
-  const rawId = chat.id;
-  if (typeof rawId === "number" && Number.isFinite(rawId)) return String(Math.trunc(rawId));
-  if (typeof rawId === "bigint") return rawId.toString();
-  return String(rawId || "").trim();
 }
 
 async function sendTelegramMessage({
