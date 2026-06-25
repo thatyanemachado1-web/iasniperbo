@@ -1,4 +1,3 @@
-// @ts-nocheck
 import "./lib/error-capture";
 
 import bcrypt from "bcryptjs";
@@ -1348,13 +1347,17 @@ function cleanLocalAiResponse(value: string) {
 }
 
 function beautifyPortugueseText(value: string) {
-  const mojibakeFixed = value
-    .split("n????o").join("n??o")
-    .split("N????o").join("N??o")
-    .split("aten????????o").join("aten????o")
-    .split("Aten????????o").join("Aten????o")
-    .split("pain????is").join("pain??is")
-    .split("indispon????vel").join("indispon??vel");
+  let mojibakeFixed = value;
+  for (const [search, replacement] of [
+    ["n????o", "n??o"],
+    ["N????o", "N??o"],
+    ["aten????????o", "aten????o"],
+    ["Aten????????o", "Aten????o"],
+    ["pain????is", "pain??is"],
+    ["indispon????vel", "indispon??vel"],
+  ] as const) {
+    mojibakeFixed = replaceLiteralText(mojibakeFixed, search, replacement);
+  }
 
   return [
     ["voce", "voc??"],
@@ -1391,6 +1394,10 @@ function beautifyPortugueseText(value: string) {
     ["possivel", "poss??vel"],
     ["saida", "sa??da"],
   ].reduce((text, [plain, accented]) => replacePortugueseWord(text, plain, accented), mojibakeFixed);
+}
+
+function replaceLiteralText(value: string, search: string, replacement: string) {
+  return search ? value.split(search).join(replacement) : value;
 }
 
 function replacePortugueseWord(text: string, plain: string, accented: string) {
