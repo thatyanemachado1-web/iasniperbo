@@ -53,11 +53,9 @@ import {
   createStorageId,
   currentUserId,
   maskBotToken,
-  readNotificationChannels,
   readPatternDraft,
   removeNotificationChannel,
   removeSavedPattern,
-  upsertNotificationChannel,
   upsertSavedPattern,
   writeNotificationChannels,
   writeSavedPatterns,
@@ -133,8 +131,9 @@ function NeuralValidatorPage() {
   });
   const [manualResult, setManualResult] = useState<ValidatorResult | null>(null);
   const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>([]);
-  const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
+  const [channels, setChannels] = useState<ValidatorNotificationChannel[]>([]);
   const [testingTelegramId, setTestingTelegramId] = useState("");
+  const [savingChannel, setSavingChannel] = useState(false);
   const [siteAlerts, setSiteAlerts] = useState<LiveValidatorHit[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
   const deletedPatternIdsRef = useRef(new Set<string>());
@@ -526,10 +525,10 @@ function NeuralValidatorPage() {
     }
   }
 
-  function saveChannel() {
+  async function saveChannel() {
     if (!planLimits.telegram) {
       showNotice("Telegram fica bloqueado para o plano Free.");
-      return;
+      return false;
     }
     const name = channelForm.name.trim() || "Canal Telegram";
     const token = channelForm.botToken.trim();
@@ -540,6 +539,14 @@ function NeuralValidatorPage() {
       const sameChat = chatId ? channel.chatId === chatId || !channel.chatId : true;
       return sameName && sameChat;
     });
+    if (!token && !matchingChannel?.botTokenMasked) {
+      showNotice("Informe o Bot Token para validar o grupo.");
+      return false;
+    }
+    if (!chatId && !matchingChannel?.chatId) {
+      showNotice("Informe o Chat ID do grupo para validar.");
+      return false;
+    }
     const duplicateChannel = chatId
       ? channels.find((channel) =>
           normalizeValidatorChannelCode(channel.chatId) === normalizeValidatorChannelCode(chatId) &&
@@ -548,11 +555,11 @@ function NeuralValidatorPage() {
       : null;
     if (duplicateChannel) {
       showNotice("Ja existe um canal com este Chat ID/codigo.");
-      return;
+      return false;
     }
     if (channels.length >= planLimits.channels && !matchingChannel) {
       showNotice(`Seu plano permite ate ${planLimits.channels} canais.`);
-      return;
+      return false;
     }
     const now = new Date().toISOString();
     const channel: ValidatorNotificationChannel = {
@@ -574,17 +581,32 @@ function NeuralValidatorPage() {
       createdAt: matchingChannel?.createdAt || now,
       updatedAt: now,
     };
-    const next = upsertNotificationChannel(channel);
-    setChannels(next);
-    void saveServerValidatorChannel(channel, token).then((serverChannel) => {
-      if (!serverChannel) {
-        showNotice("Canal salvo no navegador, mas o servidor nao confirmou. Telegram precisa do canal no servidor.");
-        return;
+    let serverChannel: ValidatorNotificationChannel | null = null;
+    setSavingChannel(true);
+    setTestingTelegramId("form");
+    try {
+      serverChannel = await saveServerValidatorChannel(channel, token);
+      await testServerValidatorChannel(serverChannel.id);
+      setChannels((current) => {
+        const next = upsertValidatorChannelList(current, serverChannel!);
+        writeNotificationChannels(next);
+        return next;
+      });
+      setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
+      showNotice("Grupo validado no Telegram e canal salvo para este usuario.");
+      return true;
+    } catch (error) {
+      if (serverChannel?.id && !matchingChannel) {
+        void deleteServerValidatorChannel(serverChannel.id);
       }
-      setChannels(upsertNotificationChannel(serverChannel));
-    });
-    setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
-    showNotice("Canal salvo para este usuario. Token fica mascarado depois de salvo.");
+      showNotice(error instanceof Error
+        ? error.message
+        : "Nao consegui validar o grupo. Confira se o bot esta no grupo e se o Chat ID esta correto.");
+      return false;
+    } finally {
+      setSavingChannel(false);
+      setTestingTelegramId("");
+    }
   }
 
   function updateNotificationChannel(
@@ -601,28 +623,18 @@ function NeuralValidatorPage() {
       },
       updatedAt: new Date().toISOString(),
     };
-    setChannels(upsertNotificationChannel(updated));
-    void saveServerValidatorChannel(updated);
+    setChannels((current) => {
+      const next = upsertValidatorChannelList(current, updated);
+      writeNotificationChannels(next);
+      return next;
+    });
+    void saveServerValidatorChannel(updated).catch((error) => {
+      showNotice(error instanceof Error ? error.message : "Falha ao atualizar canal no motor Telegram.");
+    });
   }
 
   async function testChannelFromForm() {
-    if (!planLimits.telegram) {
-      showNotice("Telegram fica bloqueado para o plano Free.");
-      return;
-    }
-    const botToken = channelForm.botToken.trim();
-    const chatId = channelForm.chatId.trim();
-    if (!botToken || !chatId) {
-      showNotice("Informe Bot Token e Chat ID para testar.");
-      return;
-    }
-    await testTelegramChannel({
-      id: "form",
-      name: channelForm.name || "Canal Telegram",
-      botToken,
-      chatId,
-      buttonLink: channelForm.buttonLink,
-    });
+    await saveChannel();
   }
 
   async function testSavedChannel(channel: ValidatorNotificationChannel) {
@@ -653,8 +665,8 @@ function NeuralValidatorPage() {
         message:
           "ENTRADA CONFIRMADA\n" +
           "Mesa: Bac Bo\n" +
-          "Padrao: 🔴10 → 🔵7 → 🟡6\n" +
-          "Entrada: 🔴 Banker\n" +
+          "Padrao: ??10 ? ??7 ? ??6\n" +
+          "Entrada: ?? Banker\n" +
           "Gale: Ate G1\n" +
           "Protecao Tie: Ativa\n" +
           `Canal: ${channel.name}`,
@@ -826,6 +838,7 @@ function NeuralValidatorPage() {
             onUpdateChannel={updateNotificationChannel}
             telegramEnabled={planLimits.telegram}
             testingTelegramId={testingTelegramId}
+            savingChannel={savingChannel}
           />
         </TabsContent>
       </Tabs>
@@ -1499,6 +1512,7 @@ function ChannelsTab({
   onUpdateChannel,
   telegramEnabled,
   testingTelegramId,
+  savingChannel,
 }: {
   channels: ValidatorNotificationChannel[];
   channelForm: {
@@ -1530,6 +1544,7 @@ function ChannelsTab({
   onUpdateChannel: (channel: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>) => void;
   telegramEnabled: boolean;
   testingTelegramId: string;
+  savingChannel: boolean;
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
@@ -1594,17 +1609,17 @@ function ChannelsTab({
             </div>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <Button type="button" className="w-full btn-primary-grad" onClick={onSave} disabled={!telegramEnabled}>
-              <Save className="size-4" /> Salvar configuracao
+            <Button type="button" className="w-full btn-primary-grad" onClick={onSave} disabled={!telegramEnabled || savingChannel}>
+              <Save className="size-4" /> {savingChannel ? "Validando..." : "Procurar e salvar grupo"}
             </Button>
             <Button
               type="button"
               variant="secondary"
               className="w-full"
               onClick={onTestForm}
-              disabled={!telegramEnabled || testingTelegramId === "form"}
+              disabled={!telegramEnabled || savingChannel || testingTelegramId === "form"}
             >
-              <Send className="size-4" /> {testingTelegramId === "form" ? "Enviando..." : "Testar envio"}
+              <Send className="size-4" /> {testingTelegramId === "form" ? "Validando..." : "Validar grupo"}
             </Button>
           </div>
         </div>
@@ -1768,7 +1783,7 @@ function ValidationDetailsPanel({ result, config }: { result: ValidatorResult | 
         <div className="text-sm font-black">Detalhes da validacao</div>
         <div className="flex flex-wrap gap-2 text-xs">
           <ResultChip label="Entrada" side={selectedEntry ?? result.entry} />
-          <ResultChip label="Empate" value={config.tieProtection ? "🟡 coberto" : "🟡 sem cobertura"} />
+          <ResultChip label="Empate" value={config.tieProtection ? "?? coberto" : "?? sem cobertura"} />
           <ResultChip label="Rodadas" value={result.analyzedRounds.toLocaleString("pt-BR")} />
         </div>
       </div>
@@ -1872,7 +1887,7 @@ function PatternLine({
       {pattern.map((token, index) => (
         <span key={`${formatToken(token)}-${index}`} className="inline-flex items-center gap-1">
           <TokenPill token={token} />
-          {index < pattern.length - 1 && <span className="text-muted-foreground">→</span>}
+          {index < pattern.length - 1 && <span className="text-muted-foreground">?</span>}
         </span>
       ))}
       <span className="text-muted-foreground">= puxou</span>
@@ -1931,7 +1946,7 @@ function CompactPatternLine({
               </button>
             ) : null}
           </span>
-          {index < pattern.length - 1 && <span className="text-muted-foreground">→</span>}
+          {index < pattern.length - 1 && <span className="text-muted-foreground">?</span>}
         </span>
       ))}
     </div>
@@ -2194,9 +2209,10 @@ async function saveServerValidatorChannel(channel: ValidatorNotificationChannel,
       },
     }),
   });
-  if (!response.ok) return null;
-  const data = await response.json().catch(() => null) as { channel?: ValidatorNotificationChannel } | null;
-  return data?.channel ?? null;
+  const data = await response.json().catch(() => null) as { channel?: ValidatorNotificationChannel; error?: string } | null;
+  if (!response.ok) throw new Error(data?.error || "Falha ao salvar canal no motor Telegram.");
+  if (!data?.channel) throw new Error("Motor Telegram nao confirmou o canal.");
+  return data.channel;
 }
 
 async function deleteServerValidatorChannel(channelId: string) {
@@ -2265,6 +2281,11 @@ function mergeValidatorChannels(primary: ValidatorNotificationChannel[], seconda
     }
   }
   return [...byKey.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+}
+
+function upsertValidatorChannelList(channels: ValidatorNotificationChannel[], channel: ValidatorNotificationChannel) {
+  const remaining = channels.filter((item) => item.id !== channel.id);
+  return mergeValidatorChannels([channel], remaining);
 }
 
 function validatorChannelDedupeKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
@@ -2511,9 +2532,9 @@ function invertToken(token: ValidatorPatternToken): ValidatorPatternToken {
 }
 
 function sideEmoji(side: RoundResult) {
-  if (side === "B") return "🔴";
-  if (side === "P") return "🔵";
-  return "🟡";
+  if (side === "B") return "??";
+  if (side === "P") return "??";
+  return "??";
 }
 
 function entryTypeToSide(entryType: ValidatorEntryType): RoundResult | null {
