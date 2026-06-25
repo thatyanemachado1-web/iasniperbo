@@ -20,6 +20,50 @@ const DEFAULT_MODULE_CONFIG = {
   redTemplate: "",
   tieTemplate: "",
 };
+const DEFAULT_MODULE_TEMPLATES = {
+  ai_patterns:
+    "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+  paying_numbers:
+    "💎 <b>ENTRADA CONFIRMADA</b>\n🔢 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+  surf_alert:
+    "🌊 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+  ties_only:
+    "🟡 <b>POSSIVEL EMPATE</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🛡️ <b>Cobrir empate:</b> ate G{{tieCoverage}}\n📌 <b>Nivel:</b> {{level}}",
+  validator:
+    "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{percentage}}",
+};
+const DEFAULT_MODULE_GREEN_TEMPLATES = {
+  ai_patterns:
+    "✅ <b>{{result}}</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+  paying_numbers:
+    "✅ <b>{{result}}</b>\n\n💎 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+  surf_alert:
+    "✅ <b>{{result}}</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+  ties_only:
+    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Protecao:</b> {{gale}}",
+  validator:
+    "✅ <b>{{result}}</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+};
+const DEFAULT_MODULE_RED_TEMPLATES = {
+  ai_patterns:
+    "❌ <b>RED</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+  paying_numbers: "❌ <b>RED</b>\n\n💎 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+  surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate nao confirmou</b>\n🛡️ <b>Protecao:</b> {{gale}}",
+  validator: "❌ <b>RED</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+};
+const DEFAULT_MODULE_TIE_TEMPLATES = {
+  ai_patterns:
+    "✅ <b>{{result}}</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+  paying_numbers:
+    "✅ <b>{{result}}</b>\n\n💎 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+  surf_alert:
+    "✅ <b>{{result}}</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+  ties_only:
+    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Protecao:</b> {{gale}}",
+  validator:
+    "✅ <b>{{result}}</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+};
 const MAX_CHANNELS_PER_USER = 20;
 const MAX_NOTIFICATIONS = 1000;
 const DEFAULT_ACCESS_GRACE_DAYS = 5;
@@ -320,7 +364,7 @@ export class TelegramEngine {
         blocked.push({ channelId: channel.id, reason: "entry_not_allowed" });
         continue;
       }
-      if (signalKind === "entry" && !config.enabled) {
+      if (!config.enabled) {
         blocked.push({ channelId: channel.id, reason: "module_inactive" });
         continue;
       }
@@ -349,7 +393,9 @@ export class TelegramEngine {
         protection: finalNotificationProtection,
         result: notificationResult,
       };
-      const renderedMessage = template ? renderTemplate(template, templateVariables) : String(body.message || "");
+      const renderedMessage = shouldRenderSignalTemplate(template, templateVariables)
+        ? renderTemplate(template, templateVariables)
+        : String(body.message || "");
       const message = formatTelegramMessageText(String(renderedMessage || body.message || renderTemplate("{{entry}}", templateVariables))).slice(0, 4096);
       const dedupeKeys = [`sent:${channel.userId}:${channel.id}:${signalKey}`];
       const entryDedupeKey = entrySignalDedupeKey(channel, roundId, entry, signalKind);
@@ -707,6 +753,10 @@ function normalizeModuleConfigs(value) {
   const record = readRecord(value);
   return MODULE_KEYS.reduce((acc, key) => {
     const raw = readRecord(record[key]);
+    const defaultTemplate = DEFAULT_MODULE_TEMPLATES[key] || "";
+    const defaultGreenTemplate = DEFAULT_MODULE_GREEN_TEMPLATES[key] || "";
+    const defaultRedTemplate = DEFAULT_MODULE_RED_TEMPLATES[key] || "";
+    const defaultTieTemplate = DEFAULT_MODULE_TIE_TEMPLATES[key] || defaultGreenTemplate;
     acc[key] = {
       ...DEFAULT_MODULE_CONFIG,
       enabled: Object.prototype.hasOwnProperty.call(raw, "enabled") ? Boolean(raw.enabled) : key === "validator",
@@ -715,10 +765,10 @@ function normalizeModuleConfigs(value) {
       coverTie: Object.prototype.hasOwnProperty.call(raw, "coverTie") ? Boolean(raw.coverTie) : key === "ties_only",
       tieCoverage: clampInt(raw.tieCoverage ?? (key === "ties_only" ? 4 : 1), 0, 4),
       cooldownSeconds: clampInt(raw.cooldownSeconds ?? (key === "validator" ? 0 : 2), 0, 300),
-      template: repairTelegramEncodingArtifacts(raw.template || ""),
-      greenTemplate: repairTelegramEncodingArtifacts(raw.greenTemplate || ""),
-      redTemplate: repairTelegramEncodingArtifacts(raw.redTemplate || ""),
-      tieTemplate: repairTelegramEncodingArtifacts(raw.tieTemplate || ""),
+      template: repairTelegramEncodingArtifacts(raw.template || defaultTemplate),
+      greenTemplate: repairTelegramEncodingArtifacts(raw.greenTemplate || defaultGreenTemplate),
+      redTemplate: repairTelegramEncodingArtifacts(raw.redTemplate || defaultRedTemplate),
+      tieTemplate: repairTelegramEncodingArtifacts(raw.tieTemplate || defaultTieTemplate),
     };
     return acc;
   }, {});
@@ -949,9 +999,9 @@ function moduleAllowsEntry(config, entry) {
 }
 
 function formatEntry(entry) {
-  if (entry === "BANKER") return "🔴 BANKER";
-  if (entry === "PLAYER") return "🔵 PLAYER";
-  if (entry === "TIE") return "🟡 TIE";
+  if (entry === "BANKER") return "🔴 Banker";
+  if (entry === "PLAYER") return "🔵 Player";
+  if (entry === "TIE") return "🟡 Tie";
   return "Automatico";
 }
 
@@ -1033,6 +1083,12 @@ function repairTelegramEncodingArtifacts(value) {
     .replace(/âœ…|Ã¢Å“â€¦/g, "✅")
     .replace(/âŒ|Ã¢ÂÅ’/g, "❌")
     .replace(/âš |Ã¢Å¡ /g, "⚠")
+    .replace(/Padr[\uFFFD?]+o/gi, "Padrao")
+    .replace(/PADR[\uFFFD?]+O/g, "PADRAO")
+    .replace(/Prote[\uFFFD?]+o/gi, "Protecao")
+    .replace(/M[\uFFFD?]+dulo/gi, "Modulo")
+    .replace(/N[\uFFFD?]+mero/gi, "Numero")
+    .replace(/Confian[\uFFFD?]+a/gi, "Confianca")
     .replace(/Padr(?:ÃƒÂ£|Ã£|ï¿½)o/gi, "Padrao")
     .replace(/PADR(?:ÃƒÆ’|Ãƒ|ï¿½)O/g, "PADRAO")
     .replace(/Prote(?:ÃƒÂ§ÃƒÂ£|Ã§Ã£|ï¿½ï¿½)o/gi, "Protecao")
@@ -1071,6 +1127,15 @@ function moduleName(key) {
 
 function renderTemplate(template, variables) {
   return String(template || "").replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key) => String(variables[key] ?? ""));
+}
+
+function shouldRenderSignalTemplate(template, variables) {
+  const text = String(template || "");
+  if (!text) return false;
+  const names = [...text.matchAll(/{{\s*([a-zA-Z]+)\s*}}/g)].map((match) => match[1]).filter(Boolean);
+  if (!names.length) return true;
+  const record = readRecord(variables);
+  return names.every((name) => Object.prototype.hasOwnProperty.call(record, name));
 }
 
 function maskToken(token) {
