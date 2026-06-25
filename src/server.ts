@@ -311,6 +311,7 @@ const VALIDATOR_ROUNDS_TABLE = "validator_rounds";
 const VALIDATOR_PATTERNS_TABLE = "validator_saved_patterns";
 const VALIDATOR_CHANNELS_TABLE = "validator_channels";
 const VALIDATOR_NOTIFICATIONS_TABLE = "validator_notifications";
+const VALIDATOR_PATTERN_DELETED_STATE_PREFIX = "validator_pattern_deleted:";
 const VALIDATOR_CHANNEL_STATE_PREFIX = "validator_channel:";
 const VALIDATOR_CHANNEL_DELETED_STATE_PREFIX = "validator_channel_deleted:";
 const LEGACY_PATTERN_LIVE_HITS_TABLE = "pattern_live_hits";
@@ -6449,6 +6450,12 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
         const body = readRecord(await request.json().catch(() => ({})));
         const pattern = normalizeServerSavedPattern(body.pattern || body, userId);
         if (!pattern) return json({ error: "Padrao invalido." }, 400);
+        if (await isValidatorPatternHardDeleted(env, pattern.userId, pattern.id)) {
+          return json({
+            error: "Padrao ja foi excluido. Salve novamente para criar outro registro.",
+            deleted: true,
+          }, 410);
+        }
         clearDeletedEntityForRecord(pattern as unknown as Record<string, unknown>);
         liveValidatorPatterns = upsertValidatorPattern(pattern);
         await persistValidatorPattern(env, pattern);
@@ -6479,7 +6486,15 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       liveValidatorPatterns = liveValidatorPatterns.filter(
         (pattern) => !(pattern.userId === userId && pattern.id === patternId),
       );
-      await deleteValidatorPatternRow(env, userId, patternId);
+      liveValidatorNotifications = liveValidatorNotifications.filter(
+        (notification) => readString(notification, "patternId") !== patternId &&
+          readString(notification, "pattern_id") !== patternId,
+      );
+      await Promise.allSettled([
+        deleteValidatorPatternRow(env, userId, patternId),
+        deleteValidatorPatternNotifications(env, userId, patternId),
+        deleteValidatorPatternState(env, userId, patternId),
+      ]);
       await saveLiveState(env);
       return json({ ok: true });
     }
@@ -6490,6 +6505,12 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       const body = readRecord(await request.json().catch(() => ({})));
       const next = normalizeServerSavedPattern({ ...current, ...body, id: current.id }, userId);
       if (!next) return json({ error: "Padrao invalido." }, 400);
+      if (await isValidatorPatternHardDeleted(env, next.userId, next.id)) {
+        return json({
+          error: "Padrao ja foi excluido. Salve novamente para criar outro registro.",
+          deleted: true,
+        }, 410);
+      }
       clearDeletedEntityForRecord(next as unknown as Record<string, unknown>);
       liveValidatorPatterns = upsertValidatorPattern(next);
       await persistValidatorPattern(env, next);
@@ -7050,14 +7071,17 @@ function publicValidatorChannel(channel: ValidatorNotificationChannel): Validato
 
 async function hydrateValidatorUserCache(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return;
-  const legacyPatterns = filterDeletedEntityRows(
-    liveValidatorPatterns.filter((pattern) => pattern.userId === userId) as unknown as Record<string, unknown>[],
-  ) as unknown as SavedValidatorPattern[];
   const legacyChannels = liveValidatorChannels.filter((channel) => channel.userId === userId);
-  const [storedPatterns, storedChannels] = await Promise.all([
+  const [storedPatterns, storedChannels, deletedPatternIds] = await Promise.all([
     fetchStoredValidatorPatterns(env, userId),
     fetchStoredValidatorChannels(env, userId),
+    fetchValidatorPatternDeletedIds(env, userId),
   ]);
+  const legacyPatterns = (
+    filterDeletedEntityRows(
+      liveValidatorPatterns.filter((pattern) => pattern.userId === userId) as unknown as Record<string, unknown>[],
+    ) as unknown as SavedValidatorPattern[]
+  ).filter((pattern) => !deletedPatternIds.has(pattern.id));
   const patterns = filterDeletedEntityRows(
     mergeValidatorEntityList(storedPatterns, legacyPatterns) as unknown as Record<string, unknown>[],
   ) as unknown as SavedValidatorPattern[];
@@ -7200,27 +7224,35 @@ async function refreshValidatorMonitorCache(env: unknown) {
 
 async function fetchStoredValidatorPatterns(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return [];
-  const rows = await fetchSupabaseRows(
-    env,
-    VALIDATOR_PATTERNS_TABLE,
-    `select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc&limit=1000`,
-  );
+  const [rows, deletedIds] = await Promise.all([
+    fetchSupabaseRows(
+      env,
+      VALIDATOR_PATTERNS_TABLE,
+      `select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc&limit=1000`,
+    ),
+    fetchValidatorPatternDeletedIds(env, userId),
+  ]);
   return rows
     .map(validatorPatternFromRow)
     .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern))
+    .filter((pattern) => !deletedIds.has(pattern.id))
     .filter((pattern) => !isEntityDeleted(pattern as unknown as Record<string, unknown>));
 }
 
 async function fetchStoredActiveValidatorPatterns(env: unknown) {
   if (!getSupabasePersistenceConfig(env)) return [];
-  const rows = await fetchSupabaseRows(
-    env,
-    VALIDATOR_PATTERNS_TABLE,
-    "select=*&is_active=eq.true&destination=not.eq.disabled&order=updated_at.desc&limit=5000",
-  );
+  const [rows, deletedKeys] = await Promise.all([
+    fetchSupabaseRows(
+      env,
+      VALIDATOR_PATTERNS_TABLE,
+      "select=*&is_active=eq.true&destination=not.eq.disabled&order=updated_at.desc&limit=5000",
+    ),
+    fetchValidatorPatternDeletedKeys(env),
+  ]);
   return rows
     .map(validatorPatternFromRow)
     .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern))
+    .filter((pattern) => !deletedKeys.has(validatorPatternDeletedKey(pattern.userId, pattern.id)))
     .filter((pattern) => !isEntityDeleted(pattern as unknown as Record<string, unknown>));
 }
 
@@ -7307,6 +7339,43 @@ async function deleteValidatorPatternRow(env: unknown, userId: string, patternId
     `user_id=eq.${encodeURIComponent(userId)}&id=eq.${encodeURIComponent(patternId)}`,
   );
   return true;
+}
+
+async function deleteValidatorPatternNotifications(env: unknown, userId: string, patternId: string) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedPatternId = readString(patternId);
+  if (!normalizedUserId || !normalizedPatternId) return false;
+  await deleteSupabaseRows(
+    env,
+    VALIDATOR_NOTIFICATIONS_TABLE,
+    `user_id=eq.${encodeURIComponent(normalizedUserId)}&pattern_id=eq.${encodeURIComponent(normalizedPatternId)}`,
+  );
+  return true;
+}
+
+async function deleteValidatorPatternState(env: unknown, userId: string, patternId: string) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedPatternId = readString(patternId);
+  if (!normalizedUserId || !normalizedPatternId) return false;
+  return saveDurableLiveStateById(env, validatorPatternDeletedStateId(normalizedUserId, normalizedPatternId), {
+    type: "validator_pattern_deleted",
+    userId: normalizedUserId,
+    patternId: normalizedPatternId,
+    deletedAt: new Date().toISOString(),
+  });
+}
+
+async function isValidatorPatternHardDeleted(env: unknown, userId: string, patternId: string) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedPatternId = readString(patternId);
+  if (!normalizedUserId || !normalizedPatternId) return false;
+  if (isEntityDeleted({ id: normalizedPatternId, userId: normalizedUserId })) return true;
+  const deletedState = await loadDurableLiveStateById(
+    env,
+    validatorPatternDeletedStateId(normalizedUserId, normalizedPatternId),
+  );
+  return Boolean(deletedState && hasRecordFields(deletedState));
 }
 
 async function persistValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
@@ -7418,12 +7487,74 @@ async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
   return ids;
 }
 
+async function fetchValidatorPatternDeletedIds(env: unknown, userId?: string) {
+  const ids = new Set<string>();
+  if (!getSupabasePersistenceConfig(env)) return ids;
+  const prefix = userId
+    ? `${VALIDATOR_PATTERN_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:`
+    : VALIDATOR_PATTERN_DELETED_STATE_PREFIX;
+  const rows = await fetchSupabaseRows(
+    env,
+    LIVE_STATE_TABLE,
+    `select=id,state&id=like.${encodePostgrestLikeValue(`${prefix}*`)}&order=updated_at.desc&limit=5000`,
+  );
+  for (const row of rows) {
+    const state = readRecord(row.state);
+    const patternId = readString(state, "patternId") || readString(row, "id").split(":").pop() || "";
+    if (patternId) ids.add(patternId);
+  }
+  return ids;
+}
+
+async function fetchValidatorPatternDeletedKeys(env: unknown, userId?: string) {
+  const keys = new Set<string>();
+  if (!getSupabasePersistenceConfig(env)) return keys;
+  const prefix = userId
+    ? `${VALIDATOR_PATTERN_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:`
+    : VALIDATOR_PATTERN_DELETED_STATE_PREFIX;
+  const rows = await fetchSupabaseRows(
+    env,
+    LIVE_STATE_TABLE,
+    `select=id,state&id=like.${encodePostgrestLikeValue(`${prefix}*`)}&order=updated_at.desc&limit=5000`,
+  );
+  for (const row of rows) {
+    const state = readRecord(row.state);
+    const stateUserId = normalizeValidatorUserId(readString(state, "userId"));
+    const statePatternId = readString(state, "patternId");
+    const parsed = parseValidatorPatternDeletedStateId(readString(row, "id"));
+    const deletedUserId = stateUserId || parsed.userId;
+    const deletedPatternId = statePatternId || parsed.patternId;
+    if (deletedUserId && deletedPatternId) keys.add(validatorPatternDeletedKey(deletedUserId, deletedPatternId));
+  }
+  return keys;
+}
+
 function validatorChannelStateId(userId: string, channelId: string) {
   return `${VALIDATOR_CHANNEL_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
 }
 
 function validatorChannelDeletedStateId(userId: string, channelId: string) {
   return `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
+}
+
+function validatorPatternDeletedStateId(userId: string, patternId: string) {
+  return `${VALIDATOR_PATTERN_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(patternId)}`;
+}
+
+function validatorPatternDeletedKey(userId: string, patternId: string) {
+  return `${normalizeValidatorUserId(userId)}:${readString(patternId)}`;
+}
+
+function parseValidatorPatternDeletedStateId(value: string) {
+  const clean = readString(value);
+  if (!clean.startsWith(VALIDATOR_PATTERN_DELETED_STATE_PREFIX)) return { userId: "", patternId: "" };
+  const rest = clean.slice(VALIDATOR_PATTERN_DELETED_STATE_PREFIX.length);
+  const separatorIndex = rest.indexOf(":");
+  if (separatorIndex < 0) return { userId: "", patternId: rest };
+  return {
+    userId: normalizeValidatorUserId(rest.slice(0, separatorIndex)),
+    patternId: rest.slice(separatorIndex + 1),
+  };
 }
 
 function encodePostgrestLikeValue(value: string) {
