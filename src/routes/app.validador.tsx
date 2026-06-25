@@ -648,7 +648,7 @@ function NeuralValidatorPage() {
   async function testSavedChannel(channel: ValidatorNotificationChannel) {
     setTestingTelegramId(channel.id);
     try {
-      await testServerValidatorChannel(channel.id);
+      await testServerValidatorChannel(channel);
       showNotice("Teste enviado no Telegram.");
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Canal salvo sem token ou Chat ID no servidor.");
@@ -2235,12 +2235,16 @@ async function deleteServerValidatorChannel(channelId: string) {
   }).catch(() => null);
 }
 
-async function testServerValidatorChannel(channelId: string) {
+async function testServerValidatorChannel(channel: ValidatorNotificationChannel) {
   const response = await fetch("/validator/channels/test", {
     method: "POST",
     cache: "no-store",
     headers: validatorApiHeaders(true),
-    body: JSON.stringify({ channelId }),
+    body: JSON.stringify({
+      channelId: channel.id,
+      chatId: channel.chatId,
+      name: channel.name,
+    }),
   });
   const data = await response.json().catch(() => null) as { error?: string } | null;
   if (!response.ok) throw new Error(data?.error || "Falha ao testar canal salvo.");

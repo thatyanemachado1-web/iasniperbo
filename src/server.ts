@@ -6596,7 +6596,11 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   if (request.method === "POST" && url.pathname === "/validator/channels/test") {
     const body = readRecord(await request.json().catch(() => ({})));
     const channelId = readString(body, "channelId");
-    const channel = await findValidatorChannelForUser(env, userId, channelId);
+    const channel = await findValidatorChannelForUserByHints(env, userId, {
+      channelId,
+      chatId: readString(body, "chatId"),
+      name: readString(body, "name"),
+    });
     if (!channel) return json({ error: "Canal nao encontrado." }, 404);
     const botToken = decodeServerToken(channel.botTokenEncoded);
     if (!botToken || !channel.chatId) {
@@ -6691,6 +6695,43 @@ async function findValidatorChannelForUser(env: unknown, userId: string, channel
     liveValidatorChannels = upsertValidatorChannel(storedFromList);
   }
   return storedFromList;
+}
+
+async function findValidatorChannelForUserByHints(
+  env: unknown,
+  userId: string,
+  hints: { channelId?: string; chatId?: string; name?: string },
+) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  if (!normalizedUserId) return null;
+
+  const channelId = readString(hints.channelId);
+  if (channelId) {
+    const exact = await findValidatorChannelForUser(env, normalizedUserId, channelId);
+    if (exact) return exact;
+  }
+
+  const chatCode = normalizeValidatorChannelCode(readString(hints.chatId));
+  const nameCode = readString(hints.name).trim().toLowerCase();
+  const fromMemory = liveValidatorChannels.find((channel) =>
+    channel.userId === normalizedUserId &&
+    (
+      (chatCode && normalizeValidatorChannelCode(channel.chatId) === chatCode) ||
+      (nameCode && readString(channel.name).trim().toLowerCase() === nameCode)
+    )
+  );
+  if (fromMemory) return fromMemory;
+
+  const storedChannels = await fetchStoredValidatorChannels(env, normalizedUserId);
+  const fromStorage = storedChannels.find((channel) =>
+    channel.userId === normalizedUserId &&
+    (
+      (chatCode && normalizeValidatorChannelCode(channel.chatId) === chatCode) ||
+      (nameCode && readString(channel.name).trim().toLowerCase() === nameCode)
+    )
+  ) || null;
+  if (fromStorage) liveValidatorChannels = upsertValidatorChannel(fromStorage);
+  return fromStorage;
 }
 
 async function sendTelegramMessage({
