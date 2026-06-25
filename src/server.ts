@@ -292,7 +292,7 @@ type AdminActionType =
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
 const LIVE_STATE_TABLE = "sniper_live_state";
-const SNIPER_DEPLOY_MARKER = "2026-06-25-admin-backend-repair-v1";
+const SNIPER_DEPLOY_MARKER = "2026-06-25-validator-telegram-persistence-v2";
 const CLIENT_REGISTRY_SNAPSHOT_LATEST_ID = `${LIVE_STATE_ID}:client_registry_latest`;
 const CLIENT_REGISTRY_SNAPSHOT_PREFIX = `${LIVE_STATE_ID}:client_registry:`;
 const CRM_CLIENTS_TABLE = "crm_clients";
@@ -302,6 +302,7 @@ const VALIDATOR_ROUNDS_TABLE = "validator_rounds";
 const VALIDATOR_PATTERNS_TABLE = "validator_saved_patterns";
 const VALIDATOR_CHANNELS_TABLE = "validator_channels";
 const VALIDATOR_NOTIFICATIONS_TABLE = "validator_notifications";
+const VALIDATOR_PATTERN_DELETED_STATE_PREFIX = "validator_pattern_deleted:";
 const VALIDATOR_CHANNEL_STATE_PREFIX = "validator_channel:";
 const VALIDATOR_CHANNEL_DELETED_STATE_PREFIX = "validator_channel_deleted:";
 const LEGACY_PATTERN_LIVE_HITS_TABLE = "pattern_live_hits";
@@ -6350,7 +6351,10 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
         const body = readRecord(await request.json().catch(() => ({})));
         const pattern = normalizeServerSavedPattern(body.pattern || body, userId);
         if (!pattern) return json({ error: "Padrao invalido." }, 400);
-        clearValidatorPatternDeleted(userId, pattern.id);
+        if (isValidatorPatternDeleted(pattern)) {
+          await deleteValidatorPatternRow(env, userId, pattern.id);
+          return json({ error: "Padrao excluido definitivamente. Salve uma nova estrategia para recriar." }, 410);
+        }
         liveValidatorPatterns = upsertValidatorPattern(pattern);
         await persistValidatorPattern(env, pattern);
         await saveLiveState(env);
@@ -6372,13 +6376,17 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   if (patternMatch) {
     const patternId = decodeURIComponent(patternMatch[1] || "");
     const current = liveValidatorPatterns.find((pattern) => pattern.userId === userId && pattern.id === patternId);
-    if (!current) return json({ error: "Padrao nao encontrado." }, 404);
+    if (!current && request.method !== "DELETE") return json({ error: "Padrao nao encontrado." }, 404);
 
     if (request.method === "PATCH") {
+      if (!current) return json({ error: "Padrao nao encontrado." }, 404);
       const body = readRecord(await request.json().catch(() => ({})));
       const next = normalizeServerSavedPattern({ ...current, ...body, id: current.id }, userId);
       if (!next) return json({ error: "Padrao invalido." }, 400);
-      clearValidatorPatternDeleted(userId, next.id);
+      if (isValidatorPatternDeleted(next)) {
+        await deleteValidatorPatternRow(env, userId, next.id);
+        return json({ error: "Padrao excluido definitivamente. Salve uma nova estrategia para recriar." }, 410);
+      }
       liveValidatorPatterns = upsertValidatorPattern(next);
       await persistValidatorPattern(env, next);
       await saveLiveState(env);
@@ -6387,6 +6395,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
     if (request.method === "DELETE") {
       markValidatorPatternDeleted(userId, patternId);
+      await markValidatorPatternDeletedDurable(env, userId, patternId);
       liveValidatorPatterns = liveValidatorPatterns.filter(
         (pattern) => !(pattern.userId === userId && pattern.id === patternId),
       );
@@ -7217,14 +7226,16 @@ function publicValidatorChannel(channel: ValidatorNotificationChannel): Validato
 
 async function hydrateValidatorUserCache(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return;
-  const deletedRefs = liveValidatorPatternDeletedRefs;
+  const [storedPatterns, storedChannels, durableDeletedRefs] = await Promise.all([
+    fetchStoredValidatorPatterns(env, userId),
+    fetchStoredValidatorChannels(env, userId),
+    fetchValidatorPatternDeletedRefs(env, userId),
+  ]);
+  const deletedRefs = mergeValidatorPatternDeletedRefs(liveValidatorPatternDeletedRefs, durableDeletedRefs);
+  liveValidatorPatternDeletedRefs = deletedRefs;
   const legacyPatterns = liveValidatorPatterns
     .filter((pattern) => pattern.userId === userId)
     .filter((pattern) => !isValidatorPatternDeleted(pattern, deletedRefs));
-  const [storedPatterns, storedChannels] = await Promise.all([
-    fetchStoredValidatorPatterns(env, userId),
-    fetchStoredValidatorChannels(env, userId),
-  ]);
   const patterns = mergeValidatorEntityList(storedPatterns, legacyPatterns).filter(
     (pattern) => !isValidatorPatternDeleted(pattern, deletedRefs),
   );
@@ -7314,6 +7325,45 @@ function clearValidatorPatternDeleted(userId: string, patternId: string) {
     const rowPatternId = readString(row, "patternId") || readString(row, "pattern_id") || readString(row, "id");
     return !(rowUserId === normalizedUserId && rowPatternId === normalizedPatternId);
   });
+}
+
+async function markValidatorPatternDeletedDurable(env: unknown, userId: string, patternId: string) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedPatternId = readString(patternId);
+  if (!normalizedUserId || !normalizedPatternId) return false;
+  return saveDurableLiveStateById(env, validatorPatternDeletedStateId(normalizedUserId, normalizedPatternId), {
+    type: "validator_pattern_deleted",
+    userId: normalizedUserId,
+    patternId: normalizedPatternId,
+    deletedAt: new Date().toISOString(),
+  });
+}
+
+async function fetchValidatorPatternDeletedRefs(env: unknown, userId?: string) {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const normalizedUserId = normalizeValidatorUserId(userId || "");
+  const prefix = normalizedUserId
+    ? `${VALIDATOR_PATTERN_DELETED_STATE_PREFIX}${normalizedUserId}:`
+    : VALIDATOR_PATTERN_DELETED_STATE_PREFIX;
+  const rows = await fetchSupabaseRows(
+    env,
+    LIVE_STATE_TABLE,
+    `select=id,state,updated_at&id=like.${encodePostgrestLikeValue(`${prefix}*`)}&order=updated_at.desc&limit=5000`,
+  );
+  return normalizeValidatorPatternDeletedRefs(
+    rows.map((row) => {
+      const state = readRecord(row.state);
+      const rowId = readString(row, "id");
+      const parts = rowId.split(":");
+      const patternId = readString(state, "patternId") || (parts.length >= 3 ? parts.slice(2).join(":") : "");
+      return {
+        userId: readString(state, "userId") || normalizedUserId,
+        patternId,
+        deletedAt: readString(state, "deletedAt") || readString(state, "deleted_at") || readString(row, "updated_at"),
+      };
+    }),
+  );
 }
 
 function isValidatorPatternDeleted(
@@ -7445,28 +7495,36 @@ async function refreshValidatorMonitorCache(env: unknown) {
 
 async function fetchStoredValidatorPatterns(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return [];
-  const rows = await fetchSupabaseRows(
-    env,
-    VALIDATOR_PATTERNS_TABLE,
-    `select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc&limit=1000`,
-  );
+  const [rows, deletedRefs] = await Promise.all([
+    fetchSupabaseRows(
+      env,
+      VALIDATOR_PATTERNS_TABLE,
+      `select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc&limit=1000`,
+    ),
+    fetchValidatorPatternDeletedRefs(env, userId),
+  ]);
+  liveValidatorPatternDeletedRefs = mergeValidatorPatternDeletedRefs(liveValidatorPatternDeletedRefs, deletedRefs);
   return rows
     .map(validatorPatternFromRow)
     .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern))
-    .filter((pattern) => !isValidatorPatternDeleted(pattern));
+    .filter((pattern) => !isValidatorPatternDeleted(pattern, liveValidatorPatternDeletedRefs));
 }
 
 async function fetchStoredActiveValidatorPatterns(env: unknown) {
   if (!getSupabasePersistenceConfig(env)) return [];
-  const rows = await fetchSupabaseRows(
-    env,
-    VALIDATOR_PATTERNS_TABLE,
-    "select=*&is_active=eq.true&destination=not.eq.disabled&order=updated_at.desc&limit=5000",
-  );
+  const [rows, deletedRefs] = await Promise.all([
+    fetchSupabaseRows(
+      env,
+      VALIDATOR_PATTERNS_TABLE,
+      "select=*&is_active=eq.true&destination=not.eq.disabled&order=updated_at.desc&limit=5000",
+    ),
+    fetchValidatorPatternDeletedRefs(env),
+  ]);
+  liveValidatorPatternDeletedRefs = mergeValidatorPatternDeletedRefs(liveValidatorPatternDeletedRefs, deletedRefs);
   return rows
     .map(validatorPatternFromRow)
     .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern))
-    .filter((pattern) => !isValidatorPatternDeleted(pattern));
+    .filter((pattern) => !isValidatorPatternDeleted(pattern, liveValidatorPatternDeletedRefs));
 }
 
 async function fetchStoredValidatorChannel(env: unknown, userId: string, channelId: string) {
@@ -7843,6 +7901,10 @@ function isValidatorChannelDeleted(
 
 function validatorChannelStateId(userId: string, channelId: string) {
   return `${VALIDATOR_CHANNEL_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
+}
+
+function validatorPatternDeletedStateId(userId: string, patternId: string) {
+  return `${VALIDATOR_PATTERN_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(patternId)}`;
 }
 
 function validatorChannelDeletedStateId(userId: string, channelId: string) {
@@ -8312,60 +8374,74 @@ function buildValidatorChannelModuleSignal(
 }
 
 function buildAiPatternsModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
-  if (liveValidatorRoundHistory.length < 20) return null;
   const moduleConfig = validatorChannelModuleConfig(channel, "ai_patterns");
-  const galeLimit = Math.max(0, Math.min(2, moduleConfig.galeLimit)) as ValidatorGaleLimit;
-  const historySize = Math.min(5000, liveValidatorRoundHistory.length);
-  const suggestions = serverValidatorEngine.minePatterns(liveValidatorRoundHistory, {
-    historySize,
-    patternLength: 3,
-    entryType: "AI",
-    galeLimit,
-    minAccuracy: 70,
-    minOccurrences: 5,
-    includeTie: true,
-    includeNumbers: true,
-    includeOpposite: true,
-    hotOnly: false,
-    lowRedOnly: false,
-  });
-  const suggestion = suggestions.find(
-    (item) =>
-      item.pulledSide &&
-      validatorModuleAllowsRoundEntry(moduleConfig, item.pulledSide) &&
-      matchesServerValidatorPattern(liveValidatorRoundHistory.slice(-item.pattern.length), item.pattern),
-  );
-  if (!suggestion || !suggestion.pulledSide) return null;
+  const confirmed = readDashboardConfirmedAiPattern();
+  if (!confirmed) return null;
+  if (!validatorModuleAllowsRoundEntry(moduleConfig, confirmed.entry)) return null;
   return createValidatorModuleSignal(
     channel,
     "ai_patterns",
     latestRound,
-    `ai:${suggestion.id}:${latestRound.id}:${suggestion.pulledSide}`,
+    `ai-dashboard:${confirmed.eventId}`,
     {
       table: "Bac Bo",
-      pattern: formatServerTelegramPattern(suggestion.pattern),
-      entry: formatServerTelegramSide(suggestion.pulledSide),
+      pattern: confirmed.sequenceText,
+      entry: formatServerTelegramSide(confirmed.entry),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: String(moduleConfig.tieCoverage),
-      confidence: formatServerPercent(suggestion.validation.accuracy),
-      percentage: formatServerPercent(suggestion.validation.accuracy),
-      status: suggestion.status,
-      risk: suggestion.risk,
+      confidence: formatServerPercent(confirmed.assertiveness),
+      percentage: formatServerPercent(confirmed.assertiveness),
+      status: confirmed.status,
+      risk: confirmed.status,
       number: "",
       level: "",
       round: String(latestRound.id),
       module: "Padroes IA",
     },
     {
-      pattern: suggestion.pattern,
-      entry: suggestion.pulledSide,
-      entryText: formatServerTelegramSide(suggestion.pulledSide),
+      pattern: confirmed.sequenceText,
+      entry: confirmed.entry,
+      entryText: formatServerTelegramSide(confirmed.entry),
       protection: formatValidatorModuleGale(moduleConfig.galeLimit),
       result: "Aguardando resultado",
-      accuracy: suggestion.validation.accuracy ?? null,
-      status: suggestion.status,
+      accuracy: confirmed.assertiveness ?? null,
+      status: confirmed.status,
     },
   );
+}
+
+function readDashboardConfirmedAiPattern() {
+  const snapshot = readRecord(liveDashboardData.patternMinerSnapshot || liveDashboardData.patternMiner);
+  const entryAlerts = Array.isArray(snapshot.entryAlerts) ? snapshot.entryAlerts.map(readRecord) : [];
+  const alert = entryAlerts.find((item) => {
+    const kind = readString(item, "kind");
+    const title = readString(item, "title").toLowerCase();
+    return kind === "validated" || title.includes("validado") || title.includes("confirmado");
+  });
+  if (!alert) return null;
+
+  const strategy = readRecord(alert.strategy);
+  const expected = normalizeRoundResult(strategy.expectedResult);
+  if (!expected) return null;
+  const sequence = Array.isArray(strategy.sequence) ? strategy.sequence.map(String).map((item) => item.trim()).filter(Boolean) : [];
+  if (!sequence.length) return null;
+  const matchedRounds = Array.isArray(alert.matchedRounds) ? alert.matchedRounds.map(readRecord) : [];
+  const lastMatchedRound = matchedRounds.at(-1) || {};
+  const lastMatchedRoundId =
+    readString(lastMatchedRound, "id") ||
+    readString(lastMatchedRound, "roundId") ||
+    readString(lastMatchedRound, "round_id") ||
+    readString(lastMatchedRound, "time");
+  const alertId = readString(alert, "id") || readString(strategy, "id") || sequence.join(">");
+  const eventId = [alertId, lastMatchedRoundId, expected, sequence.join(">")].filter(Boolean).join(":");
+  return {
+    id: readString(strategy, "id") || sequence.join(">"),
+    eventId,
+    entry: expected,
+    sequenceText: sequence.join(" > "),
+    assertiveness: readNullableNumber(strategy.assertiveness) ?? undefined,
+    status: readString(strategy, "status") || "CONFIRMADO",
+  };
 }
 
 function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
@@ -8558,7 +8634,7 @@ function createValidatorModuleSignal(
     moduleKey,
     channel,
     signalKey,
-    notificationKey: `module:${moduleKey}:${channel.userId}:${channel.id}:${latestRound.id}:${signalHash}`,
+    notificationKey: `module:${moduleKey}:${channel.userId}:${channel.id}:${signalHash}`,
     roundId: latestRound.id,
     message: renderValidatorTelegramTemplate(moduleConfig.template, variables),
     detectedAt,
@@ -8938,6 +9014,7 @@ function formatValidatorModuleName(moduleKey: ValidatorTelegramModuleKey) {
 }
 
 function formatValidatorPayloadPattern(value: unknown) {
+  if (typeof value === "string") return value;
   const pattern = normalizeServerPatternTokens(value);
   return pattern.length ? formatServerTelegramPattern(pattern) : "";
 }
@@ -9356,15 +9433,15 @@ function formatServerTelegramPattern(pattern: ValidatorPatternToken[]) {
 }
 
 function formatServerTelegramSide(side: Round["result"]) {
-  if (side === "B") return "B Banker";
-  if (side === "P") return "P Player";
-  return "T Tie";
+  if (side === "B") return "🔴 BANKER";
+  if (side === "P") return "🔵 PLAYER";
+  return "🟡 TIE";
 }
 
 function serverSideCircle(side: Round["result"]) {
-  if (side === "B") return "B";
-  if (side === "P") return "P";
-  return "T";
+  if (side === "B") return "🔴";
+  if (side === "P") return "🔵";
+  return "🟡";
 }
 
 function formatServerPercent(value?: number) {

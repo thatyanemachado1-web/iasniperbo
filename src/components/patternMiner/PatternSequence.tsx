@@ -40,7 +40,7 @@ export function PatternSequence({
                 </span>
               )}
             </span>
-            {index < sequence.length - 1 && <span className="text-muted-foreground">→</span>}
+            {index < sequence.length - 1 && <span className="text-muted-foreground">-&gt;</span>}
           </div>
         );
       })}

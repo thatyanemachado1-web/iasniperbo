@@ -43,7 +43,6 @@ export function readValidatorHistory(fallbackRounds: Round[]) {
 }
 
 export function readSavedPatterns() {
-  clearLegacyDeletedPatternsCache();
   return readUserList<SavedValidatorPattern>(SAVED_PATTERNS_KEY).map((pattern) => ({
     ...pattern,
     pattern: Array.isArray(pattern.pattern) ? pattern.pattern.filter(isPatternToken) : [],
@@ -51,7 +50,6 @@ export function readSavedPatterns() {
 }
 
 export function writeSavedPatterns(patterns: SavedValidatorPattern[]) {
-  clearLegacyDeletedPatternsCache();
   writeUserList(SAVED_PATTERNS_KEY, patterns);
 }
 
@@ -173,9 +171,6 @@ function purgeSavedPatternLocal(patternId: string) {
   for (const key of Object.keys(window.localStorage)) {
     if (key === SAVED_PATTERNS_KEY || key.startsWith(`${SAVED_PATTERNS_KEY}:`)) {
       rewriteStoredListWithoutId<SavedValidatorPattern>(key, id);
-    }
-    if (key === LEGACY_DELETED_PATTERNS_KEY || key.startsWith(`${LEGACY_DELETED_PATTERNS_KEY}:`)) {
-      window.localStorage.removeItem(key);
     }
   }
 }

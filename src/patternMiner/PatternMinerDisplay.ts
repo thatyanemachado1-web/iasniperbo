@@ -31,7 +31,7 @@ export function formatPatternToken(token: string) {
 }
 
 export function formatPatternSequence(sequence: string[]) {
-  return sequence.map(formatPatternToken).join(" → ");
+  return sequence.map(formatPatternToken).join(" -> ");
 }
 
 export function formatPulledSide(side: RoundResult) {
@@ -41,7 +41,7 @@ export function formatPulledSide(side: RoundResult) {
 export function formatStrategyConclusion(strategy: PatternMinerStrategy) {
   const sequence = formatPatternSequence(strategy.sequence);
   if (strategy.insufficientSample || !strategy.expectedResult) {
-    return `${sequence} = Padrão detectado, mas ainda sem amostra suficiente para dizer o que puxou.`;
+    return `${sequence} = Padrao detectado, mas ainda sem amostra suficiente para dizer o que puxou.`;
   }
   return `${sequence} = PAGANDO ${formatPulledSide(strategy.expectedResult)}`;
 }
@@ -55,8 +55,8 @@ export function statusLabel(status: PatternMinerStrategyStatus) {
   const labels: Record<PatternMinerStrategyStatus, string> = {
     VERY_HOT: "🔥 MUITO QUENTE",
     HOT: "🔥 QUENTE",
-    STABLE: "🟡 ESTÁVEL",
-    OBSERVATION: "🟠 EM OBSERVAÇÃO",
+    STABLE: "🟡 ESTAVEL",
+    OBSERVATION: "🟠 EM OBSERVACAO",
     WEAK: "🔴 FRACA",
     INACTIVE: "⚫ INATIVA",
   };
