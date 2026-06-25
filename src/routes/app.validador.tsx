@@ -55,7 +55,6 @@ import {
   maskBotToken,
   readNotificationChannels,
   readPatternDraft,
-  readSavedPatterns,
   removeNotificationChannel,
   removeSavedPattern,
   upsertNotificationChannel,
@@ -133,7 +132,7 @@ function NeuralValidatorPage() {
     historySize: Math.min(DEFAULT_VALIDATOR_CONFIG.historySize, planLimits.history),
   });
   const [manualResult, setManualResult] = useState<ValidatorResult | null>(null);
-  const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
+  const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>([]);
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() => readNotificationChannels());
   const [testingTelegramId, setTestingTelegramId] = useState("");
   const [siteAlerts, setSiteAlerts] = useState<LiveValidatorHit[]>([]);
