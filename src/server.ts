@@ -453,36 +453,36 @@ const VALIDATOR_TELEGRAM_MODULE_KEYS: ValidatorTelegramModuleKey[] = [
 ];
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
-    "ðŸ¤– <b>PADRÃƒO IA CONFIRMADO</b>\n\nðŸŽ² <b>Mesa:</b> {{table}}\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}\nðŸ“Š <b>Assertividade:</b> {{confidence}}",
+    "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "ðŸ’Ž <b>NÃšMERO PAGANTE CONFIRMADO</b>\n\nðŸ”¢ <b>NÃºmero:</b> {{number}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}\nðŸ“Œ <b>Status:</b> {{status}}",
+    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
   surf_alert:
-    "ðŸŒŠ <b>AVISO DE SURF CONFIRMADO</b>\n\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nâš ï¸ <b>Risco:</b> {{risk}}\nðŸ“Š <b>ConfianÃ§a:</b> {{confidence}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
+    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "ðŸŸ¡ <b>POSSÃVEL EMPATE</b>\n\nðŸŽ² <b>Mesa:</b> {{table}}\nðŸ›¡ï¸ <b>Cobrir empate:</b> atÃ© G{{tieCoverage}}\nðŸ“Œ <b>NÃ­vel:</b> {{level}}",
+    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🛡️ <b>Cobrir empate:</b> até G{{tieCoverage}}\n📌 <b>Nível:</b> {{level}}",
   validator:
-    "ðŸŽ¯ <b>ENTRADA CONFIRMADA</b>\n\nðŸŽ² <b>Mesa:</b> {{table}}\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}\nðŸ“Š <b>Assertividade:</b> {{percentage}}",
+    "🎯 <b>ENTRADA CONFIRMADA</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{percentage}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "âœ… <b>{{result}}</b>\n\nðŸ¤– <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
-  paying_numbers: "âœ… <b>{{result}}</b>\n\nðŸ’Ž <b>NÃºmero:</b> {{number}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
-  surf_alert: "âœ… <b>{{result}}</b>\n\nðŸŒŠ <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
-  ties_only: "âœ… <b>{{result}}</b>\n\nðŸŸ¡ <b>Empate confirmado</b>",
-  validator: "âœ… <b>{{result}}</b>\n\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
+  ai_patterns: "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  paying_numbers: "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>",
+  validator: "✅ <b>{{result}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "âŒ <b>RED</b>\n\nðŸ¤– <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
-  paying_numbers: "âŒ <b>RED</b>\n\nðŸ’Ž <b>NÃºmero:</b> {{number}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
-  surf_alert: "âŒ <b>RED</b>\n\nðŸŒŠ <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
-  ties_only: "âŒ <b>RED</b>\n\nðŸŸ¡ <b>Empate nÃ£o confirmou</b>\nðŸ›¡ï¸ <b>ProteÃ§Ã£o:</b> {{gale}}",
-  validator: "âŒ <b>RED</b>\n\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
+  ai_patterns: "❌ <b>RED</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  paying_numbers: "❌ <b>RED</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate não confirmou</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+  validator: "❌ <b>RED</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nðŸ¤– <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
-  paying_numbers: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nðŸ’Ž <b>NÃºmero:</b> {{number}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
-  surf_alert: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nðŸŒŠ <b>MÃ³dulo:</b> {{module}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
-  ties_only: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nâœ… <b>Empate confirmado</b>",
-  validator: "ðŸŸ¡ <b>EMPATE {{tieMultiplier}}</b>\n\nðŸ§© <b>PadrÃ£o:</b> {{pattern}}\nðŸŽ¯ <b>Entrada:</b> {{entry}}",
+  ai_patterns: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  paying_numbers: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n✅ <b>Empate confirmado</b>",
+  validator: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
@@ -491,6 +491,7 @@ let liveValidatorRoundHistory: Round[] = [];
 let liveValidatorPatterns: SavedValidatorPattern[] = [];
 let liveValidatorChannels: ValidatorNotificationChannel[] = [];
 let liveValidatorNotifications: Array<Record<string, unknown>> = [];
+let liveValidatorPatternDeletedRefs: Array<Record<string, unknown>> = [];
 let liveNeuralCalendarDailyStats: NeuralCalendarDailyStat[] = [];
 let liveNeuralCalendarHourlyStats: NeuralCalendarHourlyStat[] = [];
 let liveNeuralCalendarCountedRoundKeys: Record<string, true> = {};
@@ -2478,6 +2479,19 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         delete (client as Record<string, unknown>).password;
         await saveLiveState(env);
       }
+    } else if (clientCanBindPasswordDuringMigration(client)) {
+      client.password_hash = await hashPassword(password);
+      client.updated_at = new Date().toISOString();
+      upsertLiveClient(client);
+      upsertRecipientFromClient(client);
+      await persistBillingUser(env, client);
+      await saveLiveState(env);
+      recordAccessEvent("client_password_bound_after_migration", {
+        ...client,
+        risk: "medium",
+        detail: "Senha vinculada automaticamente para cliente premium migrado sem password_hash.",
+      });
+      ok = true;
     } else {
       return json(
         {
@@ -2628,6 +2642,9 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       syncClientFromAdminUserEmail(env, session.email);
     if (!client && session.scope === "client") {
       client = await ensureSessionClientForExpiredTrial(env, request, session);
+    }
+    if (!client && session.scope === "client" && session.approved && ["premium", "vip"].includes(session.plan)) {
+      client = await restoreClientFromApprovedSession(env, request, session);
     }
     if (!client) {
       return json({
@@ -6503,6 +6520,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
         const body = readRecord(await request.json().catch(() => ({})));
         const pattern = normalizeServerSavedPattern(body.pattern || body, userId);
         if (!pattern) return json({ error: "Padrao invalido." }, 400);
+        clearValidatorPatternDeleted(userId, pattern.id);
         liveValidatorPatterns = upsertValidatorPattern(pattern);
         await persistValidatorPattern(env, pattern);
         await saveLiveState(env);
@@ -6532,6 +6550,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       const body = readRecord(await request.json().catch(() => ({})));
       const next = normalizeServerSavedPattern({ ...current, ...body, id: current.id }, userId);
       if (!next) return json({ error: "Padrao invalido." }, 400);
+      clearValidatorPatternDeleted(userId, next.id);
       liveValidatorPatterns = upsertValidatorPattern(next);
       await persistValidatorPattern(env, next);
       await saveLiveState(env);
@@ -6539,10 +6558,17 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     }
 
     if (request.method === "DELETE") {
+      markValidatorPatternDeleted(userId, patternId);
       liveValidatorPatterns = liveValidatorPatterns.filter(
         (pattern) => !(pattern.userId === userId && pattern.id === patternId),
       );
+      liveValidatorNotifications = liveValidatorNotifications.filter((notification) => {
+        const notificationUserId = normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id"));
+        const notificationPatternId = readString(notification, "patternId") || readString(notification, "pattern_id");
+        return !(notificationUserId === userId && notificationPatternId === patternId);
+      });
       await deleteValidatorPatternRow(env, userId, patternId);
+      await deleteValidatorPatternNotificationRows(env, userId, patternId);
       await saveLiveState(env);
       return json({ ok: true });
     }
@@ -7360,12 +7386,16 @@ function publicValidatorChannel(channel: ValidatorNotificationChannel): Validato
 
 async function hydrateValidatorUserCache(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return;
-  const legacyPatterns = liveValidatorPatterns.filter((pattern) => pattern.userId === userId);
+  const deletedRefs = liveValidatorPatternDeletedRefs;
+  const legacyPatterns = liveValidatorPatterns
+    .filter((pattern) => pattern.userId === userId)
+    .filter((pattern) => !isValidatorPatternDeleted(pattern, deletedRefs));
   const [storedPatterns, storedChannels] = await Promise.all([
     fetchStoredValidatorPatterns(env, userId),
     fetchStoredValidatorChannels(env, userId),
   ]);
-  const patterns = mergeValidatorEntityList(storedPatterns, legacyPatterns);
+  const patterns = mergeValidatorEntityList(storedPatterns, legacyPatterns)
+    .filter((pattern) => !isValidatorPatternDeleted(pattern, deletedRefs));
   const channels = mergeValidatorChannelList(storedChannels);
 
   if (!storedPatterns.length && legacyPatterns.length) {
@@ -7405,6 +7435,71 @@ function mergeValidatorEntityList<T extends { id: string }>(stored: T[], legacy:
       stateEntityUpdatedAtMs(right as Record<string, unknown>) -
       stateEntityUpdatedAtMs(left as Record<string, unknown>),
   );
+}
+
+function normalizeValidatorPatternDeletedRefs(value: unknown) {
+  const refs = Array.isArray(value) ? value : [];
+  const byKey = new Map<string, Record<string, unknown>>();
+  for (const row of refs.map(readRecord)) {
+    const userId = normalizeValidatorUserId(readString(row, "userId") || readString(row, "user_id"));
+    const patternId = readString(row, "patternId") || readString(row, "pattern_id") || readString(row, "id");
+    if (!userId || !patternId) continue;
+    const deletedAt = readString(row, "deletedAt") || readString(row, "deleted_at") || new Date().toISOString();
+    const key = `${userId}:${patternId}`;
+    const current = byKey.get(key);
+    if (!current || Date.parse(deletedAt) >= Date.parse(readString(current, "deletedAt"))) {
+      byKey.set(key, { userId, patternId, deletedAt });
+    }
+  }
+  return [...byKey.values()].sort(
+    (left, right) => Date.parse(readString(right, "deletedAt")) - Date.parse(readString(left, "deletedAt")),
+  );
+}
+
+function mergeValidatorPatternDeletedRefs(left: unknown, right: unknown) {
+  return normalizeValidatorPatternDeletedRefs([
+    ...normalizeValidatorPatternDeletedRefs(left),
+    ...normalizeValidatorPatternDeletedRefs(right),
+  ]).slice(0, 2000);
+}
+
+function markValidatorPatternDeleted(userId: string, patternId: string) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedPatternId = readString(patternId);
+  if (!normalizedUserId || !normalizedPatternId) return;
+  liveValidatorPatternDeletedRefs = mergeValidatorPatternDeletedRefs(
+    liveValidatorPatternDeletedRefs,
+    [{ userId: normalizedUserId, patternId: normalizedPatternId, deletedAt: new Date().toISOString() }],
+  );
+}
+
+function clearValidatorPatternDeleted(userId: string, patternId: string) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedPatternId = readString(patternId);
+  if (!normalizedUserId || !normalizedPatternId) return;
+  liveValidatorPatternDeletedRefs = liveValidatorPatternDeletedRefs.filter((row) => {
+    const rowUserId = normalizeValidatorUserId(readString(row, "userId") || readString(row, "user_id"));
+    const rowPatternId = readString(row, "patternId") || readString(row, "pattern_id") || readString(row, "id");
+    return !(rowUserId === normalizedUserId && rowPatternId === normalizedPatternId);
+  });
+}
+
+function isValidatorPatternDeleted(
+  pattern: Pick<SavedValidatorPattern, "id" | "userId" | "updatedAt"> | Record<string, unknown>,
+  refs = liveValidatorPatternDeletedRefs,
+) {
+  const patternRecord = pattern as Record<string, unknown>;
+  const userId = normalizeValidatorUserId(readString(patternRecord, "userId") || readString(patternRecord, "user_id"));
+  const patternId = readString(patternRecord, "id") || readString(patternRecord, "patternId") || readString(patternRecord, "pattern_id");
+  if (!userId || !patternId) return false;
+  const updatedAtMs = Date.parse(readString(patternRecord, "updatedAt") || readString(patternRecord, "updated_at") || "");
+  return normalizeValidatorPatternDeletedRefs(refs).some((row) => {
+    const rowUserId = normalizeValidatorUserId(readString(row, "userId") || readString(row, "user_id"));
+    const rowPatternId = readString(row, "patternId") || readString(row, "pattern_id") || readString(row, "id");
+    if (rowUserId !== userId || rowPatternId !== patternId) return false;
+    const deletedAtMs = Date.parse(readString(row, "deletedAt") || readString(row, "deleted_at") || "");
+    return !Number.isFinite(updatedAtMs) || !Number.isFinite(deletedAtMs) || updatedAtMs <= deletedAtMs;
+  });
 }
 
 function mergeValidatorChannelList(...lists: ValidatorNotificationChannel[][]) {
@@ -7509,7 +7604,8 @@ async function fetchStoredValidatorPatterns(env: unknown, userId: string) {
   );
   return rows
     .map(validatorPatternFromRow)
-    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
+    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern))
+    .filter((pattern) => !isValidatorPatternDeleted(pattern));
 }
 
 async function fetchStoredActiveValidatorPatterns(env: unknown) {
@@ -7521,7 +7617,8 @@ async function fetchStoredActiveValidatorPatterns(env: unknown) {
   );
   return rows
     .map(validatorPatternFromRow)
-    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
+    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern))
+    .filter((pattern) => !isValidatorPatternDeleted(pattern));
 }
 
 async function fetchStoredValidatorChannel(env: unknown, userId: string, channelId: string) {
@@ -7647,6 +7744,19 @@ async function deleteValidatorPatternRow(env: unknown, userId: string, patternId
     env,
     VALIDATOR_PATTERNS_TABLE,
     `user_id=eq.${encodeURIComponent(userId)}&id=eq.${encodeURIComponent(patternId)}`,
+  );
+  return true;
+}
+
+async function deleteValidatorPatternNotificationRows(env: unknown, userId: string, patternId: string) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedPatternId = readString(patternId);
+  if (!normalizedUserId || !normalizedPatternId) return false;
+  await deleteSupabaseRows(
+    env,
+    VALIDATOR_NOTIFICATIONS_TABLE,
+    `user_id=eq.${encodeURIComponent(normalizedUserId)}&pattern_id=eq.${encodeURIComponent(normalizedPatternId)}`,
   );
   return true;
 }
@@ -8125,6 +8235,7 @@ function publicValidatorNotification(notification: Record<string, unknown>) {
 }
 
 function upsertValidatorPattern(pattern: SavedValidatorPattern) {
+  clearValidatorPatternDeleted(pattern.userId, pattern.id);
   const current = liveValidatorPatterns.filter((item) => !(item.userId === pattern.userId && item.id === pattern.id));
   return [pattern, ...current].slice(0, 5000);
 }
@@ -9117,6 +9228,7 @@ function logPayingNumbersTelegramDecision(
 }
 
 function shouldMonitorValidatorPattern(pattern: SavedValidatorPattern, latestRound: Round) {
+  if (isValidatorPatternDeleted(pattern)) return false;
   if (!pattern.isActive || pattern.destination === "disabled") return false;
   if (!pattern.pattern.length || liveValidatorRoundHistory.length < pattern.pattern.length) return false;
   const cooldown = Math.max(0, Number(pattern.cooldownRounds) || 0);
@@ -13524,6 +13636,18 @@ function clientHasLiveAccess(client: Record<string, unknown>) {
   return enabled && !isExpiredIso(readString(client, "expires_at"));
 }
 
+function clientCanBindPasswordDuringMigration(client: Record<string, unknown>) {
+  if (readString(client, "password_hash") || readString(client, "password")) return false;
+  if (Boolean(client.isBlocked) || Boolean(client.is_blocked)) return false;
+  const plan = normalizeBillingPlanId(readString(client, "plan"));
+  const status = readString(client, "access_status").toLowerCase();
+  if (!plan || plan === "free") return false;
+  if (status === "expired" || status === "blocked" || isExpiredIso(readString(client, "expires_at"))) {
+    return false;
+  }
+  return Boolean(client.enabled) || ["approved", "active", "manual_vip"].includes(status);
+}
+
 function buildRegistrationTrialAccess(
   env: unknown,
   email: string,
@@ -13741,6 +13865,49 @@ async function ensureSessionClientForExpiredTrial(
   });
   await saveLiveState(env);
   await persistBillingUser(env, client);
+  return findClientByEmail(session.email) || client;
+}
+
+async function restoreClientFromApprovedSession(
+  env: unknown,
+  request: Request,
+  session: SessionPayload,
+) {
+  if (!(await sessionMatchesRequestBinding(env, request, session))) return null;
+  const now = new Date().toISOString();
+  const plan = session.plan === "vip" ? "vip" : "premium";
+  const client: Record<string, unknown> = {
+    id: crypto.randomUUID(),
+    full_name: nameFromEmail(session.email),
+    email: session.email,
+    phone: "",
+    city: "",
+    country: "",
+    password_hash: "",
+    plan,
+    access_status: "approved",
+    enabled: true,
+    starts_at: now,
+    validity_days: plan === "vip" ? 3650 : 30,
+    expires_at: "",
+    trial_started_at: "",
+    trial_expires_at: "",
+    trial_ip_hash: "",
+    trial_user_agent_hash: "",
+    trial_blocked_reason: "",
+    created_at: now,
+    updated_at: now,
+  };
+  if (isEntityDeleted(client)) return null;
+  upsertLiveClient(client);
+  upsertRecipientFromClient(client);
+  recordAccessEvent("client_restored_from_approved_session", {
+    ...client,
+    risk: "medium",
+    detail: "Cliente premium reconstruido por sessao assinada apos migracao.",
+  });
+  await persistBillingUser(env, client);
+  await saveLiveState(env);
   return findClientByEmail(session.email) || client;
 }
 
@@ -15221,10 +15388,14 @@ function applyLiveState(state: Record<string, unknown>) {
     liveValidatorRoundHistory = normalizeStoredRoundHistory(state.validatorRoundHistory);
   }
 
+  const deletedPatternRefs = normalizeValidatorPatternDeletedRefs(state.validatorPatternDeletedRefs);
+  if (deletedPatternRefs.length) liveValidatorPatternDeletedRefs = deletedPatternRefs;
+
   if (Array.isArray(state.validatorPatterns)) {
     liveValidatorPatterns = state.validatorPatterns
       .map((pattern) => normalizeServerSavedPattern(pattern, readString(readRecord(pattern), "userId")))
-      .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
+      .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern))
+      .filter((pattern) => !isValidatorPatternDeleted(pattern, deletedPatternRefs));
   }
 
   // Telegram channels are isolated in dedicated channel storage. Do not hydrate
@@ -15456,6 +15627,10 @@ function mergeLiveStates(
     durable.deletedEntities,
     cache.deletedEntities,
   ).slice(0, 1000);
+  const validatorPatternDeletedRefs = mergeValidatorPatternDeletedRefs(
+    durable.validatorPatternDeletedRefs,
+    cache.validatorPatternDeletedRefs,
+  );
   return {
     ...cache,
     ...durable,
@@ -15469,7 +15644,8 @@ function mergeLiveStates(
       cache.validatorPatterns,
       durableSavedAt,
       cacheSavedAt,
-    ),
+    ).filter((pattern) => !isValidatorPatternDeleted(readRecord(pattern), validatorPatternDeletedRefs)),
+    validatorPatternDeletedRefs,
     validatorChannels: [],
     validatorChannelStore: pickStateObjectByUpdatedAt(
       durable.validatorChannelStore,
@@ -15865,7 +16041,8 @@ function buildLiveStateSnapshot(env?: unknown) {
   return {
     dashboard: liveDashboardData,
     validatorRoundHistory: liveValidatorRoundHistory.slice(-MAX_MONITOR_ROUND_HISTORY),
-    validatorPatterns: liveValidatorPatterns,
+    validatorPatterns: liveValidatorPatterns.filter((pattern) => !isValidatorPatternDeleted(pattern)),
+    validatorPatternDeletedRefs: liveValidatorPatternDeletedRefs.slice(0, 2000),
     validatorChannels: [],
     validatorChannelStore: {
       version: 1,
