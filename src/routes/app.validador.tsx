@@ -53,7 +53,6 @@ import {
   createStorageId,
   currentUserId,
   maskBotToken,
-  readDeletedPatternIds,
   readNotificationChannels,
   readPatternDraft,
   readSavedPatterns,
@@ -217,12 +216,10 @@ function NeuralValidatorPage() {
         ]);
         if (cancelled) return;
 
-        const deletedPatternIds = readDeletedPatternIds();
         const localPatterns = readSavedPatterns();
-        const visibleServerPatterns = serverPatterns.filter((item) => !deletedPatternIds.has(item.id));
         const mergedChannels = mergeValidatorChannels(serverChannels);
         const mergedPatterns = autoPrepareAdminTelegramDelivery(
-          mergeValidatorItems(visibleServerPatterns, localPatterns).filter((item) => !deletedPatternIds.has(item.id)),
+          mergeValidatorItems(serverPatterns, localPatterns),
           mergedChannels,
           adminAccess,
         );
@@ -231,7 +228,7 @@ function NeuralValidatorPage() {
         setSavedPatterns(mergedPatterns);
         setChannels(mergedChannels);
 
-        const patternsToSync = mergedPatterns.filter((item) => shouldSyncValidatorItem(item, visibleServerPatterns));
+        const patternsToSync = mergedPatterns.filter((item) => shouldSyncValidatorItem(item, serverPatterns));
         await Promise.all([
           ...patternsToSync.map((item) => saveServerValidatorPattern(item).catch(() => null)),
         ]);
@@ -399,6 +396,11 @@ function NeuralValidatorPage() {
   }
 
   function removePattern(id: string) {
+    telegramSendKeysRef.current = new Set(
+      [...telegramSendKeysRef.current].filter((key) => !key.startsWith(`${id}:`)),
+    );
+    forgetTelegramNotificationsForPattern(id);
+    setSiteAlerts((current) => current.filter((hit) => hit.pattern.id !== id));
     setSavedPatterns(removeSavedPattern(id));
     void deleteServerValidatorPattern(id);
     showNotice("Padrao removido.");
@@ -2480,7 +2482,22 @@ function markTelegramNotificationSent(key: string) {
 function forgetTelegramNotificationSent(key: string) {
   if (typeof window === "undefined") return;
   const next = readTelegramSentKeys().filter((item) => item !== key);
-  window.localStorage.setItem(telegramSentStorageKey(), JSON.stringify(next));
+  if (next.length) {
+    window.localStorage.setItem(telegramSentStorageKey(), JSON.stringify(next));
+    return;
+  }
+  window.localStorage.removeItem(telegramSentStorageKey());
+}
+
+function forgetTelegramNotificationsForPattern(patternId: string) {
+  if (typeof window === "undefined") return;
+  const prefix = `${patternId}:`;
+  const next = readTelegramSentKeys().filter((item) => !item.startsWith(prefix));
+  if (next.length) {
+    window.localStorage.setItem(telegramSentStorageKey(), JSON.stringify(next));
+    return;
+  }
+  window.localStorage.removeItem(telegramSentStorageKey());
 }
 
 function invertToken(token: ValidatorPatternToken): ValidatorPatternToken {
