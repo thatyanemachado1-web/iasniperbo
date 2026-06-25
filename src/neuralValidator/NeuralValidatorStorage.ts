@@ -8,6 +8,7 @@ import type {
 } from "@/types/neuralValidator";
 
 const SAVED_PATTERNS_KEY = "sniper_neural_validator_patterns_v1";
+const DELETED_PATTERNS_KEY = "sniper_neural_validator_deleted_patterns_v1";
 const CHANNELS_KEY = "sniper_neural_validator_channels_v1";
 const DRAFT_KEY = "sniper_neural_validator_draft_v1";
 const ROUND_HISTORY_KEY = "sniper_round_history_v1";
@@ -21,7 +22,6 @@ export const DEFAULT_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
   scoreboard: "{{wins}} GREEN / {{loss}} RED / {{percentage}}",
   greenStreak: "{{wins}} GREENS SEGUIDOS",
   preAlert: "Padrao quase formado\nMesa: {{table}}\nCondicao: {{pattern}}\nPossivel entrada: {{entry}}",
-  analyzing: "ANALISANDO PADRAO\nMesa: {{table}}\nAguardando entrada validada",
 };
 
 interface StoredHistory {
@@ -42,14 +42,16 @@ export function readValidatorHistory(fallbackRounds: Round[]) {
 }
 
 export function readSavedPatterns() {
+  const deletedIds = readDeletedPatternIds();
   return readUserList<SavedValidatorPattern>(SAVED_PATTERNS_KEY).map((pattern) => ({
     ...pattern,
     pattern: Array.isArray(pattern.pattern) ? pattern.pattern.filter(isPatternToken) : [],
-  }));
+  })).filter((pattern) => !deletedIds.has(pattern.id));
 }
 
 export function writeSavedPatterns(patterns: SavedValidatorPattern[]) {
-  writeUserList(SAVED_PATTERNS_KEY, patterns);
+  const deletedIds = readDeletedPatternIds();
+  writeUserList(SAVED_PATTERNS_KEY, patterns.filter((pattern) => !deletedIds.has(pattern.id)));
 }
 
 export function upsertSavedPattern(pattern: SavedValidatorPattern) {
@@ -63,9 +65,29 @@ export function upsertSavedPattern(pattern: SavedValidatorPattern) {
 }
 
 export function removeSavedPattern(patternId: string) {
+  markSavedPatternDeleted(patternId);
   const next = readSavedPatterns().filter((pattern) => pattern.id !== patternId);
   writeSavedPatterns(next);
   return next;
+}
+
+export function readDeletedPatternIds() {
+  return new Set(readDeletedPatternRecords().map((record) => record.id).filter(Boolean));
+}
+
+export function isSavedPatternDeleted(patternId: string) {
+  return readDeletedPatternIds().has(patternId);
+}
+
+export function markSavedPatternDeleted(patternId: string) {
+  if (typeof window === "undefined") return;
+  const id = patternId.trim();
+  if (!id) return;
+  const current = readDeletedPatternRecords().filter((record) => record.id !== id);
+  writeUserList(DELETED_PATTERNS_KEY, [
+    { id, deletedAt: new Date().toISOString() },
+    ...current,
+  ].slice(0, 1000));
 }
 
 export function readNotificationChannels() {
@@ -149,6 +171,15 @@ function sanitizeNotificationChannel(channel: ValidatorNotificationChannel): Val
 function readUserList<T>(key: string): T[] {
   const payload = readJson<{ userId?: string; items?: T[] }>(userStorageKey(key));
   return Array.isArray(payload?.items) ? payload.items : [];
+}
+
+function readDeletedPatternRecords() {
+  return readUserList<{ id: string; deletedAt: string }>(DELETED_PATTERNS_KEY)
+    .filter((record) => typeof record.id === "string" && record.id.trim())
+    .map((record) => ({
+      id: record.id.trim(),
+      deletedAt: typeof record.deletedAt === "string" ? record.deletedAt : "",
+    }));
 }
 
 function writeUserList<T>(key: string, items: T[]) {
