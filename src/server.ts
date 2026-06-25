@@ -1,4 +1,4 @@
-﻿import "./lib/error-capture";
+import "./lib/error-capture";
 
 import bcrypt from "bcryptjs";
 import { mockDashboardData } from "./data/mockDashboardData";
@@ -311,7 +311,6 @@ const VALIDATOR_ROUNDS_TABLE = "validator_rounds";
 const VALIDATOR_PATTERNS_TABLE = "validator_saved_patterns";
 const VALIDATOR_CHANNELS_TABLE = "validator_channels";
 const VALIDATOR_NOTIFICATIONS_TABLE = "validator_notifications";
-const VALIDATOR_PATTERN_DELETED_STATE_PREFIX = "validator_pattern_deleted:";
 const VALIDATOR_CHANNEL_STATE_PREFIX = "validator_channel:";
 const VALIDATOR_CHANNEL_DELETED_STATE_PREFIX = "validator_channel_deleted:";
 const LEGACY_PATTERN_LIVE_HITS_TABLE = "pattern_live_hits";
@@ -412,6 +411,78 @@ const DEFAULT_VALIDATOR_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
   greenStreak: "{{wins}} GREENS SEGUIDOS",
   preAlert: "Padrao quase formado\nMesa: {{table}}\nCondicao: {{pattern}}\nPossivel entrada: {{entry}}",
   analyzing: "ANALISANDO PADRAO\nMesa: {{table}}\nAguardando entrada validada",
+};
+type ValidatorTelegramModuleKey =
+  | "ai_patterns"
+  | "paying_numbers"
+  | "surf_alert"
+  | "ties_only"
+  | "validator";
+type ValidatorTelegramModuleConfig = {
+  enabled: boolean;
+  entryType: "AUTO" | "BANKER" | "PLAYER" | "TIE";
+  galeLimit: number;
+  coverTie: boolean;
+  tieCoverage: number;
+  cooldownSeconds: number;
+  template: string;
+  greenTemplate: string;
+  redTemplate: string;
+  tieTemplate: string;
+};
+type ValidatorChannelWithModules = ValidatorNotificationChannel & {
+  signalModules?: Partial<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>;
+};
+type ValidatorTelegramModuleSignal = {
+  moduleKey: ValidatorTelegramModuleKey;
+  channel: ValidatorNotificationChannel;
+  notificationKey: string;
+  signalKey: string;
+  roundId: number;
+  message: string;
+  detectedAt: string;
+  matchedAtMs: number;
+  payloadJson?: Record<string, unknown>;
+};
+const VALIDATOR_TELEGRAM_MODULE_KEYS: ValidatorTelegramModuleKey[] = [
+  "ai_patterns",
+  "paying_numbers",
+  "surf_alert",
+  "ties_only",
+  "validator",
+];
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns:
+    "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
+  paying_numbers:
+    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
+  surf_alert:
+    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  ties_only:
+    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🛡️ <b>Cobrir empate:</b> até G{{tieCoverage}}\n📌 <b>Nível:</b> {{level}}",
+  validator:
+    "🎯 <b>ENTRADA CONFIRMADA</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{percentage}}",
+};
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  paying_numbers: "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>",
+  validator: "✅ <b>{{result}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+};
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "❌ <b>RED</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  paying_numbers: "❌ <b>RED</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate não confirmou</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+  validator: "❌ <b>RED</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+};
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  paying_numbers: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n✅ <b>Empate confirmado</b>",
+  validator: "🟡 <b>EMPATE {{tieMultiplier}}</b>\n\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
@@ -538,7 +609,7 @@ function isCatastrophicSsrErrorBody(body: string, responseStatus: number): boole
 }
 
 // h3 swallows in-handler throws into a normal 500 Response with body
-// {"unhandled":true,"message":"HTTPError"} â€” try/catch alone never fires for those.
+// {"unhandled":true,"message":"HTTPError"} ??? try/catch alone never fires for those.
 async function normalizeCatastrophicSsrResponse(response: Response): Promise<Response> {
   if (response.status < 500) return response;
   const contentType = response.headers.get("content-type") ?? "";
@@ -722,10 +793,7 @@ function rateLimitForRequest(method: string, pathname: string) {
     pathname.startsWith("/validator/channels/") ||
     pathname === "/validator/channels/test"
   ) return 120;
-  if (
-    pathname === "/validator/telegram/test" ||
-    pathname === "/validator/telegram/send"
-  ) return 30;
+  if (pathname === "/validator/telegram/test" || pathname === "/validator/telegram/send") return 30;
   if (pathname === "/adaptive-strategy/sync") return 240;
   if (
     pathname === "/billing/plans" ||
@@ -764,18 +832,18 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
   }
 
   if (request.method !== "POST") {
-    return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+    return json({ error: "M??todo n??o permitido." }, 405);
   }
 
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const body = readRecord(await request.json().catch(() => ({})));
   const rawText = String(body.text || body.narration || "");
   const text = normalizeNarrationText(rawText);
   if (!text) {
-    return json({ error: "Texto de voz obrigatÃ³rio." }, 400);
+    return json({ error: "Texto de voz obrigat??rio." }, 400);
   }
   if (text.length > MAX_NARRATION_CHARS) {
     return json(
@@ -793,12 +861,12 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
 
   const apiKeys = getElevenLabsApiKeys(env);
   if (!apiKeys.length) {
-    return json({ error: "ELEVENLABS_API_KEY nÃ£o configurada no backend." }, 503);
+    return json({ error: "ELEVENLABS_API_KEY n??o configurada no backend." }, 503);
   }
 
   const voiceId = getElevenLabsVoiceId(env);
   if (!voiceId) {
-    return json({ error: "ELEVENLABS_VOICE_ID nÃ£o configurado no backend." }, 503);
+    return json({ error: "ELEVENLABS_VOICE_ID n??o configurado no backend." }, 503);
   }
 
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
@@ -838,7 +906,7 @@ async function handleVoiceNarrationRequest(request: Request, env: unknown) {
       console.warn(`Falha ao gerar voz ElevenLabs (${lastFailureStatus}) em todas as chaves configuradas.`);
       return json(elevenLabsErrorPayload(lastFailureStatus), elevenLabsErrorStatus(lastFailureStatus));
     }
-    return json({ error: "Falha de conexÃ£o ao gerar voz ElevenLabs." }, 502);
+    return json({ error: "Falha de conex??o ao gerar voz ElevenLabs." }, 502);
   }
 
   recordElevenLabsStatus("ok");
@@ -860,10 +928,10 @@ async function handleVoiceDiagnosticsRequest(request: Request, env: unknown) {
   if (url.pathname !== "/voice/diagnostics") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "GET") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "GET") return json({ error: "M??todo n??o permitido." }, 405);
 
   if (!(await isDashboardAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const apiKeys = getElevenLabsApiKeys(env);
@@ -912,14 +980,14 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
   if (url.pathname !== "/api/voice/speak") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "M??todo n??o permitido." }, 405);
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const body = readRecord(await request.json().catch(() => ({})));
   const text = normalizeNarrationText(readString(body, "text"));
-  if (!text) return json({ error: "Texto de voz obrigatÃ³rio." }, 400);
+  if (!text) return json({ error: "Texto de voz obrigat??rio." }, 400);
   if (text.length > MAX_NARRATION_CHARS) {
     return json({ error: `Texto de voz muito longo. Limite: ${MAX_NARRATION_CHARS} caracteres.` }, 413);
   }
@@ -930,12 +998,12 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
     return generateElevenLabsVoiceResponse(text, env);
   }
   if (provider !== "edge-tts") {
-    return json({ fallback: "browser", reason: "Provedor local ainda nÃ£o ativo no backend." });
+    return json({ fallback: "browser", reason: "Provedor local ainda n??o ativo no backend." });
   }
 
   const edgeTtsUrl = readServerEnvString(env, "EDGE_TTS_URL", "").replace(/\/+$/, "");
   if (!edgeTtsUrl) {
-    return json({ fallback: "browser", reason: "EDGE_TTS_URL nÃ£o configurado no backend." });
+    return json({ fallback: "browser", reason: "EDGE_TTS_URL n??o configurado no backend." });
   }
 
   try {
@@ -952,7 +1020,7 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
       }),
     });
     if (!response.ok) {
-      return json({ fallback: "browser", reason: `Edge TTS indisponÃ­vel (${response.status}).` });
+      return json({ fallback: "browser", reason: `Edge TTS indispon??vel (${response.status}).` });
     }
 
     return new Response(await response.arrayBuffer(), {
@@ -967,20 +1035,20 @@ async function handleLocalVoiceRequest(request: Request, env: unknown) {
       },
     });
   } catch (error) {
-    console.warn("Edge TTS indisponÃ­vel.", error);
-    return json({ fallback: "browser", reason: "Falha de conexÃ£o com Edge TTS." });
+    console.warn("Edge TTS indispon??vel.", error);
+    return json({ fallback: "browser", reason: "Falha de conex??o com Edge TTS." });
   }
 }
 
 async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
   const apiKeys = getElevenLabsApiKeys(env);
   if (!apiKeys.length) {
-    return json({ error: "ELEVENLABS_API_KEY nÃ£o configurada no backend." }, 503);
+    return json({ error: "ELEVENLABS_API_KEY n??o configurada no backend." }, 503);
   }
 
   const voiceId = getElevenLabsVoiceId(env);
   if (!voiceId) {
-    return json({ error: "ELEVENLABS_VOICE_ID nÃ£o configurado no backend." }, 503);
+    return json({ error: "ELEVENLABS_VOICE_ID n??o configurado no backend." }, 503);
   }
 
   const modelId = readServerEnvString(env, "ELEVENLABS_MODEL_ID", DEFAULT_ELEVENLABS_MODEL_ID);
@@ -1019,7 +1087,7 @@ async function generateElevenLabsVoiceResponse(text: string, env: unknown) {
     if (typeof lastFailureStatus === "number") {
       return json(elevenLabsErrorPayload(lastFailureStatus), elevenLabsErrorStatus(lastFailureStatus));
     }
-    return json({ error: "Falha de conexÃ£o ao gerar voz ElevenLabs." }, 502);
+    return json({ error: "Falha de conex??o ao gerar voz ElevenLabs." }, 502);
   }
 
   recordElevenLabsStatus("ok");
@@ -1042,7 +1110,7 @@ async function handleLocalAiRequest(request: Request, env: unknown) {
   if (url.pathname === "/admin/local-ai") {
     if (request.method === "OPTIONS") return json(null, 204);
     const role = await getAdminRequestRole(request, env);
-    if (!role) return json({ error: "NÃ£o autorizado." }, 401);
+    if (!role) return json({ error: "N??o autorizado." }, 401);
     if (request.method === "GET") {
       return json({
         settings: getLocalAiSettings(env),
@@ -1060,14 +1128,14 @@ async function handleLocalAiRequest(request: Request, env: unknown) {
         status: await probeOllamaStatus(env),
       });
     }
-    return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+    return json({ error: "M??todo n??o permitido." }, 405);
   }
 
   if (url.pathname !== "/api/ai/local-commentary") return null;
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "M??todo n??o permitido." }, 405);
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const startedAt = Date.now();
@@ -1239,17 +1307,17 @@ function buildLocalAiPrompt(
   summary: Record<string, unknown>,
 ) {
   return [
-    "VocÃª Ã© o Sniper Voice IA, analista virtual de Bac Bo dentro do Sniper Bo IA.",
-    "VocÃª NÃƒO decide entradas. As entradas jÃ¡ foram decididas pelos mÃ³dulos internos.",
-    "Use somente os dados reais enviados em JSON. NÃ£o invente porcentagens, estatÃ­sticas ou fatos.",
+    "Voc?? ?? o Sniper Voice IA, analista virtual de Bac Bo dentro do Sniper Bo IA.",
+    "Voc?? N??O decide entradas. As entradas j?? foram decididas pelos m??dulos internos.",
+    "Use somente os dados reais enviados em JSON. N??o invente porcentagens, estat??sticas ou fatos.",
     "Nunca prometa lucro. Nunca diga certeza, garantida ou entrada garantida.",
-    "Se nÃ£o houver dados suficientes, diga que a mesa estÃ¡ em observaÃ§Ã£o.",
+    "Se n??o houver dados suficientes, diga que a mesa est?? em observa????o.",
     "Tom: natural, agressivo, confiante, profissional, frases curtas, sala ao vivo.",
     "Sempre mencione risco quando o risco estiver alto.",
-    "Responda em portuguÃªs do Brasil com acentos corretos e no mÃ¡ximo 3 frases curtas.",
+    "Responda em portugu??s do Brasil com acentos corretos e no m??ximo 3 frases curtas.",
     `Evento: ${event || "chat"}`,
-    question ? `Pergunta do usuÃ¡rio: ${question}` : "",
-    fallbackText ? `ComentÃ¡rio base do sistema: ${fallbackText}` : "",
+    question ? `Pergunta do usu??rio: ${question}` : "",
+    fallbackText ? `Coment??rio base do sistema: ${fallbackText}` : "",
     `Dados reais do Sniper Bo IA: ${JSON.stringify(summary).slice(0, 6000)}`,
     "Resposta:",
   ]
@@ -1327,77 +1395,64 @@ function fallbackLocalAiCommentary(event: string, summary: Record<string, unknow
   const entry = readRecord(summary.entradaAtual);
   const side = readString(entry, "side");
   if (readString(risk, "nivel") === "alto") {
-    return "Cuidado. O mercado estÃ¡ pesado e o risco subiu. Melhor nÃ£o forÃ§ar entrada agora.";
+    return "Cuidado. O mercado est?? pesado e o risco subiu. Melhor n??o for??ar entrada agora.";
   }
-  if (event.includes("green")) return "Bateu. Green confirmado. A leitura respeitou o padrÃ£o.";
-  if (event.includes("red")) return "Red confirmado. O mercado quebrou a leitura. GestÃ£o primeiro.";
+  if (event.includes("green")) return "Bateu. Green confirmado. A leitura respeitou o padr??o.";
+  if (event.includes("red")) return "Red confirmado. O mercado quebrou a leitura. Gest??o primeiro.";
   if (side === "BANKER" || side === "PLAYER" || side === "TIE") {
-    return `Entrada confirmada em ${side}. A leitura veio dos mÃ³dulos internos e o risco estÃ¡ monitorado.`;
+    return `Entrada confirmada em ${side}. A leitura veio dos m??dulos internos e o risco est?? monitorado.`;
   }
-  return "Mesa ainda em observaÃ§Ã£o. Tem movimento, mas nÃ£o existe confirmaÃ§Ã£o limpa para entrada.";
+  return "Mesa ainda em observa????o. Tem movimento, mas n??o existe confirma????o limpa para entrada.";
 }
 
 function cleanLocalAiResponse(value: string) {
   const text = beautifyPortugueseText(sanitizeQuestion(value, 520))
-    .replace(/entrada\s+garantida/gi, "entrada confirmada pelos mÃ³dulos")
+    .replace(/entrada\s+garantida/gi, "entrada confirmada pelos m??dulos")
     .replace(/\bgarantid[ao]\b/gi, "confirmado pelos dados")
     .replace(/\bcerteza\b/gi, "leitura")
     .replace(/lucro\s+certo/gi, "resultado ainda depende do mercado");
-  return text || "Mesa em observaÃ§Ã£o. Ainda sem dados suficientes para comentÃ¡rio seguro.";
+  return text || "Mesa em observa????o. Ainda sem dados suficientes para coment??rio seguro.";
 }
 
 function beautifyPortugueseText(value: string) {
-  let mojibakeFixed = value;
-  for (const [search, replacement] of [
-    ["nÃƒÂ£o", "nÃ£o"],
-    ["NÃƒÂ£o", "NÃ£o"],
-    ["atenÃƒÂ§ÃƒÂ£o", "atenÃ§Ã£o"],
-    ["AtenÃƒÂ§ÃƒÂ£o", "AtenÃ§Ã£o"],
-    ["painÃƒÂ©is", "painÃ©is"],
-    ["indisponÃƒÂ­vel", "indisponÃ­vel"],
-  ] as const) {
-    mojibakeFixed = replaceLiteralText(mojibakeFixed, search, replacement);
-  }
+  const mojibakeFixed = value;
+
 
   return [
-    ["voce", "vocÃª"],
-    ["nao", "nÃ£o"],
-    ["atencao", "atenÃ§Ã£o"],
-    ["observacao", "observaÃ§Ã£o"],
-    ["narracao", "narraÃ§Ã£o"],
-    ["comentario", "comentÃ¡rio"],
-    ["analise", "anÃ¡lise"],
-    ["numero", "nÃºmero"],
-    ["padrao", "padrÃ£o"],
-    ["gestao", "gestÃ£o"],
-    ["confianca", "confianÃ§a"],
-    ["direcao", "direÃ§Ã£o"],
-    ["protecao", "proteÃ§Ã£o"],
-    ["confirmacao", "confirmaÃ§Ã£o"],
-    ["proxima", "prÃ³xima"],
-    ["forcar", "forÃ§ar"],
-    ["modulos", "mÃ³dulos"],
-    ["metricas", "mÃ©tricas"],
-    ["estatisticas", "estatÃ­sticas"],
-    ["usuario", "usuÃ¡rio"],
-    ["usuarios", "usuÃ¡rios"],
-    ["responsavel", "responsÃ¡vel"],
-    ["prejuizo", "prejuÃ­zo"],
-    ["apos", "apÃ³s"],
-    ["ate", "atÃ©"],
-    ["esta", "estÃ¡"],
-    ["ta", "tÃ¡"],
-    ["so", "sÃ³"],
-    ["mao", "mÃ£o"],
-    ["tambem", "tambÃ©m"],
-    ["valida", "vÃ¡lida"],
-    ["possivel", "possÃ­vel"],
-    ["saida", "saÃ­da"],
+    ["voce", "voc??"],
+    ["nao", "n??o"],
+    ["atencao", "aten????o"],
+    ["observacao", "observa????o"],
+    ["narracao", "narra????o"],
+    ["comentario", "coment??rio"],
+    ["analise", "an??lise"],
+    ["numero", "n??mero"],
+    ["padrao", "padr??o"],
+    ["gestao", "gest??o"],
+    ["confianca", "confian??a"],
+    ["direcao", "dire????o"],
+    ["protecao", "prote????o"],
+    ["confirmacao", "confirma????o"],
+    ["proxima", "pr??xima"],
+    ["forcar", "for??ar"],
+    ["modulos", "m??dulos"],
+    ["metricas", "m??tricas"],
+    ["estatisticas", "estat??sticas"],
+    ["usuario", "usu??rio"],
+    ["usuarios", "usu??rios"],
+    ["responsavel", "respons??vel"],
+    ["prejuizo", "preju??zo"],
+    ["apos", "ap??s"],
+    ["ate", "at??"],
+    ["esta", "est??"],
+    ["ta", "t??"],
+    ["so", "s??"],
+    ["mao", "m??o"],
+    ["tambem", "tamb??m"],
+    ["valida", "v??lida"],
+    ["possivel", "poss??vel"],
+    ["saida", "sa??da"],
   ].reduce((text, [plain, accented]) => replacePortugueseWord(text, plain, accented), mojibakeFixed);
-}
-
-function replaceLiteralText(value: string, search: string, replacement: string) {
-  return search ? value.split(search).join(replacement) : value;
 }
 
 function replacePortugueseWord(text: string, plain: string, accented: string) {
@@ -1512,7 +1567,7 @@ async function handleSalesSettingsRequest(request: Request) {
   if (url.pathname !== "/sales/settings") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "GET") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "GET") return json({ error: "M??todo n??o permitido." }, 405);
 
   return json({ salesSettings: publicSalesSettings() });
 }
@@ -1522,7 +1577,7 @@ async function handleSiteContentRequest(request: Request) {
   if (url.pathname !== "/site-content") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "GET") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "GET") return json({ error: "M??todo n??o permitido." }, 405);
 
   return json({ siteContent: publicSiteContentSettings() });
 }
@@ -1565,7 +1620,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
   if (request.method === "POST" && url.pathname === "/billing/checkout") {
     if (liveSalesSettings.salesClosed) {
       return json(
-        { error: "Vendas encerradas no momento. Entre na fila de espera para a prÃ³xima abertura." },
+        { error: "Vendas encerradas no momento. Entre na fila de espera para a pr??xima abertura." },
         403,
       );
     }
@@ -1580,7 +1635,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
       return json(
         {
           error:
-            "SessÃ£o expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
+            "Sess??o expirada. Volte ao cadastro, entre com seu e-mail e tente comprar novamente.",
         },
         auth.status,
       );
@@ -1612,7 +1667,7 @@ async function handleBillingRequest(request: Request, env: unknown) {
     });
   }
 
-  return json({ error: "Rota de assinatura nÃ£o encontrada." }, 404);
+  return json({ error: "Rota de assinatura n??o encontrada." }, 404);
 }
 
 async function requireClientBillingSession(
@@ -1623,17 +1678,17 @@ async function requireClientBillingSession(
   | { ok: false; status: number; error: string }
 > {
   const token = getBearerToken(request);
-  if (!token) return { ok: false, status: 401, error: "SessÃ£o obrigatÃ³ria." };
+  if (!token) return { ok: false, status: 401, error: "Sess??o obrigat??ria." };
 
   const session = await verifySessionToken(env, token);
-  if (!session) return { ok: false, status: 401, error: "SessÃ£o expirada." };
+  if (!session) return { ok: false, status: 401, error: "Sess??o expirada." };
   if (session.scope !== "client") {
     return { ok: false, status: 403, error: "Use uma conta de cliente para assinar." };
   }
 
   const client =
     findClientByEmail(session.email) || (await hydrateClientFromBilling(env, session.email));
-  if (!client) return { ok: false, status: 404, error: "Cliente nÃ£o encontrado." };
+  if (!client) return { ok: false, status: 404, error: "Cliente n??o encontrado." };
 
   const sessionCheck = await validateClientSessionBinding(env, request, session, client);
   if (!sessionCheck.ok) {
@@ -1645,7 +1700,7 @@ async function requireClientBillingSession(
       user_agent_hash: sessionCheck.userAgentHash || "",
     });
     await saveLiveState(env);
-    return { ok: false, status: 401, error: "SessÃ£o invÃ¡lida ou usada em outro dispositivo." };
+    return { ok: false, status: 401, error: "Sess??o inv??lida ou usada em outro dispositivo." };
   }
 
   return { ok: true, client, session };
@@ -1670,7 +1725,7 @@ async function recoverCheckoutClientFromBody(
   recordAccessEvent("checkout_session_recovered", {
     ...client,
     risk: auth.status >= 500 ? "medium" : "low",
-    detail: `Checkout liberado por e-mail apÃ³s falha de sessÃ£o: ${auth.error}`,
+    detail: `Checkout liberado por e-mail ap??s falha de sess??o: ${auth.error}`,
     ip_hash: binding.ipHash || "",
     user_agent_hash: binding.userAgentHash || "",
   });
@@ -1787,7 +1842,7 @@ async function createMercadoPagoCheckout(
     return json(
       {
         error:
-          "Checkout Hubla nÃ£o configurado. Adicione HUBLA_CHECKOUT_URL ou o link do plano nos Secrets.",
+          "Checkout Hubla n??o configurado. Adicione HUBLA_CHECKOUT_URL ou o link do plano nos Secrets.",
       },
       503,
     );
@@ -1795,7 +1850,7 @@ async function createMercadoPagoCheckout(
 
   const planConfig = getBillingPlan(plan, env);
   if (!planConfig || !planConfig.amount || planConfig.amount <= 0) {
-    return json({ error: "Valor do plano nÃ£o configurado." }, 503);
+    return json({ error: "Valor do plano n??o configurado." }, 503);
   }
 
   const now = new Date().toISOString();
@@ -1861,18 +1916,18 @@ async function createMercadoPagoCheckout(
     preference = readRecord(await response.json().catch(() => ({})));
     if (!response.ok) {
       console.warn(`Mercado Pago preference falhou (${response.status}).`);
-      return json({ error: "NÃ£o foi possÃ­vel criar checkout no Mercado Pago." }, 502);
+      return json({ error: "N??o foi poss??vel criar checkout no Mercado Pago." }, 502);
     }
   } catch (error) {
     console.warn("Falha de rede ao criar checkout Mercado Pago.", error);
-    return json({ error: "Mercado Pago indisponÃ­vel no momento." }, 502);
+    return json({ error: "Mercado Pago indispon??vel no momento." }, 502);
   }
 
   const preferenceId = readString(preference, "id");
   const checkoutUrl =
     readString(preference, "init_point") || readString(preference, "sandbox_init_point");
   if (!preferenceId || !checkoutUrl) {
-    return json({ error: "Mercado Pago nÃ£o retornou o link de checkout." }, 502);
+    return json({ error: "Mercado Pago n??o retornou o link de checkout." }, 502);
   }
 
   const subscription = upsertSubscriptionRecord({
@@ -1932,7 +1987,7 @@ async function handleMercadoPagoWebhook(request: Request, url: URL, env: unknown
     paymentId,
   );
   if (!signatureOk) {
-    return json({ error: "Webhook Mercado Pago invÃ¡lido." }, 401);
+    return json({ error: "Webhook Mercado Pago inv??lido." }, 401);
   }
 
   const payment = await fetchMercadoPagoPayment(env, paymentId);
@@ -1947,7 +2002,7 @@ async function handleMercadoPagoWebhook(request: Request, url: URL, env: unknown
 async function handleHublaWebhook(request: Request, env: unknown) {
   const rawBody = await request.text();
   if (!(await validateHublaWebhook(request, rawBody, env))) {
-    return json({ error: "Webhook Hubla invÃ¡lido." }, 401);
+    return json({ error: "Webhook Hubla inv??lido." }, 401);
   }
 
   const payload = readRecord(parseJsonSafe(rawBody));
@@ -2122,7 +2177,7 @@ async function fetchMercadoPagoPayment(
 > {
   const accessToken = getMercadoPagoAccessToken(env);
   if (!accessToken) {
-    return { ok: false, status: 503, error: "Mercado Pago nÃ£o configurado no servidor." };
+    return { ok: false, status: 503, error: "Mercado Pago n??o configurado no servidor." };
   }
 
   try {
@@ -2135,12 +2190,12 @@ async function fetchMercadoPagoPayment(
     const payment = readRecord(await response.json().catch(() => ({})));
     if (!response.ok) {
       console.warn(`Consulta de pagamento Mercado Pago falhou (${response.status}).`);
-      return { ok: false, status: 502, error: "NÃ£o foi possÃ­vel confirmar o pagamento." };
+      return { ok: false, status: 502, error: "N??o foi poss??vel confirmar o pagamento." };
     }
     return { ok: true, payment };
   } catch (error) {
     console.warn("Falha de rede ao consultar pagamento Mercado Pago.", error);
-    return { ok: false, status: 502, error: "Mercado Pago indisponÃ­vel no momento." };
+    return { ok: false, status: 502, error: "Mercado Pago indispon??vel no momento." };
   }
 }
 
@@ -2284,7 +2339,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (request.method === "GET" && url.pathname === "/auth/diagnostics") {
     if (!(await isDashboardAuthorized(request, url, env))) {
-      return json({ error: "NÃ£o autorizado." }, 401);
+      return json({ error: "N??o autorizado." }, 401);
     }
     return json({
       hasAdminEmail: getAdminEmails(env).length > 0,
@@ -2303,7 +2358,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const adminPasswordHash = getAdminPasswordHash(env);
 
     if (!adminPasswordHash || !getSessionSecret(env)) {
-      return json({ error: "Credenciais admin nÃ£o configuradas no servidor." }, 503);
+      return json({ error: "Credenciais admin n??o configuradas no servidor." }, 503);
     }
 
     if (adminRole && await verifyPassword(readString(body, "password"), adminPasswordHash)) {
@@ -2332,7 +2387,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ token, email: loginEmail, role: adminRole });
     }
 
-    return json({ error: "E-mail ou senha admin invÃ¡lidos." }, 401);
+    return json({ error: "E-mail ou senha admin inv??lidos." }, 401);
   }
 
   if (request.method === "POST" && url.pathname === "/auth/check") {
@@ -2343,7 +2398,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const adminRole = getAdminRoleForEmail(env, email);
 
     if (!getSessionSecret(env)) {
-      return json({ error: "SessÃ£o nÃ£o configurada no servidor." }, 503);
+      return json({ error: "Sess??o n??o configurada no servidor." }, 503);
     }
 
     if (adminRole === "owner" && adminPasswordHash && await verifyPassword(password, adminPasswordHash)) {
@@ -2398,7 +2453,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
           email,
           full_name: "",
           expires_at: "",
-          reason: "E-mail ainda nÃ£o cadastrado.",
+          reason: "E-mail ainda n??o cadastrado.",
         },
       });
     }
@@ -2433,7 +2488,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       );
     }
     if (!ok) {
-      return json({ error: "Senha invÃ¡lida." }, 401);
+      return json({ error: "Senha inv??lida." }, 401);
     }
 
     recordAccessEvent(client.enabled ? "client_login" : "client_pending_login", client);
@@ -2447,10 +2502,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
     if (!email || !password) {
-      return json({ error: "E-mail e senha sÃ£o obrigatÃ³rios." }, 400);
+      return json({ error: "E-mail e senha s??o obrigat??rios." }, 400);
     }
     if (!getSessionSecret(env)) {
-      return json({ error: "SessÃ£o nÃ£o configurada no servidor." }, 503);
+      return json({ error: "Sess??o n??o configurada no servidor." }, 503);
     }
 
     if (getAdminRoleForEmail(env, email)) {
@@ -2549,7 +2604,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (session.scope === "owner") {
       if (!(await sessionMatchesRequestBinding(env, request, session))) {
         return json(
-          { valid: false, reason: "SessÃ£o invÃ¡lida ou usada em outro dispositivo." },
+          { valid: false, reason: "Sess??o inv??lida ou usada em outro dispositivo." },
           401,
         );
       }
@@ -2559,7 +2614,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     if (session.scope === "admin_approver") {
       if (!(await sessionMatchesRequestBinding(env, request, session))) {
         return json(
-          { valid: false, reason: "SessÃ£o invÃ¡lida ou usada em outro dispositivo." },
+          { valid: false, reason: "Sess??o inv??lida ou usada em outro dispositivo." },
           401,
         );
       }
@@ -2586,7 +2641,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
           email: session.email,
           full_name: "",
           expires_at: "",
-          reason: "E-mail ainda nÃ£o cadastrado.",
+          reason: "E-mail ainda n??o cadastrado.",
           client_token: "",
         },
       });
@@ -2602,7 +2657,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         user_agent_hash: sessionCheck.userAgentHash || "",
       });
       await saveLiveState(env);
-      return json({ valid: false, reason: "SessÃ£o invÃ¡lida ou usada em outro dispositivo." }, 401);
+      return json({ valid: false, reason: "Sess??o inv??lida ou usada em outro dispositivo." }, 401);
     }
 
     const access = await clientAccess(env, client, request, session);
@@ -2612,7 +2667,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   const adminRole = await getAdminRequestRole(request, env);
   if (!adminRole) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   if (url.pathname === "/admin/sales-settings") {
@@ -2641,7 +2696,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ salesSettings: adminSalesSettings(env, saveStatus) });
     }
 
-    return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+    return json({ error: "M??todo n??o permitido." }, 405);
   }
 
   if (url.pathname === "/admin/site-content") {
@@ -2673,7 +2728,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ siteContent: adminSiteContentSettings(env, saveStatus) });
     }
 
-    return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+    return json({ error: "M??todo n??o permitido." }, 405);
   }
 
   if (request.method === "GET" && url.pathname === "/admin/summary") {
@@ -2709,7 +2764,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const userId = decodeURIComponent(adminUserMatch[1]);
     const actionPath = adminUserMatch[2] || "";
     const target = findAdminManagedUser(userId, env);
-    if (!target) return json({ error: "UsuÃ¡rio nÃ£o encontrado." }, 404);
+    if (!target) return json({ error: "Usu??rio n??o encontrado." }, 404);
 
     if (request.method === "GET" && !actionPath) {
       return json({ user: target });
@@ -2831,7 +2886,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     const body = readRecord(await request.json().catch(() => ({})));
     const title = readString(body, "title");
     const message = readString(body, "message");
-    if (!title || !message) return json({ error: "TÃ­tulo e mensagem sÃ£o obrigatÃ³rios." }, 400);
+    if (!title || !message) return json({ error: "T??tulo e mensagem s??o obrigat??rios." }, 400);
     const before = liveSiteContentSettings;
     liveSiteContentSettings = normalizeSiteContentSettings(
       {
@@ -2908,7 +2963,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       const clientIndex = liveClients.findIndex((client) => client.id === recipientId);
       if (clientIndex === -1) {
         if (syncChanged) await saveLiveState(env);
-        return json({ error: "DestinatÃ¡rio nÃ£o encontrado." }, 404);
+        return json({ error: "Destinat??rio n??o encontrado." }, 404);
       }
       upsertRecipientFromClient(liveClients[clientIndex]);
       await saveLiveState(env);
@@ -2991,7 +3046,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     });
   }
 
-  return json({ error: "Rota nÃ£o encontrada." }, 404);
+  return json({ error: "Rota n??o encontrada." }, 404);
 }
 
 async function handleDashboardRequest(request: Request, env: unknown, ctx?: unknown) {
@@ -3013,7 +3068,6 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/validator/channels" ||
       url.pathname.startsWith("/validator/channels/") ||
       url.pathname === "/validator/channels/test" ||
-      url.pathname === "/validator/notifications" ||
       url.pathname === "/validator/live-hit/send" ||
       url.pathname === "/validator/telegram/test" ||
       url.pathname === "/validator/telegram/send"
@@ -3042,7 +3096,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     (url.pathname === "/validator/telegram/test" || url.pathname === "/validator/telegram/send")
   ) {
     if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "NÃƒÆ’Ã‚Â£o autorizado." }, 401);
+      return json({ error: "N????????o autorizado." }, 401);
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
@@ -3074,7 +3128,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     (url.pathname === "/dashboard/round-history" || url.pathname === "/validator/round-history")
   ) {
     if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "NÃƒÂ£o autorizado." }, 401);
+      return json({ error: "N????o autorizado." }, 401);
     }
 
     const limit = clampRoundHistoryLimit(url.searchParams.get("limit"));
@@ -3102,7 +3156,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   if (request.method === "POST" && url.pathname === "/validator/round-history") {
     if (!(await isDashboardWriteAuthorized(request, url, env))) {
-      return json({ error: "NÃƒÂ£o autorizado." }, 401);
+      return json({ error: "N????o autorizado." }, 401);
     }
 
     const body = readRecord(await request.json().catch(() => ({})));
@@ -3147,7 +3201,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   if (request.method === "GET" && url.pathname === "/dashboard") {
     if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "NÃ£o autorizado." }, 401);
+      return json({ error: "N??o autorizado." }, 401);
     }
 
     await syncDashboardReadState(env);
@@ -3166,7 +3220,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/dashboard/publish")
   ) {
     if (!(await isDashboardWriteAuthorized(request, url, env))) {
-      return json({ error: "NÃ£o autorizado." }, 401);
+      return json({ error: "N??o autorizado." }, 401);
     }
 
     const body = await request.json().catch(() => ({}));
@@ -6303,57 +6357,6 @@ function defaultCalendarHourlyStats(rows = liveNeuralCalendarHourlyStats) {
   return rows.filter(isDefaultCalendarHourlyStat);
 }
 
-const DEFAULT_TELEGRAM_ENGINE_URL = "https://sniperbo-telegram-engine.sniperboia.workers.dev";
-const TELEGRAM_ENGINE_SECRET_NAMES = [
-  "TELEGRAM_ENGINE_SECRET",
-  "CLOUDFLARE_TELEGRAM_ENGINE_SECRET",
-  "ENGINE_API_SECRET",
-  "SNIPER_PUBLISHER_TOKEN",
-  "SNIPER_DASHBOARD_TOKEN",
-  "SNIPER_ADMIN_TOKEN",
-] as const;
-
-function telegramEngineBaseUrl(env: unknown) {
-  return (
-    readNamedServerSecret(env, "TELEGRAM_ENGINE_URL", "") ||
-    readNamedServerSecret(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL", "") ||
-    DEFAULT_TELEGRAM_ENGINE_URL
-  ).trim().replace(/\/+$/, "");
-}
-
-function telegramEngineSecret(env: unknown) {
-  return TELEGRAM_ENGINE_SECRET_NAMES
-    .map((name) => readNamedServerSecret(env, name, ""))
-    .find(Boolean)?.trim() || "";
-}
-
-async function proxyTelegramEngineRequest(request: Request, url: URL, env: unknown, userId: string) {
-  const baseUrl = telegramEngineBaseUrl(env);
-  const secret = telegramEngineSecret(env);
-  if (!baseUrl || !secret) return null;
-
-  const headers = new Headers();
-  headers.set("authorization", `Bearer ${secret}`);
-  headers.set("x-validator-user-id", userId);
-  const contentType = request.headers.get("content-type");
-  if (contentType) headers.set("content-type", contentType);
-  const accept = request.headers.get("accept");
-  if (accept) headers.set("accept", accept);
-
-  const init: RequestInit = {
-    method: request.method,
-    headers,
-    body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.text(),
-  };
-  const engineResponse = await fetch(`${baseUrl}${url.pathname}${url.search}`, init);
-  return new Response(await engineResponse.text(), {
-    status: engineResponse.status,
-    headers: {
-      "content-type": engineResponse.headers.get("content-type") || "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
 async function handleValidatorStorageRequest(request: Request, url: URL, env: unknown) {
   const isPatternsRoute =
     url.pathname === "/validator/patterns" || url.pathname.startsWith("/validator/patterns/");
@@ -6361,21 +6364,32 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     url.pathname === "/validator/channels" ||
     url.pathname.startsWith("/validator/channels/") ||
     url.pathname === "/validator/channels/test";
-  const isNotificationsRoute = url.pathname === "/validator/notifications";
   const isLiveHitRoute = url.pathname === "/validator/live-hit/send";
-  if (!isPatternsRoute && !isChannelsRoute && !isNotificationsRoute && !isLiveHitRoute) return null;
+  const isNotificationsRoute = url.pathname === "/validator/notifications";
+  if (!isPatternsRoute && !isChannelsRoute && !isLiveHitRoute && !isNotificationsRoute) return null;
 
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
-  if (isNotificationsRoute) {
-    const telegramEngineResponse = await proxyTelegramEngineRequest(request, url, env, userId).catch((error) => {
+  if (isChannelsRoute || isNotificationsRoute) {
+    if (!getTelegramEngineConfig(env)) {
+      return json({ error: "Telegram Engine secrets missing" }, 500);
+    }
+    const telegramAccess = await syncTelegramEngineUserAccess(env, userId, findClientByEmail(userId)).catch(
+      (error) => ({
+        ok: false,
+        status: 502,
+        error: errorMessage(error),
+      }),
+    );
+    if (!telegramAccess.ok) {
+      return json({ error: "Falha ao preparar Central Telegram.", detail: telegramAccess.error }, telegramAccess.status);
+    }
+    const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId).catch((error) => {
       console.warn("Cloudflare Telegram Engine indisponivel.", error);
       return null;
     });
-    if (telegramEngineResponse) return telegramEngineResponse;
-    return json({
-      error: telegramEngineSecret(env) ? "Telegram Engine unavailable" : "Telegram Engine secrets missing",
-    }, telegramEngineSecret(env) ? 502 : 500);
+    if (cloudResponse) return cloudResponse;
+    return json({ error: "Telegram Engine unavailable" }, 502);
   }
   await withTimeout(
     hydrateValidatorUserCache(env, userId),
@@ -6383,6 +6397,24 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     "carregar dados do Validador",
     undefined,
   );
+
+  if (request.method === "GET" && isNotificationsRoute) {
+    const storedNotifications = getSupabasePersistenceConfig(env)
+      ? await withTimeout(
+          fetchStoredRecentValidatorNotifications(env),
+          LIVE_STATE_IO_TIMEOUT_MS,
+          "carregar notificacoes do Validador",
+          [] as Array<Record<string, unknown>>,
+        )
+      : [];
+    const notifications = mergeValidatorNotifications(storedNotifications, liveValidatorNotifications)
+      .filter((notification) => normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id")) === userId)
+      .filter((notification) => !isValidatorResultNotification(notification))
+      .sort((a, b) => validatorNotificationTimeMs(b) - validatorNotificationTimeMs(a))
+      .slice(0, 50)
+      .map(publicValidatorNotification);
+    return json({ notifications });
+  }
 
   if (request.method === "POST" && isLiveHitRoute) {
     const body = readRecord(await request.json().catch(() => ({})));
@@ -6416,12 +6448,22 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
     const notification = {
       id: notificationKey,
+      type: "entry",
       userId: pattern.userId,
       patternId: pattern.id,
       channelId: channel.id,
       roundId,
       status: result.ok ? "sent" : "error",
       error: result.ok ? "" : result.error,
+      payloadJson: {
+        moduleKey: "validator",
+        entry: pattern.pulledSide ? formatServerTelegramSide(pattern.pulledSide) : formatServerTelegramSide(validatorEntrySide(pattern.entryType) || "B"),
+        protection: formatValidatorModuleGale(pattern.galeLimit),
+        result: "Aguardando resultado",
+        pattern: pattern.pattern,
+        percentage: formatServerPercent(pattern.validation?.accuracy),
+        telegramMessageId: result.ok ? result.messageId : null,
+      },
       sentAt,
       updatedAt: sentAt,
     };
@@ -6461,13 +6503,6 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
         const body = readRecord(await request.json().catch(() => ({})));
         const pattern = normalizeServerSavedPattern(body.pattern || body, userId);
         if (!pattern) return json({ error: "Padrao invalido." }, 400);
-        if (await isValidatorPatternHardDeleted(env, pattern.userId, pattern.id)) {
-          return json({
-            error: "Padrao ja foi excluido. Salve novamente para criar outro registro.",
-            deleted: true,
-          }, 410);
-        }
-        clearDeletedEntityForRecord(pattern as unknown as Record<string, unknown>);
         liveValidatorPatterns = upsertValidatorPattern(pattern);
         await persistValidatorPattern(env, pattern);
         await saveLiveState(env);
@@ -6491,49 +6526,46 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     const current = liveValidatorPatterns.find(
       (pattern) => pattern.userId === userId && pattern.id === patternId,
     );
-
-    if (request.method === "DELETE") {
-      markEntityDeleted((current || { id: patternId }) as unknown as Record<string, unknown>);
-      liveValidatorPatterns = liveValidatorPatterns.filter(
-        (pattern) => !(pattern.userId === userId && pattern.id === patternId),
-      );
-      liveValidatorNotifications = liveValidatorNotifications.filter(
-        (notification) => readString(notification, "patternId") !== patternId &&
-          readString(notification, "pattern_id") !== patternId,
-      );
-      await Promise.allSettled([
-        deleteValidatorPatternRow(env, userId, patternId),
-        deleteValidatorPatternNotifications(env, userId, patternId),
-        deleteValidatorPatternState(env, userId, patternId),
-      ]);
-      await saveLiveState(env);
-      return json({ ok: true });
-    }
-
     if (!current) return json({ error: "Padrao nao encontrado." }, 404);
 
     if (request.method === "PATCH") {
       const body = readRecord(await request.json().catch(() => ({})));
       const next = normalizeServerSavedPattern({ ...current, ...body, id: current.id }, userId);
       if (!next) return json({ error: "Padrao invalido." }, 400);
-      if (await isValidatorPatternHardDeleted(env, next.userId, next.id)) {
-        return json({
-          error: "Padrao ja foi excluido. Salve novamente para criar outro registro.",
-          deleted: true,
-        }, 410);
-      }
-      clearDeletedEntityForRecord(next as unknown as Record<string, unknown>);
       liveValidatorPatterns = upsertValidatorPattern(next);
       await persistValidatorPattern(env, next);
       await saveLiveState(env);
       return json({ pattern: next });
     }
+
+    if (request.method === "DELETE") {
+      liveValidatorPatterns = liveValidatorPatterns.filter(
+        (pattern) => !(pattern.userId === userId && pattern.id === patternId),
+      );
+      await deleteValidatorPatternRow(env, userId, patternId);
+      await saveLiveState(env);
+      return json({ ok: true });
+    }
   }
 
   if (url.pathname === "/validator/channels") {
     if (request.method === "GET") {
+      const durableChannelsEnabled = Boolean(getSupabasePersistenceConfig(env));
+      const storedUserChannels = durableChannelsEnabled
+        ? await withTimeout(
+            fetchStoredValidatorChannels(env, userId),
+            LIVE_STATE_IO_TIMEOUT_MS,
+            "carregar canais do Validador",
+            [] as ValidatorNotificationChannel[],
+          )
+        : null;
       const userChannels = mergeValidatorChannelList(
-        liveValidatorChannels.filter((channel) => channel.userId === userId),
+        durableChannelsEnabled
+          ? [
+              ...(storedUserChannels ?? []),
+              ...liveValidatorChannels.filter((channel) => channel.userId === userId),
+            ]
+          : liveValidatorChannels.filter((channel) => channel.userId === userId),
       );
       liveValidatorChannels = [
         ...userChannels,
@@ -6549,21 +6581,45 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     if (request.method === "POST") {
       const body = readRecord(await request.json().catch(() => ({})));
       const incoming = readRecord(body.channel || body);
+      const incomingToken = normalizeSecretValue(readString(incoming, "botToken"));
+      const validationCode = readString(body, "validationCode") || readString(incoming, "validationCode");
       const existingById = liveValidatorChannels.find(
         (channel) => channel.userId === userId && channel.id === readString(incoming, "id"),
       );
       const existingByCode = findValidatorChannelByIncomingCode(liveValidatorChannels, userId, incoming);
+      if (existingByCode && existingByCode.id !== existingById?.id) {
+        return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409);
+      }
       const existing = existingById || existingByCode;
-      const normalizedIncoming = existing && !existingById
-        ? { ...incoming, id: existing.id, createdAt: existing.createdAt }
-        : incoming;
-      const channel = normalizeServerNotificationChannel(normalizedIncoming, userId, existing);
+      const channel = normalizeServerNotificationChannel(incoming, userId, existing);
       if (!channel) return json({ error: "Canal invalido." }, 400);
-      const duplicateIds = validatorChannelRelatedIds(liveValidatorChannels, channel)
-        .filter((channelId) => channelId !== channel.id);
+      const botToken = decodeServerToken(channel.botTokenEncoded);
+      if (!botToken || !channel.chatId) {
+        return json({ error: "Bot Token e Chat ID sao obrigatorios para salvar o canal." }, 400);
+      }
+      if (incomingToken || !existing) {
+        const validationOk = await verifyTelegramChannelValidationCode(
+          env,
+          userId,
+          botToken,
+          channel.chatId,
+          validationCode,
+        );
+        if (!validationOk) {
+          const validation = await validateTelegramChannelAccess(request, botToken, channel.chatId);
+          if (!validation.ok) return json({ error: validation.error }, validation.status);
+        }
+      }
+      const duplicateIds = [
+        ...new Set([
+          ...validatorChannelRelatedIds(liveValidatorChannels, channel),
+          ...(await findStoredValidatorChannelRelatedIds(env, userId, channel)),
+        ]),
+      ].filter((channelId) => channelId !== channel.id);
       liveValidatorChannels = upsertValidatorChannel(channel);
       if (duplicateIds.length) {
         await deleteValidatorChannelRows(env, userId, duplicateIds);
+        await markValidatorChannelsDeleted(env, userId, duplicateIds, "");
         liveValidatorChannels = liveValidatorChannels.filter(
           (item) => !(item.userId === userId && duplicateIds.includes(item.id)),
         );
@@ -6577,20 +6633,8 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       ].slice(0, 1000);
       const persisted = await persistValidatorChannel(env, channel);
       const saveStatus = await saveLiveState(env);
-      if (!persisted && !saveStatus.durable) {
-        liveValidatorChannels = liveValidatorChannels.filter(
-          (item) => !(item.userId === userId && item.id === channel.id),
-        );
-        await saveLiveState(env);
-        return json({
-          error: "Persistencia Telegram nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar canais definitivos.",
-          storage: {
-            dedicated: persisted,
-            durable: saveStatus.durable,
-            cache: saveStatus.cache,
-            deduped: duplicateIds.length,
-          },
-        }, 500);
+      if (getSupabasePersistenceConfig(env) && !persisted && !saveStatus.durable && !saveStatus.cache) {
+        console.warn("Canal do Validador salvo apenas em memoria; armazenamento duravel indisponivel.");
       }
       return json({
         channel: publicValidatorChannel(channel),
@@ -6605,14 +6649,30 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     }
   }
 
+  if (request.method === "POST" && url.pathname === "/validator/channels/validate") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const botToken = normalizeSecretValue(readString(body, "botToken"));
+    const chatId = readString(body, "chatId");
+    if (!botToken) return json({ error: "Bot Token obrigatorio." }, 400);
+    if (!chatId) return json({ error: "Chat ID obrigatorio." }, 400);
+
+    const existingByCode = findValidatorChannelByIncomingCode(liveValidatorChannels, userId, { chatId });
+    if (existingByCode) return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409);
+
+    const validation = await validateTelegramChannelAccess(request, botToken, chatId);
+    if (!validation.ok) return json({ error: validation.error }, validation.status);
+    return json({
+      ok: true,
+      validated: true,
+      messageId: validation.messageId,
+      validationCode: await issueTelegramChannelValidationCode(env, userId, botToken, chatId),
+    });
+  }
+
   if (request.method === "POST" && url.pathname === "/validator/channels/test") {
     const body = readRecord(await request.json().catch(() => ({})));
     const channelId = readString(body, "channelId");
-    const channel = await findValidatorChannelForUserByHints(env, userId, {
-      channelId,
-      chatId: readString(body, "chatId"),
-      name: readString(body, "name"),
-    });
+    const channel = await findValidatorChannelForUser(env, userId, channelId);
     if (!channel) return json({ error: "Canal nao encontrado." }, 404);
     const botToken = decodeServerToken(channel.botTokenEncoded);
     if (!botToken || !channel.chatId) {
@@ -6622,13 +6682,13 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       botToken,
       chatId: channel.chatId,
       message:
-        "\u{1F916} ENTRADA CONFIRMADA\n" +
-        "\u{1F3B2} Mesa: Bac Bo\n" +
-        "\u{1F9E9} Padrao: \u{1F534}10 \u{2192} \u{1F535}7 \u{2192} \u{1F7E1}6\n" +
-        "\u{1F3AF} Entrada: \u{1F534} Banker\n" +
-        "\u{1F6E1}\u{FE0F} Protecao: Ate G1\n" +
-        "\u{1F91D} Protecao Tie: Ativa\n" +
-        `\u{1F4E1} Canal: ${channel.name}`,
+        "ENTRADA CONFIRMADA\n" +
+        "Mesa: Bac Bo\n" +
+        "Padrao: B10 > T7 > P6\n" +
+        "Entrada: B Banker\n" +
+        "Gale: Ate G1\n" +
+        "Protecao Tie: Ativa\n" +
+        `Canal: ${channel.name}`,
       buttonLabel: "Abrir Sniper Bo IA",
       buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
       allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
@@ -6644,21 +6704,40 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     if (request.method === "DELETE") {
       const current = await findValidatorChannelForUser(env, userId, channelId);
       const idsToDelete = new Set<string>([channelId]);
+      const channelCodeToDelete = current ? normalizeValidatorChannelCode(current.chatId) : "";
       if (current) {
         for (const relatedId of validatorChannelRelatedIds(liveValidatorChannels, current)) {
+          idsToDelete.add(relatedId);
+        }
+        for (const relatedId of await findStoredValidatorChannelRelatedIds(env, userId, current)) {
           idsToDelete.add(relatedId);
         }
       }
       const deletedIds = [...idsToDelete].filter(Boolean);
       liveValidatorChannels = liveValidatorChannels.filter(
-        (channel) => !(channel.userId === userId && idsToDelete.has(channel.id)),
+        (channel) =>
+          !(
+            channel.userId === userId &&
+            (idsToDelete.has(channel.id) ||
+              (channelCodeToDelete && normalizeValidatorChannelCode(channel.chatId) === channelCodeToDelete))
+          ),
       );
       liveValidatorPatterns = liveValidatorPatterns.map((pattern) =>
         pattern.userId === userId && idsToDelete.has(pattern.telegramChannelId)
           ? { ...pattern, telegramChannelId: "", updatedAt: new Date().toISOString() }
           : pattern,
       );
+      liveValidatorNotifications = liveValidatorNotifications.filter((notification) => {
+        const notificationUserId = normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id"));
+        const notificationChannelId = readString(notification, "channelId") || readString(notification, "channel_id");
+        return !(notificationUserId === userId && idsToDelete.has(notificationChannelId));
+      });
       await deleteValidatorChannelRows(env, userId, deletedIds);
+      await deleteValidatorChannelNotificationRows(env, userId, deletedIds);
+      await markValidatorChannelsDeleted(env, userId, deletedIds, current?.chatId || "");
+      if (current?.chatId) {
+        await deleteValidatorChannelsByCode(env, userId, current.chatId);
+      }
       await Promise.all(
         liveValidatorPatterns
           .filter((pattern) => pattern.userId === userId && pattern.telegramChannelId === "")
@@ -6709,41 +6788,64 @@ async function findValidatorChannelForUser(env: unknown, userId: string, channel
   return storedFromList;
 }
 
-async function findValidatorChannelForUserByHints(
+async function validateTelegramChannelAccess(request: Request, botToken: string, chatId: string) {
+  return sendTelegramMessage({
+    botToken,
+    chatId,
+    message: "oi",
+    buttonLabel: "Abrir Sniper Bo IA",
+    buttonUrl: "",
+    allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
+  });
+}
+
+async function issueTelegramChannelValidationCode(
   env: unknown,
   userId: string,
-  hints: { channelId?: string; chatId?: string; name?: string },
+  botToken: string,
+  chatId: string,
 ) {
-  const normalizedUserId = normalizeValidatorUserId(userId);
-  if (!normalizedUserId) return null;
+  const bucket = telegramValidationBucket();
+  const signature = await telegramChannelValidationSignature(env, userId, botToken, chatId, bucket);
+  return signature ? `${bucket}.${signature}` : "";
+}
 
-  const channelId = readString(hints.channelId);
-  if (channelId) {
-    const exact = await findValidatorChannelForUser(env, normalizedUserId, channelId);
-    if (exact) return exact;
-  }
+async function verifyTelegramChannelValidationCode(
+  env: unknown,
+  userId: string,
+  botToken: string,
+  chatId: string,
+  validationCode: string,
+) {
+  const [bucketText, signature] = validationCode.split(".");
+  const bucket = Number(bucketText);
+  if (!Number.isFinite(bucket) || !signature) return false;
+  const currentBucket = telegramValidationBucket();
+  if (bucket < currentBucket - 1 || bucket > currentBucket) return false;
+  const expected = await telegramChannelValidationSignature(env, userId, botToken, chatId, bucket);
+  return Boolean(expected && constantTimeStringEqual(signature, expected));
+}
 
-  const chatCode = normalizeValidatorChannelCode(readString(hints.chatId));
-  const nameCode = readString(hints.name).trim().toLowerCase();
-  const fromMemory = liveValidatorChannels.find((channel) =>
-    channel.userId === normalizedUserId &&
-    (
-      (chatCode && normalizeValidatorChannelCode(channel.chatId) === chatCode) ||
-      (nameCode && readString(channel.name).trim().toLowerCase() === nameCode)
-    )
-  );
-  if (fromMemory) return fromMemory;
+async function telegramChannelValidationSignature(
+  env: unknown,
+  userId: string,
+  botToken: string,
+  chatId: string,
+  bucket: number,
+) {
+  const secret = getSessionSecret(env);
+  if (!secret) return "";
+  const payload = [
+    normalizeValidatorUserId(userId),
+    normalizeSecretValue(botToken),
+    normalizeValidatorChannelCode(chatId),
+    String(bucket),
+  ].join("|");
+  return bytesToB64Url(await hmacSign(secret, payload));
+}
 
-  const storedChannels = await fetchStoredValidatorChannels(env, normalizedUserId);
-  const fromStorage = storedChannels.find((channel) =>
-    channel.userId === normalizedUserId &&
-    (
-      (chatCode && normalizeValidatorChannelCode(channel.chatId) === chatCode) ||
-      (nameCode && readString(channel.name).trim().toLowerCase() === nameCode)
-    )
-  ) || null;
-  if (fromStorage) liveValidatorChannels = upsertValidatorChannel(fromStorage);
-  return fromStorage;
+function telegramValidationBucket() {
+  return Math.floor(Date.now() / (10 * 60_000));
 }
 
 async function sendTelegramMessage({
@@ -6764,6 +6866,7 @@ async function sendTelegramMessage({
   const payload: Record<string, unknown> = {
     chat_id: chatId,
     text: message,
+    parse_mode: "HTML",
     disable_web_page_preview: true,
   };
 
@@ -6970,7 +7073,11 @@ async function validatorRequestUserId(request: Request, url: URL, env: unknown) 
     if (bindingOk && (session.scope === "client" || session.scope === "owner" || session.scope === "admin_approver")) {
       if (session.scope === "client") {
         const client = findClientByEmail(session.email);
-        if (!client || !clientHasLiveAccess(client)) return "";
+        if (!client || !clientHasLiveAccess(client)) {
+          if (client) await syncTelegramEngineUserAccess(env, session.email, client).catch(() => null);
+          return "";
+        }
+        await syncTelegramEngineUserAccess(env, session.email, client).catch(() => null);
       }
       return normalizeValidatorUserId(session.email);
     }
@@ -7036,6 +7143,17 @@ function normalizeServerNotificationChannel(
   const tokenEncoded =
     incomingToken ? encodeServerToken(incomingToken) : readString(record, "botTokenEncoded") || existing?.botTokenEncoded || "";
   const decodedToken = decodeServerToken(tokenEncoded);
+  const templatesRecord = readRecord(record.templates);
+  const existingModules = validatorChannelSignalModules(existing);
+  const signalModulesSource = readRecord(record.signalModules);
+  const templateModulesSource = readRecord(templatesRecord.signalModules);
+  const signalModules = normalizeValidatorChannelSignalModules(
+    hasRecordFields(signalModulesSource)
+      ? signalModulesSource
+      : hasRecordFields(templateModulesSource)
+        ? templateModulesSource
+        : existingModules,
+  );
   return {
     id: readString(record, "id") || crypto.randomUUID(),
     userId: normalizedUserId,
@@ -7049,11 +7167,118 @@ function normalizeServerNotificationChannel(
     analyzingCooldownRounds: Math.max(1, Math.floor(Number(record.analyzingCooldownRounds) || 3)),
     templates: {
       ...DEFAULT_VALIDATOR_MESSAGE_TEMPLATES,
-      ...readRecord(record.templates),
+      ...templatesRecord,
     },
+    signalModules,
     createdAt: readString(record, "createdAt") || now,
     updatedAt: readString(record, "updatedAt") || now,
+  } as ValidatorNotificationChannel;
+}
+
+function normalizeValidatorChannelSignalModules(value: unknown) {
+  const record = readRecord(value);
+  return VALIDATOR_TELEGRAM_MODULE_KEYS.reduce<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>(
+    (acc, key) => {
+      const defaults = defaultValidatorTelegramModuleConfig(key);
+      const raw = readRecord(record[key]);
+      const hasEnabled = Object.prototype.hasOwnProperty.call(raw, "enabled");
+      acc[key] = {
+        enabled: hasEnabled ? readBooleanField(raw, "enabled") : defaults.enabled,
+        entryType: normalizeValidatorModuleEntryType(raw.entryType, defaults.entryType),
+        galeLimit: clampValidatorModuleNumber(raw.galeLimit, defaults.galeLimit, 0, 4),
+        coverTie: Object.prototype.hasOwnProperty.call(raw, "coverTie")
+          ? readBooleanField(raw, "coverTie")
+          : defaults.coverTie,
+        tieCoverage: clampValidatorModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
+        cooldownSeconds: clampValidatorModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
+        template: readString(raw, "template") || defaults.template,
+        greenTemplate: readString(raw, "greenTemplate") || defaults.greenTemplate,
+        redTemplate: readString(raw, "redTemplate") || defaults.redTemplate,
+        tieTemplate: readString(raw, "tieTemplate") || defaults.tieTemplate,
+      };
+      return acc;
+    },
+    {} as Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>,
+  );
+}
+
+function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
+  return {
+    enabled: key === "validator",
+    entryType: "AUTO",
+    galeLimit: key === "ties_only" ? 0 : 1,
+    coverTie: key === "ties_only",
+    tieCoverage: key === "ties_only" ? 4 : 1,
+    cooldownSeconds: key === "validator" ? 0 : 2,
+    template: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES[key],
+    greenTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES[key],
+    redTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES[key],
+    tieTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES[key],
   };
+}
+
+function validatorChannelSignalModules(channel?: ValidatorNotificationChannel | null) {
+  if (!channel) return normalizeValidatorChannelSignalModules({});
+  const record = channel as ValidatorChannelWithModules;
+  const templatesRecord = readRecord(channel.templates);
+  const modulesRecord = readRecord(record.signalModules);
+  const templateModulesRecord = readRecord(templatesRecord.signalModules);
+  return normalizeValidatorChannelSignalModules(
+    hasRecordFields(modulesRecord) ? modulesRecord : templateModulesRecord,
+  );
+}
+
+function validatorChannelModuleConfig(
+  channel: ValidatorNotificationChannel,
+  key: ValidatorTelegramModuleKey,
+) {
+  return validatorChannelSignalModules(channel)[key] || defaultValidatorTelegramModuleConfig(key);
+}
+
+function validatorChannelModuleConfigState(
+  channel: ValidatorNotificationChannel,
+  key: ValidatorTelegramModuleKey,
+) {
+  const record = channel as ValidatorChannelWithModules;
+  const templatesRecord = readRecord(channel.templates);
+  const modulesRecord = readRecord(record.signalModules);
+  const templateModulesRecord = readRecord(templatesRecord.signalModules);
+  const source = hasRecordFields(modulesRecord)
+    ? modulesRecord
+    : hasRecordFields(templateModulesRecord)
+      ? templateModulesRecord
+      : null;
+  if (!source || !Object.prototype.hasOwnProperty.call(source, key)) return null;
+  return {
+    source: hasRecordFields(modulesRecord) ? "channel" : "templates",
+    config: normalizeValidatorChannelSignalModules(source)[key],
+  };
+}
+
+function validatorChannelModuleEnabled(
+  channel: ValidatorNotificationChannel,
+  key: ValidatorTelegramModuleKey,
+  fallbackEnabled = false,
+) {
+  const rawModules = readRecord((channel as ValidatorChannelWithModules).signalModules);
+  const templateModules = readRecord(readRecord(channel.templates).signalModules);
+  const hasConfig = hasRecordFields(rawModules) || hasRecordFields(templateModules);
+  if (!hasConfig) return fallbackEnabled;
+  return Boolean(validatorChannelModuleConfig(channel, key).enabled);
+}
+
+function clampValidatorModuleNumber(value: unknown, fallback: number, min: number, max: number) {
+  const number = Math.floor(Number(value));
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
+function normalizeValidatorModuleEntryType(value: unknown, fallback: ValidatorTelegramModuleConfig["entryType"]) {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "AUTO" || text === "BANKER" || text === "PLAYER" || text === "TIE") {
+    return text as ValidatorTelegramModuleConfig["entryType"];
+  }
+  return fallback;
 }
 
 function normalizeServerPatternTokens(value: unknown): ValidatorPatternToken[] {
@@ -7135,27 +7360,16 @@ function publicValidatorChannel(channel: ValidatorNotificationChannel): Validato
 
 async function hydrateValidatorUserCache(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return;
-  const legacyChannels = liveValidatorChannels.filter((channel) => channel.userId === userId);
-  const [storedPatterns, storedChannels, deletedPatternIds] = await Promise.all([
+  const legacyPatterns = liveValidatorPatterns.filter((pattern) => pattern.userId === userId);
+  const [storedPatterns, storedChannels] = await Promise.all([
     fetchStoredValidatorPatterns(env, userId),
     fetchStoredValidatorChannels(env, userId),
-    fetchValidatorPatternDeletedIds(env, userId),
   ]);
-  const legacyPatterns = (
-    filterDeletedEntityRows(
-      liveValidatorPatterns.filter((pattern) => pattern.userId === userId) as unknown as Record<string, unknown>[],
-    ) as unknown as SavedValidatorPattern[]
-  ).filter((pattern) => !deletedPatternIds.has(pattern.id));
-  const patterns = filterDeletedEntityRows(
-    mergeValidatorEntityList(storedPatterns, legacyPatterns) as unknown as Record<string, unknown>[],
-  ) as unknown as SavedValidatorPattern[];
-  const channels = mergeValidatorChannelList(storedChannels, legacyChannels);
+  const patterns = mergeValidatorEntityList(storedPatterns, legacyPatterns);
+  const channels = mergeValidatorChannelList(storedChannels);
 
   if (!storedPatterns.length && legacyPatterns.length) {
     void Promise.all(legacyPatterns.map((pattern) => persistValidatorPattern(env, pattern)));
-  }
-  if (!storedChannels.length && legacyChannels.length) {
-    void Promise.all(legacyChannels.map((channel) => persistValidatorChannel(env, channel)));
   }
 
   liveValidatorPatterns = [
@@ -7288,66 +7502,58 @@ async function refreshValidatorMonitorCache(env: unknown) {
 
 async function fetchStoredValidatorPatterns(env: unknown, userId: string) {
   if (!getSupabasePersistenceConfig(env)) return [];
-  const [rows, deletedIds] = await Promise.all([
-    fetchSupabaseRows(
-      env,
-      VALIDATOR_PATTERNS_TABLE,
-      `select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc&limit=1000`,
-    ),
-    fetchValidatorPatternDeletedIds(env, userId),
-  ]);
+  const rows = await fetchSupabaseRows(
+    env,
+    VALIDATOR_PATTERNS_TABLE,
+    `select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc&limit=1000`,
+  );
   return rows
     .map(validatorPatternFromRow)
-    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern))
-    .filter((pattern) => !deletedIds.has(pattern.id))
-    .filter((pattern) => !isEntityDeleted(pattern as unknown as Record<string, unknown>));
+    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
 }
 
 async function fetchStoredActiveValidatorPatterns(env: unknown) {
   if (!getSupabasePersistenceConfig(env)) return [];
-  const [rows, deletedKeys] = await Promise.all([
-    fetchSupabaseRows(
-      env,
-      VALIDATOR_PATTERNS_TABLE,
-      "select=*&is_active=eq.true&destination=not.eq.disabled&order=updated_at.desc&limit=5000",
-    ),
-    fetchValidatorPatternDeletedKeys(env),
-  ]);
+  const rows = await fetchSupabaseRows(
+    env,
+    VALIDATOR_PATTERNS_TABLE,
+    "select=*&is_active=eq.true&destination=not.eq.disabled&order=updated_at.desc&limit=5000",
+  );
   return rows
     .map(validatorPatternFromRow)
-    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern))
-    .filter((pattern) => !deletedKeys.has(validatorPatternDeletedKey(pattern.userId, pattern.id)))
-    .filter((pattern) => !isEntityDeleted(pattern as unknown as Record<string, unknown>));
+    .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
 }
 
 async function fetchStoredValidatorChannel(env: unknown, userId: string, channelId: string) {
+  const cloudChannel = (await fetchCloudValidatorChannels(env, userId)).find((channel) => channel.id === channelId);
+  if (cloudChannel) return cloudChannel;
   if (!getSupabasePersistenceConfig(env)) return null;
   const normalizedUserId = normalizeValidatorUserId(userId);
   const normalizedChannelId = readString(channelId);
   if (!normalizedUserId || !normalizedChannelId) return null;
 
-  const [rows, stateChannel, deletedState] = await Promise.all([
+  const [rows, stateChannel, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
       VALIDATOR_CHANNELS_TABLE,
       `select=*&user_id=eq.${encodeURIComponent(normalizedUserId)}&id=eq.${encodeURIComponent(normalizedChannelId)}&limit=1`,
     ),
     fetchValidatorChannelStateChannel(env, normalizedUserId, normalizedChannelId),
-    loadDurableLiveStateById(env, validatorChannelDeletedStateId(normalizedUserId, normalizedChannelId)),
+    fetchValidatorChannelDeletedRefs(env, normalizedUserId),
   ]);
-  if (deletedState && hasRecordFields(deletedState)) return null;
   const dedicatedChannel = rows
     .map(validatorChannelFromRow)
     .find((channel): channel is ValidatorNotificationChannel => Boolean(channel)) || null;
   return mergeValidatorChannelList(
     dedicatedChannel ? [dedicatedChannel] : [],
     stateChannel ? [stateChannel] : [],
-  )[0] || null;
+  ).find((channel) => !isValidatorChannelDeleted(channel, deletedRefs)) || null;
 }
 
 async function fetchStoredValidatorChannels(env: unknown, userId: string) {
-  if (!getSupabasePersistenceConfig(env)) return [];
-  const [rows, stateChannels, deletedIds] = await Promise.all([
+  const cloudChannels = await fetchCloudValidatorChannels(env, userId);
+  if (!getSupabasePersistenceConfig(env)) return cloudChannels;
+  const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
       VALIDATOR_CHANNELS_TABLE,
@@ -7359,12 +7565,52 @@ async function fetchStoredValidatorChannels(env: unknown, userId: string) {
   const storedChannels = rows
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  return mergeValidatorChannelList(storedChannels, stateChannels).filter((channel) => !deletedIds.has(channel.id));
+  return mergeValidatorChannelList(cloudChannels, storedChannels, stateChannels)
+    .filter((channel) => !isValidatorChannelDeleted(channel, deletedRefs));
+}
+
+async function fetchRawStoredValidatorChannels(env: unknown, userId: string) {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  if (!normalizedUserId) return [];
+  const [rows, stateChannels] = await Promise.all([
+    fetchSupabaseRows(
+      env,
+      VALIDATOR_CHANNELS_TABLE,
+      `select=*&user_id=eq.${encodeURIComponent(normalizedUserId)}&order=updated_at.desc&limit=1000`,
+    ),
+    fetchValidatorChannelStateChannels(env, normalizedUserId),
+  ]);
+  const storedChannels = rows
+    .map(validatorChannelFromRow)
+    .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
+  return [...storedChannels, ...stateChannels].filter((channel) => channel.userId === normalizedUserId);
+}
+
+async function findStoredValidatorChannelRelatedIds(
+  env: unknown,
+  userId: string,
+  target: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">,
+) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const targetCode = normalizeValidatorChannelCode(target.chatId);
+  const targetKey = validatorChannelUniqueKey({ ...target, userId: normalizedUserId });
+  if (!normalizedUserId) return [];
+  const rawChannels = await fetchRawStoredValidatorChannels(env, normalizedUserId);
+  return rawChannels
+    .filter((channel) => {
+      if (channel.id === target.id) return true;
+      if (targetCode && normalizeValidatorChannelCode(channel.chatId) === targetCode) return true;
+      return validatorChannelUniqueKey(channel) === targetKey;
+    })
+    .map((channel) => channel.id)
+    .filter(Boolean);
 }
 
 async function fetchStoredActiveValidatorChannels(env: unknown) {
-  if (!getSupabasePersistenceConfig(env)) return [];
-  const [rows, stateChannels, deletedIds] = await Promise.all([
+  const cloudChannels = await fetchCloudValidatorChannels(env);
+  if (!getSupabasePersistenceConfig(env)) return cloudChannels;
+  const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
       VALIDATOR_CHANNELS_TABLE,
@@ -7376,8 +7622,8 @@ async function fetchStoredActiveValidatorChannels(env: unknown) {
   const storedChannels = rows
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
-  return mergeValidatorChannelList(storedChannels, stateChannels)
-    .filter((channel) => channel.isActive && !deletedIds.has(channel.id));
+  return mergeValidatorChannelList(cloudChannels, storedChannels, stateChannels, liveValidatorChannels)
+    .filter((channel) => channel.isActive && !isValidatorChannelDeleted(channel, deletedRefs));
 }
 
 async function fetchStoredRecentValidatorNotifications(env: unknown) {
@@ -7405,53 +7651,14 @@ async function deleteValidatorPatternRow(env: unknown, userId: string, patternId
   return true;
 }
 
-async function deleteValidatorPatternNotifications(env: unknown, userId: string, patternId: string) {
-  if (!getSupabasePersistenceConfig(env)) return false;
-  const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedPatternId = readString(patternId);
-  if (!normalizedUserId || !normalizedPatternId) return false;
-  await deleteSupabaseRows(
-    env,
-    VALIDATOR_NOTIFICATIONS_TABLE,
-    `user_id=eq.${encodeURIComponent(normalizedUserId)}&pattern_id=eq.${encodeURIComponent(normalizedPatternId)}`,
-  );
-  return true;
-}
-
-async function deleteValidatorPatternState(env: unknown, userId: string, patternId: string) {
-  const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedPatternId = readString(patternId);
-  if (!normalizedUserId || !normalizedPatternId) return false;
-  return saveDurableLiveStateById(env, validatorPatternDeletedStateId(normalizedUserId, normalizedPatternId), {
-    type: "validator_pattern_deleted",
-    userId: normalizedUserId,
-    patternId: normalizedPatternId,
-    deletedAt: new Date().toISOString(),
-  });
-}
-
-async function isValidatorPatternHardDeleted(env: unknown, userId: string, patternId: string) {
-  const normalizedUserId = normalizeValidatorUserId(userId);
-  const normalizedPatternId = readString(patternId);
-  if (!normalizedUserId || !normalizedPatternId) return false;
-  if (isEntityDeleted({ id: normalizedPatternId, userId: normalizedUserId })) return true;
-  const deletedState = await loadDurableLiveStateById(
-    env,
-    validatorPatternDeletedStateId(normalizedUserId, normalizedPatternId),
-  );
-  return Boolean(deletedState && hasRecordFields(deletedState));
-}
-
 async function persistValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
   if (!getSupabasePersistenceConfig(env)) return false;
-  await deleteSupabaseRows(
-    env,
-    LIVE_STATE_TABLE,
-    `id=eq.${encodeURIComponent(validatorChannelDeletedStateId(channel.userId, channel.id))}`,
-  );
-  const dedicated = await persistSupabaseRow(env, VALIDATOR_CHANNELS_TABLE, validatorChannelToRow(channel), "id");
-  if (dedicated) return true;
-  return persistValidatorChannelState(env, channel);
+  await clearValidatorChannelDeletedState(env, channel);
+  const [dedicated, state] = await Promise.all([
+    persistSupabaseRow(env, VALIDATOR_CHANNELS_TABLE, validatorChannelToRow(channel), "id"),
+    persistValidatorChannelState(env, channel),
+  ]);
+  return dedicated || state;
 }
 
 async function deleteValidatorChannelRow(env: unknown, userId: string, channelId: string) {
@@ -7478,6 +7685,47 @@ async function deleteValidatorChannelRows(env: unknown, userId: string, channelI
   return results.some((result) => result.status === "fulfilled");
 }
 
+async function deleteValidatorChannelNotificationRows(env: unknown, userId: string, channelIds: string[]) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const ids = [...new Set(channelIds.map(readString).filter(Boolean))];
+  if (!normalizedUserId || !ids.length) return false;
+  const results = await Promise.allSettled(
+    ids.map((channelId) =>
+      deleteSupabaseRows(
+        env,
+        VALIDATOR_NOTIFICATIONS_TABLE,
+        `user_id=eq.${encodeURIComponent(normalizedUserId)}&channel_id=eq.${encodeURIComponent(channelId)}`,
+      )
+    ),
+  );
+  return results.some((result) => result.status === "fulfilled");
+}
+
+async function deleteValidatorChannelsByCode(env: unknown, userId: string, chatId: string) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const normalizedCode = normalizeValidatorChannelCode(chatId);
+  if (!normalizedUserId || !normalizedCode) return false;
+
+  const rawChannels = await fetchRawStoredValidatorChannels(env, normalizedUserId);
+  const ids = rawChannels
+    .filter((channel) => normalizeValidatorChannelCode(channel.chatId) === normalizedCode)
+    .map((channel) => channel.id)
+    .filter(Boolean);
+
+  await Promise.allSettled([
+    deleteValidatorChannelRows(env, normalizedUserId, ids),
+    deleteValidatorChannelNotificationRows(env, normalizedUserId, ids),
+    deleteSupabaseRows(
+      env,
+      VALIDATOR_CHANNELS_TABLE,
+      `user_id=eq.${encodeURIComponent(normalizedUserId)}&chat_id=eq.${encodeURIComponent(chatId)}`,
+    ),
+  ]);
+  return true;
+}
+
 async function persistValidatorChannelState(env: unknown, channel: ValidatorNotificationChannel) {
   return saveDurableLiveStateById(env, validatorChannelStateId(channel.userId, channel.id), {
     type: "validator_channel",
@@ -7495,12 +7743,62 @@ async function deleteValidatorChannelState(env: unknown, userId: string, channel
     LIVE_STATE_TABLE,
     `id=eq.${encodeURIComponent(validatorChannelStateId(normalizedUserId, normalizedChannelId))}`,
   );
-  return saveDurableLiveStateById(env, validatorChannelDeletedStateId(normalizedUserId, normalizedChannelId), {
-    type: "validator_channel_deleted",
-    userId: normalizedUserId,
-    channelId: normalizedChannelId,
-    deletedAt: new Date().toISOString(),
-  });
+  return true;
+}
+
+async function clearValidatorChannelDeletedState(env: unknown, channel: ValidatorNotificationChannel) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const ids = [
+    validatorChannelDeletedStateId(channel.userId, channel.id),
+    validatorChannelDeletedCodeStateId(channel.userId, channel.chatId),
+  ].filter(Boolean);
+  if (!ids.length) return false;
+  await Promise.allSettled(
+    ids.map((id) =>
+      deleteSupabaseRows(
+        env,
+        LIVE_STATE_TABLE,
+        `id=eq.${encodeURIComponent(id)}`,
+      )
+    ),
+  );
+  return true;
+}
+
+async function markValidatorChannelsDeleted(
+  env: unknown,
+  userId: string,
+  channelIds: string[],
+  chatId: string,
+) {
+  if (!getSupabasePersistenceConfig(env)) return false;
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const ids = [...new Set(channelIds.map(readString).filter(Boolean))];
+  const normalizedCode = normalizeValidatorChannelCode(chatId);
+  if (!normalizedUserId || (!ids.length && !normalizedCode)) return false;
+  const now = new Date().toISOString();
+  const results = await Promise.allSettled([
+    ...ids.map((channelId) =>
+      saveDurableLiveStateById(env, validatorChannelDeletedStateId(normalizedUserId, channelId), {
+        type: "validator_channel_deleted",
+        userId: normalizedUserId,
+        channelId,
+        chatId: readString(chatId),
+        code: normalizedCode,
+        deletedAt: now,
+      })
+    ),
+    normalizedCode
+      ? saveDurableLiveStateById(env, validatorChannelDeletedCodeStateId(normalizedUserId, chatId), {
+          type: "validator_channel_deleted",
+          userId: normalizedUserId,
+          chatId: readString(chatId),
+          code: normalizedCode,
+          deletedAt: now,
+        })
+      : Promise.resolve(false),
+  ]);
+  return results.some((result) => result.status === "fulfilled" && result.value);
 }
 
 async function fetchValidatorChannelStateChannels(env: unknown, userId?: string) {
@@ -7533,10 +7831,18 @@ async function fetchValidatorChannelStateChannel(env: unknown, userId: string, c
 }
 
 async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
+  return (await fetchValidatorChannelDeletedRefs(env, userId)).ids;
+}
+
+async function fetchValidatorChannelDeletedRefs(env: unknown, userId?: string) {
   const ids = new Set<string>();
-  if (!getSupabasePersistenceConfig(env)) return ids;
-  const prefix = userId
-    ? `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:`
+  const codes = new Set<string>();
+  const idTimes = new Map<string, number>();
+  const codeTimes = new Map<string, number>();
+  if (!getSupabasePersistenceConfig(env)) return { ids, codes, idTimes, codeTimes };
+  const normalizedUserId = normalizeValidatorUserId(userId || "");
+  const prefix = normalizedUserId
+    ? `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizedUserId}:`
     : VALIDATOR_CHANNEL_DELETED_STATE_PREFIX;
   const rows = await fetchSupabaseRows(
     env,
@@ -7545,52 +7851,52 @@ async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
   );
   for (const row of rows) {
     const state = readRecord(row.state);
-    const channelId = readString(state, "channelId") || readString(row, "id").split(":").pop() || "";
-    if (channelId) ids.add(channelId);
+    const rowId = readString(row, "id");
+    const parts = rowId.split(":");
+    const codeFromId = parts.length >= 4 && parts[2] === "code" ? parts.slice(3).join(":") : "";
+    const idFromId = parts.length >= 3 && parts[2] !== "code" ? parts.slice(2).join(":") : "";
+    const channelId = readString(state, "channelId") || idFromId;
+    const code = normalizeValidatorChannelCode(
+      readString(state, "code") || readString(state, "chatId") || codeFromId,
+    );
+    const deletedAt = Date.parse(
+      readString(state, "deletedAt") ||
+        readString(state, "deleted_at") ||
+        readString(row, "updated_at") ||
+        "",
+    );
+    const deletedAtMs = Number.isFinite(deletedAt) ? deletedAt : Date.now();
+    if (channelId) {
+      ids.add(channelId);
+      idTimes.set(channelId, Math.max(idTimes.get(channelId) || 0, deletedAtMs));
+    }
+    if (code) {
+      codes.add(code);
+      codeTimes.set(code, Math.max(codeTimes.get(code) || 0, deletedAtMs));
+    }
   }
-  return ids;
+  return { ids, codes, idTimes, codeTimes };
 }
 
-async function fetchValidatorPatternDeletedIds(env: unknown, userId?: string) {
-  const ids = new Set<string>();
-  if (!getSupabasePersistenceConfig(env)) return ids;
-  const prefix = userId
-    ? `${VALIDATOR_PATTERN_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:`
-    : VALIDATOR_PATTERN_DELETED_STATE_PREFIX;
-  const rows = await fetchSupabaseRows(
-    env,
-    LIVE_STATE_TABLE,
-    `select=id,state&id=like.${encodePostgrestLikeValue(`${prefix}*`)}&order=updated_at.desc&limit=5000`,
+function isValidatorChannelDeleted(
+  channel: ValidatorNotificationChannel,
+  deletedRefs: {
+    ids: Set<string>;
+    codes: Set<string>;
+    idTimes?: Map<string, number>;
+    codeTimes?: Map<string, number>;
+  },
+) {
+  const code = normalizeValidatorChannelCode(channel.chatId);
+  const channelTime = stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>);
+  const idDeletedAt = deletedRefs.idTimes?.get(channel.id) || (deletedRefs.ids.has(channel.id) ? Number.MAX_SAFE_INTEGER : 0);
+  const codeDeletedAt = code
+    ? deletedRefs.codeTimes?.get(code) || (deletedRefs.codes.has(code) ? Number.MAX_SAFE_INTEGER : 0)
+    : 0;
+  return Boolean(
+    (idDeletedAt && (!channelTime || channelTime <= idDeletedAt)) ||
+      (codeDeletedAt && (!channelTime || channelTime <= codeDeletedAt)),
   );
-  for (const row of rows) {
-    const state = readRecord(row.state);
-    const patternId = readString(state, "patternId") || readString(row, "id").split(":").pop() || "";
-    if (patternId) ids.add(patternId);
-  }
-  return ids;
-}
-
-async function fetchValidatorPatternDeletedKeys(env: unknown, userId?: string) {
-  const keys = new Set<string>();
-  if (!getSupabasePersistenceConfig(env)) return keys;
-  const prefix = userId
-    ? `${VALIDATOR_PATTERN_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:`
-    : VALIDATOR_PATTERN_DELETED_STATE_PREFIX;
-  const rows = await fetchSupabaseRows(
-    env,
-    LIVE_STATE_TABLE,
-    `select=id,state&id=like.${encodePostgrestLikeValue(`${prefix}*`)}&order=updated_at.desc&limit=5000`,
-  );
-  for (const row of rows) {
-    const state = readRecord(row.state);
-    const stateUserId = normalizeValidatorUserId(readString(state, "userId"));
-    const statePatternId = readString(state, "patternId");
-    const parsed = parseValidatorPatternDeletedStateId(readString(row, "id"));
-    const deletedUserId = stateUserId || parsed.userId;
-    const deletedPatternId = statePatternId || parsed.patternId;
-    if (deletedUserId && deletedPatternId) keys.add(validatorPatternDeletedKey(deletedUserId, deletedPatternId));
-  }
-  return keys;
 }
 
 function validatorChannelStateId(userId: string, channelId: string) {
@@ -7601,24 +7907,9 @@ function validatorChannelDeletedStateId(userId: string, channelId: string) {
   return `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(channelId)}`;
 }
 
-function validatorPatternDeletedStateId(userId: string, patternId: string) {
-  return `${VALIDATOR_PATTERN_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:${readString(patternId)}`;
-}
-
-function validatorPatternDeletedKey(userId: string, patternId: string) {
-  return `${normalizeValidatorUserId(userId)}:${readString(patternId)}`;
-}
-
-function parseValidatorPatternDeletedStateId(value: string) {
-  const clean = readString(value);
-  if (!clean.startsWith(VALIDATOR_PATTERN_DELETED_STATE_PREFIX)) return { userId: "", patternId: "" };
-  const rest = clean.slice(VALIDATOR_PATTERN_DELETED_STATE_PREFIX.length);
-  const separatorIndex = rest.indexOf(":");
-  if (separatorIndex < 0) return { userId: "", patternId: rest };
-  return {
-    userId: normalizeValidatorUserId(rest.slice(0, separatorIndex)),
-    patternId: rest.slice(separatorIndex + 1),
-  };
+function validatorChannelDeletedCodeStateId(userId: string, chatId: string) {
+  const code = normalizeValidatorChannelCode(chatId);
+  return code ? `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizeValidatorUserId(userId)}:code:${code}` : "";
 }
 
 function encodePostgrestLikeValue(value: string) {
@@ -7691,6 +7982,7 @@ function validatorPatternFromRow(row: Record<string, unknown>) {
 }
 
 function validatorChannelToRow(channel: ValidatorNotificationChannel) {
+  const signalModules = validatorChannelSignalModules(channel);
   return {
     id: channel.id,
     user_id: channel.userId,
@@ -7702,7 +7994,10 @@ function validatorChannelToRow(channel: ValidatorNotificationChannel) {
     is_active: Boolean(channel.isActive),
     analyzing_enabled: Boolean(channel.analyzingEnabled),
     analyzing_cooldown_rounds: Math.max(1, Math.floor(Number(channel.analyzingCooldownRounds) || 3)),
-    templates_json: channel.templates,
+    templates_json: {
+      ...channel.templates,
+      signalModules,
+    },
     created_at: channel.createdAt || new Date().toISOString(),
     updated_at: channel.updatedAt || new Date().toISOString(),
   };
@@ -7712,6 +8007,7 @@ function validatorChannelFromRow(row: Record<string, unknown>) {
   const id = readString(row, "id");
   const userId = readString(row, "user_id") || readString(row, "userId");
   if (!id || !userId) return null;
+  const templatesRecord = readRecord(row.templates_json);
   return normalizeServerNotificationChannel(
     {
       id,
@@ -7724,7 +8020,8 @@ function validatorChannelFromRow(row: Record<string, unknown>) {
       isActive: row.is_active,
       analyzingEnabled: row.analyzing_enabled,
       analyzingCooldownRounds: row.analyzing_cooldown_rounds,
-      templates: row.templates_json,
+      templates: templatesRecord,
+      signalModules: templatesRecord.signalModules,
       createdAt: readString(row, "created_at"),
       updatedAt: readString(row, "updated_at"),
     },
@@ -7746,6 +8043,7 @@ function validatorChannelFromStateRecord(state: Record<string, unknown>) {
       ...channelRecord,
       id: idFromState,
       userId: userIdFromState,
+      signalModules: channelRecord.signalModules || readRecord(channelRecord.templates).signalModules,
     },
     userIdFromState,
   );
@@ -7778,8 +8076,51 @@ function validatorNotificationFromRow(row: Record<string, unknown>) {
     roundId: Math.floor(Number(row.round_id) || 0),
     status: readString(row, "status"),
     error: readString(row, "error"),
+    payloadJson: readRecord(row.payload_json || row.payloadJson),
     sentAt: readString(row, "sent_at"),
     updatedAt: readString(row, "updated_at"),
+  };
+}
+
+function mergeValidatorNotifications(
+  primary: Array<Record<string, unknown>>,
+  secondary: Array<Record<string, unknown>>,
+) {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const notification of [...secondary, ...primary].map(readRecord)) {
+    const id = readString(notification, "id");
+    if (!id) continue;
+    const existing = byId.get(id);
+    if (!existing || validatorNotificationTimeMs(notification) >= validatorNotificationTimeMs(existing)) {
+      byId.set(id, notification);
+    }
+  }
+  return [...byId.values()];
+}
+
+function validatorNotificationTimeMs(notification: Record<string, unknown>) {
+  const sentAt =
+    readString(notification, "updatedAt") ||
+    readString(notification, "updated_at") ||
+    readString(notification, "sentAt") ||
+    readString(notification, "sent_at");
+  const time = Date.parse(sentAt);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function publicValidatorNotification(notification: Record<string, unknown>) {
+  const payloadJson = readRecord(notification.payloadJson || notification.payload_json);
+  return {
+    id: readString(notification, "id"),
+    type: readString(notification, "type") || "entry",
+    userId: normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id")),
+    channelId: readString(notification, "channelId") || readString(notification, "channel_id"),
+    roundId: Math.floor(Number(notification.roundId ?? notification.round_id) || 0),
+    status: readString(notification, "status"),
+    error: readString(notification, "error"),
+    payloadJson,
+    sentAt: readString(notification, "sentAt") || readString(notification, "sent_at"),
+    updatedAt: readString(notification, "updatedAt") || readString(notification, "updated_at"),
   };
 }
 
@@ -7840,11 +8181,16 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
   }
   const latestRound = liveValidatorRoundHistory.at(-1);
-  if (!latestRound || !liveValidatorPatterns.length) return false;
+  if (!latestRound) return false;
 
   let changed = false;
   const entryChannelKeys = new Set<string>();
-  const entrySendTasks: Array<() => Promise<boolean>> = [];
+  const entrySendTasks: Array<() => Promise<boolean>> = buildValidatorModuleTelegramSendTasks(
+    env,
+    latestRound,
+    entryChannelKeys,
+    options,
+  );
   for (const pattern of liveValidatorPatterns) {
     if (!shouldMonitorValidatorPattern(pattern, latestRound)) continue;
     const matchedRounds = liveValidatorRoundHistory.slice(-pattern.pattern.length);
@@ -7861,6 +8207,8 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     if (!validatorPatternAllowsTelegramForward(pattern)) continue;
     const channel = findValidatorTelegramChannelForPattern(pattern);
     if (!channel) continue;
+    if (!validatorChannelModuleEnabled(channel, "validator", true)) continue;
+    if (validatorChannelModuleCoolingDown(channel, "validator", matchedAtMs)) continue;
     entryChannelKeys.add(validatorChannelKey(channel));
     const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${latestRound.id}`;
     if (validatorNotificationAlreadySent(notificationKey)) continue;
@@ -7882,7 +8230,9 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     const results = await runLimitedValidatorTelegramSends(entrySendTasks);
     changed = results.some(Boolean) || changed;
   }
-  const analysisChanged = await sendValidatorAnalyzingMessages(latestRound, entryChannelKeys, options);
+  const resultChanged = await processValidatorTelegramResultMessages(env, latestRound, options);
+  changed = changed || resultChanged;
+  const analysisChanged = await sendValidatorAnalyzingMessages(env, latestRound, entryChannelKeys, options);
   changed = changed || analysisChanged;
 
   return changed;
@@ -7900,14 +8250,26 @@ async function sendValidatorEntryTelegramNotification(
 ) {
   const roundReceivedAtMs = options.roundReceivedAtMs || matchedAtMs;
   const telegramSendStartedAtMs = Date.now();
-  const result = await sendTelegramMessage({
-    botToken: decodeServerToken(channel.botTokenEncoded),
-    chatId: channel.chatId,
-    message: buildServerValidatorTelegramMessage(pattern, channel),
-    buttonLabel: "Abrir Sniper Bo IA",
-    buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-    allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-  });
+  const message = buildServerValidatorTelegramMessage(pattern, channel);
+  const entrySide = pattern.pulledSide || validatorEntrySide(pattern.entryType) || "B";
+  const result = isCloudValidatorTelegramChannel(channel)
+    ? await sendTelegramEngineSignal(env, {
+        userId: pattern.userId,
+        channelId: channel.id,
+        moduleKey: "validator",
+        signalKey: notificationKey,
+        roundId,
+        entry: entrySide,
+        message,
+      })
+    : await sendTelegramMessage({
+        botToken: decodeServerToken(channel.botTokenEncoded),
+        chatId: channel.chatId,
+        message,
+        buttonLabel: "Abrir Sniper Bo IA",
+        buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+        allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+      });
   const telegramRespondedAtMs = Date.now();
   const latency = {
     roundReceivedAt: new Date(roundReceivedAtMs).toISOString(),
@@ -7923,6 +8285,7 @@ async function sendValidatorEntryTelegramNotification(
   logValidatorTelegramLatency(pattern, channel, roundId, result.ok ? "sent" : "error", latency);
   const notification = {
     id: notificationKey,
+    type: "entry",
     userId: pattern.userId,
     patternId: pattern.id,
     channelId: channel.id,
@@ -7930,6 +8293,12 @@ async function sendValidatorEntryTelegramNotification(
     status: result.ok ? "sent" : "error",
     error: result.ok ? "" : result.error,
     payloadJson: {
+      moduleKey: "validator",
+      entry: pattern.pulledSide ? formatServerTelegramSide(pattern.pulledSide) : formatServerTelegramSide(validatorEntrySide(pattern.entryType) || "B"),
+      protection: formatValidatorModuleGale(pattern.galeLimit),
+      result: "Aguardando resultado",
+      pattern: pattern.pattern,
+      percentage: formatServerPercent(pattern.validation?.accuracy),
       latency,
       telegramMessageId: result.ok ? result.messageId : null,
       targetExceeded: latency.totalMs > VALIDATOR_TELEGRAM_TARGET_MS,
@@ -7943,6 +8312,730 @@ async function sendValidatorEntryTelegramNotification(
   ].slice(0, 1000);
   void persistValidatorNotification(env, notification);
   return true;
+}
+
+function buildValidatorModuleTelegramSendTasks(
+  env: unknown,
+  latestRound: Round,
+  entryChannelKeys: Set<string>,
+  options: ValidatorMonitorOptions,
+) {
+  const tasks: Array<() => Promise<boolean>> = [];
+  for (const channel of liveValidatorChannels) {
+    if (!isUsableValidatorTelegramChannel(channel)) continue;
+    for (const moduleKey of VALIDATOR_TELEGRAM_MODULE_KEYS) {
+      if (moduleKey === "validator") continue;
+      if (moduleKey !== "paying_numbers" && !validatorChannelModuleEnabled(channel, moduleKey, false)) continue;
+      const signal = buildValidatorChannelModuleSignal(channel, moduleKey, latestRound);
+      if (!signal) continue;
+      if (validatorNotificationAlreadySent(signal.notificationKey)) {
+        if (moduleKey === "paying_numbers") {
+          logPayingNumbersTelegramDecision(channel, "blocked", "duplicate_signal", {
+            roundId: latestRound.id,
+            signalKey: signal.signalKey,
+          });
+        }
+        continue;
+      }
+      if (validatorChannelModuleCoolingDown(channel, moduleKey, signal.matchedAtMs)) {
+        if (moduleKey === "paying_numbers") {
+          logPayingNumbersTelegramDecision(channel, "blocked", "cooldown_active", {
+            roundId: latestRound.id,
+            signalKey: signal.signalKey,
+            cooldownSeconds: validatorChannelModuleConfig(channel, moduleKey).cooldownSeconds,
+          });
+        }
+        continue;
+      }
+      entryChannelKeys.add(validatorChannelKey(channel));
+      tasks.push(() => sendValidatorModuleTelegramNotification(env, signal, options));
+    }
+  }
+  return tasks;
+}
+
+function buildValidatorChannelModuleSignal(
+  channel: ValidatorNotificationChannel,
+  moduleKey: ValidatorTelegramModuleKey,
+  latestRound: Round,
+): ValidatorTelegramModuleSignal | null {
+  if (moduleKey === "ai_patterns") return buildAiPatternsModuleSignal(channel, latestRound);
+  if (moduleKey === "paying_numbers") return buildPayingNumbersModuleSignal(channel, latestRound);
+  if (moduleKey === "surf_alert") return buildSurfAlertModuleSignal(channel, latestRound);
+  if (moduleKey === "ties_only") return buildTiesOnlyModuleSignal(channel, latestRound);
+  return null;
+}
+
+function buildAiPatternsModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
+  if (liveValidatorRoundHistory.length < 20) return null;
+  const moduleConfig = validatorChannelModuleConfig(channel, "ai_patterns");
+  const galeLimit = Math.max(0, Math.min(2, moduleConfig.galeLimit)) as ValidatorGaleLimit;
+  const historySize = Math.min(5000, liveValidatorRoundHistory.length);
+  const suggestions = serverValidatorEngine.minePatterns(liveValidatorRoundHistory, {
+    historySize,
+    patternLength: 3,
+    entryType: "AI",
+    galeLimit,
+    minAccuracy: 70,
+    minOccurrences: 5,
+    includeTie: true,
+    includeNumbers: true,
+    includeOpposite: true,
+    hotOnly: false,
+    lowRedOnly: false,
+  });
+  const suggestion = suggestions.find((item) => (
+    item.pulledSide &&
+    validatorModuleAllowsRoundEntry(moduleConfig, item.pulledSide) &&
+    matchesServerValidatorPattern(liveValidatorRoundHistory.slice(-item.pattern.length), item.pattern)
+  ));
+  if (!suggestion || !suggestion.pulledSide) return null;
+  return createValidatorModuleSignal(
+    channel,
+    "ai_patterns",
+    latestRound,
+    `ai:${suggestion.id}:${latestRound.id}:${suggestion.pulledSide}`,
+    {
+      table: "Bac Bo",
+      pattern: formatServerTelegramPattern(suggestion.pattern),
+      entry: formatServerTelegramSide(suggestion.pulledSide),
+      gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      tieCoverage: String(moduleConfig.tieCoverage),
+      confidence: formatServerPercent(suggestion.validation.accuracy),
+      percentage: formatServerPercent(suggestion.validation.accuracy),
+      status: suggestion.status,
+      risk: suggestion.risk,
+      number: "",
+      level: "",
+      round: String(latestRound.id),
+      module: "Padroes IA",
+    },
+    {
+      pattern: suggestion.pattern,
+      entry: suggestion.pulledSide,
+      entryText: formatServerTelegramSide(suggestion.pulledSide),
+      protection: formatValidatorModuleGale(moduleConfig.galeLimit),
+      result: "Aguardando resultado",
+      accuracy: suggestion.validation.accuracy ?? null,
+      status: suggestion.status,
+    },
+  );
+}
+
+function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
+  const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
+  const reading = state?.readingSnapshot ?? liveDashboardData.neuralReading ?? null;
+  if (!reading || (reading.mode !== "ACTIVE" && !state)) return null;
+  const moduleState = validatorChannelModuleConfigState(channel, "paying_numbers");
+  if (!moduleState) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "missing_channel_config", {
+      roundId: latestRound.id,
+      numero: reading.numero ?? null,
+    });
+    return null;
+  }
+  const moduleConfig = moduleState.config;
+  const expectedSide = state?.expectedSide ?? readServerNeuralSide(reading.direcao ?? reading.origem);
+  if (!expectedSide) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "missing_detected_entry", {
+      roundId: latestRound.id,
+      numero: reading.numero ?? null,
+    });
+    return null;
+  }
+  const key = state?.key || serverNeuralEntryKey(reading);
+  if (!key) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "missing_signal_key", {
+      roundId: latestRound.id,
+      expectedSide,
+      numero: reading.numero ?? null,
+    });
+    return null;
+  }
+  if (!moduleConfig.enabled) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "module_inactive", {
+      roundId: latestRound.id,
+      signalKey: key,
+      expectedSide,
+    });
+    return null;
+  }
+  if (!validatorModuleAllowsSignalEntry(moduleConfig, expectedSide)) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "entry_not_allowed", {
+      roundId: latestRound.id,
+      signalKey: key,
+      expectedSide,
+      allowedEntry: moduleConfig.entryType,
+    });
+    return null;
+  }
+  const status = String(reading.paganteStatus || (state?.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"));
+  return createValidatorModuleSignal(
+    channel,
+    "paying_numbers",
+    latestRound,
+    `paying:${key}:${state?.triggerRoundKey || latestRound.id}`,
+    {
+      table: "Bac Bo",
+      pattern: "",
+      entry: formatServerSignalSide(expectedSide),
+      gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      tieCoverage: moduleConfig.coverTie ? String(moduleConfig.tieCoverage) : "0",
+      tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
+      confidence: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
+      percentage: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
+      status,
+      risk: serverReadPaganteKind(reading),
+      number: typeof reading.numero === "number" ? String(reading.numero) : "",
+      level: "",
+      round: String(latestRound.id),
+      module: "Numeros Pagantes",
+    },
+    {
+      key,
+      numero: reading.numero ?? null,
+      expectedSide,
+      entryText: formatServerSignalSide(expectedSide),
+      protection: formatValidatorModuleGale(moduleConfig.galeLimit),
+      coverTie: moduleConfig.coverTie,
+      tieCoverage: moduleConfig.coverTie ? moduleConfig.tieCoverage : 0,
+      result: "Aguardando resultado",
+      status,
+    },
+  );
+}
+
+function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
+  const alert = readRecord(liveDashboardData.currentSurfAlert);
+  if (!hasRecordFields(alert)) return null;
+  const side = normalizeSignalSide(alert.surf_prediction_side || alert.surf_side || alert.side || alert.entry);
+  if (!isServerEntrySide(side)) return null;
+  const moduleConfig = validatorChannelModuleConfig(channel, "surf_alert");
+  if (!validatorModuleAllowsSignalEntry(moduleConfig, side)) return null;
+  const risk = clampPercent(alert.surf_break_risk ?? alert.surf_risk ?? alert.risk ?? 0);
+  const confidence = clampPercent(alert.surf_confidence ?? alert.confidence ?? alert.confianca ?? risk);
+  const statusText = serverNormalizeText(alert.surf_status || alert.status || alert.phase || alert.surf_phase);
+  const active = Boolean(
+    readBooleanField(alert, "surf_alert") ||
+      statusText.includes("ATIVO") ||
+      statusText.includes("ACTIVE") ||
+      statusText.includes("CONFIRM") ||
+      statusText.includes("ALERTA") ||
+      risk >= 70,
+  );
+  if (!active) return null;
+  return createValidatorModuleSignal(
+    channel,
+    "surf_alert",
+    latestRound,
+    `surf:${readString(alert, "id") || latestRound.id}:${side}:${Math.round(risk)}`,
+    {
+      table: "Bac Bo",
+      pattern: "",
+      entry: formatServerSignalSide(side),
+      gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      tieCoverage: String(moduleConfig.tieCoverage),
+      confidence: formatServerPercent(confidence),
+      percentage: formatServerPercent(confidence),
+      status: statusText || "CONFIRMADO",
+      risk: formatServerPercent(risk),
+      number: "",
+      level: statusText || "",
+      round: String(latestRound.id),
+      module: "Aviso de Surf",
+    },
+    {
+      side,
+      entryText: formatServerSignalSide(side),
+      protection: formatValidatorModuleGale(moduleConfig.galeLimit),
+      result: "Aguardando resultado",
+      risk,
+      confidence,
+      status: statusText,
+    },
+  );
+}
+
+function buildTiesOnlyModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
+  const alert = readRecord(liveDashboardData.currentTieAlert);
+  if (!hasRecordFields(alert)) return null;
+  const status = readString(alert, "status");
+  if (status !== "active") return null;
+  const moduleConfig = validatorChannelModuleConfig(channel, "ties_only");
+  if (!validatorModuleAllowsSignalEntry(moduleConfig, "TIE")) return null;
+  const confidence = clampPercent(alert.confidence ?? alert.confianca ?? 0);
+  const level = readString(alert, "level") || readString(alert, "nivel") || "ativo";
+  return createValidatorModuleSignal(
+    channel,
+    "ties_only",
+    latestRound,
+    `tie:${readString(alert, "id") || latestRound.id}:${level}:${Math.round(confidence)}`,
+    {
+      table: "Bac Bo",
+      pattern: "",
+      entry: "Tie",
+      gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      tieCoverage: String(moduleConfig.tieCoverage),
+      confidence: formatServerPercent(confidence),
+      percentage: formatServerPercent(confidence),
+      status,
+      risk: level,
+      number: "",
+      level,
+      round: String(latestRound.id),
+      module: "Somente Empates",
+    },
+    {
+      level,
+      confidence,
+      entryText: "Tie",
+      protection: moduleConfig.coverTie ? `G${moduleConfig.tieCoverage}` : "SG",
+      result: "Aguardando resultado",
+      tieCoverage: moduleConfig.tieCoverage,
+    },
+  );
+}
+
+function createValidatorModuleSignal(
+  channel: ValidatorNotificationChannel,
+  moduleKey: ValidatorTelegramModuleKey,
+  latestRound: Round,
+  signalKey: string,
+  variables: Record<string, string>,
+  payloadJson: Record<string, unknown>,
+): ValidatorTelegramModuleSignal {
+  const moduleConfig = validatorChannelModuleConfig(channel, moduleKey);
+  const matchedAtMs = Date.now();
+  const detectedAt = new Date(matchedAtMs).toISOString();
+  const signalHash = hashServerText(signalKey);
+  return {
+    moduleKey,
+    channel,
+    signalKey,
+    notificationKey: `module:${moduleKey}:${channel.userId}:${channel.id}:${latestRound.id}:${signalHash}`,
+    roundId: latestRound.id,
+    message: renderValidatorTelegramTemplate(moduleConfig.template, variables),
+    detectedAt,
+    matchedAtMs,
+    payloadJson: {
+      moduleKey,
+      signalKey,
+      entry: variables.entry,
+      protection: variables.gale,
+      result: "Aguardando resultado",
+      ...payloadJson,
+    },
+  };
+}
+
+async function sendValidatorModuleTelegramNotification(
+  env: unknown,
+  signal: ValidatorTelegramModuleSignal,
+  options: ValidatorMonitorOptions,
+) {
+  const telegramSendStartedAtMs = Date.now();
+  const result = isCloudValidatorTelegramChannel(signal.channel)
+    ? await sendTelegramEngineSignal(env, {
+        userId: signal.channel.userId,
+        channelId: signal.channel.id,
+        moduleKey: signal.moduleKey,
+        signalKey: signal.signalKey,
+        roundId: signal.roundId,
+        entry: readString(signal.payloadJson, "expectedSide") || readString(signal.payloadJson, "side") || readString(signal.payloadJson, "entry"),
+        message: signal.message,
+      })
+    : await sendTelegramMessage({
+        botToken: decodeServerToken(signal.channel.botTokenEncoded),
+        chatId: signal.channel.chatId,
+        message: signal.message,
+        buttonLabel: "Abrir Sniper Bo IA",
+        buttonUrl: normalizeTelegramButtonUrl(signal.channel.buttonLink),
+        allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+      });
+  const telegramRespondedAtMs = Date.now();
+  const latency = {
+    roundReceivedAt: options.roundReceivedAtMs ? new Date(options.roundReceivedAtMs).toISOString() : "",
+    moduleMatchedAt: new Date(signal.matchedAtMs).toISOString(),
+    telegramSendStartedAt: new Date(telegramSendStartedAtMs).toISOString(),
+    telegramRespondedAt: new Date(telegramRespondedAtMs).toISOString(),
+    matchToTelegramStartMs: Math.max(0, telegramSendStartedAtMs - signal.matchedAtMs),
+    telegramApiMs: Math.max(0, telegramRespondedAtMs - telegramSendStartedAtMs),
+  };
+  const notification = {
+    id: signal.notificationKey,
+    type: `module:${signal.moduleKey}`,
+    userId: signal.channel.userId,
+    channelId: signal.channel.id,
+    roundId: signal.roundId,
+    status: result.ok ? "sent" : "error",
+    error: result.ok ? "" : result.error,
+    payloadJson: {
+      ...signal.payloadJson,
+      latency,
+      telegramMessageId: result.ok ? result.messageId : null,
+    },
+    sentAt: signal.detectedAt,
+    updatedAt: new Date(telegramRespondedAtMs).toISOString(),
+  };
+  liveValidatorNotifications = [
+    notification,
+    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== signal.notificationKey),
+  ].slice(0, 1000);
+  void persistValidatorNotification(env, notification);
+  if (signal.moduleKey === "paying_numbers") {
+    logPayingNumbersTelegramDecision(signal.channel, result.ok ? "sent" : "blocked", result.ok ? "sent_to_telegram" : "telegram_error", {
+      roundId: signal.roundId,
+      signalKey: signal.signalKey,
+      telegramMessageId: result.ok ? result.messageId : null,
+      error: result.ok ? "" : result.error,
+    });
+  }
+  return true;
+}
+
+async function processValidatorTelegramResultMessages(
+  env: unknown,
+  latestRound: Round,
+  options: ValidatorMonitorOptions,
+) {
+  const tasks: Array<() => Promise<boolean>> = [];
+  for (const notification of liveValidatorNotifications) {
+    const pending = readPendingValidatorTelegramEntry(notification);
+    if (!pending) continue;
+    const outcome = resolveValidatorTelegramEntryOutcome(notification);
+    if (!outcome) continue;
+    const channel = findValidatorTelegramChannelForNotification(notification);
+    if (!channel) continue;
+    const resultNotificationKey = `${pending.id}:result:${outcome.status}:${outcome.roundId}`;
+    if (validatorNotificationAlreadySent(resultNotificationKey)) continue;
+    tasks.push(() =>
+      sendValidatorTelegramResultNotification(
+        env,
+        notification,
+        channel,
+        outcome,
+        resultNotificationKey,
+        latestRound,
+        options,
+      ),
+    );
+  }
+  if (!tasks.length) return false;
+  const results = await runLimitedValidatorTelegramSends(tasks);
+  return results.some(Boolean);
+}
+
+function readPendingValidatorTelegramEntry(notification: Record<string, unknown>) {
+  const id = readString(notification, "id");
+  const type = readString(notification, "type") || "entry";
+  const status = readString(notification, "status");
+  const payloadJson = readRecord(notification.payloadJson || notification.payload_json);
+  if (!id || status !== "sent") return null;
+  if (isValidatorResultNotification(notification)) return null;
+  if (type !== "entry" && !type.startsWith("module:")) return null;
+  const result = readString(payloadJson, "result").toLowerCase();
+  if (result && !result.includes("aguardando")) return null;
+  return { id, type, payloadJson };
+}
+
+function resolveValidatorTelegramEntryOutcome(notification: Record<string, unknown>) {
+  const payloadJson = readRecord(notification.payloadJson || notification.payload_json);
+  const entry = readValidatorTelegramEntrySide(payloadJson);
+  if (!entry) return null;
+  const triggerRoundId = Math.floor(Number(notification.roundId ?? notification.round_id) || 0);
+  const triggerIndex = findValidatorRoundIndexById(triggerRoundId);
+  if (triggerIndex < 0) return null;
+  const maxGale = readValidatorProtectionGale(payloadJson.protection || payloadJson.gale);
+  let attempts = 0;
+  for (const round of liveValidatorRoundHistory.slice(triggerIndex + 1)) {
+    if (round.result === "T") {
+      const tieMultiplier = formatServerTieMultiplier(round);
+      return {
+        status: "TIE",
+        label: tieMultiplier ? `Empate ${tieMultiplier}` : "Empate",
+        roundId: round.id,
+        galeUsed: attempts,
+        tieMultiplier,
+      };
+    }
+    if (round.result === entry) {
+      return {
+        status: attempts <= 0 ? "GREEN_SG" : `GREEN_G${Math.min(4, attempts)}`,
+        label: attempts <= 0 ? "Green" : `Green G${Math.min(4, attempts)}`,
+        roundId: round.id,
+        galeUsed: attempts,
+        tieMultiplier: "",
+      };
+    }
+    attempts += 1;
+    if (attempts > maxGale) {
+      return {
+        status: "RED",
+        label: "Red",
+        roundId: round.id,
+        galeUsed: maxGale,
+        tieMultiplier: "",
+      };
+    }
+  }
+  return null;
+}
+
+async function sendValidatorTelegramResultNotification(
+  env: unknown,
+  originalNotification: Record<string, unknown>,
+  channel: ValidatorNotificationChannel,
+  outcome: {
+    status: string;
+    label: string;
+    roundId: number;
+    galeUsed: number;
+    tieMultiplier: string;
+  },
+  resultNotificationKey: string,
+  latestRound: Round,
+  options: ValidatorMonitorOptions,
+) {
+  const payloadJson = readRecord(originalNotification.payloadJson || originalNotification.payload_json);
+  const moduleKey = readValidatorNotificationModuleKey(originalNotification);
+  const moduleConfig = validatorChannelModuleConfig(channel, moduleKey);
+  const variables = validatorTelegramResultVariables(moduleKey, payloadJson, outcome, latestRound);
+  const template = outcome.status === "RED"
+    ? moduleConfig.redTemplate
+    : outcome.status === "TIE"
+      ? moduleConfig.tieTemplate
+      : moduleConfig.greenTemplate;
+  const sentAt = new Date().toISOString();
+  const message = renderValidatorTelegramTemplate(template, variables);
+  const result = isCloudValidatorTelegramChannel(channel)
+    ? await sendTelegramEngineSignal(env, {
+        userId: readString(originalNotification, "userId") || readString(originalNotification, "user_id"),
+        channelId: channel.id,
+        moduleKey,
+        signalKey: resultNotificationKey,
+        roundId: outcome.roundId,
+        entry: readString(payloadJson, "expectedSide") || readString(payloadJson, "side") || readString(payloadJson, "entry"),
+        message,
+      })
+    : await sendTelegramMessage({
+        botToken: decodeServerToken(channel.botTokenEncoded),
+        chatId: channel.chatId,
+        message,
+        buttonLabel: "Abrir Sniper Bo IA",
+        buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+        allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+      });
+  const resultNotification = {
+    id: resultNotificationKey,
+    type: `result:${moduleKey}`,
+    userId: readString(originalNotification, "userId") || readString(originalNotification, "user_id"),
+    channelId: channel.id,
+    roundId: outcome.roundId,
+    status: result.ok ? "sent" : "error",
+    error: result.ok ? "" : result.error,
+    payloadJson: {
+      moduleKey,
+      originalNotificationId: readString(originalNotification, "id"),
+      result: outcome.label,
+      resultStatus: outcome.status,
+      resultRoundId: outcome.roundId,
+      tieMultiplier: outcome.tieMultiplier,
+      telegramMessageId: result.ok ? result.messageId : null,
+    },
+    sentAt,
+    updatedAt: sentAt,
+  };
+  liveValidatorNotifications = [
+    resultNotification,
+    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== resultNotificationKey),
+  ].slice(0, 1000);
+  void persistValidatorNotification(env, resultNotification);
+  if (!result.ok) return false;
+
+  const updatedOriginal = {
+    ...originalNotification,
+    payloadJson: {
+      ...payloadJson,
+      result: outcome.label,
+      resultStatus: outcome.status,
+      resultRoundId: outcome.roundId,
+      resultSentAt: sentAt,
+      resultNotificationId: resultNotificationKey,
+      tieMultiplier: outcome.tieMultiplier,
+    },
+    updatedAt: sentAt,
+  };
+  liveValidatorNotifications = [
+    updatedOriginal,
+    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== readString(originalNotification, "id")),
+  ].slice(0, 1000);
+  void persistValidatorNotification(env, updatedOriginal);
+  return true;
+}
+
+function validatorTelegramResultVariables(
+  moduleKey: ValidatorTelegramModuleKey,
+  payloadJson: Record<string, unknown>,
+  outcome: {
+    status: string;
+    label: string;
+    roundId: number;
+    galeUsed: number;
+    tieMultiplier: string;
+  },
+  latestRound: Round,
+) {
+  const entry = readString(payloadJson, "entryText") || readString(payloadJson, "entry") || "Entrada";
+  const protection = readString(payloadJson, "protection") || readString(payloadJson, "gale") || "";
+  return {
+    table: "Bac Bo",
+    module: formatValidatorModuleName(moduleKey),
+    pattern: formatValidatorPayloadPattern(payloadJson.pattern),
+    entry,
+    gale: protection,
+    protection,
+    result: outcome.label,
+    status: outcome.status,
+    round: String(outcome.roundId || latestRound.id),
+    number: String(payloadJson.numero ?? payloadJson.number ?? ""),
+    percentage: readString(payloadJson, "percentage"),
+    confidence: readString(payloadJson, "confidence"),
+    tieMultiplier: outcome.tieMultiplier,
+  };
+}
+
+function findValidatorTelegramChannelForNotification(notification: Record<string, unknown>) {
+  const userId = normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id"));
+  const channelId = readString(notification, "channelId") || readString(notification, "channel_id");
+  return liveValidatorChannels.find(
+    (channel) => channel.userId === userId && channel.id === channelId && isUsableValidatorTelegramChannel(channel),
+  ) || null;
+}
+
+function readValidatorNotificationModuleKey(notification: Record<string, unknown>): ValidatorTelegramModuleKey {
+  const payloadJson = readRecord(notification.payloadJson || notification.payload_json);
+  const payloadModule = readString(payloadJson, "moduleKey");
+  if (VALIDATOR_TELEGRAM_MODULE_KEYS.includes(payloadModule as ValidatorTelegramModuleKey)) {
+    return payloadModule as ValidatorTelegramModuleKey;
+  }
+  const type = readString(notification, "type");
+  const fromType = type.replace(/^module:/, "").replace(/^result:/, "").replace(/:result$/, "");
+  if (VALIDATOR_TELEGRAM_MODULE_KEYS.includes(fromType as ValidatorTelegramModuleKey)) {
+    return fromType as ValidatorTelegramModuleKey;
+  }
+  return "validator";
+}
+
+function isValidatorResultNotification(notification: Record<string, unknown>) {
+  const type = readString(notification, "type");
+  return type.startsWith("result:") || type.endsWith(":result");
+}
+
+function readValidatorTelegramEntrySide(payloadJson: Record<string, unknown>): Round["result"] | null {
+  const text = String(payloadJson.entryText || payloadJson.entry || payloadJson.expectedSide || "")
+    .trim()
+    .toUpperCase();
+  if (text === "B" || text === "BANKER" || text.includes("BANKER")) return "B";
+  if (text === "P" || text === "PLAYER" || text.includes("PLAYER")) return "P";
+  if (text === "T" || text === "TIE" || text.includes("TIE") || text.includes("EMPATE")) return "T";
+  return null;
+}
+
+function readValidatorProtectionGale(value: unknown) {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "SG" || text === "SEM GALE") return 0;
+  const match = text.match(/G([0-4])/);
+  if (match) return Number(match[1]);
+  const number = Math.floor(Number(value) || 0);
+  return Math.max(0, Math.min(4, number));
+}
+
+function findValidatorRoundIndexById(roundId: number) {
+  if (!roundId) return -1;
+  for (let index = liveValidatorRoundHistory.length - 1; index >= 0; index -= 1) {
+    if (liveValidatorRoundHistory[index]?.id === roundId) return index;
+  }
+  return -1;
+}
+
+function formatServerTieMultiplier(round: Round) {
+  const multiplier = Number(round.tieMultiplier ?? serverTieMultiplierFromRound(round));
+  if (!Number.isFinite(multiplier) || multiplier <= 0) return "";
+  return `${multiplier}x`;
+}
+
+function formatValidatorModuleName(moduleKey: ValidatorTelegramModuleKey) {
+  if (moduleKey === "ai_patterns") return "Padroes IA";
+  if (moduleKey === "paying_numbers") return "Numeros Pagantes";
+  if (moduleKey === "surf_alert") return "Aviso de Surf";
+  if (moduleKey === "ties_only") return "Somente Empates";
+  return "Validador";
+}
+
+function formatValidatorPayloadPattern(value: unknown) {
+  const pattern = normalizeServerPatternTokens(value);
+  return pattern.length ? formatServerTelegramPattern(pattern) : "";
+}
+
+function validatorChannelModuleCoolingDown(
+  channel: ValidatorNotificationChannel,
+  moduleKey: ValidatorTelegramModuleKey,
+  nowMs = Date.now(),
+) {
+  const cooldownSeconds = Math.max(0, Number(validatorChannelModuleConfig(channel, moduleKey).cooldownSeconds) || 0);
+  if (!cooldownSeconds) return false;
+  const cooldownMs = cooldownSeconds * 1000;
+  return liveValidatorNotifications.some((notification) => {
+    if (readString(notification, "status") !== "sent") return false;
+    if (readString(notification, "userId") !== channel.userId) return false;
+    if (readString(notification, "channelId") !== channel.id) return false;
+    if (!validatorNotificationMatchesModule(notification, moduleKey)) return false;
+    const sentAt = Date.parse(readString(notification, "sentAt") || readString(notification, "sent_at"));
+    return Number.isFinite(sentAt) && nowMs - sentAt < cooldownMs;
+  });
+}
+
+function validatorNotificationMatchesModule(
+  notification: Record<string, unknown>,
+  moduleKey: ValidatorTelegramModuleKey,
+) {
+  const type = readString(notification, "type");
+  if (moduleKey === "validator") return !type || type === "entry" || type === "module:validator";
+  return type === `module:${moduleKey}`;
+}
+
+function renderValidatorTelegramTemplate(template: string, variables: Record<string, string>) {
+  return (template || "").replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
+}
+
+function formatValidatorModuleGale(value: unknown) {
+  const gale = Math.max(0, Math.min(4, Math.floor(Number(value) || 0)));
+  return gale <= 0 ? "SG" : `G${gale}`;
+}
+
+function formatServerSignalSide(side: CurrentSignalSide | NonNullable<NeuralEntryState["expectedSide"]>) {
+  if (side === "BANKER") return "Banker";
+  if (side === "PLAYER") return "Player";
+  if (side === "TIE") return "Tie";
+  return "Aguardando";
+}
+
+function validatorModuleAllowsRoundEntry(
+  moduleConfig: ValidatorTelegramModuleConfig,
+  side: Round["result"],
+) {
+  if (moduleConfig.entryType === "AUTO") return true;
+  if (moduleConfig.entryType === "BANKER") return side === "B";
+  if (moduleConfig.entryType === "PLAYER") return side === "P";
+  return side === "T";
+}
+
+function validatorModuleAllowsSignalEntry(
+  moduleConfig: ValidatorTelegramModuleConfig,
+  side: CurrentSignalSide | NonNullable<NeuralEntryState["expectedSide"]>,
+) {
+  if (moduleConfig.entryType === "AUTO") return true;
+  return moduleConfig.entryType === side;
 }
 
 async function runLimitedValidatorTelegramSends(tasks: Array<() => Promise<boolean>>) {
@@ -8001,6 +9094,28 @@ function maskTelemetryUserId(userId: string) {
   return `${name.slice(0, 1)}***@${domain}`;
 }
 
+function logPayingNumbersTelegramDecision(
+  channel: ValidatorNotificationChannel,
+  status: "sent" | "blocked",
+  reason: string,
+  details: Record<string, unknown> = {},
+) {
+  const summary = {
+    event: "telegram_paying_numbers_decision",
+    status,
+    reason,
+    user: maskTelemetryUserId(channel.userId),
+    channelId: channel.id,
+    ...details,
+  };
+  const line = JSON.stringify(summary);
+  if (status === "blocked") {
+    console.info(line);
+    return;
+  }
+  console.info(line);
+}
+
 function shouldMonitorValidatorPattern(pattern: SavedValidatorPattern, latestRound: Round) {
   if (!pattern.isActive || pattern.destination === "disabled") return false;
   if (!pattern.pattern.length || liveValidatorRoundHistory.length < pattern.pattern.length) return false;
@@ -8025,10 +9140,72 @@ function findValidatorTelegramChannelForPattern(pattern: SavedValidatorPattern) 
 }
 
 function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel) {
-  return Boolean(channel?.isActive && channel.chatId && decodeServerToken(channel.botTokenEncoded));
+  return Boolean(channel?.isActive && channel.chatId && (isCloudValidatorTelegramChannel(channel) || decodeServerToken(channel.botTokenEncoded)));
+}
+
+function isCloudValidatorTelegramChannel(channel?: ValidatorNotificationChannel | null) {
+  return channel?.botTokenEncoded === "__cloudflare__";
+}
+
+async function sendTelegramEngineSignal(
+  env: unknown,
+  input: {
+    userId: string;
+    channelId: string;
+    moduleKey: ValidatorTelegramModuleKey;
+    signalKey: string;
+    roundId: number;
+    entry: unknown;
+    message: string;
+  },
+) {
+  const config = getTelegramEngineConfig(env);
+  if (!config) return { ok: false, status: 503, error: "Cloudflare Telegram Engine nao configurado." };
+  const response = await fetch(`${config.url}/engine/signal`, {
+    method: "POST",
+    cache: "no-store",
+    headers: telegramEngineHeaders(config.secret, "", true),
+    body: JSON.stringify({
+      userId: normalizeValidatorUserId(input.userId),
+      channelId: input.channelId,
+      moduleKey: input.moduleKey,
+      signalKey: input.signalKey,
+      roundId: input.roundId,
+      entry: normalizeCloudTelegramEntry(input.entry),
+      message: input.message,
+      buttonLabel: "Abrir Sniper Bo IA",
+    }),
+  }).catch((error) => {
+    console.warn("Falha ao chamar Cloudflare Telegram Engine.", error);
+    return null;
+  });
+  if (!response) return { ok: false, status: 502, error: "Cloudflare Telegram Engine indisponivel." };
+  const data = await response.json().catch(() => null) as {
+    sent?: Array<Record<string, unknown>>;
+    blocked?: Array<Record<string, unknown>>;
+    error?: string;
+  } | null;
+  if (!response.ok) {
+    return { ok: false, status: response.status, error: data?.error || `Cloudflare Telegram retornou ${response.status}.` };
+  }
+  const sent = Array.isArray(data?.sent) ? data.sent : [];
+  const match = sent.find((item) => readString(item, "channelId") === input.channelId) || sent[0];
+  if (match) return { ok: true, status: 200, messageId: readString(match, "notificationId") || null };
+  const blocked = Array.isArray(data?.blocked) ? data.blocked : [];
+  const reason = readString(blocked.find((item) => readString(item, "channelId") === input.channelId) || blocked[0], "reason");
+  return { ok: false, status: 409, error: reason || "Cloudflare Telegram nao enviou o sinal." };
+}
+
+function normalizeCloudTelegramEntry(value: unknown) {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "B" || text.includes("BANKER")) return "BANKER";
+  if (text === "P" || text.includes("PLAYER")) return "PLAYER";
+  if (text === "T" || text.includes("TIE")) return "TIE";
+  return "";
 }
 
 async function sendValidatorAnalyzingMessages(
+  env: unknown,
   latestRound: Round,
   entryChannelKeys: Set<string>,
   options: ValidatorMonitorOptions,
@@ -8038,14 +9215,25 @@ async function sendValidatorAnalyzingMessages(
     if (!shouldSendValidatorAnalyzingMessage(channel, latestRound, entryChannelKeys)) continue;
     const notificationKey = `analysis:${channel.userId}:${channel.id}:${latestRound.id}`;
     const sentAt = new Date().toISOString();
-    const result = await sendTelegramMessage({
-      botToken: decodeServerToken(channel.botTokenEncoded),
-      chatId: channel.chatId,
-      message: buildServerValidatorAnalyzingMessage(channel),
-      buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-      allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-    });
+    const message = buildServerValidatorAnalyzingMessage(channel);
+    const result = isCloudValidatorTelegramChannel(channel)
+      ? await sendTelegramEngineSignal(env, {
+          userId: channel.userId,
+          channelId: channel.id,
+          moduleKey: "validator",
+          signalKey: notificationKey,
+          roundId: latestRound.id,
+          entry: "",
+          message,
+        })
+      : await sendTelegramMessage({
+          botToken: decodeServerToken(channel.botTokenEncoded),
+          chatId: channel.chatId,
+          message,
+          buttonLabel: "Abrir Sniper Bo IA",
+          buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+          allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+        });
     const notification = {
       id: notificationKey,
       type: "analysis",
@@ -8073,7 +9261,7 @@ function shouldSendValidatorAnalyzingMessage(
   entryChannelKeys: Set<string>,
 ) {
   if (!channel.isActive || !channel.analyzingEnabled) return false;
-  if (!channel.chatId || !decodeServerToken(channel.botTokenEncoded)) return false;
+  if (!channel.chatId || (!isCloudValidatorTelegramChannel(channel) && !decodeServerToken(channel.botTokenEncoded))) return false;
   if (entryChannelKeys.has(validatorChannelKey(channel))) return false;
   if (!validatorChannelHasActivePattern(channel)) return false;
   const notificationKey = `analysis:${channel.userId}:${channel.id}:${latestRound.id}`;
@@ -8133,10 +9321,11 @@ function buildServerValidatorTelegramMessage(
   channel: ValidatorNotificationChannel,
 ) {
   const entry = pattern.pulledSide || validatorEntrySide(pattern.entryType);
+  const moduleConfig = validatorChannelModuleConfig(channel, "validator");
   const variables: Record<string, string> = {
     pattern: formatServerTelegramPattern(pattern.pattern),
     entry: entry ? formatServerTelegramSide(entry) : "Aguardando",
-    gale: `G${Number(pattern.galeLimit)}`,
+    gale: formatValidatorModuleGale(pattern.galeLimit),
     wins: String(pattern.wins),
     loss: String(pattern.losses),
     losses: String(pattern.losses),
@@ -8149,7 +9338,7 @@ function buildServerValidatorTelegramMessage(
     risk: pattern.validation?.risk ?? "",
     mode: "Validador Neural",
   };
-  const template = pattern.messageOverride?.trim() || channel.templates.entry || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry;
+  const template = pattern.messageOverride?.trim() || moduleConfig.template || channel.templates.entry || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry;
   return template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
 }
 
@@ -8182,19 +9371,21 @@ function validatorEntrySide(entryType: ValidatorEntryType): Round["result"] | nu
 }
 
 function formatServerTelegramPattern(pattern: ValidatorPatternToken[]) {
-  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join(" \u{2192} ");
+  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join(" > ");
 }
+
 function formatServerTelegramSide(side: Round["result"]) {
-  if (side === "B") return "\u{1F534} Banker";
-  if (side === "P") return "\u{1F535} Player";
-  return "\u{1F7E1} Tie";
+  if (side === "B") return "B Banker";
+  if (side === "P") return "P Player";
+  return "T Tie";
 }
 
 function serverSideCircle(side: Round["result"]) {
-  if (side === "B") return "\u{1F534}";
-  if (side === "P") return "\u{1F535}";
-  return "\u{1F7E1}";
+  if (side === "B") return "B";
+  if (side === "P") return "P";
+  return "T";
 }
+
 function formatServerPercent(value?: number) {
   if (value === undefined || Number.isNaN(value)) return "sem amostra";
   return `${value.toFixed(2).replace(".", ",")}%`;
@@ -8276,10 +9467,10 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
   if (url.pathname !== "/adaptive-strategy/sync") return null;
 
   if (request.method === "OPTIONS") return json(null, 204);
-  if (request.method !== "POST") return json({ error: "MÃ©todo nÃ£o permitido." }, 405);
+  if (request.method !== "POST") return json({ error: "M??todo n??o permitido." }, 405);
 
   if (!(await isDashboardReadAuthorized(request, url, env))) {
-    return json({ error: "NÃ£o autorizado." }, 401);
+    return json({ error: "N??o autorizado." }, 401);
   }
 
   const config = getSupabasePersistenceConfig(env);
@@ -8289,7 +9480,7 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
       storage: "local",
       lastSyncedAt: new Date().toISOString(),
       message:
-        "Supabase service role nÃ£o configurado no backend. Adaptive Engine mantido no histÃ³rico local.",
+        "Supabase service role n??o configurado no backend. Adaptive Engine mantido no hist??rico local.",
     });
   }
 
@@ -8310,7 +9501,7 @@ async function handleAdaptiveStrategyRequest(request: Request, env: unknown) {
         mode: "error",
         storage: "error",
         lastSyncedAt: new Date().toISOString(),
-        error: "NÃ£o foi possÃ­vel salvar todos os dados do Adaptive Engine no Supabase.",
+        error: "N??o foi poss??vel salvar todos os dados do Adaptive Engine no Supabase.",
       },
       502,
     );
@@ -8449,7 +9640,7 @@ async function saveSupabaseRows(
     }
     return true;
   } catch (error) {
-    console.warn(`Adaptive Engine: falha de conexÃ£o ao salvar ${table}.`, error);
+    console.warn(`Adaptive Engine: falha de conex??o ao salvar ${table}.`, error);
     return false;
   }
 }
@@ -10235,7 +11426,7 @@ function normalizeServerModeList(value: unknown) {
       .trim()
       .toLowerCase();
     if (text === "sniper") selected.add("sniper");
-    if (text === "hunter" || text === "cacador" || text === "caÃ§ador") selected.add("hunter");
+    if (text === "hunter" || text === "cacador" || text === "ca??ador") selected.add("hunter");
     if (text === "aggressive" || text === "agressivo") selected.add("aggressive");
   }
   return ACTIVE_ENTRY_MODES.filter((mode) => selected.has(mode));
@@ -11926,14 +13117,14 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
-      console.warn(`NÃ£o foi possÃ­vel carregar ${table} (${response.status}).`);
+      console.warn(`N??o foi poss??vel carregar ${table} (${response.status}).`);
       return [];
     }
 
     const rows = await response.json().catch(() => null);
     return Array.isArray(rows) ? rows.map(readRecord).filter(hasRecordFields) : [];
   } catch (error) {
-    console.warn(`NÃ£o foi possÃ­vel carregar ${table}.`, error);
+    console.warn(`N??o foi poss??vel carregar ${table}.`, error);
     return [];
   }
 }
@@ -11977,14 +13168,14 @@ async function fetchSupabaseRowsRange(
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
-      console.warn(`NÃƒÂ£o foi possÃƒÂ­vel carregar ${table} (${response.status}).`);
+      console.warn(`N????o foi poss????vel carregar ${table} (${response.status}).`);
       return [];
     }
 
     const rows = await response.json().catch(() => null);
     return Array.isArray(rows) ? rows.map(readRecord).filter(hasRecordFields) : [];
   } catch (error) {
-    console.warn(`NÃƒÂ£o foi possÃƒÂ­vel carregar ${table}.`, error);
+    console.warn(`N????o foi poss????vel carregar ${table}.`, error);
     return [];
   }
 }
@@ -12012,12 +13203,12 @@ async function persistSupabaseRow(
       },
     );
     if (!response.ok && response.status !== 404) {
-      console.warn(`NÃ£o foi possÃ­vel salvar ${table} (${response.status}).`);
+      console.warn(`N??o foi poss??vel salvar ${table} (${response.status}).`);
       return false;
     }
     return response.ok;
   } catch (error) {
-    console.warn(`NÃ£o foi possÃ­vel salvar ${table}.`, error);
+    console.warn(`N??o foi poss??vel salvar ${table}.`, error);
     return false;
   }
 }
@@ -12046,12 +13237,12 @@ async function persistSupabaseRows(
       },
     );
     if (!response.ok && response.status !== 404) {
-      console.warn(`NÃƒÂ£o foi possÃƒÂ­vel salvar lote em ${table} (${response.status}).`);
+      console.warn(`N????o foi poss????vel salvar lote em ${table} (${response.status}).`);
       return false;
     }
     return response.ok;
   } catch (error) {
-    console.warn(`NÃƒÂ£o foi possÃƒÂ­vel salvar lote em ${table}.`, error);
+    console.warn(`N????o foi poss????vel salvar lote em ${table}.`, error);
     return false;
   }
 }
@@ -12069,10 +13260,10 @@ async function deleteSupabaseRows(env: unknown, table: string, query: string) {
       },
     });
     if (!response.ok && response.status !== 404) {
-      console.warn(`NÃ£o foi possÃ­vel apagar ${table} (${response.status}).`);
+      console.warn(`N??o foi poss??vel apagar ${table} (${response.status}).`);
     }
   } catch (error) {
-    console.warn(`NÃ£o foi possÃ­vel apagar ${table}.`, error);
+    console.warn(`N??o foi poss??vel apagar ${table}.`, error);
   }
 }
 
@@ -12197,10 +13388,10 @@ function elevenLabsErrorStatus(status: number) {
 
 function elevenLabsErrorPayload(status: number) {
   if (status === 401 || status === 403) {
-    return { error: "API key ElevenLabs invÃ¡lida ou sem permissÃ£o." };
+    return { error: "API key ElevenLabs inv??lida ou sem permiss??o." };
   }
   if (status === 404 || status === 422) {
-    return { error: "ELEVENLABS_VOICE_ID invÃ¡lido ou indisponÃ­vel." };
+    return { error: "ELEVENLABS_VOICE_ID inv??lido ou indispon??vel." };
   }
   if (status === 429) {
     return { error: "Quota ou limite da ElevenLabs atingido." };
@@ -12707,7 +13898,7 @@ async function clientAccess(
       recordAccessEvent("client_session_replaced", {
         ...client,
         risk: "medium",
-        detail: "Nova sessÃ£o derrubou a sessÃ£o anterior.",
+        detail: "Nova sess??o derrubou a sess??o anterior.",
         ip_hash: binding.ipHash,
         user_agent_hash: binding.userAgentHash,
       });
@@ -12756,7 +13947,7 @@ async function clientAccess(
         ? "Teste gratuito ativo por tempo limitado."
         : enabled
           ? "Acesso liberado pelo administrador."
-          : "Aguardando liberaÃ§Ã£o do administrador.",
+          : "Aguardando libera????o do administrador.",
     client_token: token,
   };
 }
@@ -13151,7 +14342,7 @@ async function extendAdminManagedUser(
   reason: string,
 ) {
   if (!Number.isFinite(days) || days <= 0 || days > 365) {
-    return { ok: false as const, status: 400, error: "Quantidade de dias invÃ¡lida." };
+    return { ok: false as const, status: 400, error: "Quantidade de dias inv??lida." };
   }
   const before = normalizeAdminManagedUser(target, env);
   const baseMs = Date.parse(before.currentPeriodEnd);
@@ -13172,7 +14363,7 @@ async function extendAdminManagedUser(
       currentPeriodEnd,
       subscriptionStatus: status,
       isBlocked: false,
-      reason: reason || `ProrrogaÃ§Ã£o de ${days} dias`,
+      reason: reason || `Prorroga????o de ${days} dias`,
     },
     "EXTEND_ACCESS",
   );
@@ -13222,7 +14413,7 @@ async function unblockAdminManagedUser(
     {
       isBlocked: false,
       subscriptionStatus: nextStatus,
-      reason: reason || "ReativaÃ§Ã£o manual",
+      reason: reason || "Reativa????o manual",
     },
     "UNBLOCK_USER",
   );
@@ -13250,7 +14441,7 @@ async function deleteAdminManagedUser(
     action: "DELETE_USER",
     beforeJson: before,
     afterJson: { deleted: true },
-    reason: reason || "ExclusÃ£o manual de cadastro",
+    reason: reason || "Exclus??o manual de cadastro",
   });
   await deletePersistedBillingUser(env, before);
   return { ok: true, user: before };
@@ -13272,7 +14463,7 @@ function canDeleteAdminManagedUser(
       (user) => normalizeManagedUserRole(user.role) === "owner",
     ).length;
     if (ownerCount <= 1) {
-      return { ok: false, status: 403, error: "NÃ£o Ã© permitido excluir o Ãºnico owner ativo." };
+      return { ok: false, status: 403, error: "N??o ?? permitido excluir o ??nico owner ativo." };
     }
   }
 
@@ -13280,7 +14471,7 @@ function canDeleteAdminManagedUser(
     return {
       ok: false,
       status: 403,
-      error: "NÃ£o Ã© permitido excluir o prÃ³prio cadastro por esta rota.",
+      error: "N??o ?? permitido excluir o pr??prio cadastro por esta rota.",
     };
   }
 
@@ -13296,7 +14487,7 @@ function canEditAdminManagedUser(
   const targetRole = normalizeManagedUserRole(target.role);
   const targetEmail = readString(target, "email").toLowerCase();
   if (adminRole !== "owner" && targetRole !== "user") {
-    return { ok: false, status: 403, error: "Admin nÃ£o pode alterar outro admin ou owner." };
+    return { ok: false, status: 403, error: "Admin n??o pode alterar outro admin ou owner." };
   }
   if (change.changingRole && adminRole !== "owner") {
     return {
@@ -13306,7 +14497,7 @@ function canEditAdminManagedUser(
     };
   }
   if (targetRole === "owner" && adminRole !== "owner") {
-    return { ok: false, status: 403, error: "Admin nÃ£o pode alterar owner." };
+    return { ok: false, status: 403, error: "Admin n??o pode alterar owner." };
   }
   if (
     adminRole !== "owner" &&
@@ -13316,7 +14507,7 @@ function canEditAdminManagedUser(
     return {
       ok: false,
       status: 403,
-      error: "Admin nÃ£o pode remover o prÃ³prio acesso por esta rota.",
+      error: "Admin n??o pode remover o pr??prio acesso por esta rota.",
     };
   }
   if (
@@ -13328,7 +14519,7 @@ function canEditAdminManagedUser(
       (user) => normalizeManagedUserRole(user.role) === "owner",
     ).length;
     if (ownerCount <= 1) {
-      return { ok: false, status: 403, error: "NÃ£o Ã© permitido remover o Ãºnico owner ativo." };
+      return { ok: false, status: 403, error: "N??o ?? permitido remover o ??nico owner ativo." };
     }
   }
   return { ok: true };
@@ -13665,7 +14856,7 @@ function mockAdminManagedUsers() {
     },
     {
       id: "3",
-      name: "UsuÃ¡rio Vencido",
+      name: "Usu??rio Vencido",
       email: "vencido@email.com",
       role: "user",
       plan: "monthly",
@@ -13679,7 +14870,7 @@ function mockAdminManagedUsers() {
     },
     {
       id: "4",
-      name: "UsuÃ¡rio Bloqueado",
+      name: "Usu??rio Bloqueado",
       email: "bloqueado@email.com",
       role: "user",
       plan: "premium",
@@ -13710,7 +14901,7 @@ function buildLocationBreakdown(
 ) {
   const counts = new Map<string, number>();
   for (const record of records) {
-    const label = readString(record, field) || "NÃ£o informado";
+    const label = readString(record, field) || "N??o informado";
     counts.set(label, (counts.get(label) || 0) + 1);
   }
   return [...counts.entries()]
@@ -13990,7 +15181,7 @@ async function loadLiveStateCache() {
 
     return readRecord(await response.json().catch(() => null));
   } catch (error) {
-    console.warn("NÃ£o foi possÃ­vel carregar estado vivo do cache.", error);
+    console.warn("N??o foi poss??vel carregar estado vivo do cache.", error);
     return null;
   }
 }
@@ -14011,8 +15202,12 @@ function applyLiveState(state: Record<string, unknown>) {
       .filter((pattern): pattern is SavedValidatorPattern => Boolean(pattern));
   }
 
-  if (Array.isArray(state.validatorChannels)) {
-    liveValidatorChannels = state.validatorChannels
+  // Telegram channels are isolated in dedicated channel storage. Do not hydrate
+  // them from the broad live-state snapshot, otherwise deleted channels can
+  // return from an older cache/durable payload.
+  const validatorChannelStore = readRecord(state.validatorChannelStore);
+  if (Array.isArray(validatorChannelStore.channels)) {
+    liveValidatorChannels = validatorChannelStore.channels
       .map((channel) => normalizeServerNotificationChannel(channel, readString(readRecord(channel), "userId")))
       .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
   }
@@ -14250,11 +15445,10 @@ function mergeLiveStates(
       durableSavedAt,
       cacheSavedAt,
     ),
-    validatorChannels: mergeEntityStateArrays(
-      durable.validatorChannels,
-      cache.validatorChannels,
-      durableSavedAt,
-      cacheSavedAt,
+    validatorChannels: [],
+    validatorChannelStore: pickStateObjectByUpdatedAt(
+      durable.validatorChannelStore,
+      cache.validatorChannelStore,
     ),
     validatorNotifications: mergeStateArrays(
       durable.validatorNotifications,
@@ -14586,9 +15780,6 @@ function applyDeletedEntityTombstones() {
   liveAdminUsers = filterDeletedEntityRows(liveAdminUsers);
   liveSubscriptions = filterDeletedEntityRows(liveSubscriptions);
   livePayments = filterDeletedEntityRows(livePayments);
-  liveValidatorPatterns = filterDeletedEntityRows(
-    liveValidatorPatterns as unknown as Record<string, unknown>[],
-  ) as unknown as SavedValidatorPattern[];
 }
 
 function filterDeletedEntityRows(
@@ -14650,7 +15841,12 @@ function buildLiveStateSnapshot(env?: unknown) {
     dashboard: liveDashboardData,
     validatorRoundHistory: liveValidatorRoundHistory.slice(-MAX_MONITOR_ROUND_HISTORY),
     validatorPatterns: liveValidatorPatterns,
-    validatorChannels: liveValidatorChannels,
+    validatorChannels: [],
+    validatorChannelStore: {
+      version: 1,
+      channels: liveValidatorChannels,
+      updatedAt: new Date().toISOString(),
+    },
     validatorNotifications: liveValidatorNotifications.slice(0, 1000),
     neuralCalendarVersion: NEURAL_CALENDAR_AGGREGATE_VERSION,
     neuralCalendarDailyStats: liveNeuralCalendarDailyStats,
@@ -14942,7 +16138,7 @@ async function saveLiveStateCache(state: Record<string, unknown>) {
     );
     return true;
   } catch (error) {
-    console.warn("NÃ£o foi possÃ­vel salvar estado vivo no cache.", error);
+    console.warn("N??o foi poss??vel salvar estado vivo no cache.", error);
     return false;
   }
 }
@@ -14967,7 +16163,7 @@ async function loadDurableLiveStateById(env: unknown, id: string) {
     );
     if (response.status === 404 || response.status === 406) return null;
     if (!response.ok) {
-      console.warn(`Estado durÃ¡vel indisponÃ­vel (${response.status}).`);
+      console.warn(`Estado dur??vel indispon??vel (${response.status}).`);
       return null;
     }
 
@@ -14976,7 +16172,7 @@ async function loadDurableLiveStateById(env: unknown, id: string) {
     const state = readRecord(row.state);
     return Object.keys(state).length > 0 ? state : null;
   } catch (error) {
-    console.warn("NÃ£o foi possÃ­vel carregar estado durÃ¡vel.", error);
+    console.warn("N??o foi poss??vel carregar estado dur??vel.", error);
     return null;
   } finally {
     clearTimeout(timeout);
@@ -15013,12 +16209,12 @@ async function saveDurableLiveStateById(
       signal: controller.signal,
     });
     if (!response.ok) {
-      console.warn(`NÃ£o foi possÃ­vel salvar estado durÃ¡vel (${response.status}).`);
+      console.warn(`N??o foi poss??vel salvar estado dur??vel (${response.status}).`);
       return false;
     }
     return true;
   } catch (error) {
-    console.warn("NÃ£o foi possÃ­vel salvar estado durÃ¡vel.", error);
+    console.warn("N??o foi poss??vel salvar estado dur??vel.", error);
     return false;
   } finally {
     clearTimeout(timeout);
@@ -15060,6 +16256,141 @@ function getSupabasePersistenceConfig(env: unknown) {
 
   if (!url || !key) return null;
   return { url, key };
+}
+
+const DEFAULT_TELEGRAM_ENGINE_URL = "https://sniperbo-telegram-engine.sniperboia.workers.dev";
+const TELEGRAM_ENGINE_SECRET_NAMES = [
+  "TELEGRAM_ENGINE_SECRET",
+  "CLOUDFLARE_TELEGRAM_ENGINE_SECRET",
+  "ENGINE_API_SECRET",
+  "SNIPER_PUBLISHER_TOKEN",
+  "SNIPER_DASHBOARD_TOKEN",
+  "SNIPER_ADMIN_TOKEN",
+] as const;
+
+function getTelegramEngineConfig(env: unknown) {
+  const url = (
+    readServerEnvString(env, "TELEGRAM_ENGINE_URL", "") ||
+    readServerEnvString(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL", "") ||
+    DEFAULT_TELEGRAM_ENGINE_URL
+  ).replace(/\/+$/, "");
+  const secret = TELEGRAM_ENGINE_SECRET_NAMES
+    .map((name) => readServerEnvString(env, name, ""))
+    .find(Boolean) || "";
+  if (!url || !secret) return null;
+  return { url, secret };
+}
+
+async function syncTelegramEngineUserAccess(
+  env: unknown,
+  userId: string,
+  client: Record<string, unknown> | null,
+) {
+  const config = getTelegramEngineConfig(env);
+  if (!config) return { ok: true, skipped: true, status: 200, error: "" };
+
+  const clientRecord = client || {};
+  const normalizedUserId = normalizeValidatorUserId(userId || readString(clientRecord, "email"));
+  if (!normalizedUserId) return { ok: false, status: 400, error: "Usuario Telegram obrigatorio." };
+
+  const active = client ? clientHasLiveAccess(clientRecord) : true;
+  const path = active ? "/engine/users/provision" : "/engine/users/expire";
+  const payload = {
+    userId: normalizedUserId,
+    email: normalizedUserId,
+    active,
+    plan: readString(clientRecord, "plan") || (active ? "premium" : "expired"),
+    accessStatus: readString(clientRecord, "access_status"),
+    expiresAt: readString(clientRecord, "expires_at"),
+    graceDays: 5,
+    source: active ? "site_premium_access" : "site_expired_access",
+  };
+
+  const response = await fetch(`${config.url}${path}`, {
+    method: "POST",
+    headers: telegramEngineHeaders(config.secret, "", true),
+    body: JSON.stringify(payload),
+  }).catch((error) => ({ ok: false, status: 502, json: async () => ({ error: errorMessage(error) }) }) as Response);
+  const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status || 502,
+      error: readString(data, "error") || "Telegram Engine indisponivel.",
+    };
+  }
+  return { ok: true, skipped: false, status: response.status, error: "" };
+}
+
+async function forwardTelegramEngineRequest(request: Request, url: URL, env: unknown, userId: string) {
+  const config = getTelegramEngineConfig(env);
+  if (!config) return null;
+  const body = request.method === "GET" || request.method === "HEAD"
+    ? undefined
+    : await request.clone().text();
+  const response = await fetch(`${config.url}${url.pathname}${url.search}`, {
+    method: request.method,
+    headers: telegramEngineHeaders(config.secret, userId, Boolean(body)),
+    body,
+  });
+  return new Response(response.body, {
+    status: response.status,
+    headers: {
+      "content-type": response.headers.get("content-type") || "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
+}
+
+async function fetchCloudValidatorChannels(env: unknown, userId = "") {
+  const config = getTelegramEngineConfig(env);
+  if (!config) return [];
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const path = normalizedUserId ? "/validator/channels" : "/engine/channels/active";
+  const response = await fetch(`${config.url}${path}`, {
+    cache: "no-store",
+    headers: telegramEngineHeaders(config.secret, normalizedUserId),
+  }).catch(() => null);
+  if (!response?.ok) return [];
+  const data = await response.json().catch(() => null) as { channels?: unknown[] } | null;
+  return Array.isArray(data?.channels)
+    ? data.channels
+        .map((channel) => normalizeCloudValidatorChannel(channel, normalizedUserId))
+        .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel))
+    : [];
+}
+
+function normalizeCloudValidatorChannel(value: unknown, fallbackUserId = "") {
+  const record = readRecord(value);
+  const userId = normalizeValidatorUserId(readString(record, "userId") || fallbackUserId);
+  const id = readString(record, "id");
+  if (!userId || !id) return null;
+  const templates = readRecord(record.templates);
+  return {
+    id,
+    userId,
+    name: readString(record, "name") || "Canal Telegram",
+    botTokenMasked: readString(record, "botTokenMasked"),
+    botTokenEncoded: "__cloudflare__",
+    chatId: readString(record, "chatId"),
+    buttonLink: readString(record, "buttonLink"),
+    isActive: record.isActive !== false,
+    analyzingEnabled: readBooleanField(record, "analyzingEnabled"),
+    analyzingCooldownRounds: Math.max(1, Math.floor(Number(record.analyzingCooldownRounds) || 3)),
+    templates,
+    signalModules: normalizeValidatorChannelSignalModules(record.signalModules || templates.signalModules),
+    createdAt: readString(record, "createdAt") || new Date().toISOString(),
+    updatedAt: readString(record, "updatedAt") || new Date().toISOString(),
+  } as ValidatorNotificationChannel;
+}
+
+function telegramEngineHeaders(secret: string, userId: string, withJson = false) {
+  return {
+    Accept: "application/json",
+    Authorization: `Bearer ${secret}`,
+    ...(userId ? { "X-Validator-User-Id": userId } : {}),
+    ...(withJson ? { "Content-Type": "application/json" } : {}),
+  };
 }
 
 function supabasePersistenceHeaders(key: string) {
@@ -15163,9 +16494,9 @@ function adminSalesSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
     : saveStatus.durableConfigured;
   const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
   const warning = !durableConfigured
-    ? "PersistÃªncia fixa nÃ£o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para a chave nÃ£o voltar sozinha."
+    ? "Persist??ncia fixa n??o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para a chave n??o voltar sozinha."
     : saveStatus.saved_at && !saveStatus.durable
-      ? "NÃ£o foi possÃ­vel confirmar o salvamento durÃ¡vel. Verifique a tabela sniper_live_state no Supabase."
+      ? "N??o foi poss??vel confirmar o salvamento dur??vel. Verifique a tabela sniper_live_state no Supabase."
       : "";
   return {
     ...publicSalesSettings(),
@@ -15183,9 +16514,9 @@ function adminSiteContentSettings(env?: unknown, saveStatus = liveStateSaveStatu
     : saveStatus.durableConfigured;
   const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
   const warning = !durableConfigured
-    ? "PersistÃªncia fixa nÃ£o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar definitivo."
+    ? "Persist??ncia fixa n??o configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar definitivo."
     : saveStatus.saved_at && !saveStatus.durable
-      ? "NÃ£o foi possÃ­vel confirmar o salvamento durÃ¡vel. Verifique a tabela sniper_live_state no Supabase."
+      ? "N??o foi poss??vel confirmar o salvamento dur??vel. Verifique a tabela sniper_live_state no Supabase."
       : "";
   return {
     ...liveSiteContentSettings,
@@ -15460,6 +16791,4 @@ export async function verifySessionToken(
     return null;
   }
 }
-
-
 

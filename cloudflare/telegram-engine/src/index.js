@@ -1,4 +1,13 @@
 const MODULE_KEYS = ["ai_patterns", "paying_numbers", "surf_alert", "ties_only", "validator"];
+const ENGINE_SECRET_NAMES = [
+  "ENGINE_API_SECRET",
+  "TELEGRAM_ENGINE_SECRET",
+  "CLOUDFLARE_TELEGRAM_ENGINE_SECRET",
+  "LEGACY_ENGINE_API_SECRET",
+  "SNIPER_PUBLISHER_TOKEN",
+  "SNIPER_DASHBOARD_TOKEN",
+  "SNIPER_ADMIN_TOKEN",
+];
 const DEFAULT_MODULE_CONFIG = {
   enabled: false,
   entryType: "AUTO",
@@ -13,6 +22,7 @@ const DEFAULT_MODULE_CONFIG = {
 };
 const MAX_CHANNELS_PER_USER = 20;
 const MAX_NOTIFICATIONS = 1000;
+const DEFAULT_ACCESS_GRACE_DAYS = 5;
 
 export default {
   async fetch(request, env) {
@@ -22,8 +32,9 @@ export default {
       return json({ ok: true, service: "sniperbo-telegram-engine" }, 200, env);
     }
 
-    const secret = env.ENGINE_API_SECRET || "";
-    if (!secret || bearerToken(request) !== secret) {
+    const token = bearerToken(request);
+    const secrets = acceptedEngineSecrets(env);
+    if (!token || !secrets.includes(token)) {
       return json({ error: "Unauthorized" }, 401, env);
     }
     if (!env.TELEGRAM_ENGINE) return json({ error: "Durable Object binding missing" }, 500, env);
@@ -68,6 +79,12 @@ export class TelegramEngine {
         return this.testChannel(userId, String(body.channelId || ""));
       }
 
+      if (request.method === "POST" && url.pathname === "/validator/channels/info") {
+        if (!userId) return json({ error: "Missing user" }, 400, this.env);
+        const body = await readJson(request);
+        return this.channelInfo(userId, String(body.channelId || ""));
+      }
+
       const channelMatch = url.pathname.match(/^\/validator\/channels\/([^/]+)$/);
       if (channelMatch) {
         if (!userId) return json({ error: "Missing user" }, 400, this.env);
@@ -90,6 +107,18 @@ export class TelegramEngine {
         return this.dispatchSignal(await readJson(request));
       }
 
+      if (request.method === "POST" && url.pathname === "/engine/users/provision") {
+        return this.provisionUserWorkspace(await readJson(request));
+      }
+
+      if (request.method === "POST" && url.pathname === "/engine/users/expire") {
+        return this.expireUserWorkspace(await readJson(request));
+      }
+
+      if (request.method === "POST" && url.pathname === "/engine/channels/move") {
+        return this.moveChannel(await readJson(request));
+      }
+
       if (request.method === "GET" && url.pathname === "/engine/channels/active") {
         return json({ channels: await this.activePublicChannels() }, 200, this.env);
       }
@@ -105,8 +134,11 @@ export class TelegramEngine {
     const chatId = String(body.chatId || "").trim();
     if (!botToken) return json({ error: "Bot Token obrigatorio." }, 400, this.env);
     if (!chatId) return json({ error: "Chat ID obrigatorio." }, 400, this.env);
-    const duplicate = await this.findUserChannelByChatId(userId, chatId);
-    if (duplicate) return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409, this.env);
+    const channelId = String(body.channelId || body.id || "").trim();
+    const duplicate = await this.findAnyChannelByChatId(chatId);
+    if (duplicate && (duplicate.userId !== userId || duplicate.id !== channelId)) {
+      return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409, this.env);
+    }
 
     const result = await sendTelegramMessage({
       botToken,
@@ -124,14 +156,19 @@ export class TelegramEngine {
   }
 
   async saveChannel(userId, incoming, validationCode) {
+    const access = await this.userAccessState(userId);
+    if (!access.active) {
+      return json({ error: "Acesso premium expirado. Canal Telegram bloqueado." }, 403, this.env);
+    }
+
     const channelId = String(incoming.id || crypto.randomUUID());
     const existing = await this.getChannel(userId, channelId);
     const botToken = normalizeSecret(incoming.botToken) || (existing ? await this.decryptToken(existing.botTokenCipher) : "");
     const chatId = String(incoming.chatId || existing?.chatId || "").trim();
     if (!botToken || !chatId) return json({ error: "Bot Token e Chat ID sao obrigatorios." }, 400, this.env);
 
-    const duplicate = await this.findUserChannelByChatId(userId, chatId);
-    if (duplicate && duplicate.id !== channelId) {
+    const duplicate = await this.findAnyChannelByChatId(chatId);
+    if (duplicate && (duplicate.userId !== userId || duplicate.id !== channelId)) {
       return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409, this.env);
     }
     if (!existing || normalizeSecret(incoming.botToken)) {
@@ -192,6 +229,22 @@ export class TelegramEngine {
     return json({ ok: true, messageId: result.messageId }, 200, this.env);
   }
 
+  async channelInfo(userId, channelId) {
+    const channel = await this.getChannel(userId, channelId);
+    if (!channel) return json({ error: "Canal nao encontrado." }, 404, this.env);
+    const result = await getTelegramChat({
+      botToken: await this.decryptToken(channel.botTokenCipher),
+      chatId: channel.chatId,
+    });
+    if (!result.ok) return json({ error: result.error }, result.status, this.env);
+    return json({
+      ok: true,
+      channelId: channel.id,
+      chatId: channel.chatId,
+      telegram: result.chat,
+    }, 200, this.env);
+  }
+
   async patchChannel(userId, channelId, patch) {
     const current = await this.getChannel(userId, channelId);
     if (!current) return json({ error: "Canal nao encontrado." }, 404, this.env);
@@ -207,8 +260,8 @@ export class TelegramEngine {
       signalModules: normalizeModuleConfigs(patch.signalModules || patch.templates?.signalModules || current.signalModules || {}),
       updatedAt: new Date().toISOString(),
     };
-    const duplicate = await this.findUserChannelByChatId(userId, merged.chatId);
-    if (duplicate && duplicate.id !== channelId) {
+    const duplicate = await this.findAnyChannelByChatId(merged.chatId);
+    if (duplicate && (duplicate.userId !== userId || duplicate.id !== channelId)) {
       return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409, this.env);
     }
     await this.state.storage.put(channelKey(userId, channelId), merged);
@@ -236,44 +289,85 @@ export class TelegramEngine {
     const targetUserId = normalizeUserId(body.userId || "");
     const targetChannelId = String(body.channelId || "").trim();
     const signalKey = String(body.signalKey || body.id || `${moduleKey}:${Date.now()}`);
+    const variables = readRecord(body.variables);
+    const roundId = clampInt(
+      body.roundId ?? variables.roundId ?? variables.roundID ?? variables.round ?? variables.roundNumber,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    );
+    const signalKind = classifySignalKind(body, signalKey);
+    const notificationResult = String(body.result || variables.result || "Aguardando resultado").trim() || "Aguardando resultado";
+    const notificationProtection = String(body.protection || variables.gale || "").trim();
     const channels = (targetUserId ? await this.channelsForUser(targetUserId) : await this.activeChannels())
       .filter((channel) => !targetChannelId || channel.id === targetChannelId);
     const sent = [];
     const blocked = [];
 
+    const sentChatCodes = new Set();
     for (const channel of channels) {
+      const chatCode = normalizeChannelCode(channel.chatId);
+      if (chatCode && sentChatCodes.has(chatCode)) {
+        blocked.push({ channelId: channel.id, reason: "duplicate_chat_id" });
+        continue;
+      }
       if (!channel.isActive) {
         blocked.push({ channelId: channel.id, reason: "channel_inactive" });
         continue;
       }
       const config = normalizeModuleConfigs(channel.signalModules || {})[moduleKey];
-      if (!config.enabled) {
-        blocked.push({ channelId: channel.id, reason: "module_inactive" });
-        continue;
-      }
-      if (entry && !moduleAllowsEntry(config, entry)) {
+      if (moduleKey === "ai_patterns" && entry === "TIE") {
         blocked.push({ channelId: channel.id, reason: "entry_not_allowed" });
         continue;
       }
-      const cooldownKey = `cooldown:${channel.userId}:${channel.id}:${moduleKey}`;
-      const lastSentAt = Number(await this.state.storage.get(cooldownKey) || 0);
-      const cooldownMs = Math.max(0, Number(config.cooldownSeconds) || 0) * 1000;
-      if (lastSentAt && cooldownMs && Date.now() - lastSentAt < cooldownMs) {
-        blocked.push({ channelId: channel.id, reason: "cooldown_active" });
+      if (signalKind === "entry" && !config.enabled) {
+        blocked.push({ channelId: channel.id, reason: "module_inactive" });
         continue;
       }
-      const dedupeKey = `sent:${channel.userId}:${channel.id}:${signalKey}`;
-      if (await this.state.storage.get(dedupeKey)) {
+      if (signalKind === "entry" && entry && !moduleAllowsEntry(config, entry)) {
+        blocked.push({ channelId: channel.id, reason: "entry_not_allowed" });
+        continue;
+      }
+      let cooldownKey = "";
+      if (signalKind === "entry") {
+        cooldownKey = `cooldown:${channel.userId}:${channel.id}:${moduleKey}`;
+        const lastSentAt = Number(await this.state.storage.get(cooldownKey) || 0);
+        const cooldownMs = Math.max(0, Number(config.cooldownSeconds) || 0) * 1000;
+        if (lastSentAt && cooldownMs && Date.now() - lastSentAt < cooldownMs) {
+          blocked.push({ channelId: channel.id, reason: "cooldown_active" });
+          continue;
+        }
+      }
+
+      const finalNotificationProtection = notificationProtection || formatGale(config.galeLimit);
+      const template = selectSignalTemplate(config, signalKind, notificationResult);
+      const templateVariables = {
+        ...variables,
+        entry: formatEntry(entry),
+        module: moduleName(moduleKey),
+        gale: finalNotificationProtection,
+        protection: finalNotificationProtection,
+        result: notificationResult,
+      };
+      const renderedMessage = template ? renderTemplate(template, templateVariables) : String(body.message || "");
+      const message = formatTelegramMessageText(String(renderedMessage || body.message || renderTemplate("{{entry}}", templateVariables))).slice(0, 4096);
+      const dedupeKeys = [`sent:${channel.userId}:${channel.id}:${signalKey}`];
+      const entryDedupeKey = entrySignalDedupeKey(channel, roundId, entry, signalKind);
+      if (entryDedupeKey) dedupeKeys.push(entryDedupeKey);
+      const resultDedupeKey = resultSignalDedupeKey(channel, roundId, entry, signalKind, notificationResult);
+      if (resultDedupeKey) dedupeKeys.push(resultDedupeKey);
+      const recentDedupeKey = await recentMessageDedupeKey(channel, signalKind, message);
+      if (recentDedupeKey) dedupeKeys.push(recentDedupeKey);
+      let duplicateKey = "";
+      for (const dedupeKey of dedupeKeys) {
+        if (await this.state.storage.get(dedupeKey)) {
+          duplicateKey = dedupeKey;
+          break;
+        }
+      }
+      if (duplicateKey) {
         blocked.push({ channelId: channel.id, reason: "duplicate_signal" });
         continue;
       }
-
-      const message = String(body.message || renderTemplate(config.template || "{{entry}}", {
-        ...readRecord(body.variables),
-        entry: formatEntry(entry),
-        module: moduleName(moduleKey),
-        gale: formatGale(config.galeLimit),
-      })).slice(0, 4096);
       const result = await sendTelegramMessage({
         botToken: await this.decryptToken(channel.botTokenCipher),
         chatId: channel.chatId,
@@ -288,23 +382,26 @@ export class TelegramEngine {
         type: `module:${moduleKey}`,
         userId: channel.userId,
         channelId: channel.id,
-        roundId: clampInt(body.roundId, 0, Number.MAX_SAFE_INTEGER),
+        roundId,
         status: result.ok ? "sent" : "error",
         error: result.ok ? "" : result.error,
         payloadJson: {
           moduleKey,
           signalKey,
           entry: formatEntry(entry),
-          protection: formatGale(config.galeLimit),
-          result: "Aguardando resultado",
+          protection: finalNotificationProtection,
+          result: notificationResult,
           telegramMessageId: result.messageId || null,
           cloudflare: true,
         },
         sentAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
-      await this.state.storage.put(dedupeKey, true);
-      await this.state.storage.put(cooldownKey, Date.now());
+      for (const dedupeKey of dedupeKeys) {
+        await this.state.storage.put(dedupeKey, true);
+      }
+      if (cooldownKey) await this.state.storage.put(cooldownKey, Date.now());
+      if (result.ok && chatCode) sentChatCodes.add(chatCode);
       (result.ok ? sent : blocked).push({
         channelId: channel.id,
         notificationId: notification.id,
@@ -329,7 +426,38 @@ export class TelegramEngine {
     return json({ ok: true, messageId: result.messageId }, 200, this.env);
   }
 
+  async moveChannel(body) {
+    const sourceUserId = normalizeUserId(body.sourceUserId || "");
+    const targetUserId = normalizeUserId(body.targetUserId || "");
+    const channelId = String(body.channelId || "").trim();
+    if (!sourceUserId || !targetUserId) return json({ error: "Usuarios obrigatorios." }, 400, this.env);
+    if (sourceUserId === targetUserId) return json({ ok: true, moved: false, reason: "same_user" }, 200, this.env);
+
+    const sourceChannels = await this.channelsForUser(sourceUserId);
+    const channel = channelId
+      ? sourceChannels.find((item) => item.id === channelId)
+      : sourceChannels[0];
+    if (!channel) return json({ error: "Canal origem nao encontrado." }, 404, this.env);
+
+    const duplicate = await this.findUserChannelByChatId(targetUserId, channel.chatId);
+    if (duplicate && duplicate.id !== channel.id) {
+      return json({ error: "Usuario destino ja tem canal com este Chat ID/codigo." }, 409, this.env);
+    }
+
+    const now = new Date().toISOString();
+    const moved = {
+      ...channel,
+      userId: targetUserId,
+      updatedAt: now,
+    };
+    await this.state.storage.put(channelKey(targetUserId, moved.id), moved);
+    await this.state.storage.delete(channelKey(sourceUserId, channel.id));
+    if (moved.chatId) await this.state.storage.delete(deletedCodeKey(targetUserId, moved.chatId));
+    return json({ ok: true, moved: true, channel: publicChannel(moved) }, 200, this.env);
+  }
+
   async publicChannelsForUser(userId) {
+    await this.ensureUserWorkspace(userId, { source: "panel" });
     return (await this.channelsForUser(userId))
       .map(publicChannel)
       .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
@@ -340,6 +468,8 @@ export class TelegramEngine {
   }
 
   async channelsForUser(userId) {
+    const access = await this.userAccessState(userId);
+    if (!access.active) return [];
     const rows = await this.state.storage.list({ prefix: `channel:${userId}:` });
     const deletedCodes = await this.deletedCodesForUser(userId);
     return [...rows.values()]
@@ -349,7 +479,134 @@ export class TelegramEngine {
 
   async activeChannels() {
     const rows = await this.state.storage.list({ prefix: "channel:" });
-    return [...rows.values()].filter((channel) => channel?.isActive);
+    const channels = [...rows.values()].filter((channel) => channel?.isActive);
+    const allowed = [];
+    for (const channel of channels) {
+      const access = await this.userAccessState(channel.userId);
+      if (access.active) allowed.push(channel);
+    }
+    return allowed;
+  }
+
+  async provisionUserWorkspace(body) {
+    const userId = normalizeUserId(body.userId || body.email || "");
+    if (!userId) return json({ error: "Usuario obrigatorio." }, 400, this.env);
+    const workspace = await this.ensureUserWorkspace(userId, {
+      active: body.active !== false,
+      plan: String(body.plan || "premium"),
+      expiresAt: String(body.expiresAt || body.expires_at || ""),
+      graceDays: clampInt(body.graceDays ?? body.grace_days ?? DEFAULT_ACCESS_GRACE_DAYS, 0, 30),
+      source: String(body.source || "premium"),
+    });
+    const access = await this.userAccessState(userId);
+    return json({ ok: true, workspace: publicWorkspace(workspace), access }, 200, this.env);
+  }
+
+  async expireUserWorkspace(body) {
+    const userId = normalizeUserId(body.userId || body.email || "");
+    if (!userId) return json({ error: "Usuario obrigatorio." }, 400, this.env);
+    const now = new Date().toISOString();
+    const existing = await this.getUserWorkspace(userId);
+    const expiresAt = String(body.expiresAt || body.expires_at || existing?.expiresAt || now);
+    const graceDays = clampInt(body.graceDays ?? body.grace_days ?? existing?.graceDays ?? DEFAULT_ACCESS_GRACE_DAYS, 0, 30);
+    const cleanupAfter = addDaysIso(expiresAt || now, graceDays);
+    const workspace = {
+      ...(existing || {}),
+      userId,
+      active: false,
+      plan: String(body.plan || existing?.plan || "expired"),
+      expiresAt,
+      graceDays,
+      cleanupAfter,
+      source: String(body.source || "expired"),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    await this.state.storage.put(userKey(userId), workspace);
+    let cleaned = false;
+    if (body.force === true || isoTimeMs(cleanupAfter) <= Date.now()) {
+      cleaned = await this.cleanupUserData(userId, "expired");
+      await this.state.storage.put(userKey(userId), { ...workspace, cleanedAt: new Date().toISOString() });
+    }
+    return json({ ok: true, workspace: publicWorkspace(workspace), cleaned }, 200, this.env);
+  }
+
+  async ensureUserWorkspace(userId, patch = {}) {
+    const normalizedUserId = normalizeUserId(userId);
+    const now = new Date().toISOString();
+    const existing = await this.getUserWorkspace(normalizedUserId);
+    const expiresAt = String(patch.expiresAt || patch.expires_at || existing?.expiresAt || "");
+    const graceDays = clampInt(patch.graceDays ?? patch.grace_days ?? existing?.graceDays ?? DEFAULT_ACCESS_GRACE_DAYS, 0, 30);
+    const workspace = {
+      ...(existing || {}),
+      userId: normalizedUserId,
+      active: patch.active !== undefined ? Boolean(patch.active) : existing?.active !== false,
+      plan: String(patch.plan || existing?.plan || "premium"),
+      expiresAt,
+      graceDays,
+      cleanupAfter: expiresAt ? addDaysIso(expiresAt, graceDays) : String(existing?.cleanupAfter || ""),
+      source: String(patch.source || existing?.source || "auto"),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    await this.state.storage.put(userKey(normalizedUserId), workspace);
+    return workspace;
+  }
+
+  async getUserWorkspace(userId) {
+    return await this.state.storage.get(userKey(userId)) || null;
+  }
+
+  async userAccessState(userId) {
+    const normalizedUserId = normalizeUserId(userId);
+    if (!normalizedUserId) return { active: false, reason: "missing_user" };
+    const workspace = await this.getUserWorkspace(normalizedUserId);
+    if (!workspace) return { active: true, reason: "legacy_unprovisioned" };
+    const expiresAt = String(workspace.expiresAt || "");
+    const expired = expiresAt ? isoTimeMs(expiresAt) <= Date.now() : false;
+    if (expired || workspace.active === false) {
+      const cleanupAfter = String(workspace.cleanupAfter || (expiresAt ? addDaysIso(expiresAt, workspace.graceDays || DEFAULT_ACCESS_GRACE_DAYS) : ""));
+      if (cleanupAfter && isoTimeMs(cleanupAfter) <= Date.now() && !workspace.cleanedAt) {
+        await this.cleanupUserData(normalizedUserId, "expired_grace");
+        await this.state.storage.put(userKey(normalizedUserId), {
+          ...workspace,
+          active: false,
+          cleanupAfter,
+          cleanedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return { active: false, reason: expired ? "expired" : "inactive", expiresAt, cleanupAfter };
+    }
+    return { active: true, reason: "active", expiresAt };
+  }
+
+  async cleanupUserData(userId, reason) {
+    const normalizedUserId = normalizeUserId(userId);
+    const prefixes = [
+      `channel:${normalizedUserId}:`,
+      `notification:${normalizedUserId}:`,
+      `deleted:${normalizedUserId}:`,
+      `cooldown:${normalizedUserId}:`,
+      `sent:${normalizedUserId}:`,
+      `sent-entry:${normalizedUserId}:`,
+      `sent-result:${normalizedUserId}:`,
+      `sent-recent:${normalizedUserId}:`,
+    ];
+    let deleted = 0;
+    for (const prefix of prefixes) {
+      const rows = await this.state.storage.list({ prefix });
+      if (!rows.size) continue;
+      await Promise.all([...rows.keys()].map((key) => this.state.storage.delete(key)));
+      deleted += rows.size;
+    }
+    await this.state.storage.put(`cleanup:${normalizedUserId}:${Date.now()}`, {
+      userId: normalizedUserId,
+      reason,
+      deleted,
+      cleanedAt: new Date().toISOString(),
+    });
+    return deleted > 0;
   }
 
   async getChannel(userId, channelId) {
@@ -360,6 +617,13 @@ export class TelegramEngine {
     const code = normalizeChannelCode(chatId);
     if (!code) return null;
     return (await this.channelsForUser(userId)).find((channel) => channel.chatCode === code) || null;
+  }
+
+  async findAnyChannelByChatId(chatId) {
+    const code = normalizeChannelCode(chatId);
+    if (!code) return null;
+    const rows = await this.state.storage.list({ prefix: "channel:" });
+    return [...rows.values()].find((channel) => normalizeChannelCode(channel?.chatId) === code) || null;
   }
 
   async deletedCodesForUser(userId) {
@@ -506,6 +770,34 @@ async function sendTelegramMessage({ botToken, chatId, message, buttonLabel = ""
   return { ok: true, status: 200, messageId: data.result?.message_id || null };
 }
 
+async function getTelegramChat({ botToken, chatId }) {
+  if (!botToken || !chatId) return { ok: false, status: 400, error: "Canal Telegram sem token ou Chat ID." };
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    return {
+      ok: false,
+      status: telegramStatus(response.status),
+      error: friendlyTelegramError(response.status, String(data.description || "")),
+    };
+  }
+  const chat = data.result || {};
+  return {
+    ok: true,
+    status: 200,
+    chat: {
+      id: chat.id,
+      type: chat.type || "",
+      title: chat.title || "",
+      username: chat.username || "",
+    },
+  };
+}
+
 function friendlyTelegramError(status, description) {
   const text = String(description || "").toLowerCase();
   if (status === 401) return "Bot Token invalido.";
@@ -549,6 +841,13 @@ function bearerToken(request) {
   return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
 }
 
+function acceptedEngineSecrets(env = {}) {
+  const values = ENGINE_SECRET_NAMES
+    .map((name) => normalizeSecret(env[name]))
+    .filter(Boolean);
+  return [...new Set(values)];
+}
+
 async function readJson(request) {
   return readRecord(await request.json().catch(() => ({})));
 }
@@ -561,8 +860,36 @@ function channelKey(userId, channelId) {
   return `channel:${normalizeUserId(userId)}:${String(channelId || "").trim()}`;
 }
 
+function userKey(userId) {
+  return `user:${normalizeUserId(userId)}`;
+}
+
 function deletedCodeKey(userId, chatId) {
   return `deleted:${normalizeUserId(userId)}:code:${normalizeChannelCode(chatId)}`;
+}
+
+function publicWorkspace(workspace) {
+  return {
+    userId: workspace.userId,
+    active: workspace.active !== false,
+    plan: workspace.plan || "",
+    expiresAt: workspace.expiresAt || "",
+    cleanupAfter: workspace.cleanupAfter || "",
+    cleanedAt: workspace.cleanedAt || "",
+    updatedAt: workspace.updatedAt || "",
+  };
+}
+
+function addDaysIso(value, days) {
+  const baseMs = isoTimeMs(value) || Date.now();
+  return new Date(baseMs + Math.max(0, Number(days) || 0) * 86400000).toISOString();
+}
+
+function isoTimeMs(value) {
+  const text = String(value || "").trim();
+  if (!text) return 0;
+  const time = Date.parse(text.includes("T") ? text : `${text}T23:59:59Z`);
+  return Number.isFinite(time) ? time : 0;
 }
 
 function normalizeUserId(value) {
@@ -611,10 +938,81 @@ function moduleAllowsEntry(config, entry) {
 }
 
 function formatEntry(entry) {
-  if (entry === "BANKER") return "B Banker";
-  if (entry === "PLAYER") return "P Player";
-  if (entry === "TIE") return "T Tie";
+  if (entry === "BANKER") return "🔴 BANKER";
+  if (entry === "PLAYER") return "🔵 PLAYER";
+  if (entry === "TIE") return "🟡 TIE";
   return "Automatico";
+}
+
+function classifySignalKind(body, signalKey) {
+  const variables = readRecord(body.variables);
+  const result = String(body.result || variables.result || "").trim().toLowerCase();
+  const key = String(signalKey || "").toLowerCase();
+  if (key.includes(":result:")) return "result";
+  if (result && result !== "aguardando resultado" && result !== "aguardando") return "result";
+  return "entry";
+}
+
+function selectSignalTemplate(config, signalKind, result) {
+  if (signalKind !== "result") return String(config.template || "");
+  const normalized = normalizeDedupeText(result);
+  if (normalized.includes("red")) return String(config.redTemplate || config.template || "");
+  if (normalized.includes("empate") || normalized.includes("tie")) {
+    return String(config.tieTemplate || config.greenTemplate || config.template || "");
+  }
+  if (normalized.includes("green")) return String(config.greenTemplate || config.template || "");
+  return String(config.greenTemplate || config.template || "");
+}
+
+function entrySignalDedupeKey(channel, roundId, entry, signalKind) {
+  if (signalKind !== "entry" || !roundId || !entry) return "";
+  return `sent-entry:${channel.userId}:${channel.id}:${roundId}:${entry}`;
+}
+
+function resultSignalDedupeKey(channel, roundId, entry, signalKind, result) {
+  if (signalKind !== "result" || !roundId) return "";
+  const resultKey = normalizeDedupeText(result);
+  if (!resultKey) return "";
+  return `sent-result:${channel.userId}:${channel.id}:${roundId}:${entry || "AUTO"}:${resultKey}`;
+}
+
+async function recentMessageDedupeKey(channel, signalKind, message) {
+  const text = String(message || "").trim();
+  if (!text) return "";
+  const bucket = Math.floor(Date.now() / 30000);
+  const messageHash = await hashText(`${signalKind}:${text}`);
+  return `sent-recent:${channel.userId}:${channel.id}:${bucket}:${messageHash}`;
+}
+
+function normalizeDedupeText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function formatTelegramMessageText(value) {
+  return decorateScoreTokens(
+    String(value || "")
+      .replace(/\bB\s+Banker\b/gi, formatEntry("BANKER"))
+      .replace(/\bP\s+Player\b/gi, formatEntry("PLAYER"))
+      .replace(/\bT\s+Tie\b/gi, formatEntry("TIE")),
+  );
+}
+
+function decorateScoreTokens(message) {
+  return String(message || "").replace(/\b([BPT])\s*([2-9]|1[0-2])\b/gi, (match, side, number, offset, fullText) => {
+    const previous = String(fullText || "").slice(Math.max(0, offset - 4), offset);
+    if (previous.includes("🔴") || previous.includes("🔵") || previous.includes("🟡")) return match;
+    const normalizedSide = String(side || "").toUpperCase();
+    if (normalizedSide === "B") return `🔴 B${number}`;
+    if (normalizedSide === "P") return `🔵 P${number}`;
+    if (normalizedSide === "T") return `🟡 T${number}`;
+    return match;
+  });
 }
 
 function formatGale(value) {
