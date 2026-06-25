@@ -875,23 +875,24 @@ def direct_pattern_miner_snapshot(rounds: list[dict[str, Any]]) -> dict[str, Any
     if cache_key == DIRECT_PATTERN_MINER_SNAPSHOT_CACHE_KEY and DIRECT_PATTERN_MINER_SNAPSHOT_CACHE:
         return DIRECT_PATTERN_MINER_SNAPSHOT_CACHE
     updated_at = iso_now_ms()
-    ranking = [
+    full_ranking = [
         direct_pattern_strategy_snapshot(strategy, updated_at)
         for strategy in direct_pattern_miner_rank_strategies(rounds)
     ]
     strict_hot = [
-        strategy for strategy in ranking
+        strategy for strategy in full_ranking
         if strategy.get("status") in {"VERY_HOT", "HOT"}
     ]
     if len(strict_hot) >= 20:
         hot_strategies = strict_hot[:PATTERN_MINER_TOP_STRATEGIES_LIMIT]
     else:
         hot_strategies = [
-            strategy for strategy in ranking
+            strategy for strategy in full_ranking
             if not strategy.get("insufficientSample")
         ][:PATTERN_MINER_TOP_STRATEGIES_LIMIT]
-    alerts = direct_pattern_miner_realtime_alerts(rounds, ranking)
-    valid_strategies = [strategy for strategy in ranking if not strategy.get("insufficientSample")]
+    alerts = direct_pattern_miner_realtime_alerts(rounds, full_ranking)
+    valid_strategies = [strategy for strategy in full_ranking if not strategy.get("insufficientSample")]
+    ranking = full_ranking[:PATTERN_MINER_TOP_SCAN]
     total_validated = sum(int(strategy.get("totalValidated") or 0) for strategy in valid_strategies)
     sg = sum(int(strategy.get("sg") or 0) for strategy in valid_strategies)
     g1 = sum(int(strategy.get("g1") or 0) for strategy in valid_strategies)
@@ -916,10 +917,10 @@ def direct_pattern_miner_snapshot(rounds: list[dict[str, Any]]) -> dict[str, Any
         "entryAlerts": [alert for alert in alerts if alert.get("kind") == "validated"],
         "scoreboard": scoreboard,
         "agent": {
-            "catalogedStrategies": len(ranking),
+            "catalogedStrategies": len(full_ranking),
             "hotStrategies": len(hot_strategies),
-            "observedStrategies": len([strategy for strategy in ranking if strategy.get("status") == "OBSERVATION"]),
-            "lastDiscovery": next((strategy for strategy in ranking if not strategy.get("insufficientSample")), None),
+            "observedStrategies": len([strategy for strategy in full_ranking if strategy.get("status") == "OBSERVATION"]),
+            "lastDiscovery": next((strategy for strategy in full_ranking if not strategy.get("insufficientSample")), None),
             "updatedAt": updated_at,
         },
         "analyzedRounds": len(rounds),
