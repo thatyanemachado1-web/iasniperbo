@@ -138,6 +138,7 @@ function NeuralValidatorPage() {
   const [testingTelegramId, setTestingTelegramId] = useState("");
   const [siteAlerts, setSiteAlerts] = useState<LiveValidatorHit[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
+  const deletedPatternIdsRef = useRef(new Set<string>());
   const [channelForm, setChannelForm] = useState({
     name: "Sala Premium",
     botToken: "",
@@ -218,8 +219,9 @@ function NeuralValidatorPage() {
 
         const localPatterns = readSavedPatterns();
         const mergedChannels = mergeValidatorChannels(serverChannels);
+        const deletedPatternIds = deletedPatternIdsRef.current;
         const mergedPatterns = autoPrepareAdminTelegramDelivery(
-          mergeValidatorItems(serverPatterns, localPatterns),
+          mergeValidatorItems(serverPatterns, localPatterns).filter((item) => !deletedPatternIds.has(item.id)),
           mergedChannels,
           adminAccess,
         );
@@ -228,7 +230,9 @@ function NeuralValidatorPage() {
         setSavedPatterns(mergedPatterns);
         setChannels(mergedChannels);
 
-        const patternsToSync = mergedPatterns.filter((item) => shouldSyncValidatorItem(item, serverPatterns));
+        const patternsToSync = mergedPatterns.filter((item) =>
+          !deletedPatternIds.has(item.id) && shouldSyncValidatorItem(item, serverPatterns)
+        );
         await Promise.all([
           ...patternsToSync.map((item) => saveServerValidatorPattern(item).catch(() => null)),
         ]);
@@ -396,13 +400,16 @@ function NeuralValidatorPage() {
   }
 
   function removePattern(id: string) {
+    deletedPatternIdsRef.current.add(id);
     telegramSendKeysRef.current = new Set(
       [...telegramSendKeysRef.current].filter((key) => !key.startsWith(`${id}:`)),
     );
     forgetTelegramNotificationsForPattern(id);
     setSiteAlerts((current) => current.filter((hit) => hit.pattern.id !== id));
     setSavedPatterns(removeSavedPattern(id));
-    void deleteServerValidatorPattern(id);
+    void deleteServerValidatorPattern(id).then((deleted) => {
+      if (!deleted) showNotice("Padrao removido da tela, mas o servidor nao confirmou. Tente excluir novamente.");
+    });
     showNotice("Padrao removido.");
   }
 
@@ -2161,11 +2168,12 @@ async function saveServerValidatorPattern(pattern: SavedValidatorPattern) {
 }
 
 async function deleteServerValidatorPattern(patternId: string) {
-  await fetch(`/validator/patterns/${encodeURIComponent(patternId)}`, {
+  const response = await fetch(`/validator/patterns/${encodeURIComponent(patternId)}`, {
     method: "DELETE",
     cache: "no-store",
     headers: validatorApiHeaders(),
   }).catch(() => null);
+  return Boolean(response?.ok);
 }
 
 async function fetchServerValidatorChannels() {
