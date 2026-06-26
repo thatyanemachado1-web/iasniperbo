@@ -6319,15 +6319,36 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       return json({ ok: true, skipped: true });
     }
 
+    if (!validatorChannelModuleEnabled(channel, "validator", true)) {
+      return json({ error: "Seguir Validador esta inativo neste canal." }, 400);
+    }
+
     const sentAt = new Date().toISOString();
-    const result = await sendTelegramMessage({
-      botToken: decodeServerToken(channel.botTokenEncoded),
-      chatId: channel.chatId,
-      message: buildServerValidatorTelegramMessage(pattern, channel),
-      buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
-    });
+    const message = buildServerValidatorTelegramMessage(pattern, channel);
+    const entrySide = pattern.pulledSide || validatorEntrySide(pattern.entryType) || "B";
+    const moduleConfig = validatorChannelModuleConfig(channel, "validator");
+    const buttons = validatorModuleTelegramButtons(moduleConfig, channel);
+    const result = isCloudValidatorTelegramChannel(channel)
+      ? await sendTelegramEngineSignal(env, {
+          userId: pattern.userId,
+          channelId: channel.id,
+          moduleKey: "validator",
+          signalKey: notificationKey,
+          roundId,
+          entry: entrySide,
+          message,
+          variables: buildServerValidatorTelegramVariables(pattern, channel),
+          buttons,
+        })
+      : await sendTelegramMessage({
+          botToken: decodeServerToken(channel.botTokenEncoded),
+          chatId: channel.chatId,
+          message,
+          buttonLabel: "Abrir Sniper Bo IA",
+          buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+          buttons,
+          allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
+        });
 
     const notification = {
       id: notificationKey,
