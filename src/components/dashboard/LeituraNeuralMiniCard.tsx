@@ -113,7 +113,7 @@ export function LeituraNeuralMiniCard({
     "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
-  const confirmedEntrySide = neuralEntryState?.expectedSide ?? (mode === "ACTIVE" ? pullingSide : null);
+  const confirmedEntrySide = mode === "ACTIVE" ? pullingSide : null;
   const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
   const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
   const lastOfficialResultRef = useRef<string | null>(null);

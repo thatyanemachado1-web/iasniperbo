@@ -580,6 +580,8 @@ const validatorRoundPrunedAt = new Map<string, number>();
 const serverValidatorEngine = new NeuralValidatorEngine();
 let validatorMonitorCacheLoadedAt = 0;
 let validatorMonitorCachePromise: Promise<void> | null = null;
+let validatorOfficialDispatchersBootstrapped = false;
+let validatorInitialOfficialSignalKeys = new Set<string>();
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 const localAiRateBuckets = new Map<string, { count: number; resetAt: number }>();
 const localAiCache = new Map<string, { response: string; createdAt: number }>();
@@ -8083,6 +8085,72 @@ async function persistValidatorNotification(env: unknown, notification: Record<s
   return persistSupabaseRow(env, VALIDATOR_NOTIFICATIONS_TABLE, validatorNotificationToRow(notification), "id");
 }
 
+async function reserveValidatorNotificationDedupe(env: unknown, notification: Record<string, unknown>) {
+  const config = getSupabasePersistenceConfig(env);
+  const row = validatorNotificationToRow(notification);
+  const id = readString(row, "id");
+  if (!config) {
+    return {
+      ok: false as const,
+      reserved: false,
+      duplicate: false,
+      status: 503,
+      error: "Supabase dedupe persistence unavailable.",
+    };
+  }
+  if (!id) {
+    return {
+      ok: false as const,
+      reserved: false,
+      duplicate: false,
+      status: 400,
+      error: "Dedupe id obrigatorio.",
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `${config.url}/rest/v1/${VALIDATOR_NOTIFICATIONS_TABLE}?on_conflict=id`,
+      {
+        method: "POST",
+        headers: {
+          ...supabasePersistenceHeaders(config.key),
+          "Content-Type": "application/json",
+          Prefer: "resolution=ignore-duplicates,return=representation",
+        },
+        body: JSON.stringify(row),
+      },
+    );
+    const data = (await response.json().catch(() => null)) as unknown;
+    if (!response.ok) {
+      return {
+        ok: false as const,
+        reserved: false,
+        duplicate: false,
+        status: response.status,
+        error: readString(readRecord(data), "message") || `Supabase dedupe retornou ${response.status}.`,
+      };
+    }
+    const rows = Array.isArray(data) ? data.map(readRecord) : [];
+    const reserved = rows.some((item) => readString(item, "id") === id);
+    return {
+      ok: true as const,
+      reserved,
+      duplicate: !reserved,
+      status: response.status,
+      error: "",
+    };
+  } catch (error) {
+    return {
+      ok: false as const,
+      reserved: false,
+      duplicate: false,
+      status: 502,
+      error: errorMessage(error),
+    };
+  }
+}
+
 function validatorPatternToRow(pattern: SavedValidatorPattern) {
   return {
     id: pattern.id,
@@ -8353,6 +8421,8 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
   }
   const latestRound = liveValidatorRoundHistory.at(-1);
   if (!latestRound) return false;
+  const suppressInitialOfficialSignals = !validatorOfficialDispatchersBootstrapped;
+  validatorOfficialDispatchersBootstrapped = true;
   console.info(
     JSON.stringify({
       event: "[TELEGRAM_AUTO] card detectado",
@@ -8362,7 +8432,7 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
         : 0,
       neuralMode: liveDashboardData.neuralReading?.mode || "",
       neuralStatus: liveDashboardData.neuralReading?.paganteStatus || "",
-      neuralEntryState: Boolean(normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState)),
+      suppressInitialOfficialSignals,
       tieStatus: readString(readRecord(liveDashboardData.currentTieAlert), "status"),
       surfAlert: Boolean(readRecord(liveDashboardData.currentSurfAlert).surf_alert),
     }),
@@ -8511,32 +8581,39 @@ function buildValidatorModuleTelegramSendTasks(
   latestRound: Round,
   entryChannelKeys: Set<string>,
   options: ValidatorMonitorOptions,
+  dispatcherOptions: { suppressInitialOfficialSignals?: boolean } = {},
 ) {
-  const tasks: Array<() => Promise<boolean>> = [];
+  const tasks: Array<() => Promise<boolean>> = buildPayingNumbersTelegramSendTasks(
+    env,
+    latestRound,
+    entryChannelKeys,
+    options,
+    dispatcherOptions,
+  );
   for (const channel of liveValidatorChannels) {
     if (!isUsableValidatorTelegramChannel(channel)) continue;
     for (const moduleKey of VALIDATOR_TELEGRAM_MODULE_KEYS) {
-      if (moduleKey === "validator") continue;
-      if (moduleKey !== "paying_numbers" && !validatorChannelModuleEnabled(channel, moduleKey, false)) continue;
+      if (moduleKey === "validator" || moduleKey === "paying_numbers") continue;
+      if (!validatorChannelModuleEnabled(channel, moduleKey, false)) continue;
       const signal = buildValidatorChannelModuleSignal(channel, moduleKey, latestRound);
       if (!signal) continue;
-      if (validatorNotificationAlreadySent(signal.notificationKey)) {
-        if (moduleKey === "paying_numbers") {
-          logPayingNumbersTelegramDecision(channel, "blocked", "duplicate_signal", {
-            roundId: latestRound.id,
+      if (shouldSuppressInitialOfficialSignal(signal, dispatcherOptions.suppressInitialOfficialSignals)) {
+        console.info(
+          JSON.stringify({
+            event: "[TELEGRAM_AUTO] sinal inicial bloqueado",
+            moduleKey,
+            channelId: channel.id,
             signalKey: signal.signalKey,
-          });
-        }
+            dedupeKey: signal.notificationKey,
+            reason: "initial_active_state",
+          }),
+        );
+        continue;
+      }
+      if (validatorNotificationAlreadySent(signal.notificationKey)) {
         continue;
       }
       if (validatorChannelModuleCoolingDown(channel, moduleKey, signal.matchedAtMs)) {
-        if (moduleKey === "paying_numbers") {
-          logPayingNumbersTelegramDecision(channel, "blocked", "cooldown_active", {
-            roundId: latestRound.id,
-            signalKey: signal.signalKey,
-            cooldownSeconds: validatorChannelModuleConfig(channel, moduleKey).cooldownSeconds,
-          });
-        }
         continue;
       }
       entryChannelKeys.add(validatorChannelKey(channel));
@@ -8546,13 +8623,23 @@ function buildValidatorModuleTelegramSendTasks(
   return tasks;
 }
 
+function shouldSuppressInitialOfficialSignal(
+  signal: ValidatorTelegramModuleSignal,
+  suppressInitialOfficialSignals = false,
+) {
+  if (suppressInitialOfficialSignals) {
+    validatorInitialOfficialSignalKeys.add(signal.notificationKey);
+    return true;
+  }
+  return validatorInitialOfficialSignalKeys.has(signal.notificationKey);
+}
+
 function buildValidatorChannelModuleSignal(
   channel: ValidatorNotificationChannel,
   moduleKey: ValidatorTelegramModuleKey,
   latestRound: Round,
 ): ValidatorTelegramModuleSignal | null {
   if (moduleKey === "ai_patterns") return buildAiPatternsModuleSignal(channel, latestRound);
-  if (moduleKey === "paying_numbers") return buildPayingNumbersModuleSignal(channel, latestRound);
   if (moduleKey === "surf_alert") return buildSurfAlertModuleSignal(channel, latestRound);
   if (moduleKey === "ties_only") return buildTiesOnlyModuleSignal(channel, latestRound);
   return null;
@@ -8632,212 +8719,208 @@ function readDashboardConfirmedAiPattern() {
   };
 }
 
-function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
-  const moduleState = validatorChannelModuleConfigState(channel, "paying_numbers");
-  if (!moduleState) {
-    logPayingNumbersTelegramDecision(channel, "blocked", "missing_channel_config", {
-      roundId: latestRound.id,
-    });
-    return null;
-  }
-  const moduleConfig = moduleState.config;
+function buildPayingNumbersTelegramSendTasks(
+  env: unknown,
+  latestRound: Round,
+  entryChannelKeys: Set<string>,
+  options: ValidatorMonitorOptions,
+  dispatcherOptions: { suppressInitialOfficialSignals?: boolean } = {},
+) {
+  const tasks: Array<() => Promise<boolean>> = [];
+  const channels = liveValidatorChannels
+    .filter(isUsableValidatorTelegramChannel)
+    .filter((channel) => validatorChannelModuleEnabled(channel, "paying_numbers", false));
+  const card = readServerPayingNumbersConfirmedCard(liveDashboardData.neuralReading ?? null, latestRound);
 
-  if (!moduleConfig.enabled) {
-    logPayingNumbersTelegramDecision(channel, "blocked", "module_inactive", {
-      roundId: latestRound.id,
-    });
-    return null;
-  }
-
-  const reading = liveDashboardData.neuralReading ?? null;
-  if (!reading) {
-    logPayingNumbersTelegramDecision(channel, "blocked", "site_reading_missing", {
-      roundId: latestRound.id,
-    });
-    return null;
-  }
-
-  const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
-  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
   console.info(
     JSON.stringify({
       event: "[NUMEROS_PAGANTES] detectado",
-      user: maskTelemetryUserId(channel.userId),
-      channelId: channel.id,
       roundId: latestRound.id,
-      moduleEnabled: moduleConfig.enabled,
-      entryFilter: moduleConfig.entryType,
-      mode: reading.mode || "",
-      status: reading.paganteStatus || "",
-      numero: reading.numero ?? null,
-      expectedSide,
-      readingKey: serverNeuralEntryKey(reading),
-      stateKey: state?.key || "",
-      stateExpectedSide: state?.expectedSide || "",
-    }),
-  );
-  if (!expectedSide) {
-    logPayingNumbersTelegramDecision(channel, "blocked", "missing_detected_entry", {
-      roundId: latestRound.id,
-      numero: reading.numero ?? null,
-    });
-    return null;
-  }
-
-  const confirmedCard = readServerConfirmedNeuralEntryCard(reading, state);
-  const stateMatchesReading = Boolean(confirmedCard.stateMatchesReading);
-  const key = serverNeuralEntryKey(reading) || (stateMatchesReading ? state?.key || "" : "");
-  if (!key) {
-    logPayingNumbersTelegramDecision(channel, "blocked", "missing_signal_key", {
-      roundId: latestRound.id,
-      expectedSide,
-      numero: reading.numero ?? null,
-    });
-    return null;
-  }
-
-  if (state && !stateMatchesReading) {
-    console.info(JSON.stringify({
-      event: "telegram_paying_numbers_decision",
-      status: "info",
-      reason: "state_mismatch_ignored",
-      user: maskTelemetryUserId(channel.userId),
-      channelId: channel.id,
-      roundId: latestRound.id,
-      signalKey: key,
-      stateKey: state.key,
-      stateReadingKey: confirmedCard.stateReadingKey,
-      expectedSide,
-      stateExpectedSide: state.expectedSide,
-    }));
-  }
-
-  const confirmedEntrySide = confirmedCard.side;
-
-  if (!confirmedEntrySide) {
-    logPayingNumbersTelegramDecision(channel, "blocked", "no_confirmed_entry_card", {
-      roundId: latestRound.id,
-      signalKey: key,
-      mode: reading.mode,
-      numero: reading.numero ?? null,
-      expectedSide,
-      stateKey: state?.key || "",
-      stateMatched: stateMatchesReading,
-    });
-    return null;
-  }
-
-  console.info(
-    JSON.stringify({
-      event: "[NUMEROS_PAGANTES] confirmado",
-      user: maskTelemetryUserId(channel.userId),
-      channelId: channel.id,
-      roundId: latestRound.id,
-      signalKey: key,
-      expectedSide: confirmedEntrySide,
-      entryText: formatServerSignalSide(confirmedEntrySide),
-      stateMatched: stateMatchesReading,
-      dedupeKeyPreview: `module:paying_numbers:${channel.userId}:${channel.id}:${hashServerText(
-        `paying:${key}:${confirmedCard.triggerRoundKey || String(latestRound.id)}`,
-      )}`,
+      activeChannels: channels.length,
+      confirmed: card.confirmed,
+      reason: card.confirmed ? "confirmed_entry_card" : card.reason,
+      mode: card.mode,
+      numero: card.numero,
+      expectedSide: card.side || "",
+      signalKey: card.signalKey || "",
     }),
   );
 
-  if (!validatorModuleAllowsSignalEntry(moduleConfig, confirmedEntrySide)) {
-    logPayingNumbersTelegramDecision(channel, "blocked", "entry_not_allowed", {
-      roundId: latestRound.id,
-      signalKey: key,
-      expectedSide: confirmedEntrySide,
-      allowedEntry: moduleConfig.entryType,
-    });
-    return null;
+  if (!card.confirmed) {
+    for (const channel of channels) {
+      logPayingNumbersTelegramDecision(channel, "blocked", card.reason, {
+        roundId: latestRound.id,
+        mode: card.mode,
+        numero: card.numero,
+        expectedSide: card.side || "",
+      });
+    }
+    return tasks;
   }
 
-  const status = String(
-    reading.paganteStatus || (stateMatchesReading && state?.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"),
-  );
-  const triggerKey = confirmedCard.triggerRoundKey || String(latestRound.id);
+  for (const channel of channels) {
+    const moduleConfig = validatorChannelModuleConfig(channel, "paying_numbers");
+    if (!validatorModuleAllowsSignalEntry(moduleConfig, card.side)) {
+      logPayingNumbersTelegramDecision(channel, "blocked", "entry_not_allowed", {
+        roundId: latestRound.id,
+        signalKey: card.signalKey,
+        expectedSide: card.side,
+        allowedEntry: moduleConfig.entryType,
+      });
+      continue;
+    }
+
+    const signal = createPayingNumbersModuleSignal(channel, moduleConfig, latestRound, card);
+    if (shouldSuppressInitialOfficialSignal(signal, dispatcherOptions.suppressInitialOfficialSignals)) {
+      logPayingNumbersTelegramDecision(channel, "blocked", "initial_active_state", {
+        roundId: latestRound.id,
+        signalKey: signal.signalKey,
+        dedupeKey: signal.notificationKey,
+      });
+      continue;
+    }
+    if (validatorNotificationAlreadySent(signal.notificationKey)) {
+      logPayingNumbersTelegramDecision(channel, "blocked", "duplicate_signal", {
+        roundId: latestRound.id,
+        signalKey: signal.signalKey,
+        dedupeKey: signal.notificationKey,
+      });
+      continue;
+    }
+    if (validatorChannelModuleCoolingDown(channel, "paying_numbers", signal.matchedAtMs)) {
+      logPayingNumbersTelegramDecision(channel, "blocked", "cooldown_active", {
+        roundId: latestRound.id,
+        signalKey: signal.signalKey,
+        cooldownSeconds: moduleConfig.cooldownSeconds,
+      });
+      continue;
+    }
+
+    console.info(
+      JSON.stringify({
+        event: "[NUMEROS_PAGANTES] confirmado",
+        user: maskTelemetryUserId(channel.userId),
+        channelId: channel.id,
+        roundId: latestRound.id,
+        signalKey: signal.signalKey,
+        dedupeKey: signal.notificationKey,
+        expectedSide: card.side,
+        entryText: formatServerSignalSide(card.side),
+      }),
+    );
+    entryChannelKeys.add(validatorChannelKey(channel));
+    tasks.push(() => sendValidatorModuleTelegramNotification(env, signal, options));
+  }
+  return tasks;
+}
+
+type ServerPayingNumbersConfirmedCard =
+  | {
+      confirmed: true;
+      reason: "confirmed_entry_card";
+      reading: NeuralReading;
+      key: string;
+      signalKey: string;
+      side: NonNullable<NeuralEntryState["expectedSide"]>;
+      mode: NeuralReading["mode"];
+      numero: number | null;
+      status: string;
+    }
+  | {
+      confirmed: false;
+      reason: string;
+      reading: NeuralReading | null;
+      key: string;
+      signalKey: string;
+      side: NeuralEntryState["expectedSide"];
+      mode: string;
+      numero: number | null;
+      status: string;
+    };
+
+function readServerPayingNumbersConfirmedCard(
+  reading: NeuralReading | null,
+  latestRound: Round,
+): ServerPayingNumbersConfirmedCard {
+  const side = reading ? readServerNeuralSide(reading.direcao ?? reading.origem) : null;
+  const key = reading ? serverPayingNumbersReadingKey(reading, side) : "";
+  const mode = reading?.mode || "";
+  const numero = typeof reading?.numero === "number" ? reading.numero : null;
+  const status = String(reading?.paganteStatus || "");
+  const signalKey = key ? `paying:Bac Bo:${key}:round:${latestRound.id}:side:${side}` : "";
+
+  if (!reading) {
+    return { confirmed: false, reason: "site_reading_missing", reading, key, signalKey, side, mode, numero, status };
+  }
+  if (!isServerPayingNumbersCardConfirmed(reading, side)) {
+    return { confirmed: false, reason: "card_not_confirmed", reading, key, signalKey, side, mode, numero, status };
+  }
+  if (!key || !signalKey || !side) {
+    return { confirmed: false, reason: "missing_signal_key", reading, key, signalKey, side, mode, numero, status };
+  }
+  return { confirmed: true, reason: "confirmed_entry_card", reading, key, signalKey, side, mode: reading.mode, numero, status };
+}
+
+function createPayingNumbersModuleSignal(
+  channel: ValidatorNotificationChannel,
+  moduleConfig: ValidatorTelegramModuleConfig,
+  latestRound: Round,
+  card: Extract<ServerPayingNumbersConfirmedCard, { confirmed: true }>,
+) {
   return createValidatorModuleSignal(
     channel,
     "paying_numbers",
     latestRound,
-    `paying:${key}:${triggerKey}`,
+    card.signalKey,
     {
       table: "Bac Bo",
       pattern: "",
-      entry: formatServerSignalSide(confirmedEntrySide),
-      entryLabel: formatServerSideLabel(confirmedEntrySide),
-      entryCompact: formatServerCompactSide(confirmedEntrySide),
+      entry: formatServerSignalSide(card.side),
+      entryLabel: formatServerSideLabel(card.side),
+      entryCompact: formatServerCompactSide(card.side),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: moduleConfig.coverTie ? String(moduleConfig.tieCoverage) : "0",
       tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
-      confidence: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
-      percentage: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
-      status,
-      risk: serverReadPaganteKind(reading),
-      number: typeof reading.numero === "number" ? `${serverSignalCircle(confirmedEntrySide)}${reading.numero}` : "",
+      confidence: formatServerPercent(serverReadOptionalNumber(card.reading.assertividade)),
+      percentage: formatServerPercent(serverReadOptionalNumber(card.reading.assertividade)),
+      status: card.status || "ENTRADA_CONFIRMADA",
+      risk: serverReadPaganteKind(card.reading),
+      number: typeof card.reading.numero === "number" ? `${serverSignalCircle(card.side)}${card.reading.numero}` : "",
       level: "",
       round: String(latestRound.id),
       module: "Numeros Pagantes",
     },
     {
-      key,
-      numero: reading.numero ?? null,
-      expectedSide: confirmedEntrySide,
-      entryText: formatServerSignalSide(confirmedEntrySide),
+      key: card.key,
+      mesa: "Bac Bo",
+      numero: card.numero,
+      expectedSide: card.side,
+      entryText: formatServerSignalSide(card.side),
       protection: formatValidatorModuleGale(moduleConfig.galeLimit),
       coverTie: moduleConfig.coverTie,
       tieCoverage: moduleConfig.coverTie ? moduleConfig.tieCoverage : 0,
       result: "Aguardando resultado",
-      status,
+      status: card.status || "ENTRADA_CONFIRMADA",
       source: "site_neuralReading",
-      stateMatched: stateMatchesReading,
       confirmedEntryCard: true,
     },
   );
 }
 
-function readServerConfirmedNeuralEntryCard(
+function isServerPayingNumbersCardConfirmed(
   reading: NeuralReading,
-  state: NeuralEntryState | null,
-): {
-  side: NeuralEntryState["expectedSide"];
-  stateMatchesReading: boolean;
-  stateReadingKey: string;
-  triggerRoundKey: string;
-} {
-  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
-  const key = serverNeuralEntryKey(reading);
-  const stateReading = state?.readingSnapshot ?? (state ? neuralReadingForEntryState(state) : null);
-  const stateReadingKey = stateReading ? serverNeuralEntryKey(stateReading) : "";
-  const stateMatchesReading =
-    Boolean(state && stateReadingKey === key) &&
-    (!state?.expectedSide || state.expectedSide === expectedSide);
+  expectedSide: NeuralEntryState["expectedSide"],
+) {
+  return reading.mode === "ACTIVE" && Boolean(expectedSide);
+}
 
-  if (state?.expectedSide && stateMatchesReading) {
-    return {
-      side: state.expectedSide,
-      stateMatchesReading,
-      stateReadingKey,
-      triggerRoundKey: state.triggerRoundKey || "",
-    };
-  }
-
-  if (reading.mode === "ACTIVE" && expectedSide) {
-    return {
-      side: expectedSide,
-      stateMatchesReading,
-      stateReadingKey,
-      triggerRoundKey: "",
-    };
-  }
-
-  return {
-    side: null,
-    stateMatchesReading,
-    stateReadingKey,
-    triggerRoundKey: "",
-  };
+function serverPayingNumbersReadingKey(reading: NeuralReading, expectedSide: NeuralEntryState["expectedSide"]) {
+  const numero = typeof reading.numero === "number" ? String(reading.numero) : "";
+  const origem = readServerNeuralSide(reading.origem) || "";
+  const origemTipo = readServerNeuralOriginKind(reading.origemTipo) || "SEM_TIPO";
+  const validade = String(reading.validade || "G1").trim().toUpperCase();
+  if (!numero || !origem || !expectedSide) return "";
+  return `${numero}:${origem}:${origemTipo}:${expectedSide}:${validade}`;
 }
 
 function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
@@ -8952,7 +9035,7 @@ function createValidatorModuleSignal(
     moduleKey,
     channel,
     signalKey,
-    notificationKey: `module:${moduleKey}:${channel.userId}:${channel.id}:${signalHash}`,
+    notificationKey: `module:${channel.id}:${moduleKey}:${signalHash}`,
     roundId: latestRound.id,
     message: renderValidatorTelegramTemplate(moduleConfig.template, variables),
     detectedAt,
@@ -8977,6 +9060,56 @@ async function sendValidatorModuleTelegramNotification(
   const telegramSendStartedAtMs = Date.now();
   const moduleConfig = validatorChannelModuleConfig(signal.channel, signal.moduleKey);
   const buttons = validatorModuleTelegramButtons(moduleConfig, signal.channel);
+  const reservedAt = new Date().toISOString();
+  const reservation = {
+    id: signal.notificationKey,
+    type: `module:${signal.moduleKey}`,
+    userId: signal.channel.userId,
+    channelId: signal.channel.id,
+    roundId: signal.roundId,
+    status: "reserved",
+    error: "",
+    payloadJson: {
+      ...signal.payloadJson,
+      dedupeKey: signal.notificationKey,
+      dedupeShape: "channelId+module+signalId",
+      reservedAt,
+    },
+    sentAt: signal.detectedAt,
+    updatedAt: reservedAt,
+  };
+  const reservationResult = await reserveValidatorNotificationDedupe(env, reservation);
+  if (!reservationResult.ok || !reservationResult.reserved) {
+    const reason = reservationResult.duplicate ? "persistent_duplicate" : "dedupe_persistence_unavailable";
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_AUTO] envio bloqueado por dedupe persistente",
+        user: maskTelemetryUserId(signal.channel.userId),
+        channelId: signal.channel.id,
+        moduleKey: signal.moduleKey,
+        roundId: signal.roundId,
+        signalKey: signal.signalKey,
+        dedupeKey: signal.notificationKey,
+        status: reservationResult.status,
+        reason,
+        error: reservationResult.error,
+      }),
+    );
+    if (signal.moduleKey === "paying_numbers") {
+      logPayingNumbersTelegramDecision(signal.channel, "blocked", reason, {
+        roundId: signal.roundId,
+        signalKey: signal.signalKey,
+        dedupeKey: signal.notificationKey,
+        status: reservationResult.status,
+        error: reservationResult.error,
+      });
+    }
+    return false;
+  }
+  liveValidatorNotifications = [
+    reservation,
+    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== signal.notificationKey),
+  ].slice(0, 1000);
   console.info(
     JSON.stringify({
       event: "[TELEGRAM_AUTO] enviando",
@@ -9061,7 +9194,19 @@ async function sendValidatorModuleTelegramNotification(
     notification,
     ...liveValidatorNotifications.filter((item) => readString(item, "id") !== signal.notificationKey),
   ].slice(0, 1000);
-  void persistValidatorNotification(env, notification);
+  void persistValidatorNotification(env, notification).then((saved) => {
+    if (saved) return;
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_AUTO] dedupe persistente reservado mas atualizacao final falhou",
+        channelId: signal.channel.id,
+        moduleKey: signal.moduleKey,
+        roundId: signal.roundId,
+        signalKey: signal.signalKey,
+        dedupeKey: signal.notificationKey,
+      }),
+    );
+  });
   if (signal.moduleKey === "paying_numbers") {
     logPayingNumbersTelegramDecision(
       signal.channel,
