@@ -2315,6 +2315,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     url.pathname === "/admin/summary" ||
     url.pathname === "/admin/sales-settings" ||
     url.pathname === "/admin/site-content" ||
+    url.pathname === "/admin/client-registry/backup" ||
     url.pathname === "/admin/crm" ||
     url.pathname.startsWith("/admin/crm/") ||
     url.pathname === "/admin/users" ||
