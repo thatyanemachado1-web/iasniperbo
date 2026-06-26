@@ -6712,7 +6712,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
-  const shouldForwardToTelegramEngine = isNotificationsRoute;
+  const shouldForwardToTelegramEngine = isChannelsRoute || isNotificationsRoute;
   if (shouldForwardToTelegramEngine) {
     if (!getTelegramEngineConfig(env)) {
       return json({ error: "Telegram Engine secrets missing" }, 500);
