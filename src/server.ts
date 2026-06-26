@@ -8516,7 +8516,7 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
   }
   const latestRound = liveValidatorRoundHistory.at(-1);
   if (!latestRound) return false;
-  const suppressInitialOfficialSignals = !validatorOfficialDispatchersBootstrapped;
+  const suppressInitialOfficialSignals = !validatorOfficialDispatchersBootstrapped && !options.roundReceivedAtMs;
   validatorOfficialDispatchersBootstrapped = true;
   console.info(
     JSON.stringify({
