@@ -6391,6 +6391,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
           message,
           variables: buildServerValidatorTelegramVariables(pattern, channel),
           buttons,
+          forceMessage: true,
         })
       : await sendTelegramMessage({
           botToken: decodeServerToken(channel.botTokenEncoded),
@@ -8690,6 +8691,7 @@ async function sendValidatorEntryTelegramNotification(
         message,
         variables: buildServerValidatorTelegramVariables(pattern, channel),
         buttons,
+        forceMessage: true,
       })
     : await sendTelegramMessage({
         botToken: decodeServerToken(channel.botTokenEncoded),
@@ -9353,6 +9355,7 @@ async function sendValidatorModuleTelegramNotification(
           tieMultiplier: "",
         }),
         buttons,
+        forceMessage: signal.moduleKey === "validator",
       })
     : await sendTelegramMessage({
         botToken: decodeServerToken(signal.channel.botTokenEncoded),
@@ -9575,6 +9578,7 @@ async function sendValidatorTelegramResultNotification(
         protection: outcome.galeUsed <= 0 ? "SG" : `G${Math.min(4, outcome.galeUsed)}`,
         variables,
         buttons,
+        forceMessage: moduleKey === "validator",
       })
     : await sendTelegramMessage({
         botToken: decodeServerToken(channel.botTokenEncoded),
@@ -10150,6 +10154,7 @@ async function sendTelegramEngineSignal(
     protection?: string;
     variables?: Record<string, string>;
     buttons?: Array<{ label: string; url: string }>;
+    forceMessage?: boolean;
   },
 ) {
   const config = getTelegramEngineConfig(env);
@@ -10171,6 +10176,7 @@ async function sendTelegramEngineSignal(
       variables: input.variables || {},
       buttonLabel: "Abrir Sniper Bo IA",
       buttons: input.buttons || [],
+      forceMessage: Boolean(input.forceMessage),
     }),
   }).catch((error) => {
     console.warn("Falha ao chamar Cloudflare Telegram Engine.", error);
@@ -10231,6 +10237,7 @@ async function sendValidatorAnalyzingMessages(
           roundId: latestRound.id,
           entry: "",
           message,
+          forceMessage: true,
         })
       : await sendTelegramMessage({
           botToken: decodeServerToken(channel.botTokenEncoded),
@@ -10354,7 +10361,13 @@ function buildServerValidatorTelegramMessage(pattern: SavedValidatorPattern, cha
     moduleConfig.template ||
     channel.templates.entry ||
     DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry;
-  return template.replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
+  return renderValidatorTelegramTemplate(enforceServerValidatorTemplateIdentity(template), variables);
+}
+
+function enforceServerValidatorTemplateIdentity(template: string) {
+  return String(template || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry)
+    .replace(/PADR(?:ÃO|AO|ÃƒO|Ã?O|[\uFFFD?]+O)\s+IA\s+CONFIRMADO/gi, "PADRÃO VALIDADOR")
+    .replace(/PADR(?:ÃO|AO|ÃƒO|Ã?O|[\uFFFD?]+O)\s+IA\b/gi, "PADRÃO VALIDADOR");
 }
 
 function buildServerValidatorAnalyzingMessage(channel: ValidatorNotificationChannel) {

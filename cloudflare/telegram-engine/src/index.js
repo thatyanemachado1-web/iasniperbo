@@ -430,6 +430,7 @@ export class TelegramEngine {
     const targetChannelId = String(body.channelId || "").trim();
     const signalKey = String(body.signalKey || body.id || `${moduleKey}:${Date.now()}`);
     const variables = readRecord(body.variables);
+    const forceMessage = body.forceMessage === true;
     const roundId = clampInt(
       body.roundId ?? variables.roundId ?? variables.roundID ?? variables.round ?? variables.roundNumber,
       0,
@@ -490,7 +491,7 @@ export class TelegramEngine {
         protection: finalNotificationProtection,
         result: notificationResult,
       };
-      const renderedMessage = shouldRenderSignalTemplate(template, templateVariables)
+      const renderedMessage = !forceMessage && shouldRenderSignalTemplate(template, templateVariables)
         ? renderTemplate(template, templateVariables)
         : String(body.message || "");
       const message = formatTelegramMessageText(String(renderedMessage || body.message || renderTemplate("{{entry}}", templateVariables))).slice(0, 4096);
@@ -546,6 +547,7 @@ export class TelegramEngine {
           telegramMessageId: result.messageId || null,
           buttonCount: buttons.length,
           cloudflare: true,
+          forceMessage,
         },
         sentAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
