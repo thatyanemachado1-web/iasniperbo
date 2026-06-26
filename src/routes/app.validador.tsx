@@ -91,7 +91,7 @@ export const Route = createFileRoute("/app/validador")({
 });
 
 const engine = new NeuralValidatorEngine();
-const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
+const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v2";
 const VALIDATOR_DELETED_PATTERNS_KEY = "sniper_neural_validator_deleted_patterns_v1";
 const VALIDATOR_CLIENT_HISTORY_LIMIT = 200;
 
