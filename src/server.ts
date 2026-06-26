@@ -401,6 +401,11 @@ const DEFAULT_VALIDATOR_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
   analyzing: "🔎 <b>ANALISANDO PADRAO</b>\n🎲 <b>Mesa:</b> {{table}}\nAguardando entrada validada",
 };
 type ValidatorTelegramModuleKey = "ai_patterns" | "paying_numbers" | "surf_alert" | "ties_only" | "validator";
+type ValidatorTelegramButtonConfig = {
+  enabled: boolean;
+  label: string;
+  url: string;
+};
 type ValidatorTelegramModuleConfig = {
   enabled: boolean;
   entryType: "AUTO" | "BANKER" | "PLAYER" | "TIE";
@@ -409,9 +414,14 @@ type ValidatorTelegramModuleConfig = {
   tieCoverage: number;
   cooldownSeconds: number;
   template: string;
+  analyzingTemplate: string;
   greenTemplate: string;
+  galeTemplate: string;
   redTemplate: string;
   tieTemplate: string;
+  expiredTemplate: string;
+  canceledTemplate: string;
+  buttons: ValidatorTelegramButtonConfig[];
 };
 type ValidatorChannelWithModules = ValidatorNotificationChannel & {
   signalModules?: Partial<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>;
@@ -434,6 +444,8 @@ const VALIDATOR_TELEGRAM_MODULE_KEYS: ValidatorTelegramModuleKey[] = [
   "ties_only",
   "validator",
 ];
+const MAX_VALIDATOR_TELEGRAM_BUTTONS = 4;
+const DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL = "Abrir Sniper Bo IA";
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
     "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
@@ -458,6 +470,20 @@ const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES: Record<ValidatorTelegra
   validator:
     "✅ <b>{{result}}</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
 };
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_ANALYZING_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "🔎 <b>ANALISANDO PADRAO IA</b>\n🎲 <b>Mesa:</b> {{table}}\n⏳ Aguardando confirmacao real.",
+  paying_numbers: "🔎 <b>ANALISANDO NUMERO PAGANTE</b>\n🔢 <b>Numeros:</b> {{numbers}}\n⏳ Aguardando confirmacao real.",
+  surf_alert: "🔎 <b>ANALISANDO SURF</b>\n🌊 <b>Direcao:</b> {{side}}\n⏳ Aguardando confirmacao real.",
+  ties_only: "🔎 <b>ANALISANDO EMPATE</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}\n⏳ Aguardando confirmacao real.",
+  validator: "🔎 <b>ANALISANDO VALIDADOR</b>\n🧩 <b>Padrao:</b> {{pattern}}\n⏳ Aguardando entrada validada.",
+};
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GALE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "🛡️ <b>FAZER {{gale}}</b>\n🎯 <b>Entrada:</b> {{entry}}\n🧩 <b>Padrao:</b> {{pattern}}",
+  paying_numbers: "🛡️ <b>FAZER {{gale}}</b>\n🔢 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "🛡️ <b>FAZER {{gale}}</b>\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "🛡️ <b>COBRIR EMPATE {{gale}}</b>\n🟡 <b>Pressao:</b> {{tie_pressure}}",
+  validator: "🛡️ <b>FAZER {{gale}}</b>\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+};
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
     "❌ <b>RED</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
@@ -467,6 +493,20 @@ const DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES: Record<ValidatorTelegramM
     "❌ <b>RED</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
   ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate nao confirmou</b>\n🛡️ <b>Protecao:</b> {{gale}}",
   validator: "❌ <b>RED</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+};
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_EXPIRED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "⌛ <b>SINAL EXPIRADO</b>\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}",
+  paying_numbers: "⌛ <b>SINAL EXPIRADO</b>\n💎 <b>Modulo:</b> {{module}}\n🔢 <b>Numeros:</b> {{numbers}}",
+  surf_alert: "⌛ <b>SINAL EXPIRADO</b>\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Direcao:</b> {{side}}",
+  ties_only: "⌛ <b>ALERTA DE EMPATE EXPIRADO</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}",
+  validator: "⌛ <b>SINAL EXPIRADO</b>\n🧩 <b>Padrao:</b> {{pattern}}",
+};
+const DEFAULT_VALIDATOR_TELEGRAM_MODULE_CANCELED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
+  ai_patterns: "🚫 <b>SINAL CANCELADO</b>\n🤖 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  paying_numbers: "🚫 <b>SINAL BLOQUEADO</b>\n💎 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  surf_alert: "🚫 <b>SINAL CANCELADO</b>\n🌊 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  ties_only: "🚫 <b>ALERTA CANCELADO</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}\n📌 <b>Motivo:</b> {{result}}",
+  validator: "🚫 <b>SINAL CANCELADO</b>\n🧩 <b>Padrao:</b> {{pattern}}\n📌 <b>Motivo:</b> {{result}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
@@ -6722,6 +6762,7 @@ async function sendTelegramMessage({
   message,
   buttonLabel,
   buttonUrl,
+  buttons,
   allowInsecureNodeFallback = false,
 }: {
   botToken: string;
@@ -6729,6 +6770,7 @@ async function sendTelegramMessage({
   message: string;
   buttonLabel: string;
   buttonUrl: string;
+  buttons?: Array<{ label: string; url: string }>;
   allowInsecureNodeFallback?: boolean;
 }): Promise<{ ok: true; messageId: number | null } | { ok: false; status: number; error: string }> {
   const payload: Record<string, unknown> = {
@@ -6738,9 +6780,25 @@ async function sendTelegramMessage({
     disable_web_page_preview: true,
   };
 
-  if (buttonUrl) {
+  const inlineButtons = Array.isArray(buttons)
+    ? buttons
+        .map((button) => ({
+          text: String(button.label || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
+          url: normalizeTelegramButtonUrl(button.url),
+        }))
+        .filter((button) => button.text && button.url)
+        .slice(0, MAX_VALIDATOR_TELEGRAM_BUTTONS)
+    : [];
+  if (!inlineButtons.length && buttonUrl) {
+    inlineButtons.push({
+      text: buttonLabel.slice(0, 64) || "Abrir",
+      url: buttonUrl,
+    });
+  }
+
+  if (inlineButtons.length) {
     payload.reply_markup = {
-      inline_keyboard: [[{ text: buttonLabel.slice(0, 64) || "Abrir", url: buttonUrl }]],
+      inline_keyboard: [inlineButtons],
     };
   }
 
@@ -7063,9 +7121,14 @@ function normalizeValidatorChannelSignalModules(value: unknown) {
         tieCoverage: clampValidatorModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
         cooldownSeconds: clampValidatorModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
         template: readString(raw, "template") || defaults.template,
+        analyzingTemplate: readString(raw, "analyzingTemplate") || defaults.analyzingTemplate,
         greenTemplate: readString(raw, "greenTemplate") || defaults.greenTemplate,
+        galeTemplate: readString(raw, "galeTemplate") || defaults.galeTemplate,
         redTemplate: readString(raw, "redTemplate") || defaults.redTemplate,
         tieTemplate: readString(raw, "tieTemplate") || defaults.tieTemplate,
+        expiredTemplate: readString(raw, "expiredTemplate") || defaults.expiredTemplate,
+        canceledTemplate: readString(raw, "canceledTemplate") || defaults.canceledTemplate,
+        buttons: normalizeValidatorTelegramButtons(raw.buttons, raw, defaults.buttons),
       };
       return acc;
     },
@@ -7082,10 +7145,62 @@ function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): 
     tieCoverage: key === "ties_only" ? 4 : 1,
     cooldownSeconds: key === "validator" ? 0 : 2,
     template: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES[key],
+    analyzingTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_ANALYZING_TEMPLATES[key],
     greenTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES[key],
+    galeTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_GALE_TEMPLATES[key],
     redTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES[key],
     tieTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES[key],
+    expiredTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_EXPIRED_TEMPLATES[key],
+    canceledTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_CANCELED_TEMPLATES[key],
+    buttons: defaultValidatorTelegramButtons(),
   };
+}
+
+function defaultValidatorTelegramButtons(): ValidatorTelegramButtonConfig[] {
+  return Array.from({ length: MAX_VALIDATOR_TELEGRAM_BUTTONS }, (_, index) => ({
+    enabled: index === 0,
+    label: index === 0 ? DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL : "",
+    url: "",
+  }));
+}
+
+function normalizeValidatorTelegramButtons(
+  value: unknown,
+  legacyRecord: Record<string, unknown> = {},
+  fallback: ValidatorTelegramButtonConfig[] = defaultValidatorTelegramButtons(),
+): ValidatorTelegramButtonConfig[] {
+  const source = Array.isArray(value) ? value.slice(0, MAX_VALIDATOR_TELEGRAM_BUTTONS) : [];
+  const normalized = source.map((item) => {
+    const record = readRecord(item);
+    return {
+      enabled: Object.prototype.hasOwnProperty.call(record, "enabled") ? readBooleanField(record, "enabled") : true,
+      label: (readString(record, "label") || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
+      url: readString(record, "url"),
+    };
+  });
+
+  if (!normalized.length) {
+    const hasLegacyButton =
+      Object.prototype.hasOwnProperty.call(legacyRecord, "buttonEnabled") ||
+      Object.prototype.hasOwnProperty.call(legacyRecord, "buttonLabel") ||
+      Object.prototype.hasOwnProperty.call(legacyRecord, "buttonUrl");
+    if (hasLegacyButton) {
+      normalized.push({
+        enabled: Object.prototype.hasOwnProperty.call(legacyRecord, "buttonEnabled")
+          ? readBooleanField(legacyRecord, "buttonEnabled")
+          : true,
+        label: (readString(legacyRecord, "buttonLabel") || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
+        url: readString(legacyRecord, "buttonUrl"),
+      });
+    } else {
+      normalized.push(...fallback.map((button) => ({ ...button })));
+    }
+  }
+
+  while (normalized.length < MAX_VALIDATOR_TELEGRAM_BUTTONS) {
+    normalized.push({ enabled: false, label: "", url: "" });
+  }
+  return normalized.slice(0, MAX_VALIDATOR_TELEGRAM_BUTTONS);
 }
 
 function validatorChannelSignalModules(channel?: ValidatorNotificationChannel | null) {
@@ -8267,6 +8382,8 @@ async function sendValidatorEntryTelegramNotification(
   const telegramSendStartedAtMs = Date.now();
   const message = buildServerValidatorTelegramMessage(pattern, channel);
   const entrySide = pattern.pulledSide || validatorEntrySide(pattern.entryType) || "B";
+  const moduleConfig = validatorChannelModuleConfig(channel, "validator");
+  const buttons = validatorModuleTelegramButtons(moduleConfig, channel);
   const result = isCloudValidatorTelegramChannel(channel)
     ? await sendTelegramEngineSignal(env, {
         userId: pattern.userId,
@@ -8276,6 +8393,7 @@ async function sendValidatorEntryTelegramNotification(
         roundId,
         entry: entrySide,
         message,
+        buttons,
       })
     : await sendTelegramMessage({
         botToken: decodeServerToken(channel.botTokenEncoded),
@@ -8283,6 +8401,7 @@ async function sendValidatorEntryTelegramNotification(
         message,
         buttonLabel: "Abrir Sniper Bo IA",
         buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+        buttons,
         allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
       });
   const telegramRespondedAtMs = Date.now();
@@ -8669,6 +8788,8 @@ async function sendValidatorModuleTelegramNotification(
   options: ValidatorMonitorOptions,
 ) {
   const telegramSendStartedAtMs = Date.now();
+  const moduleConfig = validatorChannelModuleConfig(signal.channel, signal.moduleKey);
+  const buttons = validatorModuleTelegramButtons(moduleConfig, signal.channel);
   const result = isCloudValidatorTelegramChannel(signal.channel)
     ? await sendTelegramEngineSignal(env, {
         userId: signal.channel.userId,
@@ -8688,6 +8809,7 @@ async function sendValidatorModuleTelegramNotification(
           roundId: signal.roundId,
           tieMultiplier: "",
         }),
+        buttons,
       })
     : await sendTelegramMessage({
         botToken: decodeServerToken(signal.channel.botTokenEncoded),
@@ -8695,6 +8817,7 @@ async function sendValidatorModuleTelegramNotification(
         message: signal.message,
         buttonLabel: "Abrir Sniper Bo IA",
         buttonUrl: normalizeTelegramButtonUrl(signal.channel.buttonLink),
+        buttons,
         allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
       });
   const telegramRespondedAtMs = Date.now();
@@ -8850,6 +8973,7 @@ async function sendValidatorTelegramResultNotification(
   const payloadJson = readRecord(originalNotification.payloadJson || originalNotification.payload_json);
   const moduleKey = readValidatorNotificationModuleKey(originalNotification);
   const moduleConfig = validatorChannelModuleConfig(channel, moduleKey);
+  const buttons = validatorModuleTelegramButtons(moduleConfig, channel);
   const variables = validatorTelegramResultVariables(moduleKey, payloadJson, outcome, latestRound);
   const template =
     outcome.status === "RED"
@@ -8874,6 +8998,7 @@ async function sendValidatorTelegramResultNotification(
         result: outcome.label,
         protection: outcome.galeUsed <= 0 ? "SG" : `G${Math.min(4, outcome.galeUsed)}`,
         variables,
+        buttons,
       })
     : await sendTelegramMessage({
         botToken: decodeServerToken(channel.botTokenEncoded),
@@ -8881,6 +9006,7 @@ async function sendValidatorTelegramResultNotification(
         message,
         buttonLabel: "Abrir Sniper Bo IA",
         buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+        buttons,
         allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
       });
   const resultNotification = {
@@ -9130,6 +9256,20 @@ function validatorModuleAllowsSignalEntry(
   return moduleConfig.entryType === side;
 }
 
+function validatorModuleTelegramButtons(
+  moduleConfig: ValidatorTelegramModuleConfig,
+  channel: ValidatorNotificationChannel,
+) {
+  return normalizeValidatorTelegramButtons(moduleConfig.buttons)
+    .filter((button) => button.enabled)
+    .map((button) => ({
+      label: (button.label || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
+      url: normalizeTelegramButtonUrl(button.url || channel.buttonLink),
+    }))
+    .filter((button) => button.label && button.url)
+    .slice(0, MAX_VALIDATOR_TELEGRAM_BUTTONS);
+}
+
 async function runLimitedValidatorTelegramSends(tasks: Array<() => Promise<boolean>>) {
   const results: boolean[] = [];
   let cursor = 0;
@@ -9261,6 +9401,7 @@ async function sendTelegramEngineSignal(
     result?: string;
     protection?: string;
     variables?: Record<string, string>;
+    buttons?: Array<{ label: string; url: string }>;
   },
 ) {
   const config = getTelegramEngineConfig(env);
@@ -9281,6 +9422,7 @@ async function sendTelegramEngineSignal(
       protection: input.protection,
       variables: input.variables || {},
       buttonLabel: "Abrir Sniper Bo IA",
+      buttons: input.buttons || [],
     }),
   }).catch((error) => {
     console.warn("Falha ao chamar Cloudflare Telegram Engine.", error);

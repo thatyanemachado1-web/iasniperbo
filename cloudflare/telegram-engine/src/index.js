@@ -1,4 +1,6 @@
 const MODULE_KEYS = ["ai_patterns", "paying_numbers", "surf_alert", "ties_only", "validator"];
+const MAX_TELEGRAM_BUTTONS = 4;
+const DEFAULT_BUTTON_LABEL = "Abrir Sniper Bo IA";
 const ENGINE_SECRET_NAMES = [
   "ENGINE_API_SECRET",
   "TELEGRAM_ENGINE_SECRET",
@@ -16,9 +18,14 @@ const DEFAULT_MODULE_CONFIG = {
   tieCoverage: 1,
   cooldownSeconds: 2,
   template: "",
+  analyzingTemplate: "",
   greenTemplate: "",
+  galeTemplate: "",
   redTemplate: "",
   tieTemplate: "",
+  expiredTemplate: "",
+  canceledTemplate: "",
+  buttons: [],
 };
 const DEFAULT_MODULE_TEMPLATES = {
   ai_patterns:
@@ -44,6 +51,20 @@ const DEFAULT_MODULE_GREEN_TEMPLATES = {
   validator:
     "✅ <b>{{result}}</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
 };
+const DEFAULT_MODULE_ANALYZING_TEMPLATES = {
+  ai_patterns: "🔎 <b>ANALISANDO PADRAO IA</b>\n🎲 <b>Mesa:</b> {{table}}\n⏳ Aguardando confirmacao real.",
+  paying_numbers: "🔎 <b>ANALISANDO NUMERO PAGANTE</b>\n🔢 <b>Numeros:</b> {{numbers}}\n⏳ Aguardando confirmacao real.",
+  surf_alert: "🔎 <b>ANALISANDO SURF</b>\n🌊 <b>Direcao:</b> {{side}}\n⏳ Aguardando confirmacao real.",
+  ties_only: "🔎 <b>ANALISANDO EMPATE</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}\n⏳ Aguardando confirmacao real.",
+  validator: "🔎 <b>ANALISANDO VALIDADOR</b>\n🧩 <b>Padrao:</b> {{pattern}}\n⏳ Aguardando entrada validada.",
+};
+const DEFAULT_MODULE_GALE_TEMPLATES = {
+  ai_patterns: "🛡️ <b>FAZER {{gale}}</b>\n🎯 <b>Entrada:</b> {{entry}}\n🧩 <b>Padrao:</b> {{pattern}}",
+  paying_numbers: "🛡️ <b>FAZER {{gale}}</b>\n🔢 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "🛡️ <b>FAZER {{gale}}</b>\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "🛡️ <b>COBRIR EMPATE {{gale}}</b>\n🟡 <b>Pressao:</b> {{tie_pressure}}",
+  validator: "🛡️ <b>FAZER {{gale}}</b>\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+};
 const DEFAULT_MODULE_RED_TEMPLATES = {
   ai_patterns:
     "❌ <b>RED</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
@@ -51,6 +72,20 @@ const DEFAULT_MODULE_RED_TEMPLATES = {
   surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
   ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate nao confirmou</b>\n🛡️ <b>Protecao:</b> {{gale}}",
   validator: "❌ <b>RED</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+};
+const DEFAULT_MODULE_EXPIRED_TEMPLATES = {
+  ai_patterns: "⌛ <b>SINAL EXPIRADO</b>\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}",
+  paying_numbers: "⌛ <b>SINAL EXPIRADO</b>\n💎 <b>Modulo:</b> {{module}}\n🔢 <b>Numeros:</b> {{numbers}}",
+  surf_alert: "⌛ <b>SINAL EXPIRADO</b>\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Direcao:</b> {{side}}",
+  ties_only: "⌛ <b>ALERTA DE EMPATE EXPIRADO</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}",
+  validator: "⌛ <b>SINAL EXPIRADO</b>\n🧩 <b>Padrao:</b> {{pattern}}",
+};
+const DEFAULT_MODULE_CANCELED_TEMPLATES = {
+  ai_patterns: "🚫 <b>SINAL CANCELADO</b>\n🤖 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  paying_numbers: "🚫 <b>SINAL BLOQUEADO</b>\n💎 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  surf_alert: "🚫 <b>SINAL CANCELADO</b>\n🌊 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  ties_only: "🚫 <b>ALERTA CANCELADO</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}\n📌 <b>Motivo:</b> {{result}}",
+  validator: "🚫 <b>SINAL CANCELADO</b>\n🧩 <b>Padrao:</b> {{pattern}}\n📌 <b>Motivo:</b> {{result}}",
 };
 const DEFAULT_MODULE_TIE_TEMPLATES = {
   ai_patterns:
@@ -121,6 +156,12 @@ export class TelegramEngine {
         if (!userId) return json({ error: "Missing user" }, 400, this.env);
         const body = await readJson(request);
         return this.testChannel(userId, String(body.channelId || ""));
+      }
+
+      if (request.method === "POST" && url.pathname === "/validator/channels/preview") {
+        if (!userId) return json({ error: "Missing user" }, 400, this.env);
+        const body = await readJson(request);
+        return this.previewChannel(userId, body);
       }
 
       if (request.method === "POST" && url.pathname === "/validator/channels/info") {
@@ -273,6 +314,30 @@ export class TelegramEngine {
     return json({ ok: true, messageId: result.messageId }, 200, this.env);
   }
 
+  async previewChannel(userId, body) {
+    const channel = await this.getChannel(userId, String(body.channelId || ""));
+    if (!channel) return json({ error: "Canal nao encontrado." }, 404, this.env);
+    const message = String(body.message || "").trim().slice(0, 4096);
+    if (!message) return json({ error: "Mensagem de previa obrigatoria." }, 400, this.env);
+    const buttons = normalizeModuleButtons(body.buttons, {}, [])
+      .filter((button) => button.enabled)
+      .map((button) => ({
+        label: String(button.label || DEFAULT_BUTTON_LABEL).trim().slice(0, 64),
+        url: normalizeUrl(String(button.url || channel.buttonLink || "")),
+      }))
+      .filter((button) => button.label && button.url)
+      .slice(0, MAX_TELEGRAM_BUTTONS);
+    const result = await sendTelegramMessage({
+      botToken: await this.decryptToken(channel.botTokenCipher),
+      chatId: channel.chatId,
+      message,
+      buttons,
+      parseMode: "HTML",
+    });
+    if (!result.ok) return json({ error: result.error }, result.status, this.env);
+    return json({ ok: true, messageId: result.messageId, preview: true, buttonCount: buttons.length }, 200, this.env);
+  }
+
   async channelInfo(userId, channelId) {
     const channel = await this.getChannel(userId, channelId);
     if (!channel) return json({ error: "Canal nao encontrado." }, 404, this.env);
@@ -415,12 +480,14 @@ export class TelegramEngine {
         blocked.push({ channelId: channel.id, reason: "duplicate_signal" });
         continue;
       }
+      const buttons = telegramButtonsForSignal(config, channel, body);
       const result = await sendTelegramMessage({
         botToken: await this.decryptToken(channel.botTokenCipher),
         chatId: channel.chatId,
         message,
-        buttonLabel: String(body.buttonLabel || "Abrir Sniper Bo IA"),
+        buttonLabel: String(body.buttonLabel || DEFAULT_BUTTON_LABEL),
         buttonUrl: channel.buttonLink,
+        buttons,
         parseMode: "HTML",
       });
       const signalHash = await hashText(signalKey);
@@ -439,6 +506,7 @@ export class TelegramEngine {
           protection: finalNotificationProtection,
           result: notificationResult,
           telegramMessageId: result.messageId || null,
+          buttonCount: buttons.length,
           cloudflare: true,
         },
         sentAt: new Date().toISOString(),
@@ -453,6 +521,7 @@ export class TelegramEngine {
         channelId: channel.id,
         notificationId: notification.id,
         reason: result.ok ? "sent_to_telegram" : "telegram_error",
+        buttonCount: buttons.length,
         error: result.error || "",
       });
     }
@@ -754,9 +823,13 @@ function normalizeModuleConfigs(value) {
   return MODULE_KEYS.reduce((acc, key) => {
     const raw = readRecord(record[key]);
     const defaultTemplate = DEFAULT_MODULE_TEMPLATES[key] || "";
+    const defaultAnalyzingTemplate = DEFAULT_MODULE_ANALYZING_TEMPLATES[key] || "";
     const defaultGreenTemplate = DEFAULT_MODULE_GREEN_TEMPLATES[key] || "";
+    const defaultGaleTemplate = DEFAULT_MODULE_GALE_TEMPLATES[key] || "";
     const defaultRedTemplate = DEFAULT_MODULE_RED_TEMPLATES[key] || "";
     const defaultTieTemplate = DEFAULT_MODULE_TIE_TEMPLATES[key] || defaultGreenTemplate;
+    const defaultExpiredTemplate = DEFAULT_MODULE_EXPIRED_TEMPLATES[key] || "";
+    const defaultCanceledTemplate = DEFAULT_MODULE_CANCELED_TEMPLATES[key] || "";
     acc[key] = {
       ...DEFAULT_MODULE_CONFIG,
       enabled: Object.prototype.hasOwnProperty.call(raw, "enabled") ? Boolean(raw.enabled) : key === "validator",
@@ -766,12 +839,75 @@ function normalizeModuleConfigs(value) {
       tieCoverage: clampInt(raw.tieCoverage ?? (key === "ties_only" ? 4 : 1), 0, 4),
       cooldownSeconds: clampInt(raw.cooldownSeconds ?? (key === "validator" ? 0 : 2), 0, 300),
       template: repairTelegramEncodingArtifacts(raw.template || defaultTemplate),
+      analyzingTemplate: repairTelegramEncodingArtifacts(raw.analyzingTemplate || defaultAnalyzingTemplate),
       greenTemplate: repairTelegramEncodingArtifacts(raw.greenTemplate || defaultGreenTemplate),
+      galeTemplate: repairTelegramEncodingArtifacts(raw.galeTemplate || defaultGaleTemplate),
       redTemplate: repairTelegramEncodingArtifacts(raw.redTemplate || defaultRedTemplate),
       tieTemplate: repairTelegramEncodingArtifacts(raw.tieTemplate || defaultTieTemplate),
+      expiredTemplate: repairTelegramEncodingArtifacts(raw.expiredTemplate || defaultExpiredTemplate),
+      canceledTemplate: repairTelegramEncodingArtifacts(raw.canceledTemplate || defaultCanceledTemplate),
+      buttons: normalizeModuleButtons(raw.buttons, raw),
     };
     return acc;
   }, {});
+}
+
+function defaultModuleButtons() {
+  return Array.from({ length: MAX_TELEGRAM_BUTTONS }, (_, index) => ({
+    enabled: index === 0,
+    label: index === 0 ? DEFAULT_BUTTON_LABEL : "",
+    url: "",
+  }));
+}
+
+function normalizeModuleButtons(value, legacyRecord = {}, fallback = defaultModuleButtons()) {
+  const source = Array.isArray(value) ? value.slice(0, MAX_TELEGRAM_BUTTONS) : [];
+  const normalized = source.map((item) => {
+    const record = readRecord(item);
+    return {
+      enabled: Object.prototype.hasOwnProperty.call(record, "enabled") ? Boolean(record.enabled) : true,
+      label: String(record.label || DEFAULT_BUTTON_LABEL).trim().slice(0, 64),
+      url: normalizeUrl(String(record.url || "")),
+    };
+  });
+
+  if (!normalized.length) {
+    const hasLegacyButton =
+      Object.prototype.hasOwnProperty.call(legacyRecord, "buttonEnabled") ||
+      Object.prototype.hasOwnProperty.call(legacyRecord, "buttonLabel") ||
+      Object.prototype.hasOwnProperty.call(legacyRecord, "buttonUrl");
+    if (hasLegacyButton) {
+      normalized.push({
+        enabled: Object.prototype.hasOwnProperty.call(legacyRecord, "buttonEnabled")
+          ? Boolean(legacyRecord.buttonEnabled)
+          : true,
+        label: String(legacyRecord.buttonLabel || DEFAULT_BUTTON_LABEL).trim().slice(0, 64),
+        url: normalizeUrl(String(legacyRecord.buttonUrl || "")),
+      });
+    } else {
+      normalized.push(...fallback.map((button) => ({ ...button })));
+    }
+  }
+
+  while (normalized.length < MAX_TELEGRAM_BUTTONS) {
+    normalized.push({ enabled: false, label: "", url: "" });
+  }
+  return normalized.slice(0, MAX_TELEGRAM_BUTTONS);
+}
+
+function telegramButtonsForSignal(config, channel, body) {
+  const bodyButtons = normalizeModuleButtons(body.buttons, body, []);
+  const source = bodyButtons.some((button) => button.enabled)
+    ? bodyButtons
+    : normalizeModuleButtons(config.buttons, config);
+  return source
+    .filter((button) => button.enabled)
+    .map((button) => ({
+      label: String(button.label || DEFAULT_BUTTON_LABEL).trim().slice(0, 64),
+      url: normalizeUrl(String(button.url || channel.buttonLink || "")),
+    }))
+    .filter((button) => button.label && button.url)
+    .slice(0, MAX_TELEGRAM_BUTTONS);
 }
 
 function sanitizeTemplateRecord(value) {
@@ -803,7 +939,7 @@ function publicChannel(channel) {
   };
 }
 
-async function sendTelegramMessage({ botToken, chatId, message, buttonLabel = "", buttonUrl = "", parseMode = "HTML" }) {
+async function sendTelegramMessage({ botToken, chatId, message, buttonLabel = "", buttonUrl = "", buttons = [], parseMode = "HTML" }) {
   if (!botToken || !chatId) return { ok: false, status: 400, error: "Canal Telegram sem token ou Chat ID." };
   const payload = {
     chat_id: chatId,
@@ -811,9 +947,21 @@ async function sendTelegramMessage({ botToken, chatId, message, buttonLabel = ""
     disable_web_page_preview: true,
     parse_mode: parseMode,
   };
+  const inlineButtons = Array.isArray(buttons)
+    ? buttons
+        .map((button) => ({
+          text: String(button.label || DEFAULT_BUTTON_LABEL).trim().slice(0, 64),
+          url: normalizeUrl(String(button.url || "")),
+        }))
+        .filter((button) => button.text && button.url)
+        .slice(0, MAX_TELEGRAM_BUTTONS)
+    : [];
   const url = normalizeUrl(buttonUrl);
-  if (url && buttonLabel) {
-    payload.reply_markup = { inline_keyboard: [[{ text: buttonLabel.slice(0, 64), url }]] };
+  if (!inlineButtons.length && url && buttonLabel) {
+    inlineButtons.push({ text: String(buttonLabel).slice(0, 64), url });
+  }
+  if (inlineButtons.length) {
+    payload.reply_markup = { inline_keyboard: [inlineButtons] };
   }
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
