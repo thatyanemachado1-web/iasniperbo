@@ -6595,10 +6595,10 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       message:
         "ENTRADA CONFIRMADA\n" +
         "Mesa: Bac Bo\n" +
-        "Padrao: B10 > T7 > P6\n" +
-        "Entrada: B Banker\n" +
-        "Gale: Ate G1\n" +
-        "Protecao Tie: Ativa\n" +
+        "\u{1F9E9} Padr\u00E3o: \u{1F534}10 \u2192 \u{1F535}7 \u2192 \u{1F7E1}6\n" +
+        "\u{1F3AF} Entrada: \u{1F534} Banker\n" +
+        "\u{1F6E1}\uFE0F Prote\u00E7\u00E3o: At\u00E9 G1\n" +
+        "\u{1F91D} Prote\u00E7\u00E3o Tie: Ativa\n" +
         `Canal: ${channel.name}`,
       buttonLabel: "Abrir Sniper Bo IA",
       buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
@@ -6775,7 +6775,7 @@ async function sendTelegramMessage({
 }): Promise<{ ok: true; messageId: number | null } | { ok: false; status: number; error: string }> {
   const payload: Record<string, unknown> = {
     chat_id: chatId,
-    text: message,
+    text: sanitizeValidatorTelegramOutgoingText(message).slice(0, 4096),
     parse_mode: "HTML",
     disable_web_page_preview: true,
   };
@@ -6808,7 +6808,7 @@ async function sendTelegramMessage({
   try {
     response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json; charset=utf-8" },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -9226,8 +9226,133 @@ function validatorNotificationMatchesModule(
 }
 
 function renderValidatorTelegramTemplate(template: string, variables: Record<string, string>) {
-  return (template || "").replace(/{{\s*([a-zA-Z_]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
+  return sanitizeValidatorTelegramOutgoingText(
+    (template || "").replace(/{{\s*([a-zA-Z_]+)\s*}}/g, (_, key: string) => variables[key] ?? ""),
+  );
 }
+
+function sanitizeValidatorTelegramOutgoingText(value: unknown) {
+  const text = String(value || "")
+    .replace(/\[PR[\uFFFD?]+E?VIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
+    .replace(/\[PREVIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
+    .replace(/PADR[\uFFFD?]+O/g, "PADRAO")
+    .replace(/Padr[\uFFFD?]+o/gi, "Padrao")
+    .replace(/Prote[\uFFFD?]+o/gi, "Protecao")
+    .replace(/M[\uFFFD?]+dulo/gi, "Modulo")
+    .replace(/N[\uFFFD?]+mero/gi, "Numero")
+    .replace(/Confian[\uFFFD?]+a/gi, "Confianca")
+    .replace(/\bPADRAO\b/g, "PADR\u00C3O")
+    .replace(/\bPadrao\b/g, "Padr\u00E3o")
+    .replace(/\bProtecao\b/gi, "Prote\u00E7\u00E3o")
+    .replace(/\bModulo\b/gi, "M\u00F3dulo")
+    .replace(/\bNumero\b/gi, "N\u00FAmero")
+    .replace(/\bConfianca\b/gi, "Confian\u00E7a")
+    .replace(/^\?{1,4}\s*((?:<b>)?ENTRADA CONFIRMADA(?:<\/b>)?)/gim, "\u{1F916} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?PADR?O IA CONFIRMADO(?:<\/b>)?)/gim, "\u{1F916} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Mesa:\s*(?:<\/b>)?)/gim, "\u{1F3B2} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Padr?o:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Entrada:\s*(?:<\/b>)?)/gim, "\u{1F3AF} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Prote??o:\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Assertividade:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1")
+    .replace(/\?{1,4}\s*(BANKER|Banker)\b/g, "\u{1F534} $1")
+    .replace(/\?{1,4}\s*(PLAYER|Player)\b/g, "\u{1F535} $1")
+    .replace(/\?{1,4}\s*(TIE|Tie)\b/g, "\u{1F7E1} $1");
+  return decorateValidatorTelegramPatternLines(decorateKnownValidatorTelegramLines(text));
+}
+
+function decorateKnownValidatorTelegramLines(value: string) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map(decorateKnownValidatorTelegramLine)
+    .join("\n");
+}
+
+function decorateKnownValidatorTelegramLine(line: string) {
+  const source = String(line || "");
+  const match = source.match(/^(\s*)(.*)$/);
+  const indent = match?.[1] || "";
+  const body = match?.[2] || "";
+  const cleanBody = body.replace(/^\?{1,4}\s*/, "");
+  if (!cleanBody || startsWithValidatorTelegramEmoji(cleanBody)) return indent + cleanBody;
+  const plain = cleanBody
+    .replace(/<[^>]+>/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+  const emoji = validatorTelegramEmojiForLine(plain);
+  return indent + (emoji ? `${emoji} ` : "") + cleanBody;
+}
+
+function startsWithValidatorTelegramEmoji(value: string) {
+  return /^(?:[\u{1F300}-\u{1FAFF}]|\u2600|\u26A0|\u2705|\u274C)/u.test(String(value || "").trim());
+}
+
+function validatorTelegramEmojiForLine(plain: string) {
+  if (!plain || plain.startsWith("[PREVIA DE TESTE]")) return "";
+  if (plain.startsWith("ENTRADA CONFIRMADA")) return "??";
+  if (plain.startsWith("PADRAO IA CONFIRMADO")) return "??";
+  if (plain.startsWith("PADRAO VALIDADOR")) return "??";
+  if (plain.startsWith("NUMERO PAGANTE CONFIRMADO")) return "??";
+  if (plain.startsWith("AVISO DE SURF CONFIRMADO")) return "??";
+  if (plain.startsWith("POSSIVEL EMPATE")) return "??";
+  if (plain.startsWith("MESA:")) return "??";
+  if (plain.startsWith("PADRAO:")) return "??";
+  if (plain.startsWith("ENTRADA:")) return "??";
+  if (plain.startsWith("PROTECAO:")) return "???";
+  if (plain.startsWith("PROTECAO TIE:")) return "??";
+  if (plain.startsWith("COBERTURA:")) return "???";
+  if (plain.startsWith("ASSERTIVIDADE:")) return "??";
+  if (plain.startsWith("NUMERO:")) return "??";
+  if (plain.startsWith("NUMEROS:")) return "??";
+  if (plain.startsWith("STATUS:")) return "??";
+  if (plain.startsWith("RISCO:")) return "??";
+  if (plain.startsWith("CONFIANCA:")) return "??";
+  if (plain.startsWith("NIVEL:")) return "??";
+  if (plain.startsWith("MODULO:")) return "??";
+  return "";
+}
+
+function decorateValidatorTelegramPatternLines(value: string) {
+  return String(value || "").replace(/^(\s*(?:\u{1F9E9}\s*)?(?:<b>)?Padr(?:\u00E3o|ao)(?:<\/b>)?:\s*)([^\r\n]+)/gimu, (_, prefix: string, expression: string) => {
+    let nextPrefix = String(prefix || "").replace(/Padrao/gi, "Padr\u00E3o");
+    if (!nextPrefix.includes("\u{1F9E9}")) nextPrefix = nextPrefix.replace(/^(\s*)/, "$1\u{1F9E9} ");
+    return nextPrefix + decorateValidatorTelegramPatternExpression(expression);
+  });
+}
+
+function decorateValidatorTelegramPatternExpression(value: unknown) {
+  const parts = String(value || "")
+    .split(/\s*(?:\u2192|->|>)\s*/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return formatValidatorTelegramPatternToken(value);
+  return parts.map(formatValidatorTelegramPatternToken).join(" \u2192 ");
+}
+
+function formatValidatorTelegramPatternToken(token: unknown) {
+  const source = String(token || "");
+  const hadRed = source.includes("\u{1F534}");
+  const hadBlue = source.includes("\u{1F535}");
+  const hadYellow = source.includes("\u{1F7E1}");
+  const clean = source
+    .replace(/<[^>]+>/g, "")
+    .replace(/[\uFFFD?]/g, "")
+    .replace(/[\u{1F534}\u{1F535}\u{1F7E1}]/gu, "")
+    .trim();
+  const normalized = clean.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, "");
+  const side = hadRed || normalized.startsWith("BANKER") || normalized.startsWith("B")
+    ? "B"
+    : hadBlue || normalized.startsWith("PLAYER") || normalized.startsWith("P")
+      ? "P"
+      : hadYellow || normalized.startsWith("TIE") || normalized.startsWith("T")
+        ? "T"
+        : "";
+  if (!side) return clean || source.trim();
+  const number = normalized.match(/\d{1,2}/)?.[0] || "";
+  return serverSideCircle(side as Round["result"]) + (number || " " + side);
+}
+
 
 function formatValidatorModuleGale(value: unknown) {
   const gale = Math.max(0, Math.min(4, Math.floor(Number(value) || 0)));
@@ -9668,7 +9793,7 @@ function formatServerTelegramSequenceToken(token: string) {
         : "";
   if (!side) return raw;
   const score = normalized.match(/\d+/)?.[0] || "";
-  return `${serverSideCircle(side as Round["result"])}${score}`;
+  return `${serverSideCircle(side as Round["result"])}${score || ` ${side}`}`;
 }
 
 function formatServerPercent(value?: number) {

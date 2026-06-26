@@ -878,10 +878,10 @@ function NeuralValidatorPage() {
         message:
           "ENTRADA CONFIRMADA\n" +
           "Mesa: Bac Bo\n" +
-          "Padrao: B10 > T7 > P6\n" +
-          "Entrada: B Banker\n" +
-          "Gale: Ate G1\n" +
-          "Protecao Tie: Ativa\n" +
+          "\u{1F9E9} Padr\u00E3o: \u{1F534}10 \u2192 \u{1F535}7 \u2192 \u{1F7E1}6\n" +
+          "\u{1F3AF} Entrada: \u{1F534} Banker\n" +
+          "\u{1F6E1}\uFE0F Prote\u00E7\u00E3o: At\u00E9 G1\n" +
+          "\u{1F91D} Prote\u00E7\u00E3o Tie: Ativa\n" +
           `Canal: ${channel.name}`,
         buttonLabel: "Abrir Sniper Bo IA",
       });
@@ -3136,7 +3136,7 @@ function telegramModulePreview(key: ValidatorTelegramModuleKey, config: Validato
     score: "2x0",
     status: "CONFIRMADO",
     risk: "baixo",
-    numbers: "10, 7, 6",
+    numbers: "\u{1F534}10, \u{1F535}7, \u{1F7E1}6",
     side: "Banker",
     tie_pressure: "forte",
     number: "🔵9",

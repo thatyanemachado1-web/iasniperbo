@@ -943,7 +943,7 @@ async function sendTelegramMessage({ botToken, chatId, message, buttonLabel = ""
   if (!botToken || !chatId) return { ok: false, status: 400, error: "Canal Telegram sem token ou Chat ID." };
   const payload = {
     chat_id: chatId,
-    text: String(message || "").slice(0, 4096),
+    text: sanitizeTelegramOutgoingMessage(message).slice(0, 4096),
     disable_web_page_preview: true,
     parse_mode: parseMode,
   };
@@ -965,7 +965,7 @@ async function sendTelegramMessage({ botToken, chatId, message, buttonLabel = ""
   }
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json; charset=utf-8" },
     body: JSON.stringify(payload),
   });
   const data = await response.json().catch(() => ({}));
@@ -983,7 +983,7 @@ async function getTelegramChat({ botToken, chatId }) {
   if (!botToken || !chatId) return { ok: false, status: 400, error: "Canal Telegram sem token ou Chat ID." };
   const response = await fetch(`https://api.telegram.org/bot${botToken}/getChat`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json; charset=utf-8" },
     body: JSON.stringify({ chat_id: chatId }),
   });
   const data = await response.json().catch(() => ({}));
@@ -1204,13 +1204,176 @@ function normalizeDedupeText(value) {
 }
 
 function formatTelegramMessageText(value) {
-  const repaired = repairTelegramEncodingArtifacts(value);
-  return decorateScoreTokens(
-    String(repaired || "")
+  return sanitizeTelegramOutgoingMessage(
+    String(value || "")
       .replace(/\bB\s+Banker\b/gi, formatEntry("BANKER"))
       .replace(/\bP\s+Player\b/gi, formatEntry("PLAYER"))
       .replace(/\bT\s+Tie\b/gi, formatEntry("TIE")),
   );
+}
+
+function sanitizeTelegramOutgoingMessage(value) {
+  const repaired = repairTelegramEncodingArtifacts(value);
+  return decoratePatternLines(decorateScoreTokens(restoreTelegramEmojiMarkers(repaired)));
+}
+
+function restoreTelegramEmojiMarkers(value) {
+  const red = "\u{1F534}";
+  const blue = "\u{1F535}";
+  const yellow = "\u{1F7E1}";
+  const markers = [
+    [/^\?{1,4}\s*((?:<b>)?ENTRADA CONFIRMADA(?:<\/b>)?)/gim, "\u{1F916} $1"],
+    [/^\?{1,4}\s*((?:<b>)?PADRAO IA CONFIRMADO(?:<\/b>)?)/gim, "\u{1F916} $1"],
+    [/^\?{1,4}\s*((?:<b>)?PADR?O IA CONFIRMADO(?:<\/b>)?)/gim, "\u{1F916} $1"],
+    [/^\?{1,4}\s*((?:<b>)?PADRAO VALIDADOR(?:<\/b>)?)/gim, "\u{1F916} $1"],
+    [/^\?{1,4}\s*((?:<b>)?PADR?O VALIDADOR(?:<\/b>)?)/gim, "\u{1F916} $1"],
+    [/^\?{1,4}\s*((?:<b>)?NUMERO PAGANTE CONFIRMADO(?:<\/b>)?)/gim, "\u{1F48E} $1"],
+    [/^\?{1,4}\s*((?:<b>)?N?MERO PAGANTE CONFIRMADO(?:<\/b>)?)/gim, "\u{1F48E} $1"],
+    [/^\?{1,4}\s*((?:<b>)?AVISO DE SURF CONFIRMADO(?:<\/b>)?)/gim, "\u{1F30A} $1"],
+    [/^\?{1,4}\s*((?:<b>)?POSSIVEL EMPATE(?:<\/b>)?)/gim, "\u{1F7E1} $1"],
+    [/^\?{1,4}\s*((?:<b>)?POSS?VEL EMPATE(?:<\/b>)?)/gim, "\u{1F7E1} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Mesa:\s*(?:<\/b>)?)/gim, "\u{1F3B2} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Padrao:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Padr?o:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Entrada:\s*(?:<\/b>)?)/gim, "\u{1F3AF} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Protecao:\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1"],
+    [/^\?{1,4}\s*((?:<b>)?Prote??o:\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1"],
+    [/^\?{1,4}\s*((?:<b>)?Assertividade:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Numero:\s*(?:<\/b>)?)/gim, "\u{1F522} $1"],
+    [/^\?{1,4}\s*((?:<b>)?N?mero:\s*(?:<\/b>)?)/gim, "\u{1F522} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Status:\s*(?:<\/b>)?)/gim, "\u{1F4CC} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Risco:\s*(?:<\/b>)?)/gim, "\u26A0\uFE0F $1"],
+    [/^\?{1,4}\s*((?:<b>)?Confianca:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Confian?a:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1"],
+  ];
+  let text = String(value || "")
+    .replace(/\[PR[\uFFFD?]+E?VIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
+    .replace(/\[PREVIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
+    .replace(/PADR[\uFFFD?]+O/g, "PADRAO")
+    .replace(/Padr[\uFFFD?]+o/gi, "Padrao")
+    .replace(/Prote[\uFFFD?]+o/gi, "Protecao")
+    .replace(/M[\uFFFD?]+dulo/gi, "Modulo")
+    .replace(/N[\uFFFD?]+mero/gi, "Numero")
+    .replace(/Confian[\uFFFD?]+a/gi, "Confianca")
+    .replace(/POSS[\uFFFD?]+VEL/gi, "POSSIVEL")
+    .replace(/N[\uFFFD?]+vel/gi, "Nivel")
+    .replace(/\bPADRAO\b/g, "PADR\u00C3O")
+    .replace(/\bPadrao\b/g, "Padr\u00E3o")
+    .replace(/\bProtecao\b/gi, "Prote\u00E7\u00E3o")
+    .replace(/\bModulo\b/gi, "M\u00F3dulo")
+    .replace(/\bNumero\b/gi, "N\u00FAmero")
+    .replace(/\bConfianca\b/gi, "Confian\u00E7a")
+    .replace(/\bPOSSIVEL\b/gi, "POSS\u00CDVEL")
+    .replace(/\bNivel\b/gi, "N\u00EDvel")
+    .replace(/\bate\b/gi, "at\u00E9");
+  for (const [pattern, replacement] of markers) text = text.replace(pattern, replacement);
+  text = decorateKnownTelegramLines(text);
+  return text
+    .replace(/\?{1,4}\s*(BANKER|Banker)\b/g, red + " $1")
+    .replace(/\?{1,4}\s*(PLAYER|Player)\b/g, blue + " $1")
+    .replace(/\?{1,4}\s*(TIE|Tie)\b/g, yellow + " $1")
+    .replace(/^\?{1,4}\s*(?=(?:<b>)?(?:PADR?O|Padr?o|Mesa|M?dulo|Entrada|Prote??o|Assertividade|N?mero|Status|Green|Red|RED|Empate|N?MERO|AVISO))/gim, "");
+}
+
+function decorateKnownTelegramLines(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map(decorateKnownTelegramLine)
+    .join("\n");
+}
+
+function decorateKnownTelegramLine(line) {
+  const source = String(line || "");
+  const match = source.match(/^(\s*)(.*)$/);
+  const indent = match?.[1] || "";
+  const body = match?.[2] || "";
+  const cleanBody = body.replace(/^\?{1,4}\s*/, "");
+  if (!cleanBody || startsWithTelegramEmoji(cleanBody)) return indent + cleanBody;
+  const plain = cleanBody
+    .replace(/<[^>]+>/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+  const emoji = telegramEmojiForLine(plain);
+  return indent + (emoji ? emoji + " " : "") + cleanBody;
+}
+
+function startsWithTelegramEmoji(value) {
+  return /^(?:[\u{1F300}-\u{1FAFF}]|\u2600|\u26A0|\u2705|\u274C)/u.test(String(value || "").trim());
+}
+
+function telegramEmojiForLine(plain) {
+  if (!plain || plain.startsWith("[PREVIA DE TESTE]")) return "";
+  if (plain.startsWith("ENTRADA CONFIRMADA")) return "\u{1F916}";
+  if (plain.startsWith("PADRAO IA CONFIRMADO")) return "\u{1F916}";
+  if (plain.startsWith("PADRAO VALIDADOR")) return "\u{1F916}";
+  if (plain.startsWith("NUMERO PAGANTE CONFIRMADO")) return "\u{1F48E}";
+  if (plain.startsWith("AVISO DE SURF CONFIRMADO")) return "\u{1F30A}";
+  if (plain.startsWith("POSSIVEL EMPATE")) return "\u{1F7E1}";
+  if (plain.startsWith("MESA:")) return "\u{1F3B2}";
+  if (plain.startsWith("PADRAO:")) return "\u{1F9E9}";
+  if (plain.startsWith("ENTRADA:")) return "\u{1F3AF}";
+  if (plain.startsWith("PROTECAO:")) return "\u{1F6E1}\uFE0F";
+  if (plain.startsWith("PROTECAO TIE:")) return "\u{1F91D}";
+  if (plain.startsWith("COBERTURA:")) return "\u{1F6E1}\uFE0F";
+  if (plain.startsWith("ASSERTIVIDADE:")) return "\u{1F4CA}";
+  if (plain.startsWith("NUMERO:")) return "\u{1F522}";
+  if (plain.startsWith("NUMEROS:")) return "\u{1F522}";
+  if (plain.startsWith("STATUS:")) return "\u{1F4CC}";
+  if (plain.startsWith("RISCO:")) return "\u26A0\uFE0F";
+  if (plain.startsWith("CONFIANCA:")) return "\u{1F4CA}";
+  if (plain.startsWith("NIVEL:")) return "\u{1F4CA}";
+  if (plain.startsWith("MODULO:")) return "\u{1F916}";
+  return "";
+}
+
+function decoratePatternLines(message) {
+  const puzzle = "\u{1F9E9}";
+  return String(message || "").replace(/^(\s*(?:\u{1F9E9}\s*)?(?:<b>)?Padr(?:\u00E3o|ao)(?:<\/b>)?:\s*)([^\r\n]+)/gimu, (match, prefix, expression) => {
+    let nextPrefix = String(prefix || "").replace(/Padrao/gi, "Padr\u00E3o").replace(/^\s*\?{1,4}\s*/, "");
+    if (!nextPrefix.includes(puzzle)) nextPrefix = nextPrefix.replace(/^(\s*)/, "$1" + puzzle + " ");
+    return nextPrefix + decorateTelegramPatternExpression(expression);
+  });
+}
+
+function decorateTelegramPatternExpression(value) {
+  const parts = String(value || "")
+    .split(/\s*(?:\u2192|->|>)\s*/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return formatTelegramPatternToken(value);
+  return parts.map(formatTelegramPatternToken).join(" \u2192 ");
+}
+
+function formatTelegramPatternToken(token) {
+  const source = String(token || "");
+  const hadRed = source.includes("\u{1F534}");
+  const hadBlue = source.includes("\u{1F535}");
+  const hadYellow = source.includes("\u{1F7E1}");
+  const clean = source
+    .replace(/<[^>]+>/g, "")
+    .replace(/[\uFFFD?]/g, "")
+    .replace(/[\u{1F534}\u{1F535}\u{1F7E1}]/gu, "")
+    .trim();
+  const normalized = clean.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, "");
+  const side = hadRed || normalized.startsWith("BANKER") || normalized.startsWith("B")
+    ? "B"
+    : hadBlue || normalized.startsWith("PLAYER") || normalized.startsWith("P")
+      ? "P"
+      : hadYellow || normalized.startsWith("TIE") || normalized.startsWith("T")
+        ? "T"
+        : "";
+  if (!side) return clean || source.trim();
+  const number = normalized.match(/\d{1,2}/)?.[0] || "";
+  return telegramSideCircle(side) + (number || " " + side);
+}
+
+function telegramSideCircle(side) {
+  if (side === "B" || side === "BANKER") return "\u{1F534}";
+  if (side === "P" || side === "PLAYER") return "\u{1F535}";
+  if (side === "T" || side === "TIE") return "\u{1F7E1}";
+  return "";
 }
 
 function repairTelegramEncodingArtifacts(value) {
@@ -1244,8 +1407,7 @@ function repairTelegramEncodingArtifacts(value) {
     .replace(/N(?:ÃƒÂº|Ãº|ï¿½)mero/gi, "Numero")
     .replace(/Confian(?:ÃƒÂ§|Ã§|ï¿½)a/gi, "Confianca")
     .replace(/n(?:ÃƒÂ£|Ã£|ï¿½)o/gi, "nao")
-    .replace(/Assertividade:\s*$/gim, "Assertividade:")
-    .replace(/^\?{1,4}\s*(?=(?:<b>)?(?:PADRAO|Padrao|Mesa|Modulo|Entrada|Protecao|Assertividade|Numero|Status|Green|Red|RED|Empate|NUMERO|AVISO))/gim, "");
+    .replace(/Assertividade:\s*$/gim, "Assertividade:");
 }
 
 function decorateScoreTokens(message) {
