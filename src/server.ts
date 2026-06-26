@@ -6644,6 +6644,20 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     const channelId = readString(body, "channelId");
     const channel = await findValidatorChannelForUser(env, userId, channelId);
     if (!channel) return json({ error: "Canal nao encontrado." }, 404);
+    if (isCloudValidatorTelegramChannel(channel)) {
+      const result = await sendTelegramEngineSignal(env, {
+        userId,
+        channelId: channel.id,
+        moduleKey: "validator",
+        signalKey: `connection-test:${channel.id}:${Date.now()}`,
+        roundId: Date.now(),
+        entry: "",
+        message: "[TESTE CONEXAO TELEGRAM]\nCentral Telegram conectada com sucesso.",
+        forceMessage: true,
+      });
+      if (!result.ok) return json({ error: result.error }, result.status || 502);
+      return json({ ok: true, messageId: result.messageId, channelId: channel.id });
+    }
     const botToken = decodeServerToken(channel.botTokenEncoded);
     if (!botToken || !channel.chatId) {
       return json({ error: "Canal Telegram sem Bot Token ou Chat ID. Salve o canal novamente." }, 400);
@@ -6713,12 +6727,26 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       const next = normalizeServerNotificationChannel({ ...current, ...body, id: current.id }, userId, current);
       if (!next) return json({ error: "Canal invalido." }, 400);
       if (validatorChannelActivatesAnyModule(current, next)) {
-        const botToken = decodeServerToken(next.botTokenEncoded);
-        if (!botToken || !next.chatId) {
-          return json({ error: "Canal Telegram sem Bot Token ou Chat ID. Salve o canal novamente." }, 400);
+        if (isCloudValidatorTelegramChannel(next)) {
+          const result = await sendTelegramEngineSignal(env, {
+            userId,
+            channelId: next.id,
+            moduleKey: "validator",
+            signalKey: `activation-test:${next.id}:${Date.now()}`,
+            roundId: Date.now(),
+            entry: "",
+            message: "[TESTE CONEXAO TELEGRAM]\nCentral Telegram conectada com sucesso.",
+            forceMessage: true,
+          });
+          if (!result.ok) return json({ error: result.error }, result.status || 502);
+        } else {
+          const botToken = decodeServerToken(next.botTokenEncoded);
+          if (!botToken || !next.chatId) {
+            return json({ error: "Canal Telegram sem Bot Token ou Chat ID. Salve o canal novamente." }, 400);
+          }
+          const validation = await validateTelegramChannelAccess(request, botToken, next.chatId);
+          if (!validation.ok) return json({ error: validation.error }, validation.status);
         }
-        const validation = await validateTelegramChannelAccess(request, botToken, next.chatId);
-        if (!validation.ok) return json({ error: validation.error }, validation.status);
       }
       liveValidatorChannels = upsertValidatorChannel(next);
       await persistValidatorChannel(env, next);
