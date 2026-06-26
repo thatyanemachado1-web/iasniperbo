@@ -3283,9 +3283,7 @@ async function persistDashboardRoundIngestion(
       ),
     );
   }
-  const monitorTask = incomingRounds.length
-    ? processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback, fast: true, roundReceivedAtMs })
-    : Promise.resolve(false);
+  const monitorTask = processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback, fast: true, roundReceivedAtMs });
   await Promise.all([...writes, monitorTask]);
   await saveLiveState(env);
 }
@@ -7614,10 +7612,13 @@ function validatorChannelRelatedIds(
     .filter(Boolean);
 }
 
-async function refreshValidatorMonitorCache(env: unknown) {
-  if (!getSupabasePersistenceConfig(env)) return;
+async function refreshValidatorMonitorCache(env: unknown, force = false) {
+  const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
+  const cloudEngineConfigured = Boolean(getTelegramEngineConfig(env));
+  if (!durableConfigured && !cloudEngineConfigured) return;
   const now = Date.now();
-  if (validatorMonitorCacheLoadedAt && now - validatorMonitorCacheLoadedAt < VALIDATOR_MONITOR_CACHE_TTL_MS) return;
+  if (!force && validatorMonitorCacheLoadedAt && now - validatorMonitorCacheLoadedAt < VALIDATOR_MONITOR_CACHE_TTL_MS)
+    return;
   if (validatorMonitorCachePromise) {
     await validatorMonitorCachePromise;
     return;
@@ -7625,13 +7626,24 @@ async function refreshValidatorMonitorCache(env: unknown) {
 
   validatorMonitorCachePromise = (async () => {
     const [patterns, channels, notifications] = await Promise.all([
-      fetchStoredActiveValidatorPatterns(env),
+      durableConfigured ? fetchStoredActiveValidatorPatterns(env) : Promise.resolve(liveValidatorPatterns),
       fetchStoredActiveValidatorChannels(env),
-      fetchStoredRecentValidatorNotifications(env),
+      durableConfigured ? fetchStoredRecentValidatorNotifications(env) : Promise.resolve(liveValidatorNotifications),
     ]);
     liveValidatorPatterns = patterns;
     liveValidatorChannels = channels;
     liveValidatorNotifications = notifications;
+    console.info(
+      JSON.stringify({
+        event: "[TELEGRAM_AUTO] canais ativos encontrados",
+        cloudEngineConfigured,
+        durableConfigured,
+        channels: channels.length,
+        usableChannels: channels.filter(isUsableValidatorTelegramChannel).length,
+        patterns: patterns.length,
+        notifications: notifications.length,
+      }),
+    );
     validatorMonitorCacheLoadedAt = Date.now();
   })().finally(() => {
     validatorMonitorCachePromise = null;
@@ -8319,20 +8331,42 @@ type ValidatorMonitorOptions = {
 };
 
 async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMonitorOptions = {}) {
-  const hasWarmMonitorCache = liveValidatorPatterns.length > 0 || liveValidatorChannels.length > 0;
-  if (!options.fast || !hasWarmMonitorCache) {
-    await withTimeout(
-      refreshValidatorMonitorCache(env),
-      LIVE_STATE_IO_TIMEOUT_MS,
-      "carregar monitor do Validador",
-      undefined,
-    );
-  }
+  const hasWarmMonitorCache = liveValidatorChannels.some(isUsableValidatorTelegramChannel);
+  console.info(
+    JSON.stringify({
+      event: "[TELEGRAM_AUTO] monitor iniciado",
+      fast: Boolean(options.fast),
+      cachedChannels: liveValidatorChannels.length,
+      usableCachedChannels: liveValidatorChannels.filter(isUsableValidatorTelegramChannel).length,
+      cachedPatterns: liveValidatorPatterns.length,
+      willRefresh: true,
+    }),
+  );
+  await withTimeout(
+    refreshValidatorMonitorCache(env, true),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar monitor do Validador",
+    undefined,
+  );
   if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
     liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
   }
   const latestRound = liveValidatorRoundHistory.at(-1);
   if (!latestRound) return false;
+  console.info(
+    JSON.stringify({
+      event: "[TELEGRAM_AUTO] card detectado",
+      roundId: latestRound.id,
+      aiEntryAlerts: Array.isArray(readRecord(liveDashboardData.patternMinerSnapshot || liveDashboardData.patternMiner).entryAlerts)
+        ? readRecord(liveDashboardData.patternMinerSnapshot || liveDashboardData.patternMiner).entryAlerts.length
+        : 0,
+      neuralMode: liveDashboardData.neuralReading?.mode || "",
+      neuralStatus: liveDashboardData.neuralReading?.paganteStatus || "",
+      neuralEntryState: Boolean(normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState)),
+      tieStatus: readString(readRecord(liveDashboardData.currentTieAlert), "status"),
+      surfAlert: Boolean(readRecord(liveDashboardData.currentSurfAlert).surf_alert),
+    }),
+  );
 
   let changed = false;
   const entryChannelKeys = new Set<string>();
@@ -8624,7 +8658,24 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
   }
 
   const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
-  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem) || state?.expectedSide;
+  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
+  console.info(
+    JSON.stringify({
+      event: "[NUMEROS_PAGANTES] detectado",
+      user: maskTelemetryUserId(channel.userId),
+      channelId: channel.id,
+      roundId: latestRound.id,
+      moduleEnabled: moduleConfig.enabled,
+      entryFilter: moduleConfig.entryType,
+      mode: reading.mode || "",
+      status: reading.paganteStatus || "",
+      numero: reading.numero ?? null,
+      expectedSide,
+      readingKey: serverNeuralEntryKey(reading),
+      stateKey: state?.key || "",
+      stateExpectedSide: state?.expectedSide || "",
+    }),
+  );
   if (!expectedSide) {
     logPayingNumbersTelegramDecision(channel, "blocked", "missing_detected_entry", {
       roundId: latestRound.id,
@@ -8633,7 +8684,9 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     return null;
   }
 
-  const key = serverNeuralEntryKey(reading) || state?.key || "";
+  const confirmedCard = readServerConfirmedNeuralEntryCard(reading, state);
+  const stateMatchesReading = Boolean(confirmedCard.stateMatchesReading);
+  const key = serverNeuralEntryKey(reading) || (stateMatchesReading ? state?.key || "" : "");
   if (!key) {
     logPayingNumbersTelegramDecision(channel, "blocked", "missing_signal_key", {
       roundId: latestRound.id,
@@ -8643,8 +8696,6 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     return null;
   }
 
-  const confirmedCard = readServerConfirmedNeuralEntryCard(reading, state);
-  const stateMatchesReading = Boolean(confirmedCard.stateMatchesReading);
   if (state && !stateMatchesReading) {
     console.info(JSON.stringify({
       event: "telegram_paying_numbers_decision",
@@ -8675,6 +8726,22 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     });
     return null;
   }
+
+  console.info(
+    JSON.stringify({
+      event: "[NUMEROS_PAGANTES] confirmado",
+      user: maskTelemetryUserId(channel.userId),
+      channelId: channel.id,
+      roundId: latestRound.id,
+      signalKey: key,
+      expectedSide: confirmedEntrySide,
+      entryText: formatServerSignalSide(confirmedEntrySide),
+      stateMatched: stateMatchesReading,
+      dedupeKeyPreview: `module:paying_numbers:${channel.userId}:${channel.id}:${hashServerText(
+        `paying:${key}:${confirmedCard.triggerRoundKey || String(latestRound.id)}`,
+      )}`,
+    }),
+  );
 
   if (!validatorModuleAllowsSignalEntry(moduleConfig, confirmedEntrySide)) {
     logPayingNumbersTelegramDecision(channel, "blocked", "entry_not_allowed", {
@@ -8747,7 +8814,7 @@ function readServerConfirmedNeuralEntryCard(
     Boolean(state && stateReadingKey === key) &&
     (!state?.expectedSide || state.expectedSide === expectedSide);
 
-  if (state?.expectedSide) {
+  if (state?.expectedSide && stateMatchesReading) {
     return {
       side: state.expectedSide,
       stateMatchesReading,
@@ -8910,6 +8977,17 @@ async function sendValidatorModuleTelegramNotification(
   const telegramSendStartedAtMs = Date.now();
   const moduleConfig = validatorChannelModuleConfig(signal.channel, signal.moduleKey);
   const buttons = validatorModuleTelegramButtons(moduleConfig, signal.channel);
+  console.info(
+    JSON.stringify({
+      event: "[TELEGRAM_AUTO] enviando",
+      user: maskTelemetryUserId(signal.channel.userId),
+      channelId: signal.channel.id,
+      moduleKey: signal.moduleKey,
+      roundId: signal.roundId,
+      signalKey: signal.signalKey,
+      dedupeKey: signal.notificationKey,
+    }),
+  );
   const result = isCloudValidatorTelegramChannel(signal.channel)
     ? await sendTelegramEngineSignal(env, {
         userId: signal.channel.userId,
@@ -8941,6 +9019,20 @@ async function sendValidatorModuleTelegramNotification(
         allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
       });
   const telegramRespondedAtMs = Date.now();
+  console[result.ok ? "info" : "warn"](
+    JSON.stringify({
+      event: result.ok ? "[TELEGRAM_AUTO] enviado com sucesso" : "[TELEGRAM_AUTO] erro: motivo completo",
+      user: maskTelemetryUserId(signal.channel.userId),
+      channelId: signal.channel.id,
+      moduleKey: signal.moduleKey,
+      roundId: signal.roundId,
+      signalKey: signal.signalKey,
+      dedupeKey: signal.notificationKey,
+      status: result.status,
+      telegramMessageId: result.ok ? result.messageId : null,
+      error: result.ok ? "" : result.error,
+    }),
+  );
   const latency = {
     roundReceivedAt: options.roundReceivedAtMs ? new Date(options.roundReceivedAtMs).toISOString() : "",
     moduleMatchedAt: new Date(signal.matchedAtMs).toISOString(),
@@ -9621,7 +9713,8 @@ function logPayingNumbersTelegramDecision(
   details: Record<string, unknown> = {},
 ) {
   const summary = {
-    event: "telegram_paying_numbers_decision",
+    event: status === "sent" ? "[NUMEROS_PAGANTES] enviado" : `[NUMEROS_PAGANTES] descartado: ${reason}`,
+    legacyEvent: "telegram_paying_numbers_decision",
     status,
     reason,
     user: maskTelemetryUserId(channel.userId),
