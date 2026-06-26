@@ -1,4 +1,4 @@
-const MODULE_KEYS = ["ai_patterns", "paying_numbers", "surf_alert", "ties_only", "validator"];
+﻿const MODULE_KEYS = ["ai_patterns", "paying_numbers", "surf_alert", "ties_only", "validator"];
 const MAX_TELEGRAM_BUTTONS = 4;
 const DEFAULT_BUTTON_LABEL = "Abrir Sniper Bo IA";
 const ENGINE_SECRET_NAMES = [
@@ -29,76 +29,65 @@ const DEFAULT_MODULE_CONFIG = {
 };
 const DEFAULT_MODULE_TEMPLATES = {
   ai_patterns:
-    "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
+    "\u{1F916} <b>PADR\u00C3O IA CONFIRMADO</b>\n\n\u{1F3B2} <b>Mesa:</b> {{table}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}\n\u{1F4CA} <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entryLabel}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
+    "\u{1F48E} <b>N\u00DAMERO PAGANTE CONFIRMADO</b>\n\n\u{1F522} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entryLabel}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}\n\u{1F4CC} <b>Status:</b> {{status}}",
   surf_alert:
-    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entryCompact}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
+    "\u{1F30A} <b>AVISO DE SURF CONFIRMADO</b>\n\n\u{1F3AF} <b>Entrada:</b> {{entryCompact}}\n\u26A0\uFE0F <b>Risco:</b> {{risk}}\n\u{1F4CA} <b>Confian\u00E7a:</b> {{confidence}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
   ties_only:
-    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Cobertura:</b> até G{{tieCoverage}}\n📊 <b>Nível:</b> {{level}}",
+    "\u{1F7E1} <b>POSS\u00CDVEL EMPATE</b>\n\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Cobertura:</b> at\u00E9 G{{tieCoverage}}\n\u{1F4CA} <b>N\u00EDvel:</b> {{level}}",
   validator:
-    "🤖 <b>PADRÃO VALIDADOR</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{percentage}}",
+    "\u{1F916} <b>PADR\u00C3O VALIDADOR</b>\n\n\u{1F3B2} <b>Mesa:</b> {{table}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}\n\u{1F4CA} <b>Assertividade:</b> {{percentage}}",
 };
 const DEFAULT_MODULE_GREEN_TEMPLATES = {
   ai_patterns:
-    "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+    "\u2705 <b>{{result}}</b>\n\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
   paying_numbers:
-    "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+    "\u2705 <b>{{result}}</b>\n\n\u{1F48E} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
   surf_alert:
-    "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+    "\u2705 <b>{{result}}</b>\n\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
   ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+    "\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>Empate confirmado</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
   validator:
-    "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+    "\u2705 <b>{{result}}</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
 };
 const DEFAULT_MODULE_ANALYZING_TEMPLATES = {
-  ai_patterns: "🔎 <b>ANALISANDO PADRÃO IA</b>\n🎲 <b>Mesa:</b> {{table}}\n⏳ Aguardando confirmação real.",
-  paying_numbers: "🔎 <b>ANALISANDO NÚMERO PAGANTE</b>\n🔢 <b>Números:</b> {{numbers}}\n⏳ Aguardando confirmação real.",
-  surf_alert: "🔎 <b>ANALISANDO SURF</b>\n🌊 <b>Direção:</b> {{side}}\n⏳ Aguardando confirmação real.",
-  ties_only: "🔎 <b>ANALISANDO EMPATE</b>\n🟡 <b>Pressão Tie:</b> {{tie_pressure}}\n⏳ Aguardando confirmação real.",
-  validator: "🔎 <b>ANALISANDO VALIDADOR</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n⏳ Aguardando entrada validada.",
+  ai_patterns: "\u{1F50E} <b>ANALISANDO PADR\u00C3O IA</b>\n\u{1F3B2} <b>Mesa:</b> {{table}}\n\u23F3 Aguardando confirma\u00E7\u00E3o real.",
+  paying_numbers: "\u{1F50E} <b>ANALISANDO N\u00DAMERO PAGANTE</b>\n\u{1F522} <b>N\u00FAmeros:</b> {{numbers}}\n\u23F3 Aguardando confirma\u00E7\u00E3o real.",
+  surf_alert: "\u{1F50E} <b>ANALISANDO SURF</b>\n\u{1F30A} <b>Dire\u00E7\u00E3o:</b> {{side}}\n\u23F3 Aguardando confirma\u00E7\u00E3o real.",
+  ties_only: "\u{1F50E} <b>ANALISANDO EMPATE</b>\n\u{1F7E1} <b>Press\u00E3o Tie:</b> {{tie_pressure}}\n\u23F3 Aguardando confirma\u00E7\u00E3o real.",
+  validator: "\u{1F50E} <b>ANALISANDO VALIDADOR</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u23F3 Aguardando entrada validada.",
 };
 const DEFAULT_MODULE_GALE_TEMPLATES = {
-  ai_patterns: "🛡️ <b>FAZER {{gale}}</b>\n🎯 <b>Entrada:</b> {{entry}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}",
-  paying_numbers: "🛡️ <b>FAZER {{gale}}</b>\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
-  surf_alert: "🛡️ <b>FAZER {{gale}}</b>\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
-  ties_only: "🛡️ <b>COBRIR EMPATE {{gale}}</b>\n🟡 <b>Pressão:</b> {{tie_pressure}}",
-  validator: "🛡️ <b>FAZER {{gale}}</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ai_patterns: "\u{1F6E1}\uFE0F <b>FAZER {{gale}}</b>\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}",
+  paying_numbers: "\u{1F6E1}\uFE0F <b>FAZER {{gale}}</b>\n\u{1F522} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}",
+  surf_alert: "\u{1F6E1}\uFE0F <b>FAZER {{gale}}</b>\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}",
+  ties_only: "\u{1F6E1}\uFE0F <b>COBRIR EMPATE {{gale}}</b>\n\u{1F7E1} <b>Press\u00E3o:</b> {{tie_pressure}}",
+  validator: "\u{1F6E1}\uFE0F <b>FAZER {{gale}}</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}",
 };
 const DEFAULT_MODULE_RED_TEMPLATES = {
   ai_patterns:
-    "❌ <b>RED</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-  paying_numbers: "❌ <b>RED</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-  surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate não confirmou</b>\n🛡️ <b>Proteção:</b> {{gale}}",
-  validator: "❌ <b>RED</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+    "\u274C <b>RED</b>\n\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
+  paying_numbers: "\u274C <b>RED</b>\n\n\u{1F48E} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
+  surf_alert: "\u274C <b>RED</b>\n\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
+  ties_only: "\u274C <b>RED</b>\n\n\u{1F7E1} <b>Empate n\u00E3o confirmou</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
+  validator: "\u274C <b>RED</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}",
 };
 const DEFAULT_MODULE_EXPIRED_TEMPLATES = {
-  ai_patterns: "⌛ <b>SINAL EXPIRADO</b>\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}",
-  paying_numbers: "⌛ <b>SINAL EXPIRADO</b>\n💎 <b>Módulo:</b> {{module}}\n🔢 <b>Números:</b> {{numbers}}",
-  surf_alert: "⌛ <b>SINAL EXPIRADO</b>\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Direção:</b> {{side}}",
-  ties_only: "⌛ <b>ALERTA DE EMPATE EXPIRADO</b>\n🟡 <b>Pressão Tie:</b> {{tie_pressure}}",
-  validator: "⌛ <b>SINAL EXPIRADO</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}",
+  ai_patterns: "\u231B <b>SINAL EXPIRADO</b>\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}",
+  paying_numbers: "\u231B <b>SINAL EXPIRADO</b>\n\u{1F48E} <b>M\u00F3dulo:</b> {{module}}\n\u{1F522} <b>N\u00FAmeros:</b> {{numbers}}",
+  surf_alert: "\u231B <b>SINAL EXPIRADO</b>\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Dire\u00E7\u00E3o:</b> {{side}}",
+  ties_only: "\u231B <b>ALERTA DE EMPATE EXPIRADO</b>\n\u{1F7E1} <b>Press\u00E3o Tie:</b> {{tie_pressure}}",
+  validator: "\u231B <b>SINAL EXPIRADO</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}",
 };
 const DEFAULT_MODULE_CANCELED_TEMPLATES = {
-  ai_patterns: "🚫 <b>SINAL CANCELADO</b>\n🤖 <b>Módulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
-  paying_numbers: "🚫 <b>SINAL BLOQUEADO</b>\n💎 <b>Módulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
-  surf_alert: "🚫 <b>SINAL CANCELADO</b>\n🌊 <b>Módulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
-  ties_only: "🚫 <b>ALERTA CANCELADO</b>\n🟡 <b>Pressão Tie:</b> {{tie_pressure}}\n📌 <b>Motivo:</b> {{result}}",
-  validator: "🚫 <b>SINAL CANCELADO</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n📌 <b>Motivo:</b> {{result}}",
+  ai_patterns: "\u{1F6AB} <b>SINAL CANCELADO</b>\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F4CC} <b>Motivo:</b> {{result}}",
+  paying_numbers: "\u{1F6AB} <b>SINAL BLOQUEADO</b>\n\u{1F48E} <b>M\u00F3dulo:</b> {{module}}\n\u{1F4CC} <b>Motivo:</b> {{result}}",
+  surf_alert: "\u{1F6AB} <b>SINAL CANCELADO</b>\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F4CC} <b>Motivo:</b> {{result}}",
+  ties_only: "\u{1F6AB} <b>ALERTA CANCELADO</b>\n\u{1F7E1} <b>Press\u00E3o Tie:</b> {{tie_pressure}}\n\u{1F4CC} <b>Motivo:</b> {{result}}",
+  validator: "\u{1F6AB} <b>SINAL CANCELADO</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F4CC} <b>Motivo:</b> {{result}}",
 };
-const DEFAULT_MODULE_TIE_TEMPLATES = {
-  ai_patterns:
-    "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-  paying_numbers:
-    "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-  surf_alert:
-    "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-  ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
-  validator:
-    "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
-};
+const DEFAULT_MODULE_TIE_TEMPLATES = DEFAULT_MODULE_GREEN_TEMPLATES;
 const MAX_CHANNELS_PER_USER = 20;
 const MAX_NOTIFICATIONS = 1000;
 const DEFAULT_ACCESS_GRACE_DAYS = 5;
@@ -208,6 +197,14 @@ export class TelegramEngine {
         return json({ channels: await this.activePublicChannels() }, 200, this.env);
       }
 
+      if (request.method === "GET" && url.pathname === "/engine/notifications/active") {
+        return json({ notifications: await this.activeNotifications() }, 200, this.env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/engine/notifications/purge") {
+        return json(await this.purgeNotifications(), 200, this.env);
+      }
+
       return json({ error: "Not found" }, 404, this.env);
     } catch (error) {
       return json({ error: "Cloud Telegram failed", detail: errorMessage(error) }, 500, this.env);
@@ -302,7 +299,7 @@ export class TelegramEngine {
         "<b>Mesa:</b> Bac Bo",
         "<b>Padr\u00E3o:</b> \u{1F534}10\u{1F535}7\u{1F7E1}6",
         "<b>Entrada:</b> \u{1F534} BANKER",
-        "<b>Gale:</b> Até G1",
+        "<b>Gale:</b> At\u00E9 G1",
         "<b>Prote\u00E7\u00E3o Tie:</b> Ativa",
         `<b>Canal:</b> ${escapeHtml(channel.name)}`,
       ].join("\n"),
@@ -394,7 +391,7 @@ export class TelegramEngine {
 
   async dispatchSignal(body) {
     const moduleKey = normalizeModuleKey(body.moduleKey || body.type);
-    if (!moduleKey) return json({ error: "Módulo invalido." }, 400, this.env);
+    if (!moduleKey) return json({ error: "M\u00F3dulo invalido." }, 400, this.env);
     const entry = normalizeEntry(body.entry);
     const targetUserId = normalizeUserId(body.userId || "");
     const targetChannelId = String(body.channelId || "").trim();
@@ -502,6 +499,7 @@ export class TelegramEngine {
         status: result.ok ? "sent" : "error",
         error: result.ok ? "" : result.error,
         payloadJson: {
+          ...variables,
           moduleKey,
           signalKey,
           entry: formatEntry(entry),
@@ -754,6 +752,26 @@ export class TelegramEngine {
     return [...rows.values()]
       .sort((a, b) => Date.parse(b.updatedAt || b.sentAt || "") - Date.parse(a.updatedAt || a.sentAt || ""))
       .slice(0, 50);
+  }
+
+  async activeNotifications() {
+    const rows = await this.state.storage.list({ prefix: "notification:" });
+    const notifications = [...rows.values()].filter((notification) => notification?.userId && notification?.channelId);
+    return notifications
+      .sort((a, b) => Date.parse(b.updatedAt || b.sentAt || "") - Date.parse(a.updatedAt || a.sentAt || ""))
+      .slice(0, MAX_NOTIFICATIONS);
+  }
+
+  async purgeNotifications() {
+    const rows = await this.state.storage.list({ prefix: "notification:" });
+    await Promise.all([...rows.keys()].map((key) => this.state.storage.delete(key)));
+    const purgedAt = new Date().toISOString();
+    await this.state.storage.put(`maintenance:notifications_purged:${Date.now()}`, {
+      deleted: rows.size,
+      purgedAt,
+      reason: "start_future_only",
+    });
+    return { ok: true, deleted: rows.size, purgedAt };
   }
 
   async storeNotification(notification) {
@@ -1258,63 +1276,33 @@ function restoreTelegramEmojiMarkers(value) {
   const red = "\u{1F534}";
   const blue = "\u{1F535}";
   const yellow = "\u{1F7E1}";
-  const markers = [
-    [/^\?{1,4}\s*((?:<b>)?ENTRADA CONFIRMADA(?:<\/b>)?)/gim, "\u{1F916} $1"],
-    [/^\?{1,4}\s*((?:<b>)?PADRAO IA CONFIRMADO(?:<\/b>)?)/gim, "\u{1F916} $1"],
-    [/^\?{1,4}\s*((?:<b>)?PADR?O IA CONFIRMADO(?:<\/b>)?)/gim, "\u{1F916} $1"],
-    [/^\?{1,4}\s*((?:<b>)?PADRAO VALIDADOR(?:<\/b>)?)/gim, "\u{1F916} $1"],
-    [/^\?{1,4}\s*((?:<b>)?PADR?O VALIDADOR(?:<\/b>)?)/gim, "\u{1F916} $1"],
-    [/^\?{1,4}\s*((?:<b>)?NUMERO PAGANTE CONFIRMADO(?:<\/b>)?)/gim, "\u{1F48E} $1"],
-    [/^\?{1,4}\s*((?:<b>)?N?MERO PAGANTE CONFIRMADO(?:<\/b>)?)/gim, "\u{1F48E} $1"],
-    [/^\?{1,4}\s*((?:<b>)?AVISO DE SURF CONFIRMADO(?:<\/b>)?)/gim, "\u{1F30A} $1"],
-    [/^\?{1,4}\s*((?:<b>)?POSSIVEL EMPATE(?:<\/b>)?)/gim, "\u{1F7E1} $1"],
-    [/^\?{1,4}\s*((?:<b>)?POSS?VEL EMPATE(?:<\/b>)?)/gim, "\u{1F7E1} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Mesa:\s*(?:<\/b>)?)/gim, "\u{1F3B2} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Padrão:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Padrão:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Entrada:\s*(?:<\/b>)?)/gim, "\u{1F3AF} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Proteção:\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1"],
-    [/^\?{1,4}\s*((?:<b>)?Prote??o:\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1"],
-    [/^\?{1,4}\s*((?:<b>)?Assertividade:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Número:\s*(?:<\/b>)?)/gim, "\u{1F522} $1"],
-    [/^\?{1,4}\s*((?:<b>)?N?mero:\s*(?:<\/b>)?)/gim, "\u{1F522} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Status:\s*(?:<\/b>)?)/gim, "\u{1F4CC} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Risco:\s*(?:<\/b>)?)/gim, "\u26A0\uFE0F $1"],
-    [/^\?{1,4}\s*((?:<b>)?Confianca:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Confian?a:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1"],
-  ];
-  let text = String(value || "")
-    .replace(/\[PR[\uFFFD?]+E?VIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
-    .replace(/\[PREVIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
-    .replace(/PADR[\uFFFD?]+O/g, "PADRAO")
-    .replace(/Padr[\uFFFD?]+o/gi, "Padrao")
-    .replace(/Prote[\uFFFD?]+o/gi, "Proteção")
-    .replace(/M[\uFFFD?]+dulo/gi, "Módulo")
-    .replace(/N[\uFFFD?]+mero/gi, "Numero")
-    .replace(/Confian[\uFFFD?]+a/gi, "Confianca")
-    .replace(/POSS[\uFFFD?]+VEL/gi, "POSSIVEL")
-    .replace(/N[\uFFFD?]+vel/gi, "Nivel")
-    .replace(/\bPADRAO\b/g, "PADR\u00C3O")
-    .replace(/\bPadrao\b/g, "Padr\u00E3o")
-    .replace(/\bProteção\b/gi, "Prote\u00E7\u00E3o")
-    .replace(/\bMódulo\b/gi, "M\u00F3dulo")
-    .replace(/\bNumero\b/gi, "N\u00FAmero")
-    .replace(/\bConfianca\b/gi, "Confian\u00E7a")
-    .replace(/\bPOSSIVEL\b/gi, "POSS\u00CDVEL")
-    .replace(/\bNivel\b/gi, "N\u00EDvel")
-    .replace(/\bate\b/gi, "at\u00E9");
-  for (const [pattern, replacement] of markers) text = text.replace(pattern, replacement);
+  let text = repairTelegramEncodingArtifacts(value)
+    .replace(/^\?{1,4}\s*((?:<b>)?ENTRADA CONFIRMADA(?:<\/b>)?)/gim, "\u{1F916} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?PADR?O IA CONFIRMADO(?:<\/b>)?)/gim, "\u{1F916} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?PADRAO IA CONFIRMADO(?:<\/b>)?)/gim, "\u{1F916} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?PADRAO VALIDADOR(?:<\/b>)?)/gim, "\u{1F916} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?NUMERO PAGANTE CONFIRMADO(?:<\/b>)?)/gim, "\u{1F48E} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?AVISO DE SURF CONFIRMADO(?:<\/b>)?)/gim, "\u{1F30A} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?POSSIVEL EMPATE(?:<\/b>)?)/gim, "\u{1F7E1} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Mesa:\s*(?:<\/b>)?)/gim, "\u{1F3B2} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Padr(?:\u00E3o|ao):\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Entrada:\s*(?:<\/b>)?)/gim, "\u{1F3AF} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Prote(?:\u00E7\u00E3o|cao):\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Assertividade:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?N(?:\u00FAmero|umero):\s*(?:<\/b>)?)/gim, "\u{1F522} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Status:\s*(?:<\/b>)?)/gim, "\u{1F4CC} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Risco:\s*(?:<\/b>)?)/gim, "\u26A0\uFE0F $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Confian(?:\u00E7a|ca):\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1");
   text = decorateKnownTelegramLines(text);
-  return text
+  return decoratePatternLines(text)
     .replace(/\?{1,4}\s*(BANKER|Banker)\b/g, red + " $1")
     .replace(/\?{1,4}\s*(PLAYER|Player)\b/g, blue + " $1")
     .replace(/\?{1,4}\s*(TIE|Tie)\b/g, yellow + " $1")
     .replace(/\u{1F534}\s*Banker\b/gu, "\u{1F534} BANKER")
     .replace(/\u{1F535}\s*Player\b/gu, "\u{1F535} PLAYER")
     .replace(/\u{1F7E1}\s*Tie\b/gu, "\u{1F7E1} TIE")
-    .replace(/^\?{1,4}\s*(?=(?:<b>)?(?:PADR?O|Padrão|Mesa|M?dulo|Entrada|Prote??o|Assertividade|N?mero|Status|Green|Red|RED|Empate|N?MERO|AVISO))/gim, "");
+    .replace(/^\?{1,4}\s*(?=(?:<b>)?(?:PADR?O|Padrao|Padr\u00E3o|Mesa|Modulo|M\u00F3dulo|Entrada|Protecao|Prote\u00E7\u00E3o|Assertividade|Numero|N\u00FAmero|Status|Green|Red|RED|Empate|AVISO))/gim, "");
 }
-
 function decorateKnownTelegramLines(value) {
   return String(value || "")
     .split(/\r?\n/)
@@ -1427,63 +1415,48 @@ function telegramSideCircle(side) {
 
 function repairTelegramEncodingArtifacts(value) {
   return String(value || "")
-    .replace(/ðŸ¤–|Ã°Å¸Â¤â€“/g, "🤖")
-    .replace(/ðŸŽ²|Ã°Å¸Å½Â²/g, "🎲")
-    .replace(/ðŸ§©|Ã°Å¸Â§Â©/g, "🧩")
-    .replace(/ðŸŽ¯|Ã°Å¸Å½Â¯/g, "🎯")
-    .replace(/ðŸ›¡ï¸|Ã°Å¸â€ºÂ¡Ã¯Â¸Â/g, "🛡️")
-    .replace(/ðŸ“Š|Ã°Å¸â€œÅ /g, "📊")
-    .replace(/ðŸ’Ž|Ã°Å¸â€™Å½/g, "💎")
-    .replace(/ðŸ”¢|Ã°Å¸â€Â¢/g, "🔢")
-    .replace(/ðŸ“Œ|Ã°Å¸â€œÅ’/g, "📌")
-    .replace(/ðŸŒŠ|Ã°Å¸Å’Å /g, "🌊")
-    .replace(/ðŸŸ¡|Ã°Å¸Å¸Â¡/g, "🟡")
-    .replace(/ðŸ”´|Ã°Å¸â€Â´/g, "🔴")
-    .replace(/ðŸ”µ|Ã°Å¸â€Âµ/g, "🔵")
-    .replace(/âœ…|Ã¢Å“â€¦/g, "✅")
-    .replace(/âŒ|Ã¢ÂÅ’/g, "❌")
-    .replace(/âš |Ã¢Å¡ /g, "⚠")
-    .replace(/Padr[\uFFFD?]+o/gi, "Padrao")
+    .replace(/\[PR[\uFFFD?]+E?VIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
+    .replace(/\[PREVIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
     .replace(/PADR[\uFFFD?]+O/g, "PADRAO")
-    .replace(/Prote[\uFFFD?]+o/gi, "Proteção")
-    .replace(/M[\uFFFD?]+dulo/gi, "Módulo")
+    .replace(/Padr[\uFFFD?]+o/gi, "Padrao")
+    .replace(/Prote[\uFFFD?]+o/gi, "Protecao")
+    .replace(/M[\uFFFD?]+dulo/gi, "Modulo")
     .replace(/N[\uFFFD?]+mero/gi, "Numero")
     .replace(/Confian[\uFFFD?]+a/gi, "Confianca")
-    .replace(/Padr(?:ÃƒÂ£|Ã£|ï¿½)o/gi, "Padrao")
-    .replace(/PADR(?:ÃƒÆ’|Ãƒ|ï¿½)O/g, "PADRAO")
-    .replace(/Prote(?:ÃƒÂ§ÃƒÂ£|Ã§Ã£|ï¿½ï¿½)o/gi, "Proteção")
-    .replace(/M(?:ÃƒÂ³|Ã³|ï¿½)dulo/gi, "Módulo")
-    .replace(/N(?:ÃƒÂº|Ãº|ï¿½)mero/gi, "Numero")
-    .replace(/Confian(?:ÃƒÂ§|Ã§|ï¿½)a/gi, "Confianca")
-    .replace(/n(?:ÃƒÂ£|Ã£|ï¿½)o/gi, "nao")
+    .replace(/POSS[\uFFFD?]+VEL/gi, "POSSIVEL")
+    .replace(/N[\uFFFD?]+vel/gi, "Nivel")
+    .replace(/\bPADRAO\b/g, "PADR\u00C3O")
+    .replace(/\bPadrao\b/g, "Padr\u00E3o")
+    .replace(/\bProtecao\b/gi, "Prote\u00E7\u00E3o")
+    .replace(/\bModulo\b/gi, "M\u00F3dulo")
+    .replace(/\bNumero\b/gi, "N\u00FAmero")
+    .replace(/\bConfianca\b/gi, "Confian\u00E7a")
+    .replace(/\bPOSSIVEL\b/gi, "POSS\u00CDVEL")
+    .replace(/\bNivel\b/gi, "N\u00EDvel")
+    .replace(/\bate\b/gi, "at\u00E9")
     .replace(/Assertividade:\s*$/gim, "Assertividade:");
 }
-
 function decorateScoreTokens(message) {
   return String(message || "").replace(/\b([BPT])\s*([2-9]|1[0-2])\b/gi, (match, side, number, offset, fullText) => {
     const previous = String(fullText || "").slice(Math.max(0, offset - 4), offset);
-    if (previous.includes("🔴") || previous.includes("🔵") || previous.includes("🟡")) return match;
+    if (previous.includes("\u{1F534}") || previous.includes("\u{1F535}") || previous.includes("\u{1F7E1}")) return match;
     const normalizedSide = String(side || "").toUpperCase();
-    if (normalizedSide === "B") return `🔴 B${number}`;
-    if (normalizedSide === "P") return `🔵 P${number}`;
-    if (normalizedSide === "T") return `🟡 T${number}`;
-    return match;
+    const circle = telegramSideCircle(normalizedSide);
+    return circle ? `${circle}${number}` : match;
   });
 }
-
 function formatGale(value) {
   const gale = clampInt(value, 0, 4);
   return gale <= 0 ? "SG" : `G${gale}`;
 }
 
 function moduleName(key) {
-  if (key === "ai_patterns") return "Padroes IA";
-  if (key === "paying_numbers") return "Numeros Pagantes";
+  if (key === "ai_patterns") return "Padr\u00F5es IA";
+  if (key === "paying_numbers") return "N\u00FAmeros Pagantes";
   if (key === "surf_alert") return "Aviso de Surf";
   if (key === "ties_only") return "Somente Empates";
   return "Validador";
 }
-
 function renderTemplate(template, variables) {
   return String(template || "").replace(/{{\s*([a-zA-Z_]+)\s*}}/g, (_, key) => String(variables[key] ?? ""));
 }
