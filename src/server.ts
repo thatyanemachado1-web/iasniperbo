@@ -6778,14 +6778,141 @@ async function findValidatorChannelForUser(env: unknown, userId: string, channel
 }
 
 async function validateTelegramChannelAccess(request: Request, botToken: string, chatId: string) {
-  return sendTelegramMessage({
-    botToken,
-    chatId,
-    message: "oi",
+  const cleanToken = normalizeSecretValue(botToken);
+  const cleanChatId = normalizeTelegramChatId(chatId);
+  const allowInsecureNodeFallback = isLocalDevelopmentRequest(request);
+
+  if (!cleanToken) {
+    return { ok: false as const, status: 400, error: "Token invalido ou revogado." };
+  }
+  if (!cleanChatId) {
+    return { ok: false as const, status: 400, error: "Chat ID obrigatorio." };
+  }
+
+  const getMe = await callTelegramJson(cleanToken, "getMe", {});
+  if (!getMe.ok) {
+    return {
+      ok: false as const,
+      status: getMe.status,
+      error: getMe.status === 401 ? "Token invalido ou revogado." : getMe.error,
+    };
+  }
+
+  const bot = readRecord(getMe.result);
+  const botId = Number(bot.id);
+  if (!Number.isFinite(botId)) {
+    return { ok: false as const, status: 400, error: "Token invalido ou revogado." };
+  }
+
+  const chat = await callTelegramJson(cleanToken, "getChat", { chat_id: cleanChatId });
+  if (!chat.ok) {
+    return {
+      ok: false as const,
+      status: chat.status,
+      error: chat.error || "Chat ID nao encontrado. Confira o Chat ID e adicione o bot no canal.",
+    };
+  }
+
+  const chatRecord = readRecord(chat.result);
+  const chatType = readString(chatRecord, "type");
+  const member = await callTelegramJson(cleanToken, "getChatMember", {
+    chat_id: cleanChatId,
+    user_id: botId,
+  });
+  if (!member.ok) {
+    return {
+      ok: false as const,
+      status: member.status,
+      error: "Adicione o bot como administrador do canal.",
+    };
+  }
+
+  const memberRecord = readRecord(member.result);
+  const status = readString(memberRecord, "status");
+  if (status === "left" || status === "kicked") {
+    return {
+      ok: false as const,
+      status: 403,
+      error: "Adicione o bot como administrador do canal.",
+    };
+  }
+  if (chatType === "channel" && status !== "administrator" && status !== "creator") {
+    return {
+      ok: false as const,
+      status: 403,
+      error: "Adicione o bot como administrador do canal.",
+    };
+  }
+  if (
+    (status === "administrator" || status === "creator") &&
+    memberRecord.can_post_messages === false
+  ) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: "De permissao para postar mensagens.",
+    };
+  }
+
+  const sendResult = await sendTelegramMessage({
+    botToken: cleanToken,
+    chatId: cleanChatId,
+    message: "[TESTE CONEXAO TELEGRAM]\nCentral Telegram conectada com sucesso.",
     buttonLabel: "Abrir Sniper Bo IA",
     buttonUrl: "",
-    allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
+    allowInsecureNodeFallback,
   });
+
+  if (!sendResult.ok) return sendResult;
+  if (!sendResult.messageId) {
+    return {
+      ok: false as const,
+      status: 502,
+      error: "Telegram aceitou o teste, mas nao retornou message_id. Tente novamente.",
+    };
+  }
+
+  return sendResult;
+}
+
+function normalizeTelegramChatId(value: string) {
+  return String(value || "").trim().replace(/\s+/g, "");
+}
+
+async function callTelegramJson(
+  botToken: string,
+  method: string,
+  payload: Record<string, unknown>,
+): Promise<{ ok: true; result: unknown } | { ok: false; status: number; error: string }> {
+  let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TELEGRAM_SEND_TIMEOUT_MS);
+  try {
+    response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch {
+    return {
+      ok: false,
+      status: 502,
+      error: "Nao foi possivel conectar ao Telegram agora.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const data = readRecord(await response.json().catch(() => ({})));
+  if (!response.ok || data.ok !== true) {
+    return {
+      ok: false,
+      status: telegramHttpStatus(response.status),
+      error: friendlyTelegramError(response.status, readString(data, "description")),
+    };
+  }
+  return { ok: true, result: data.result };
 }
 
 async function issueTelegramChannelValidationCode(env: unknown, userId: string, botToken: string, chatId: string) {

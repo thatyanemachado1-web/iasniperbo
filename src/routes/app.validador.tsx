@@ -864,7 +864,7 @@ function NeuralValidatorPage() {
         code: validation.validationCode,
         validatedAt: new Date().toISOString(),
       });
-      showNotice("Grupo validado: enviei oi no Telegram.");
+      showNotice("Conexao validada: mensagem teste enviada no Telegram.");
     } catch (error) {
       setChannelValidation({ key: "", code: "", validatedAt: "" });
       showNotice(error instanceof Error ? error.message : "Falha ao validar grupo no Telegram.");
@@ -1903,7 +1903,13 @@ function CentralTelegramTab({
                   <Input value={channelForm.name} onChange={(event) => setChannelForm({ ...channelForm, name: event.target.value })} />
                 </Field>
                 <Field label="Bot Token">
-                  <Input value={channelForm.botToken} onChange={(event) => setChannelForm({ ...channelForm, botToken: event.target.value })} placeholder="872946...XNwY" />
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={channelForm.botToken}
+                    onChange={(event) => setChannelForm({ ...channelForm, botToken: event.target.value })}
+                    placeholder="8825...F69U"
+                  />
                 </Field>
                 <Field label="Chat ID">
                   <Input value={channelForm.chatId} onChange={(event) => setChannelForm({ ...channelForm, chatId: event.target.value })} />
@@ -1915,7 +1921,7 @@ function CentralTelegramTab({
                       : "border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan"
                   }`}>
                     {validatingChannelForm ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
-                    {validatingChannelForm ? "Validando grupo..." : "Grupo validado"}
+                    {validatingChannelForm ? "Validando Telegram..." : "Conexao validada com teste real"}
                   </div>
                 )}
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -1927,7 +1933,7 @@ function CentralTelegramTab({
                     disabled={!telegramEnabled || validatingChannelForm || savingChannel}
                   >
                     {validatingChannelForm ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-                    {isChannelFormValidated ? "Grupo validado" : "Procurar grupo"}
+                    {isChannelFormValidated ? "Conexao validada" : "Procurar grupo"}
                   </Button>
                   <Button
                     type="button"
