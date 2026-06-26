@@ -123,6 +123,10 @@ export interface ValidatorNotificationChannel {
   analyzingCooldownRounds?: number;
   templates: ValidatorMessageTemplates;
   signalModules?: Record<string, unknown>;
+  connectionStatus?: "pending" | "connected" | "invalid";
+  lastTestedAt?: string;
+  lastTestMessageId?: number | string | null;
+  lastConnectionError?: string;
   createdAt: string;
   updatedAt: string;
 }

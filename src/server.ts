@@ -812,7 +812,8 @@ function rateLimitForRequest(method: string, pathname: string) {
     pathname.startsWith("/validator/patterns/") ||
     pathname === "/validator/channels" ||
     pathname.startsWith("/validator/channels/") ||
-    pathname === "/validator/channels/test"
+    pathname === "/validator/channels/test" ||
+    isTelegramServiceRoutePath(pathname)
   )
     return 120;
   if (pathname === "/validator/telegram/test" || pathname === "/validator/telegram/send") return 30;
@@ -3024,6 +3025,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/validator/channels" ||
       url.pathname.startsWith("/validator/channels/") ||
       url.pathname === "/validator/channels/test" ||
+      isTelegramServiceRoutePath(url.pathname) ||
       url.pathname === "/validator/live-hit/send" ||
       url.pathname === "/validator/telegram/test" ||
       url.pathname === "/validator/telegram/send")
@@ -3039,6 +3041,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   const neuralCalendarResponse = await handleNeuralCalendarRequest(request, url, env);
   if (neuralCalendarResponse) return neuralCalendarResponse;
+
+  const telegramServiceResponse = await handleTelegramServiceRequest(request, url, env);
+  if (telegramServiceResponse) return telegramServiceResponse;
 
   const validatorStorageResponse = await handleValidatorStorageRequest(request, url, env);
   if (validatorStorageResponse) return validatorStorageResponse;
@@ -6234,6 +6239,467 @@ function defaultCalendarHourlyStats(rows = liveNeuralCalendarHourlyStats) {
   return rows.filter(isDefaultCalendarHourlyStat);
 }
 
+const TELEGRAM_CONNECTION_TEST_MESSAGE = "[TESTE TELEGRAM]\nCanal conectado com sucesso.";
+
+function isTelegramServiceRoutePath(pathname: string) {
+  return (
+    pathname === "/telegram/channels" ||
+    pathname.startsWith("/telegram/channels/") ||
+    pathname === "/telegram/channels/test" ||
+    pathname === "/telegram/channels/validate" ||
+    pathname === "/telegram/channels/preview" ||
+    pathname === "/telegram/motors/toggle" ||
+    pathname === "/telegram/status"
+  );
+}
+
+const telegramService = {
+  createChannel: telegramServiceCreateChannel,
+  listChannels: telegramServiceListPublicChannels,
+  testChannel: telegramServiceTestChannel,
+  getConnectedChannel: telegramServiceGetConnectedChannel,
+  toggleMotor: telegramServiceToggleMotor,
+  sendTelegramMessage: telegramServiceSendTelegramMessage,
+  getClientsWithMotorEnabled: telegramServiceGetClientsWithMotorEnabled,
+  sendGlobalConfirmedSignalToEnabledClients: telegramServiceSendGlobalConfirmedSignalToEnabledClients,
+  sendValidatorSignal: telegramServiceSendValidatorSignal,
+};
+
+async function handleTelegramServiceRequest(request: Request, url: URL, env: unknown) {
+  if (!isTelegramServiceRoutePath(url.pathname)) return null;
+
+  const clientId = await validatorRequestUserId(request, url, env);
+  if (!clientId) return json({ error: "Nao autorizado." }, 401);
+
+  await withTimeout(
+    hydrateValidatorUserCache(env, clientId),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar Central Telegram",
+    undefined,
+  );
+
+  if (request.method === "GET" && url.pathname === "/telegram/channels") {
+    return json({ channels: await telegramService.listChannels(env, clientId) });
+  }
+
+  if (request.method === "POST" && url.pathname === "/telegram/channels") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    return telegramService.createChannel(env, request, clientId, body);
+  }
+
+  if (request.method === "POST" && url.pathname === "/telegram/channels/validate") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const botToken = normalizeSecretValue(readString(body, "botToken"));
+    const chatId = readString(body, "chatId");
+    if (!botToken) return json({ error: "Token invalido ou revogado." }, 400);
+    if (!chatId) return json({ error: "Chat ID invalido." }, 400);
+
+    const existingByCode = findValidatorChannelByIncomingCode(liveValidatorChannels, clientId, { chatId });
+    if (existingByCode && existingByCode.userId === clientId) {
+      return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409);
+    }
+
+    const validation = await validateTelegramChannelAccess(request, botToken, chatId);
+    if (!validation.ok) return json({ error: validation.error }, validation.status);
+    return json({
+      ok: true,
+      validated: true,
+      messageId: validation.messageId,
+      validationCode: await issueTelegramChannelValidationCode(env, clientId, botToken, chatId),
+    });
+  }
+
+  if (request.method === "POST" && url.pathname === "/telegram/channels/test") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const channelId = readString(body, "channelId");
+    return telegramService.testChannel(env, request, clientId, channelId);
+  }
+
+  if (request.method === "POST" && url.pathname === "/telegram/channels/preview") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const channelId = readString(body, "channelId");
+    const message = normalizeTelegramMessage(readString(body, "message"));
+    const buttons = Array.isArray(body.buttons)
+      ? body.buttons.map(readRecord).map((button) => ({
+          label: readString(button, "label"),
+          url: readString(button, "url"),
+        }))
+      : [];
+    if (!message) return json({ error: "Mensagem de previa obrigatoria." }, 400);
+    const result = await telegramService.sendTelegramMessage(env, request, clientId, channelId, message, buttons);
+    if (!result.ok) return json({ error: result.error }, result.status || 502);
+    return json({ ok: true, messageId: result.messageId, preview: true });
+  }
+
+  if (request.method === "POST" && url.pathname === "/telegram/motors/toggle") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    return telegramService.toggleMotor(
+      env,
+      clientId,
+      readString(body, "channelId"),
+      readString(body, "motorKey") as ValidatorTelegramModuleKey,
+      readBooleanField(body, "enabled"),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/telegram/status") {
+    const channels = await telegramServiceListChannelsRaw(env, clientId);
+    const connectedChannels = channels.filter(telegramServiceChannelIsConnected);
+    const activeMotors = new Set<string>();
+    for (const channel of connectedChannels) {
+      const modules = validatorChannelSignalModules(channel);
+      for (const key of VALIDATOR_TELEGRAM_MODULE_KEYS) {
+        if (modules[key]?.enabled) activeMotors.add(key);
+      }
+    }
+    return json({
+      channelStatus: connectedChannels.length ? "connected" : channels.length ? "pending" : "missing",
+      motorStatus: activeMotors.size ? "active" : "inactive",
+      channels: channels.map(publicTelegramServiceChannel),
+      activeMotors: [...activeMotors],
+    });
+  }
+
+  const channelMatch = url.pathname.match(/^\/telegram\/channels\/([^/]+)$/);
+  if (channelMatch) {
+    const channelId = decodeURIComponent(channelMatch[1] || "");
+    const current = await findValidatorChannelForUser(env, clientId, channelId);
+    if (!current) return json({ error: "Canal nao encontrado." }, 404);
+
+    if (request.method === "PATCH") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const next = normalizeServerNotificationChannel({ ...current, ...body, id: current.id }, clientId, current);
+      if (!next) return json({ error: "Canal invalido." }, 400);
+      const saved = await telegramServicePersistChannel(env, next);
+      return json({ channel: publicTelegramServiceChannel(saved) });
+    }
+
+    if (request.method === "DELETE") {
+      liveValidatorChannels = liveValidatorChannels.filter(
+        (channel) => !(channel.userId === clientId && channel.id === channelId),
+      );
+      await deleteValidatorChannelRows(env, clientId, [channelId]);
+      await deleteValidatorChannelNotificationRows(env, clientId, [channelId]);
+      await markValidatorChannelsDeleted(env, clientId, [channelId], current.chatId || "");
+      await saveLiveState(env);
+      return json({ ok: true, deleted: 1 });
+    }
+  }
+
+  return json({ error: "Rota Telegram nao encontrada." }, 404);
+}
+
+async function telegramServiceListChannelsRaw(env: unknown, clientId: string) {
+  const normalizedClientId = normalizeValidatorUserId(clientId);
+  if (!normalizedClientId) return [] as ValidatorNotificationChannel[];
+  return loadValidatorChannelsForUser(env, normalizedClientId);
+}
+
+async function telegramServiceListPublicChannels(env: unknown, clientId: string) {
+  return (await telegramServiceListChannelsRaw(env, clientId)).map(publicTelegramServiceChannel);
+}
+
+async function telegramServiceCreateChannel(env: unknown, request: Request, clientId: string, body: Record<string, unknown>) {
+  const incoming = readRecord(body.channel || body);
+  const incomingToken = normalizeSecretValue(readString(incoming, "botToken"));
+  const validationCode = readString(body, "validationCode") || readString(incoming, "validationCode");
+  const channels = await telegramServiceListChannelsRaw(env, clientId);
+  const incomingId = readString(incoming, "id");
+  const existingById = channels.find((channel) => channel.id === incomingId);
+  const existingByCode = findValidatorChannelByIncomingCode(channels, clientId, incoming);
+  if (existingByCode && existingByCode.id !== existingById?.id) {
+    return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409);
+  }
+
+  const existing = existingById || existingByCode || undefined;
+  const channel = normalizeServerNotificationChannel(incoming, clientId, existing);
+  if (!channel) return json({ error: "Canal invalido." }, 400);
+
+  const botToken = decodeServerToken(channel.botTokenEncoded);
+  if (!botToken || !channel.chatId) {
+    return json({ error: "Bot Token e Chat ID sao obrigatorios para salvar o canal." }, 400);
+  }
+
+  let messageId: number | string | null = null;
+  if (incomingToken || !existing || !telegramServiceChannelIsConnected(existing)) {
+    const validationOk = await verifyTelegramChannelValidationCode(
+      env,
+      clientId,
+      botToken,
+      channel.chatId,
+      validationCode,
+    );
+    if (!validationOk) {
+      const validation = await validateTelegramChannelAccess(request, botToken, channel.chatId);
+      if (!validation.ok) return json({ error: validation.error }, validation.status);
+      messageId = validation.messageId;
+    }
+  }
+
+  const saved = await telegramServicePersistChannel(
+    env,
+    stampTelegramChannelConnection(channel, "connected", messageId || readTelegramChannelMessageId(existing), ""),
+  );
+  return json({ channel: publicTelegramServiceChannel(saved), messageId: readTelegramChannelMessageId(saved) }, 201);
+}
+
+async function telegramServiceTestChannel(env: unknown, request: Request, clientId: string, channelId: string) {
+  const channel = await findValidatorChannelForUser(env, clientId, channelId);
+  if (!channel) return json({ error: "Canal nao encontrado." }, 404);
+
+  const result = isCloudValidatorTelegramChannel(channel)
+    ? await testCloudValidatorChannel(env, clientId, channel.id)
+    : await testDirectValidatorChannel(request, channel);
+
+  if (!result.ok) {
+    await telegramServicePersistChannel(env, stampTelegramChannelConnection(channel, "invalid", null, result.error));
+    return json({ error: result.error }, result.status || 502);
+  }
+
+  if (!result.messageId) {
+    const error = "Telegram aceitou o teste, mas nao retornou message_id. Tente novamente.";
+    await telegramServicePersistChannel(env, stampTelegramChannelConnection(channel, "invalid", null, error));
+    return json({ error }, 502);
+  }
+
+  const saved = await telegramServicePersistChannel(
+    env,
+    stampTelegramChannelConnection(channel, "connected", result.messageId, ""),
+  );
+  return json({ ok: true, messageId: result.messageId, channelId: saved.id, channel: publicTelegramServiceChannel(saved) });
+}
+
+async function telegramServiceToggleMotor(
+  env: unknown,
+  clientId: string,
+  channelId: string,
+  motorKey: ValidatorTelegramModuleKey,
+  enabled: boolean,
+) {
+  if (!VALIDATOR_TELEGRAM_MODULE_KEYS.includes(motorKey)) {
+    return json({ error: "Motor Telegram invalido." }, 400);
+  }
+  const channel = await findValidatorChannelForUser(env, clientId, channelId);
+  if (!channel) return json({ error: "Canal nao encontrado." }, 404);
+  if (enabled && !telegramServiceChannelIsConnected(channel)) {
+    return json({ error: "Teste o canal no Telegram antes de ativar o motor." }, 400);
+  }
+  const modules = validatorChannelSignalModules(channel);
+  const nextModules = {
+    ...modules,
+    [motorKey]: {
+      ...modules[motorKey],
+      enabled,
+    },
+  };
+  const next = {
+    ...channel,
+    signalModules: nextModules,
+    isActive: channel.isActive !== false,
+    updatedAt: new Date().toISOString(),
+  } as ValidatorNotificationChannel;
+  const saved = await telegramServicePersistChannel(env, next);
+  return json({ channel: publicTelegramServiceChannel(saved), motorKey, enabled });
+}
+
+async function telegramServiceGetConnectedChannel(env: unknown, clientId: string, channelId: string) {
+  const channel = await findValidatorChannelForUser(env, clientId, channelId);
+  return channel && telegramServiceChannelIsConnected(channel) ? channel : null;
+}
+
+async function telegramServiceSendTelegramMessage(
+  env: unknown,
+  request: Request,
+  clientId: string,
+  channelId: string,
+  message: string,
+  buttons: Array<{ label: string; url: string }> = [],
+) {
+  const channel = await telegramServiceGetConnectedChannel(env, clientId, channelId);
+  if (!channel) return { ok: false as const, status: 404, error: "Canal nao encontrado ou pendente de teste." };
+  if (isCloudValidatorTelegramChannel(channel)) {
+    return sendCloudValidatorChannelPreview(env, clientId, channel.id, message, buttons);
+  }
+  const botToken = decodeServerToken(channel.botTokenEncoded);
+  if (!botToken || !channel.chatId) {
+    return { ok: false as const, status: 400, error: "Canal Telegram sem Bot Token ou Chat ID." };
+  }
+  return sendTelegramMessage({
+    botToken,
+    chatId: channel.chatId,
+    message,
+    buttonLabel: "Abrir Sniper Bo IA",
+    buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
+    buttons,
+    allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
+  });
+}
+
+async function telegramServiceGetClientsWithMotorEnabled(env: unknown, motorKey: ValidatorTelegramModuleKey) {
+  const channels = await fetchStoredActiveValidatorChannels(env);
+  return [
+    ...new Set(
+      channels
+        .filter((channel) => validatorChannelModuleEnabled(channel, motorKey, false))
+        .map((channel) => channel.userId)
+        .filter(Boolean),
+    ),
+  ];
+}
+
+async function telegramServiceSendGlobalConfirmedSignalToEnabledClients(
+  _env: unknown,
+  _motorKey: ValidatorTelegramModuleKey,
+  _confirmedSignal: Record<string, unknown>,
+) {
+  return { ok: true, delegatedToMonitor: true };
+}
+
+async function telegramServiceSendValidatorSignal(
+  _env: unknown,
+  _clientId: string,
+  _strategySignal: Record<string, unknown>,
+) {
+  return { ok: true, delegatedToValidator: true };
+}
+
+async function telegramServicePersistChannel(env: unknown, channel: ValidatorNotificationChannel) {
+  liveValidatorChannels = upsertValidatorChannel(channel);
+  await persistValidatorChannel(env, channel);
+  await saveLiveState(env);
+  return channel;
+}
+
+async function testDirectValidatorChannel(request: Request, channel: ValidatorNotificationChannel) {
+  const botToken = decodeServerToken(channel.botTokenEncoded);
+  if (!botToken || !channel.chatId) {
+    return { ok: false as const, status: 400, error: "Canal Telegram sem Bot Token ou Chat ID. Salve o canal novamente." };
+  }
+  return validateTelegramChannelAccess(request, botToken, channel.chatId);
+}
+
+async function testCloudValidatorChannel(env: unknown, clientId: string, channelId: string) {
+  const response = await callCloudValidatorChannelEndpoint(env, clientId, "/validator/channels/test", {
+    channelId,
+  });
+  if (!response.ok) return response;
+  const messageId = response.messageId;
+  return messageId
+    ? { ok: true as const, status: 200, messageId }
+    : { ok: false as const, status: 502, error: "Cloudflare Telegram nao retornou message_id." };
+}
+
+async function sendCloudValidatorChannelPreview(
+  env: unknown,
+  clientId: string,
+  channelId: string,
+  message: string,
+  buttons: Array<{ label: string; url: string }>,
+) {
+  const response = await callCloudValidatorChannelEndpoint(env, clientId, "/validator/channels/preview", {
+    channelId,
+    message,
+    buttons,
+  });
+  if (!response.ok) return response;
+  return { ok: true as const, status: 200, messageId: response.messageId || null };
+}
+
+async function callCloudValidatorChannelEndpoint(
+  env: unknown,
+  clientId: string,
+  path: string,
+  payload: Record<string, unknown>,
+) {
+  const config = getTelegramEngineConfig(env);
+  if (!config) return { ok: false as const, status: 503, error: "Cloudflare Telegram Engine nao configurado." };
+  const response = await fetch(`${config.url}${path}`, {
+    method: "POST",
+    cache: "no-store",
+    headers: telegramEngineHeaders(config.secret, normalizeValidatorUserId(clientId), true),
+    body: JSON.stringify(payload),
+  }).catch(() => null);
+  if (!response) return { ok: false as const, status: 502, error: "Cloudflare Telegram Engine indisponivel." };
+  const data = readRecord(await response.json().catch(() => ({})));
+  if (!response.ok || data.ok === false) {
+    return {
+      ok: false as const,
+      status: response.status || 502,
+      error: readString(data, "error") || "Cloudflare Telegram nao confirmou o canal.",
+    };
+  }
+  return {
+    ok: true as const,
+    status: response.status,
+    messageId: readTelegramMessageId(data),
+  };
+}
+
+function stampTelegramChannelConnection(
+  channel: ValidatorNotificationChannel,
+  status: "pending" | "connected" | "invalid",
+  messageId: number | string | null,
+  error: string,
+) {
+  const now = new Date().toISOString();
+  return {
+    ...channel,
+    connectionStatus: status,
+    lastTestedAt: now,
+    lastTestMessageId: status === "connected" ? messageId : null,
+    lastConnectionError: status === "invalid" ? error : "",
+    updatedAt: now,
+  } as ValidatorNotificationChannel;
+}
+
+function publicTelegramServiceChannel(channel: ValidatorNotificationChannel) {
+  const publicChannel = publicValidatorChannel(channel);
+  return {
+    ...publicChannel,
+    connectionStatus: telegramServiceConnectionStatus(channel),
+    lastTestedAt: readString(channel as unknown as Record<string, unknown>, "lastTestedAt"),
+    lastTestMessageId: readTelegramChannelMessageId(channel),
+    lastConnectionError:
+      telegramServiceConnectionStatus(channel) === "invalid"
+        ? readString(channel as unknown as Record<string, unknown>, "lastConnectionError")
+        : "",
+  } as ValidatorNotificationChannel;
+}
+
+function telegramServiceConnectionStatus(channel?: ValidatorNotificationChannel | null) {
+  if (!channel) return "pending";
+  const raw = readString(channel as unknown as Record<string, unknown>, "connectionStatus");
+  if (raw === "connected" || raw === "invalid" || raw === "pending") return raw;
+  return isUsableValidatorTelegramChannel(channel) ? "connected" : "pending";
+}
+
+function telegramServiceChannelIsConnected(channel?: ValidatorNotificationChannel | null) {
+  return Boolean(
+    channel && telegramServiceConnectionStatus(channel) === "connected" && isUsableValidatorTelegramChannel(channel),
+  );
+}
+
+function readTelegramChannelMessageId(channel?: ValidatorNotificationChannel | null) {
+  if (!channel) return null;
+  return readTelegramMessageId(channel as unknown as Record<string, unknown>);
+}
+
+function readTelegramMessageId(record: Record<string, unknown>) {
+  const candidates = [
+    record.messageId,
+    record.message_id,
+    record.telegramMessageId,
+    record.lastTestMessageId,
+    record.notificationId,
+  ];
+  for (const candidate of candidates) {
+    const value = typeof candidate === "number" ? candidate : readString({ value: candidate }, "value");
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 async function handleValidatorStorageRequest(request: Request, url: URL, env: unknown) {
   const isPatternsRoute = url.pathname === "/validator/patterns" || url.pathname.startsWith("/validator/patterns/");
   const isChannelsRoute =
@@ -6892,7 +7358,7 @@ async function validateTelegramChannelAccess(request: Request, botToken: string,
   const sendResult = await sendTelegramMessage({
     botToken: cleanToken,
     chatId: cleanChatId,
-    message: "[TESTE CONEXAO TELEGRAM]\nCentral Telegram conectada com sucesso.",
+    message: TELEGRAM_CONNECTION_TEST_MESSAGE,
     buttonLabel: "Abrir Sniper Bo IA",
     buttonUrl: "",
     allowInsecureNodeFallback,
@@ -10378,7 +10844,7 @@ async function sendTelegramEngineSignal(
   }
   const sent = Array.isArray(data?.sent) ? data.sent : [];
   const match = sent.find((item) => readString(item, "channelId") === input.channelId) || sent[0];
-  if (match) return { ok: true, status: 200, messageId: readString(match, "notificationId") || null };
+  if (match) return { ok: true, status: 200, messageId: readTelegramMessageId(match) };
   const blocked = Array.isArray(data?.blocked) ? data.blocked : [];
   const reason = readString(
     blocked.find((item) => readString(item, "channelId") === input.channelId) || blocked[0],

@@ -790,10 +790,6 @@ function NeuralValidatorPage() {
       return;
     }
     const validationKey = telegramChannelValidationKey(token, chatId);
-    if (token && chatId && channelValidation.key !== validationKey) {
-      showNotice("Clique em Procurar grupo e valide o Telegram antes de salvar.");
-      return;
-    }
     const now = new Date().toISOString();
     const channel: ValidatorNotificationChannel = {
       id: matchingChannel?.id || createStorageId("channel"),
@@ -886,6 +882,9 @@ function NeuralValidatorPage() {
     setTestingTelegramId(channel.id);
     try {
       const result = await testServerValidatorChannel(channel.id);
+      if (result.channel) {
+        setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(result.channel))));
+      }
       showNotice(result.messageId ? `Teste enviado no Telegram. message_id ${result.messageId}.` : "Teste enviado no Telegram.");
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Canal salvo sem token ou Chat ID no servidor.");
@@ -1790,9 +1789,8 @@ function CentralTelegramTab({
   const [selectedChannelId, setSelectedChannelId] = useState("");
   const [selectedModuleKey, setSelectedModuleKey] = useState<ValidatorTelegramModuleKey>("ai_patterns");
   const [configuringModuleKey, setConfiguringModuleKey] = useState<ValidatorTelegramModuleKey | null>(null);
-  const requiresValidation = Boolean(channelForm.botToken.trim() && channelForm.chatId.trim());
   const validatingChannelForm = testingTelegramId === "form";
-  const saveBlockedByValidation = requiresValidation && !isChannelFormValidated;
+  const saveBlockedByValidation = false;
   const selectedChannel =
     channels.find((channel) => channel.id === selectedChannelId) ||
     channels.find((channel) => channel.isActive) ||
@@ -1800,8 +1798,10 @@ function CentralTelegramTab({
     null;
   const selectedChannelModules = selectedChannel ? channelSignalModules(selectedChannel) : defaultTelegramModuleConfigs();
   const selectedChannelServerConfirmed = isServerConfirmedChannel(selectedChannel);
+  const selectedConnectionStatus = telegramChannelConnectionStatus(selectedChannel);
   const connected = Boolean(
     selectedChannelServerConfirmed &&
+      selectedConnectionStatus === "connected" &&
       selectedChannel?.isActive &&
       selectedChannel.chatId &&
       (selectedChannel.botTokenMasked || (selectedChannel as ValidatorChannelWithModules).botTokenEncoded),
@@ -1889,7 +1889,7 @@ function CentralTelegramTab({
                   variant="secondary"
                   className="mt-5 h-9"
                   onClick={() => selectedChannel && onTestChannel(selectedChannel)}
-                  disabled={!telegramEnabled || !connected || testingTelegramId === selectedChannel.id}
+                  disabled={!telegramEnabled || !selectedChannel || testingTelegramId === selectedChannel.id}
                 >
                   <Send className="size-4" /> Testar
                 </Button>
@@ -1953,7 +1953,7 @@ function CentralTelegramTab({
                     disabled={!telegramEnabled || savingChannel || validatingChannelForm || saveBlockedByValidation}
                   >
                     {savingChannel ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                    {saveBlockedByValidation ? "Valide para salvar" : "Salvar canal"}
+                    Salvar canal
                   </Button>
                 </div>
               </div>
@@ -3399,7 +3399,7 @@ async function deleteServerValidatorPattern(patternId: string) {
 }
 
 async function fetchServerValidatorChannels() {
-  const response = await fetch("/validator/channels", {
+  const response = await fetch("/telegram/channels", {
     cache: "no-store",
     headers: validatorApiHeaders(),
   });
@@ -3423,7 +3423,7 @@ async function saveServerValidatorChannel(
   botToken?: string,
   validationCode?: string,
 ) {
-  const response = await fetch("/validator/channels", {
+  const response = await fetch("/telegram/channels", {
     method: "POST",
     cache: "no-store",
     headers: validatorApiHeaders(true),
@@ -3442,7 +3442,7 @@ async function saveServerValidatorChannel(
 }
 
 async function validateServerValidatorChannel(botToken: string, chatId: string) {
-  const response = await fetch("/validator/channels/validate", {
+  const response = await fetch("/telegram/channels/validate", {
     method: "POST",
     cache: "no-store",
     headers: validatorApiHeaders(true),
@@ -3458,7 +3458,7 @@ async function validateServerValidatorChannel(botToken: string, chatId: string) 
 }
 
 async function deleteServerValidatorChannel(channelId: string) {
-  await fetch(`/validator/channels/${encodeURIComponent(channelId)}`, {
+  await fetch(`/telegram/channels/${encodeURIComponent(channelId)}`, {
     method: "DELETE",
     cache: "no-store",
     headers: validatorApiHeaders(),
@@ -3466,15 +3466,19 @@ async function deleteServerValidatorChannel(channelId: string) {
 }
 
 async function testServerValidatorChannel(channelId: string) {
-  const response = await fetch("/validator/channels/test", {
+  const response = await fetch("/telegram/channels/test", {
     method: "POST",
     cache: "no-store",
     headers: validatorApiHeaders(true),
     body: JSON.stringify({ channelId }),
   });
-  const data = await response.json().catch(() => null) as { error?: string; messageId?: number | null } | null;
+  const data = await response.json().catch(() => null) as {
+    error?: string;
+    messageId?: number | string | null;
+    channel?: ValidatorNotificationChannel;
+  } | null;
   if (!response.ok) throw new Error(data?.error || "Falha ao testar canal salvo.");
-  return { messageId: typeof data?.messageId === "number" ? data.messageId : null };
+  return { messageId: data?.messageId ?? null, channel: data?.channel ?? null };
 }
 
 async function previewServerValidatorChannel(
@@ -3482,7 +3486,7 @@ async function previewServerValidatorChannel(
   message: string,
   buttons: ValidatorTelegramButtonConfig[],
 ) {
-  const response = await fetch("/validator/channels/preview", {
+  const response = await fetch("/telegram/channels/preview", {
     method: "POST",
     cache: "no-store",
     headers: validatorApiHeaders(true),
@@ -3562,6 +3566,13 @@ function markLocalFallbackChannels(channels: ValidatorNotificationChannel[]) {
 
 function isServerConfirmedChannel(channel: ValidatorNotificationChannel | null | undefined) {
   return Boolean(channel && (channel as ValidatorChannelRuntimeState).serverConfirmed === true);
+}
+
+function telegramChannelConnectionStatus(channel: ValidatorNotificationChannel | null | undefined) {
+  const status = channel?.connectionStatus;
+  if (status === "connected" || status === "invalid" || status === "pending") return status;
+  if (channel?.isActive && channel.chatId && (channel.botTokenMasked || channel.botTokenEncoded)) return "connected";
+  return "pending";
 }
 
 function validatorChannelDedupeKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
