@@ -5,17 +5,31 @@ import { createClient } from '@supabase/supabase-js'
 import type { Database } from './types'
 
 
+function firstEnvValue(...values: Array<unknown>) {
+  return values.find((value): value is string => typeof value === 'string' && value.trim().length > 0)?.trim();
+}
 
 export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server(
   async ({ next }) => {
     
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
+    const SUPABASE_URL = firstEnvValue(
+      process.env.SNIPER_SUPABASE_URL,
+      process.env.SUPABASE_URL,
+      process.env.VITE_SUPABASE_URL,
+    );
+    const SUPABASE_PUBLISHABLE_KEY = firstEnvValue(
+      process.env.SNIPER_SUPABASE_PUBLISHABLE_KEY,
+      process.env.SNIPER_SUPABASE_ANON_KEY,
+      process.env.SUPABASE_PUBLISHABLE_KEY,
+      process.env.SUPABASE_ANON_KEY,
+      process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      process.env.VITE_SUPABASE_ANON_KEY,
+    );
 
     if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
       const missing = [
         ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
-        ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
+        ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY'] : []),
       ];
       const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
       console.error(`[Supabase] ${message}`);

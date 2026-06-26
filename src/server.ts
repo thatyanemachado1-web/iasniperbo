@@ -3215,19 +3215,17 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       : emptyNeuralCalendarChangeSet();
     const saveStateTask = saveLiveState(env);
     runBackgroundTask(ctx, saveStateTask, "salvar estado vivo do dashboard");
-    if (incomingRounds.length || engineCalendarChange.changed) {
-      runBackgroundTask(
-        ctx,
-        persistDashboardRoundIngestion(
-          env,
-          incomingRounds,
-          calendarChange,
-          engineCalendarChange,
-          isLocalDevelopmentRequest(request),
-        ),
-        "persistir rodada e monitorar sinais",
-      );
-    }
+    runBackgroundTask(
+      ctx,
+      persistDashboardRoundIngestion(
+        env,
+        incomingRounds,
+        calendarChange,
+        engineCalendarChange,
+        isLocalDevelopmentRequest(request),
+      ),
+      "persistir rodada e monitorar sinais",
+    );
     if (url.pathname === "/dashboard/publish" || url.pathname === "/dashboard/signal") {
       const saveStatus = await saveStateTask;
       return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });

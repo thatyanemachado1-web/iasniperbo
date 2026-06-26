@@ -5,9 +5,22 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
+function firstEnvValue(...values: Array<unknown>) {
+  return values.find((value): value is string => typeof value === 'string' && value.trim().length > 0)?.trim();
+}
+
 function createSupabaseAdminClient() {
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const SUPABASE_URL = firstEnvValue(
+    process.env.SNIPER_SUPABASE_URL,
+    process.env.SUPABASE_URL,
+    process.env.VITE_SUPABASE_URL,
+  );
+  const SUPABASE_SERVICE_ROLE_KEY = firstEnvValue(
+    process.env.SNIPER_SUPABASE_SERVICE_ROLE_KEY,
+    process.env.SNIPER_SUPABASE_SERVICE_KEY,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    process.env.SUPABASE_SERVICE_KEY,
+  );
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     const missing = [
