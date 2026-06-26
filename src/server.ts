@@ -9890,6 +9890,10 @@ function formatServerSignalSide(side: CurrentSignalSide | NonNullable<NeuralEntr
 }
 
 function serverSignalCircle(side: CurrentSignalSide | NonNullable<NeuralEntryState["expectedSide"]>) {
+  const normalized = normalizeServerSideForTelegram(side);
+  if (normalized === "B") return "\u{1F534}";
+  if (normalized === "P") return "\u{1F535}";
+  if (normalized === "T") return "\u{1F7E1}";
   if (side === "BANKER") return "🔴";
   if (side === "PLAYER") return "🔵";
   if (side === "TIE") return "🟡";
@@ -10305,6 +10309,9 @@ function formatServerTelegramSide(side: Round["result"]) {
 }
 
 function serverSideCircle(side: Round["result"]) {
+  if (side === "B") return "\u{1F534}";
+  if (side === "P") return "\u{1F535}";
+  if (side === "T") return "\u{1F7E1}";
   if (side === "B") return "🔴";
   if (side === "P") return "🔵";
   return "🟡";

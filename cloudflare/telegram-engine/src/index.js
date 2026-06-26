@@ -469,10 +469,10 @@ export class TelegramEngine {
         ? renderTemplate(template, templateVariables)
         : String(body.message || "");
       const message = formatTelegramMessageText(String(renderedMessage || body.message || renderTemplate("{{entry}}", templateVariables))).slice(0, 4096);
-      const dedupeKeys = [`sent:${channel.userId}:${channel.id}:${signalKey}`];
-      const entryDedupeKey = entrySignalDedupeKey(channel, roundId, entry, signalKind);
+      const dedupeKeys = [`sent:${channel.userId}:${channel.id}:${moduleKey}:${signalKey}`];
+      const entryDedupeKey = entrySignalDedupeKey(channel, moduleKey, roundId, entry, signalKind);
       if (entryDedupeKey) dedupeKeys.push(entryDedupeKey);
-      const resultDedupeKey = resultSignalDedupeKey(channel, roundId, entry, signalKind, notificationResult);
+      const resultDedupeKey = resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, notificationResult);
       if (resultDedupeKey) dedupeKeys.push(resultDedupeKey);
       const recentDedupeKey = await recentMessageDedupeKey(channel, signalKind, message);
       if (recentDedupeKey) dedupeKeys.push(recentDedupeKey);
@@ -519,10 +519,12 @@ export class TelegramEngine {
         sentAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
-      for (const dedupeKey of dedupeKeys) {
-        await this.state.storage.put(dedupeKey, true);
+      if (result.ok) {
+        for (const dedupeKey of dedupeKeys) {
+          await this.state.storage.put(dedupeKey, true);
+        }
       }
-      if (cooldownKey) await this.state.storage.put(cooldownKey, Date.now());
+      if (result.ok && cooldownKey) await this.state.storage.put(cooldownKey, Date.now());
       if (result.ok && chatCode) sentChatCodes.add(chatCode);
       (result.ok ? sent : blocked).push({
         channelId: channel.id,
@@ -1215,16 +1217,16 @@ function selectSignalTemplate(config, signalKind, result) {
   return String(config.greenTemplate || config.template || "");
 }
 
-function entrySignalDedupeKey(channel, roundId, entry, signalKind) {
+function entrySignalDedupeKey(channel, moduleKey, roundId, entry, signalKind) {
   if (signalKind !== "entry" || !roundId || !entry) return "";
-  return `sent-entry:${channel.userId}:${channel.id}:${roundId}:${entry}`;
+  return `sent-entry:${channel.userId}:${channel.id}:${moduleKey}:${roundId}:${entry}`;
 }
 
-function resultSignalDedupeKey(channel, roundId, entry, signalKind, result) {
+function resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, result) {
   if (signalKind !== "result" || !roundId) return "";
   const resultKey = normalizeDedupeText(result);
   if (!resultKey) return "";
-  return `sent-result:${channel.userId}:${channel.id}:${roundId}:${entry || "AUTO"}:${resultKey}`;
+  return `sent-result:${channel.userId}:${channel.id}:${moduleKey}:${roundId}:${entry || "AUTO"}:${resultKey}`;
 }
 
 async function recentMessageDedupeKey(channel, signalKind, message) {
