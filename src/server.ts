@@ -3180,6 +3180,11 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       liveDashboardData = cycle.dashboard;
       runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
+    runBackgroundTask(
+      ctx,
+      processValidatorLiveMonitoring(env, { fast: true, roundReceivedAtMs: Date.now() }),
+      "monitorar sinais no read do dashboard",
+    );
     return json(publicDashboardSnapshot(liveDashboardData));
   }
 
