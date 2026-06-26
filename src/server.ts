@@ -8599,19 +8599,40 @@ function readDashboardConfirmedAiPattern() {
 }
 
 function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
-  const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
-  const reading = state?.readingSnapshot ?? liveDashboardData.neuralReading ?? null;
-  if (!reading || (reading.mode !== "ACTIVE" && !state)) return null;
   const moduleState = validatorChannelModuleConfigState(channel, "paying_numbers");
   if (!moduleState) {
     logPayingNumbersTelegramDecision(channel, "blocked", "missing_channel_config", {
       roundId: latestRound.id,
-      numero: reading.numero ?? null,
     });
     return null;
   }
   const moduleConfig = moduleState.config;
-  const expectedSide = state?.expectedSide ?? readServerNeuralSide(reading.direcao ?? reading.origem);
+
+  if (!moduleConfig.enabled) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "module_inactive", {
+      roundId: latestRound.id,
+    });
+    return null;
+  }
+
+  const reading = liveDashboardData.neuralReading ?? null;
+  if (!reading) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "site_reading_missing", {
+      roundId: latestRound.id,
+    });
+    return null;
+  }
+
+  if (reading.mode !== "ACTIVE") {
+    logPayingNumbersTelegramDecision(channel, "blocked", "site_reading_not_active", {
+      roundId: latestRound.id,
+      mode: reading.mode,
+      numero: reading.numero ?? null,
+    });
+    return null;
+  }
+
+  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
   if (!expectedSide) {
     logPayingNumbersTelegramDecision(channel, "blocked", "missing_detected_entry", {
       roundId: latestRound.id,
@@ -8619,7 +8640,8 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     });
     return null;
   }
-  const key = state?.key || serverNeuralEntryKey(reading);
+
+  const key = serverNeuralEntryKey(reading);
   if (!key) {
     logPayingNumbersTelegramDecision(channel, "blocked", "missing_signal_key", {
       roundId: latestRound.id,
@@ -8628,14 +8650,7 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     });
     return null;
   }
-  if (!moduleConfig.enabled) {
-    logPayingNumbersTelegramDecision(channel, "blocked", "module_inactive", {
-      roundId: latestRound.id,
-      signalKey: key,
-      expectedSide,
-    });
-    return null;
-  }
+
   if (!validatorModuleAllowsSignalEntry(moduleConfig, expectedSide)) {
     logPayingNumbersTelegramDecision(channel, "blocked", "entry_not_allowed", {
       roundId: latestRound.id,
@@ -8645,12 +8660,38 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     });
     return null;
   }
-  const status = String(reading.paganteStatus || (state?.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"));
+
+  const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
+  const stateReading = state?.readingSnapshot ?? (state ? neuralReadingForEntryState(state) : null);
+  const stateReadingKey = stateReading ? serverNeuralEntryKey(stateReading) : "";
+  const stateMatchesReading =
+    Boolean(state && stateReadingKey === key) &&
+    (!state?.expectedSide || state.expectedSide === expectedSide);
+  if (state && !stateMatchesReading) {
+    console.info(JSON.stringify({
+      event: "telegram_paying_numbers_decision",
+      status: "info",
+      reason: "state_mismatch_ignored",
+      user: maskTelemetryUserId(channel.userId),
+      channelId: channel.id,
+      roundId: latestRound.id,
+      signalKey: key,
+      stateKey: state.key,
+      stateReadingKey,
+      expectedSide,
+      stateExpectedSide: state.expectedSide,
+    }));
+  }
+
+  const status = String(
+    reading.paganteStatus || (stateMatchesReading && state?.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"),
+  );
+  const triggerKey = stateMatchesReading && state?.triggerRoundKey ? state.triggerRoundKey : String(latestRound.id);
   return createValidatorModuleSignal(
     channel,
     "paying_numbers",
     latestRound,
-    `paying:${key}:${state?.triggerRoundKey || latestRound.id}`,
+    `paying:${key}:${triggerKey}`,
     {
       table: "Bac Bo",
       pattern: "",
@@ -8679,6 +8720,8 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
       tieCoverage: moduleConfig.coverTie ? moduleConfig.tieCoverage : 0,
       result: "Aguardando resultado",
       status,
+      source: "site_neuralReading",
+      stateMatched: stateMatchesReading,
     },
   );
 }
