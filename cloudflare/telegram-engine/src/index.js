@@ -102,6 +102,8 @@ const DEFAULT_MODULE_TIE_TEMPLATES = {
 const MAX_CHANNELS_PER_USER = 20;
 const MAX_NOTIFICATIONS = 1000;
 const DEFAULT_ACCESS_GRACE_DAYS = 5;
+const DASHBOARD_MONITOR_INTERVAL_MS = 2500;
+const DASHBOARD_MONITOR_ERROR_INTERVAL_MS = 7500;
 
 export default {
   async fetch(request, env) {
@@ -126,6 +128,8 @@ export default {
     const id = env.TELEGRAM_ENGINE.idFromName("global");
     const request = new Request("https://internal.sniperbo/engine/notifications/purge", { method: "POST" });
     ctx.waitUntil(env.TELEGRAM_ENGINE.get(id).fetch(request));
+    const monitorRequest = new Request("https://internal.sniperbo/engine/monitor", { method: "POST" });
+    ctx.waitUntil(env.TELEGRAM_ENGINE.get(id).fetch(monitorRequest));
   },
 };
 export class TelegramEngine {
@@ -140,6 +144,8 @@ export class TelegramEngine {
     const userId = normalizeUserId(request.headers.get("x-validator-user-id") || "");
 
     try {
+      await this.ensureDashboardMonitorAlarm();
+
       if (request.method === "GET" && url.pathname === "/validator/channels") {
         if (!userId) return json({ error: "Missing user" }, 400, this.env);
         return json({ channels: await this.publicChannelsForUser(userId) }, 200, this.env);
@@ -197,6 +203,10 @@ export class TelegramEngine {
         return this.dispatchSignal(await readJson(request));
       }
 
+      if ((request.method === "POST" || request.method === "GET") && url.pathname === "/engine/monitor") {
+        return this.runDashboardMonitor({ source: "manual" });
+      }
+
       if (request.method === "POST" && url.pathname === "/engine/users/provision") {
         return this.provisionUserWorkspace(await readJson(request));
       }
@@ -216,6 +226,21 @@ export class TelegramEngine {
       return json({ error: "Not found" }, 404, this.env);
     } catch (error) {
       return json({ error: "Cloud Telegram failed", detail: errorMessage(error) }, 500, this.env);
+    }
+  }
+
+  async alarm() {
+    try {
+      await this.runDashboardMonitor({ source: "alarm" });
+    } catch (error) {
+      await this.state.storage.put("dashboard-monitor:last-error", {
+        event: "[TELEGRAM_AUTO] erro",
+        source: "alarm",
+        error: errorMessage(error),
+        checkedAt: new Date().toISOString(),
+      });
+    } finally {
+      await this.ensureDashboardMonitorAlarm(DASHBOARD_MONITOR_INTERVAL_MS, true);
     }
   }
 
@@ -538,6 +563,162 @@ export class TelegramEngine {
     return json({ ok: true, sent, blocked }, 200, this.env);
   }
 
+  async ensureDashboardMonitorAlarm(delayMs = DASHBOARD_MONITOR_INTERVAL_MS, force = false) {
+    if (!this.state?.storage?.setAlarm) return;
+    const currentAlarm = await this.state.storage.getAlarm?.();
+    if (!force && currentAlarm && Number(currentAlarm) > Date.now()) return;
+    await this.state.storage.setAlarm(Date.now() + Math.max(1000, Number(delayMs) || DASHBOARD_MONITOR_INTERVAL_MS));
+  }
+
+  async runDashboardMonitor({ source = "manual" } = {}) {
+    const now = Date.now();
+    const lockUntil = Number(await this.state.storage.get("dashboard-monitor:lock") || 0);
+    if (lockUntil > now) {
+      return json({ ok: true, source, skipped: "locked" }, 200, this.env);
+    }
+    await this.state.storage.put("dashboard-monitor:lock", now + 15000);
+
+    try {
+      const dashboardResult = await this.fetchDashboardSnapshot();
+      if (!dashboardResult.ok) {
+        const log = {
+          event: "[TELEGRAM_AUTO] erro",
+          source,
+          stage: "dashboard_fetch",
+          status: dashboardResult.status || 0,
+          reason: dashboardResult.error || "dashboard_unavailable",
+          checkedAt: new Date().toISOString(),
+        };
+        await this.state.storage.put("dashboard-monitor:last", log);
+        await this.ensureDashboardMonitorAlarm(DASHBOARD_MONITOR_ERROR_INTERVAL_MS, true);
+        return json({ ok: false, ...log }, 502, this.env);
+      }
+
+      const card = readPayingNumbersOfficialCard(dashboardResult.dashboard);
+      const baseLog = {
+        event: "[TELEGRAM_AUTO] card detectado",
+        source,
+        moduleKey: "paying_numbers",
+        monitor_called: true,
+        handler_called: true,
+        readingMode: card.mode,
+        cardStatus: card.status,
+        expectedSide: card.entry || "",
+        signalId: card.signalId || "",
+        roundId: card.roundId || "",
+        number: card.number || "",
+        checkedAt: new Date().toISOString(),
+      };
+
+      if (!card.confirmed) {
+        const log = {
+          ...baseLog,
+          confirmed: false,
+          dedupe_action: "not_checked",
+          telegram_send_called: false,
+          telegram_result: "not_called",
+          reason: card.reason,
+        };
+        await this.markPayingNumbersBaselineReady(card);
+        await this.state.storage.put("dashboard-monitor:last", log);
+        return json({ ok: true, ...log }, 200, this.env);
+      }
+
+      const baseline = await this.shouldSuppressPayingNumbersBaseline(card);
+      if (baseline.suppressed) {
+        const log = {
+          ...baseLog,
+          confirmed: true,
+          dedupe_action: "baseline_suppressed",
+          telegram_send_called: false,
+          telegram_result: "not_called",
+          reason: baseline.reason,
+        };
+        await this.state.storage.put("dashboard-monitor:last", log);
+        return json({ ok: true, ...log }, 200, this.env);
+      }
+
+      const response = await this.dispatchSignal({
+        moduleKey: "paying_numbers",
+        signalKey: card.signalId,
+        roundId: card.roundIdNumber,
+        entry: card.entry,
+        result: "Aguardando resultado",
+        variables: card.variables,
+      });
+      const dispatch = await response.json().catch(() => ({}));
+      const sentCount = Array.isArray(dispatch.sent) ? dispatch.sent.length : 0;
+      const blockedCount = Array.isArray(dispatch.blocked) ? dispatch.blocked.length : 0;
+      const log = {
+        ...baseLog,
+        confirmed: true,
+        activeChannels: sentCount + blockedCount,
+        sentCount,
+        blockedCount,
+        dedupe_action: sentCount ? "reserved" : "blocked",
+        telegram_send_called: sentCount > 0,
+        telegram_result: sentCount ? "sent" : "not_sent",
+        dispatch,
+      };
+      await this.state.storage.put("dashboard-monitor:last", log);
+      return json({ ok: true, ...log }, 200, this.env);
+    } finally {
+      await this.state.storage.delete("dashboard-monitor:lock");
+    }
+  }
+
+  async fetchDashboardSnapshot() {
+    const url = dashboardMonitorUrl(this.env);
+    const secrets = dashboardMonitorSecrets(this.env);
+    if (!secrets.length) return { ok: false, status: 0, error: "dashboard_token_missing" };
+
+    let lastError = { ok: false, status: 0, error: "dashboard_not_requested" };
+    for (const token of secrets) {
+      const response = await fetch(url, {
+        headers: {
+          authorization: `Bearer ${token}`,
+          "user-agent": "sniperbo-telegram-engine-monitor",
+        },
+      }).catch((error) => ({ ok: false, status: 0, text: async () => errorMessage(error) }));
+      const text = await response.text().catch(() => "");
+      if (!response.ok) {
+        lastError = { ok: false, status: response.status || 0, error: text.slice(0, 240) };
+        continue;
+      }
+      try {
+        const payload = JSON.parse(text);
+        return { ok: true, status: response.status || 200, dashboard: readRecord(payload.dashboard || payload) };
+      } catch (error) {
+        lastError = { ok: false, status: response.status || 200, error: `dashboard_json_invalid:${errorMessage(error)}` };
+      }
+    }
+    return lastError;
+  }
+
+  async markPayingNumbersBaselineReady(card) {
+    const key = "dashboard-monitor:paying_numbers:baseline-ready";
+    if (await this.state.storage.get(key)) return;
+    await this.state.storage.put(key, {
+      readyAt: new Date().toISOString(),
+      firstSignalId: card.signalId || "",
+      firstMode: card.mode || "",
+      firstReason: card.reason || "",
+    });
+  }
+
+  async shouldSuppressPayingNumbersBaseline(card) {
+    const key = "dashboard-monitor:paying_numbers:baseline-ready";
+    const existing = await this.state.storage.get(key);
+    if (existing) return { suppressed: false, reason: "" };
+    await this.state.storage.put(key, {
+      readyAt: new Date().toISOString(),
+      firstSignalId: card.signalId || "",
+      firstMode: card.mode || "",
+      firstReason: "active_on_monitor_start",
+    });
+    return { suppressed: true, reason: "active_on_monitor_start" };
+  }
+
   async sendAdHocTelegram(body) {
     const result = await sendTelegramMessage({
       botToken: normalizeSecret(body.botToken),
@@ -825,6 +1006,129 @@ export class TelegramEngine {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
     return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
   }
+}
+
+function dashboardMonitorUrl(env = {}) {
+  return normalizeUrl(env.SNIPER_DASHBOARD_URL || "") || "https://sniperbo.com/dashboard";
+}
+
+function dashboardMonitorSecrets(env = {}) {
+  return [
+    env.SNIPER_DASHBOARD_TOKEN,
+    env.SNIPER_PUBLISHER_TOKEN,
+    env.SNIPER_ADMIN_TOKEN,
+  ].map(normalizeSecret).filter(Boolean);
+}
+
+function readPayingNumbersOfficialCard(dashboard) {
+  const data = readRecord(dashboard);
+  const reading = readRecord(data.neuralReading);
+  const mode = String(reading.mode || "").trim().toUpperCase();
+  const entry = normalizeEntry(reading.direcao || reading.origem || reading.expectedSide || "");
+  const latestRound = latestDashboardRound(data);
+  const roundId = dashboardRoundKey(latestRound, data);
+  const roundIdNumber = clampInt(latestRound.id ?? latestRound.roundId ?? latestRound.round ?? 0, 0, Number.MAX_SAFE_INTEGER);
+  const number = dashboardNumber(reading.numero ?? reading.number);
+  const status = String(reading.paganteStatus || reading.status || "ENTRADA_CONFIRMADA").trim();
+
+  if (mode !== "ACTIVE") {
+    return { confirmed: false, reason: "card_not_active", mode, status, entry, roundId, roundIdNumber, number };
+  }
+  if (!entry) {
+    return { confirmed: false, reason: "missing_expected_side", mode, status, entry, roundId, roundIdNumber, number };
+  }
+  if (!roundId) {
+    return { confirmed: false, reason: "missing_round_id", mode, status, entry, roundId, roundIdNumber, number };
+  }
+
+  const signalId = ["paying", "Bac Bo", number || "sem-numero", entry, roundId].join(":");
+  const confidence = formatDashboardPercent(reading.assertividade ?? reading.confidence ?? reading.percentage);
+  const numberText = `${telegramSideCircle(entry)}${number || ""}`;
+  return {
+    confirmed: true,
+    reason: "confirmed_entry_card",
+    mode,
+    status,
+    entry,
+    roundId,
+    roundIdNumber,
+    number,
+    signalId,
+    variables: {
+      table: "Bac Bo",
+      pattern: "",
+      number: numberText,
+      numbers: numberText,
+      entry: formatEntry(entry),
+      entryLabel: formatEntryLabel(entry),
+      entryCompact: formatEntryCompact(entry),
+      side: entry,
+      status: status || "ENTRADA_CONFIRMADA",
+      confidence,
+      percentage: confidence,
+      gale: normalizeGaleText(reading.validade || "G1"),
+      protection: normalizeGaleText(reading.validade || "G1"),
+      tieCoverage: "0",
+      tieProtection: "Inativa",
+      risk: dashboardText(reading.paganteKind || reading.origemTipo || ""),
+      level: dashboardText(reading.level || ""),
+      score: dashboardText(reading.score || ""),
+      round: roundId,
+      roundId: roundIdNumber,
+      time: dashboardText(latestRound.time || ""),
+      module: "Numeros Pagantes",
+      result: "Aguardando resultado",
+    },
+  };
+}
+
+function latestDashboardRound(dashboard) {
+  const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds.map(readRecord).filter((round) => Object.keys(round).length) : [];
+  if (!rounds.length) return {};
+  return [...rounds].sort(compareDashboardRounds).at(-1) || {};
+}
+
+function compareDashboardRounds(a, b) {
+  const aId = Number(a.id ?? a.roundId ?? a.round ?? 0);
+  const bId = Number(b.id ?? b.roundId ?? b.round ?? 0);
+  if (Number.isFinite(aId) && Number.isFinite(bId) && aId !== bId) return aId - bId;
+  const aTime = String(a.time || a.recordedAt || a.createdAt || "");
+  const bTime = String(b.time || b.recordedAt || b.createdAt || "");
+  return aTime.localeCompare(bTime);
+}
+
+function dashboardRoundKey(round, dashboard) {
+  const record = readRecord(round);
+  const id = dashboardText(record.id ?? record.roundId ?? record.round ?? dashboard.roundId ?? "");
+  const result = dashboardText(record.result ?? record.winner ?? "");
+  const bankerScore = dashboardText(record.bankerScore ?? record.banker_score ?? record.banker ?? "");
+  const playerScore = dashboardText(record.playerScore ?? record.player_score ?? record.player ?? "");
+  const time = dashboardText(record.time ?? record.recordedAt ?? record.createdAt ?? "");
+  return [time, id, result, bankerScore, playerScore].filter(Boolean).join(":");
+}
+
+function dashboardNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return String(Math.trunc(number));
+}
+
+function dashboardText(value) {
+  return String(value ?? "").trim();
+}
+
+function normalizeGaleText(value) {
+  const text = String(value || "").trim().toUpperCase();
+  const match = text.match(/G\s*([0-4])/);
+  if (match) return `G${match[1]}`;
+  if (text === "SG" || text === "SEM GALE") return "SG";
+  return text || "G1";
+}
+
+function formatDashboardPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return `${number.toFixed(2)}%`;
 }
 
 function normalizeModuleConfigs(value) {
@@ -1257,8 +1561,62 @@ function formatTelegramMessageText(value) {
 }
 
 function sanitizeTelegramOutgoingMessage(value) {
-  const repaired = repairTelegramEncodingArtifacts(value);
+  const repaired = restoreMojibakeEmojiText(repairTelegramEncodingArtifacts(value));
   return decoratePatternLines(decorateScoreTokens(restoreTelegramEmojiMarkers(repaired)));
+}
+
+const WINDOWS_1252_REVERSE_BYTES = {
+  "\u20AC": 0x80,
+  "\u201A": 0x82,
+  "\u0192": 0x83,
+  "\u201E": 0x84,
+  "\u2026": 0x85,
+  "\u2020": 0x86,
+  "\u2021": 0x87,
+  "\u02C6": 0x88,
+  "\u2030": 0x89,
+  "\u0160": 0x8A,
+  "\u2039": 0x8B,
+  "\u0152": 0x8C,
+  "\u017D": 0x8E,
+  "\u2018": 0x91,
+  "\u2019": 0x92,
+  "\u201C": 0x93,
+  "\u201D": 0x94,
+  "\u2022": 0x95,
+  "\u2013": 0x96,
+  "\u2014": 0x97,
+  "\u02DC": 0x98,
+  "\u2122": 0x99,
+  "\u0161": 0x9A,
+  "\u203A": 0x9B,
+  "\u0153": 0x9C,
+  "\u017E": 0x9E,
+  "\u0178": 0x9F,
+};
+
+function restoreMojibakeEmojiText(value) {
+  return String(value || "").replace(/(?:\u00F0|\u00E2|\u00EF)[\u0080-\uFFFF]{1,8}/g, restoreMojibakeEmojiChunk);
+}
+
+function restoreMojibakeEmojiChunk(chunk) {
+  const bytes = [];
+  for (const char of Array.from(String(chunk || ""))) {
+    const code = char.codePointAt(0) || 0;
+    if (code <= 0xff) {
+      bytes.push(code);
+      continue;
+    }
+    const mapped = WINDOWS_1252_REVERSE_BYTES[char];
+    if (mapped === undefined) return chunk;
+    bytes.push(mapped);
+  }
+  try {
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(new Uint8Array(bytes));
+    return /[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/u.test(decoded) ? decoded : chunk;
+  } catch {
+    return chunk;
+  }
 }
 
 function restoreTelegramEmojiMarkers(value) {
