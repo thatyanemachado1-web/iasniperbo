@@ -10766,7 +10766,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     (Object.prototype.hasOwnProperty.call(incoming, "neuralEntryState") ||
       Object.prototype.hasOwnProperty.call(incoming, "neuralEntryLastResult"));
   const dashboardWithNeuralEntry = hasIncomingNeuralLifecycle
-    ? nextDashboard
+    ? syncServerNeuralReadingFromIncomingLifecycle(nextDashboard)
     : trackServerNeuralEntryLifecycle(nextDashboard, currentDashboard, incomingLatestRound, receivedNewRound);
   const dashboardWithVisibleNeuralSignal = hasIncomingNeuralLifecycle
     ? dashboardWithNeuralEntry
@@ -10781,6 +10781,26 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     incomingRounds,
   );
   return trackServerEntryModeStats(trackServerNeuralSequences(dashboardWithTieScoreboard, currentDashboard));
+}
+
+function syncServerNeuralReadingFromIncomingLifecycle(dashboard: LiveDashboardData): LiveDashboardData {
+  const state = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
+  if (state) {
+    return {
+      ...dashboard,
+      neuralEntryState: state,
+      neuralReading: neuralReadingForEntryState(state),
+    };
+  }
+
+  const result = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
+  if (!result) return dashboard;
+  return {
+    ...dashboard,
+    neuralEntryState: null,
+    neuralEntryLastResult: result,
+    neuralReading: neuralReadingForEntryResult(result),
+  };
 }
 
 function trackServerNeuralEntryLifecycle(
