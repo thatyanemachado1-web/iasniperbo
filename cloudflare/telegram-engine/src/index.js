@@ -29,15 +29,15 @@ const DEFAULT_MODULE_CONFIG = {
 };
 const DEFAULT_MODULE_TEMPLATES = {
   ai_patterns:
-    "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+    "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "💎 <b>ENTRADA CONFIRMADA</b>\n🔢 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
   surf_alert:
-    "🌊 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "🟡 <b>POSSIVEL EMPATE</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🛡️ <b>Cobrir empate:</b> ate G{{tieCoverage}}\n📌 <b>Nivel:</b> {{level}}",
+    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Cobertura:</b> até G{{tieCoverage}}\n📊 <b>Nível:</b> {{level}}",
   validator:
-    "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{percentage}}",
+    "🤖 <b>PADRÃO VALIDADOR</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{percentage}}",
 };
 const DEFAULT_MODULE_GREEN_TEMPLATES = {
   ai_patterns:
@@ -1274,13 +1274,13 @@ function moduleName(key) {
 }
 
 function renderTemplate(template, variables) {
-  return String(template || "").replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key) => String(variables[key] ?? ""));
+  return String(template || "").replace(/{{\s*([a-zA-Z_]+)\s*}}/g, (_, key) => String(variables[key] ?? ""));
 }
 
 function shouldRenderSignalTemplate(template, variables) {
   const text = String(template || "");
   if (!text) return false;
-  const names = [...text.matchAll(/{{\s*([a-zA-Z]+)\s*}}/g)].map((match) => match[1]).filter(Boolean);
+  const names = [...text.matchAll(/{{\s*([a-zA-Z_]+)\s*}}/g)].map((match) => match[1]).filter(Boolean);
   if (!names.length) return true;
   const record = readRecord(variables);
   return names.every((name) => Object.prototype.hasOwnProperty.call(record, name));

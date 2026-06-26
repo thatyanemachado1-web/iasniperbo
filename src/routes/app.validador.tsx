@@ -186,15 +186,15 @@ const MAX_TELEGRAM_BUTTONS = 4;
 const DEFAULT_TELEGRAM_BUTTON_LABEL = "Abrir Sniper Bo IA";
 const DEFAULT_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
-    "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+    "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "💎 <b>ENTRADA CONFIRMADA</b>\n🔢 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
   surf_alert:
-    "🌊 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "🟡 <b>POSSIVEL EMPATE</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🛡️ <b>Cobrir empate:</b> ate G{{tieCoverage}}\n📌 <b>Nivel:</b> {{level}}",
+    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Cobertura:</b> até G{{tieCoverage}}\n📊 <b>Nível:</b> {{level}}",
   validator:
-    "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{percentage}}",
+    "🤖 <b>PADRÃO VALIDADOR</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{percentage}}",
 };
 const DEFAULT_TELEGRAM_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
@@ -3021,7 +3021,7 @@ function telegramTemplateVariablesForModule(
   key: ValidatorTelegramModuleKey,
   templateKey: ValidatorTelegramTemplateKey,
 ) {
-  const common = ["module", "table", "entry", "gale", "result", "time", "round", "confidence", "percentage", "channel"];
+  const common = ["module", "table", "entry", "gale", "result", "time", "round", "confidence", "percentage", "channel", "tieCoverage", "tieProtection"];
   const byModule: Record<ValidatorTelegramModuleKey, string[]> = {
     ai_patterns: ["pattern", "score", "side", "status", "risk"],
     paying_numbers: ["numbers", "number", "side", "score", "status", "risk", "level"],
@@ -3122,7 +3122,11 @@ function telegramModulePreview(key: ValidatorTelegramModuleKey, config: Validato
   const variables: Record<string, string> = {
     table: "Bac Bo",
     pattern: "🔴10 → 🔵7 → 🟡6",
-    entry: config.entryType === "AUTO" ? "🔴 Banker" : telegramEntryPreviewLabel(config.entryType),
+    entry: key === "ties_only"
+      ? "🟡 Tie"
+      : config.entryType === "AUTO"
+        ? "🔵 Player"
+        : telegramEntryPreviewLabel(config.entryType),
     gale: formatTelegramProtection(config.galeLimit),
     tieCoverage: config.coverTie ? "4" : "0",
     tieProtection: config.coverTie ? "Ativa" : "Inativa",
@@ -3135,8 +3139,8 @@ function telegramModulePreview(key: ValidatorTelegramModuleKey, config: Validato
     numbers: "10, 7, 6",
     side: "Banker",
     tie_pressure: "forte",
-    number: "7",
-    level: "alto",
+    number: "🔵9",
+    level: "Alto",
     time: "14:32",
     round: "123456",
     module: moduleDisplayName(key),

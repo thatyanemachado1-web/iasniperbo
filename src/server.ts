@@ -448,15 +448,15 @@ const MAX_VALIDATOR_TELEGRAM_BUTTONS = 4;
 const DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL = "Abrir Sniper Bo IA";
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
-    "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+    "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "💎 <b>ENTRADA CONFIRMADA</b>\n🔢 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
   surf_alert:
-    "🌊 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{confidence}}",
+    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🛡️ <b>Cobrir empate:</b> até G{{tieCoverage}}\n📌 <b>Nível:</b> {{level}}",
+    "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Cobertura:</b> até G{{tieCoverage}}\n📊 <b>Nível:</b> {{level}}",
   validator:
-    "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{percentage}}",
+    "🤖 <b>PADRÃO VALIDADOR</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{percentage}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
@@ -8638,7 +8638,7 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
       percentage: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
       status,
       risk: serverReadPaganteKind(reading),
-      number: typeof reading.numero === "number" ? String(reading.numero) : "",
+      number: typeof reading.numero === "number" ? `${serverSignalCircle(expectedSide)}${reading.numero}` : "",
       level: "",
       round: String(latestRound.id),
       module: "Numeros Pagantes",
@@ -8726,7 +8726,7 @@ function buildTiesOnlyModuleSignal(channel: ValidatorNotificationChannel, latest
     {
       table: "Bac Bo",
       pattern: "",
-      entry: "Tie",
+      entry: formatServerSignalSide("TIE"),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: String(moduleConfig.tieCoverage),
       confidence: formatServerPercent(confidence),
@@ -8741,7 +8741,7 @@ function buildTiesOnlyModuleSignal(channel: ValidatorNotificationChannel, latest
     {
       level,
       confidence,
-      entryText: "Tie",
+      entryText: formatServerSignalSide("TIE"),
       protection: moduleConfig.coverTie ? `G${moduleConfig.tieCoverage}` : "SG",
       result: "Aguardando resultado",
       tieCoverage: moduleConfig.tieCoverage,
@@ -9226,7 +9226,7 @@ function validatorNotificationMatchesModule(
 }
 
 function renderValidatorTelegramTemplate(template: string, variables: Record<string, string>) {
-  return (template || "").replace(/{{\s*([a-zA-Z]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
+  return (template || "").replace(/{{\s*([a-zA-Z_]+)\s*}}/g, (_, key: string) => variables[key] ?? "");
 }
 
 function formatValidatorModuleGale(value: unknown) {
@@ -9239,6 +9239,13 @@ function formatServerSignalSide(side: CurrentSignalSide | NonNullable<NeuralEntr
   if (side === "PLAYER") return "🔵 Player";
   if (side === "TIE") return "🟡 Tie";
   return "Aguardando";
+}
+
+function serverSignalCircle(side: CurrentSignalSide | NonNullable<NeuralEntryState["expectedSide"]>) {
+  if (side === "BANKER") return "🔴";
+  if (side === "PLAYER") return "🔵";
+  if (side === "TIE") return "🟡";
+  return "";
 }
 
 function validatorModuleAllowsRoundEntry(moduleConfig: ValidatorTelegramModuleConfig, side: Round["result"]) {
