@@ -594,6 +594,14 @@ export class TelegramEngine {
         return json({ ok: false, ...log }, 502, this.env);
       }
 
+      const officialDispatches = [];
+      for (const officialCard of [
+        readAiPatternsOfficialCard(dashboardResult.dashboard),
+        readSurfOfficialCard(dashboardResult.dashboard),
+      ]) {
+        officialDispatches.push(await this.dispatchOfficialDashboardSignal(officialCard, source));
+      }
+
       const resultCard = readPayingNumbersOfficialResult(dashboardResult.dashboard);
       const resultDispatch = await this.dispatchPayingNumbersOfficialResult(resultCard, source);
       const card = readPayingNumbersOfficialCard(dashboardResult.dashboard);
@@ -612,6 +620,7 @@ export class TelegramEngine {
         signalId: card.signalId || "",
         roundId: card.roundId || "",
         number: card.number || "",
+        officialDispatches,
         checkedAt: new Date().toISOString(),
       };
 
@@ -759,6 +768,100 @@ export class TelegramEngine {
       ...payload,
     });
     return payload;
+  }
+
+  async dispatchOfficialDashboardSignal(card, source) {
+    const baseLog = {
+      event: "[TELEGRAM_AUTO] card detectado",
+      source,
+      moduleKey: card.moduleKey || "",
+      monitor_called: true,
+      handler_called: true,
+      readingMode: card.mode || "",
+      cardStatus: card.status || "",
+      expectedSide: card.entry || "",
+      signalId: card.signalId || "",
+      roundId: card.roundId || "",
+      checkedAt: new Date().toISOString(),
+    };
+
+    if (!card.confirmed) {
+      await this.markOfficialDashboardSignalBaselineReady(card);
+      const payload = {
+        ...baseLog,
+        confirmed: false,
+        reason: card.reason || "not_confirmed",
+        dedupe_action: "not_checked",
+        telegram_send_called: false,
+        telegram_result: "not_called",
+      };
+      await this.state.storage.put(`dashboard-monitor:last:${card.moduleKey}`, payload);
+      return payload;
+    }
+
+    const baseline = await this.shouldSuppressOfficialDashboardSignalBaseline(card);
+    if (baseline.suppressed) {
+      const payload = {
+        ...baseLog,
+        confirmed: true,
+        reason: baseline.reason,
+        dedupe_action: "baseline_suppressed",
+        telegram_send_called: false,
+        telegram_result: "not_called",
+      };
+      await this.state.storage.put(`dashboard-monitor:last:${card.moduleKey}`, payload);
+      return payload;
+    }
+
+    const response = await this.dispatchSignal({
+      moduleKey: card.moduleKey,
+      signalKey: card.signalId,
+      roundId: card.roundIdNumber,
+      entry: card.entry,
+      result: "Aguardando resultado",
+      variables: card.variables,
+    });
+    const dispatch = await response.json().catch(() => ({}));
+    const sentCount = Array.isArray(dispatch.sent) ? dispatch.sent.length : 0;
+    const blockedCount = Array.isArray(dispatch.blocked) ? dispatch.blocked.length : 0;
+    const payload = {
+      ...baseLog,
+      confirmed: true,
+      activeChannels: sentCount + blockedCount,
+      sentCount,
+      blockedCount,
+      dedupe_action: sentCount ? "reserved" : "blocked",
+      telegram_send_called: sentCount > 0,
+      telegram_result: sentCount ? "sent" : "not_sent",
+      dispatch,
+    };
+    await this.state.storage.put(`dashboard-monitor:last:${card.moduleKey}`, payload);
+    return payload;
+  }
+
+  async markOfficialDashboardSignalBaselineReady(card) {
+    if (!card?.moduleKey) return;
+    const key = `dashboard-monitor:${card.moduleKey}:baseline-ready`;
+    if (await this.state.storage.get(key)) return;
+    await this.state.storage.put(key, {
+      readyAt: new Date().toISOString(),
+      firstSignalId: card.signalId || "",
+      firstMode: card.mode || "",
+      firstReason: card.reason || "",
+    });
+  }
+
+  async shouldSuppressOfficialDashboardSignalBaseline(card) {
+    const key = `dashboard-monitor:${card.moduleKey}:baseline-ready`;
+    const existing = await this.state.storage.get(key);
+    if (existing) return { suppressed: false, reason: "" };
+    await this.state.storage.put(key, {
+      readyAt: new Date().toISOString(),
+      firstSignalId: card.signalId || "",
+      firstMode: card.mode || "",
+      firstReason: "active_on_monitor_start",
+    });
+    return { suppressed: true, reason: "active_on_monitor_start" };
   }
 
   async markPayingNumbersBaselineReady(card) {
@@ -1103,6 +1206,149 @@ function dashboardMonitorSecrets(env = {}) {
   ].map(normalizeSecret).filter(Boolean);
 }
 
+function readAiPatternsOfficialCard(dashboard) {
+  const data = readRecord(dashboard);
+  const snapshot = readRecord(data.patternMinerSnapshot || data.patternMiner);
+  const entryAlerts = Array.isArray(snapshot.entryAlerts) ? snapshot.entryAlerts.map(readRecord) : [];
+  const alert = entryAlerts[0] || {};
+  const strategy = readRecord(alert.strategy);
+  const entry = normalizeEntry(strategy.expectedResult);
+  const sequence = Array.isArray(strategy.sequence)
+    ? strategy.sequence.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const matchedRounds = Array.isArray(alert.matchedRounds) ? alert.matchedRounds.map(readRecord) : [];
+  const matchedRound = matchedRounds.at(-1) || latestDashboardRound(data);
+  const roundId = dashboardRoundKey(matchedRound, data) || dashboardRoundKey(latestDashboardRound(data), data);
+  const roundIdNumber = clampInt(matchedRound.id ?? matchedRound.roundId ?? matchedRound.round ?? 0, 0, Number.MAX_SAFE_INTEGER);
+  const kind = dashboardText(alert.kind || "").toLowerCase();
+  const title = dashboardText(alert.title || "");
+  const status = dashboardText(strategy.status || title || "CONFIRMADO");
+
+  if (!Object.keys(alert).length) {
+    return { moduleKey: "ai_patterns", confirmed: false, reason: "no_confirmed_pattern_card", mode: "EMPTY", status: "" };
+  }
+  if (kind && kind !== "validated" && !normalizeSearchText(title).includes("VALIDAD") && !normalizeSearchText(title).includes("CONFIRM")) {
+    return { moduleKey: "ai_patterns", confirmed: false, reason: "pattern_not_validated", mode: kind, status };
+  }
+  if (!entry) {
+    return { moduleKey: "ai_patterns", confirmed: false, reason: "missing_expected_side", mode: kind || "validated", status };
+  }
+  if (!sequence.length) {
+    return { moduleKey: "ai_patterns", confirmed: false, reason: "missing_pattern_sequence", mode: kind || "validated", status, entry };
+  }
+  if (!roundId) {
+    return { moduleKey: "ai_patterns", confirmed: false, reason: "missing_round_id", mode: kind || "validated", status, entry };
+  }
+
+  const pattern = formatDashboardPatternSequenceText(sequence);
+  const alertId = dashboardText(alert.id || strategy.id || sequence.join(">"));
+  const signalId = ["ai-patterns", alertId || "sem-alerta", roundId, entry, pattern].join(":");
+  const confidence = formatDashboardPercent(strategy.assertiveness);
+  return {
+    moduleKey: "ai_patterns",
+    confirmed: true,
+    reason: "confirmed_pattern_card",
+    mode: kind || "validated",
+    status,
+    entry,
+    roundId,
+    roundIdNumber,
+    signalId,
+    variables: {
+      table: "Bac Bo",
+      pattern,
+      number: "",
+      numbers: pattern,
+      entry: formatEntry(entry),
+      entryLabel: formatEntryLabel(entry),
+      entryCompact: formatEntryCompact(entry),
+      side: entry,
+      status: status || "CONFIRMADO",
+      confidence,
+      percentage: confidence,
+      gale: "G1",
+      protection: "G1",
+      tieCoverage: "1",
+      tieProtection: "Ativa",
+      risk: status || "CONFIRMADO",
+      level: status || "CONFIRMADO",
+      score: dashboardText(strategy.totalValidated || ""),
+      round: roundId,
+      roundId: roundIdNumber,
+      time: dashboardText(matchedRound.time || matchedRound.recordedAt || matchedRound.createdAt || ""),
+      module: "Padroes IA",
+      result: "Aguardando resultado",
+    },
+  };
+}
+
+function readSurfOfficialCard(dashboard) {
+  const data = readRecord(dashboard);
+  const alert = readRecord(data.currentSurfAlert);
+  const latestRound = latestDashboardRound(data);
+  const roundId = dashboardRoundKey(latestRound, data);
+  const roundIdNumber = clampInt(latestRound.id ?? latestRound.roundId ?? latestRound.round ?? 0, 0, Number.MAX_SAFE_INTEGER);
+  const confidence = clampPercentValue(alert.surf_confidence ?? alert.confidence ?? alert.confianca);
+  const risk = clampPercentValue(alert.surf_break_risk ?? alert.surf_risk ?? alert.risk);
+  const rawSide = alert.surf_prediction_side && normalizeSearchText(alert.surf_prediction_side) !== "NONE"
+    ? alert.surf_prediction_side
+    : alert.surf_side;
+  const entry = normalizeEntry(rawSide);
+  const status = dashboardText(alert.surf_status || alert.status || alert.surf_phase || alert.phase || "");
+  const mode = confidence >= 89 && entry && entry !== "TIE" ? "FOLLOW" : "WAIT";
+
+  if (!Object.keys(alert).length) {
+    return { moduleKey: "surf_alert", confirmed: false, reason: "surf_card_missing", mode: "EMPTY", status };
+  }
+  if (!entry || entry === "TIE") {
+    return { moduleKey: "surf_alert", confirmed: false, reason: "surf_without_valid_side", mode, status, entry };
+  }
+  if (confidence < 89) {
+    return { moduleKey: "surf_alert", confirmed: false, reason: "surf_not_confirmed", mode, status, entry };
+  }
+  if (!roundId) {
+    return { moduleKey: "surf_alert", confirmed: false, reason: "missing_round_id", mode, status, entry };
+  }
+
+  const signalId = ["surf", "Bac Bo", entry, roundId, Math.round(confidence), Math.round(risk)].join(":");
+  return {
+    moduleKey: "surf_alert",
+    confirmed: true,
+    reason: "confirmed_surf_card",
+    mode,
+    status: status || "CONFIRMADO",
+    entry,
+    roundId,
+    roundIdNumber,
+    signalId,
+    variables: {
+      table: "Bac Bo",
+      pattern: "",
+      number: "",
+      numbers: "",
+      entry: formatEntry(entry),
+      entryLabel: formatEntryLabel(entry),
+      entryCompact: formatEntryCompact(entry),
+      side: entry,
+      status: status || "CONFIRMADO",
+      confidence: formatDashboardPercent(confidence),
+      percentage: formatDashboardPercent(confidence),
+      gale: "G1",
+      protection: "G1",
+      tieCoverage: "1",
+      tieProtection: "Ativa",
+      risk: formatDashboardPercent(risk),
+      level: status || "",
+      score: "",
+      round: roundId,
+      roundId: roundIdNumber,
+      time: dashboardText(latestRound.time || latestRound.recordedAt || latestRound.createdAt || ""),
+      module: "Aviso de Surf",
+      result: "Aguardando resultado",
+    },
+  };
+}
+
 function readPayingNumbersOfficialCard(dashboard) {
   const data = readRecord(dashboard);
   const reading = readRecord(data.neuralReading);
@@ -1287,6 +1533,43 @@ function dashboardNumber(value) {
 
 function dashboardText(value) {
   return String(value ?? "").trim();
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+}
+
+function clampPercentValue(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(100, number));
+}
+
+function formatDashboardPatternSequenceText(sequence) {
+  return (Array.isArray(sequence) ? sequence : [])
+    .map(formatDashboardPatternToken)
+    .filter(Boolean)
+    .join("");
+}
+
+function formatDashboardPatternToken(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const normalized = raw.toUpperCase().replace(/\s+/g, "");
+  const side = normalized.startsWith("BANKER") || normalized.startsWith("B")
+    ? "B"
+    : normalized.startsWith("PLAYER") || normalized.startsWith("P")
+      ? "P"
+      : normalized.startsWith("TIE") || normalized.startsWith("T")
+        ? "T"
+        : "";
+  if (!side) return raw;
+  const score = normalized.match(/\d{1,2}/)?.[0] || "";
+  return `${telegramSideCircle(side)}${score}`;
 }
 
 function normalizeGaleText(value) {
