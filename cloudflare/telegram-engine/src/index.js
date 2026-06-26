@@ -534,8 +534,14 @@ export class TelegramEngine {
         payloadJson: {
           moduleKey,
           signalKey,
+          signalKind,
+          variables: templateVariables,
+          entrySide: entry,
           entry: formatEntry(entry),
           protection: finalNotificationProtection,
+          galeLimit: config.galeLimit,
+          coverTie: config.coverTie,
+          tieCoverage: config.tieCoverage,
           result: notificationResult,
           telegramMessageId: result.messageId || null,
           buttonCount: buttons.length,
@@ -601,6 +607,7 @@ export class TelegramEngine {
       ]) {
         officialDispatches.push(await this.dispatchOfficialDashboardSignal(officialCard, source));
       }
+      const officialResultDispatch = await this.dispatchPendingOfficialModuleResults(dashboardResult.dashboard, source);
 
       const resultCard = readPayingNumbersOfficialResult(dashboardResult.dashboard);
       const resultDispatch = await this.dispatchPayingNumbersOfficialResult(resultCard, source);
@@ -621,6 +628,7 @@ export class TelegramEngine {
         roundId: card.roundId || "",
         number: card.number || "",
         officialDispatches,
+        officialResultDispatch,
         checkedAt: new Date().toISOString(),
       };
 
@@ -631,9 +639,10 @@ export class TelegramEngine {
           dedupe_action: "not_checked",
           telegram_send_called: false,
           telegram_result: "not_called",
-          reason: card.reason,
-          resultDispatch,
-        };
+        reason: card.reason,
+        resultDispatch,
+        officialResultDispatch,
+      };
         await this.markPayingNumbersBaselineReady(card);
         await this.state.storage.put("dashboard-monitor:last", log);
         return json({ ok: true, ...log }, 200, this.env);
@@ -649,6 +658,7 @@ export class TelegramEngine {
           telegram_result: "not_called",
           reason: baseline.reason,
           resultDispatch,
+          officialResultDispatch,
         };
         await this.state.storage.put("dashboard-monitor:last", log);
         return json({ ok: true, ...log }, 200, this.env);
@@ -675,6 +685,7 @@ export class TelegramEngine {
         telegram_send_called: sentCount > 0,
         telegram_result: sentCount ? "sent" : "not_sent",
         resultDispatch,
+        officialResultDispatch,
         dispatch,
       };
       await this.state.storage.put("dashboard-monitor:last", log);
@@ -768,6 +779,115 @@ export class TelegramEngine {
       ...payload,
     });
     return payload;
+  }
+
+  async dispatchPendingOfficialModuleResults(dashboard, source) {
+    const rounds = dashboardRounds(dashboard);
+    if (rounds.length < 2) {
+      return { ok: true, source, checked: 0, sentCount: 0, blockedCount: 0, reason: "not_enough_rounds" };
+    }
+
+    const rows = await this.state.storage.list({ prefix: "notification:" });
+    const candidates = [...rows.entries()]
+      .map(([key, notification]) => ({ key, notification: readRecord(notification) }))
+      .filter(({ notification }) => isPendingOfficialEntryNotification(notification))
+      .slice(-200);
+
+    let sentCount = 0;
+    let blockedCount = 0;
+    let pendingCount = 0;
+    const details = [];
+
+    for (const item of candidates) {
+      const notification = item.notification;
+      const payload = readRecord(notification.payloadJson);
+      const moduleKey = normalizeModuleKey(payload.moduleKey || String(notification.type || "").replace("module:", ""));
+      const channel = await this.getChannel(notification.userId, notification.channelId);
+      if (!channel || !channel.isActive) {
+        blockedCount += 1;
+        details.push({ id: notification.id, moduleKey, reason: "channel_inactive_or_missing" });
+        continue;
+      }
+      const config = normalizeModuleConfigs(channel.signalModules || {})[moduleKey];
+      if (!config?.enabled) {
+        blockedCount += 1;
+        details.push({ id: notification.id, moduleKey, reason: "module_inactive" });
+        continue;
+      }
+
+      const resolution = resolveOfficialNotificationResult(notification, rounds, config);
+      if (!resolution.ready) {
+        pendingCount += 1;
+        details.push({ id: notification.id, moduleKey, reason: resolution.reason, roundId: notification.roundId });
+        continue;
+      }
+
+      const response = await this.dispatchSignal({
+        moduleKey,
+        userId: notification.userId,
+        channelId: notification.channelId,
+        signalKey: `${payload.signalKey || notification.id}:result:${resolution.resultRoundKey}:${resolution.label}`,
+        roundId: resolution.resultRoundId,
+        entry: resolution.entry,
+        result: resolution.label,
+        protection: resolution.protection,
+        variables: {
+          ...readRecord(payload.variables),
+          entry: formatEntry(resolution.entry),
+          entryLabel: formatEntryLabel(resolution.entry),
+          entryCompact: formatEntryCompact(resolution.entry),
+          side: resolution.entry,
+          result: resolution.label,
+          gale: resolution.protection,
+          protection: resolution.protection,
+          tieMultiplier: resolution.tieMultiplier ? `${resolution.tieMultiplier}x` : "",
+          round: resolution.resultRoundKey,
+          roundId: resolution.resultRoundId,
+          time: dashboardText(resolution.resultRound.time || resolution.resultRound.recordedAt || resolution.resultRound.createdAt || ""),
+        },
+      });
+      const dispatch = await response.json().catch(() => ({}));
+      const currentSent = Array.isArray(dispatch.sent) ? dispatch.sent.length : 0;
+      const currentBlocked = Array.isArray(dispatch.blocked) ? dispatch.blocked.length : 0;
+      sentCount += currentSent;
+      blockedCount += currentBlocked;
+      if (currentSent || hasDuplicateSignalBlock(dispatch)) {
+        await this.storeNotification({
+          ...notification,
+          status: resolution.status,
+          error: "",
+          payloadJson: {
+            ...payload,
+            result: resolution.label,
+            resultStatus: resolution.status,
+            resultRoundId: resolution.resultRoundId,
+            resultRoundKey: resolution.resultRoundKey,
+            resultSentAt: new Date().toISOString(),
+          },
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      details.push({
+        id: notification.id,
+        moduleKey,
+        result: resolution.label,
+        sentCount: currentSent,
+        blockedCount: currentBlocked,
+      });
+    }
+
+    const summary = {
+      ok: true,
+      source,
+      checked: candidates.length,
+      sentCount,
+      blockedCount,
+      pendingCount,
+      details: details.slice(-20),
+      checkedAt: new Date().toISOString(),
+    };
+    await this.state.storage.put("dashboard-monitor:last-official-results", summary);
+    return summary;
   }
 
   async dispatchOfficialDashboardSignal(card, source) {
@@ -1488,6 +1608,129 @@ function payingNumbersResultLabel(outcome, kind, tieMultiplier) {
 function payingNumbersResultProtection(kind) {
   if (kind === "g1" || kind === "tie_g1" || kind === "red") return "G1";
   return "SG";
+}
+
+function isPendingOfficialEntryNotification(notification) {
+  const payload = readRecord(notification.payloadJson);
+  const moduleKey = normalizeModuleKey(payload.moduleKey || String(notification.type || "").replace("module:", ""));
+  if (!["ai_patterns", "paying_numbers", "surf_alert", "ties_only"].includes(moduleKey)) return false;
+  if (payload.resultSentAt || payload.resultStatus) return false;
+  if (payload.signalKind && payload.signalKind !== "entry") return false;
+  if (String(notification.status || "") !== "sent") return false;
+  const result = normalizeDedupeText(payload.result || "");
+  return !result || result === "aguardando_resultado" || result === "aguardando";
+}
+
+function resolveOfficialNotificationResult(notification, rounds, config) {
+  const payload = readRecord(notification.payloadJson);
+  const moduleKey = normalizeModuleKey(payload.moduleKey || String(notification.type || "").replace("module:", ""));
+  const entry = normalizeEntryLoose(payload.entrySide || payload.entry || readRecord(payload.variables).entry);
+  const entryRoundId = clampInt(notification.roundId ?? readRecord(payload.variables).roundId ?? 0, 0, Number.MAX_SAFE_INTEGER);
+  if (!entry) return { ready: false, reason: "missing_entry" };
+  if (!entryRoundId) return { ready: false, reason: "missing_entry_round" };
+
+  const sortedRounds = dashboardRounds({ rounds });
+  const futureRounds = sortedRounds
+    .filter((round) => Number(round.id ?? round.roundId ?? round.round ?? 0) > entryRoundId)
+    .slice(0, 8);
+  if (!futureRounds.length) return { ready: false, reason: "awaiting_next_round" };
+
+  const maxGale = moduleKey === "ties_only"
+    ? clampInt(config.tieCoverage ?? payload.tieCoverage ?? parseGaleLimit(payload.protection), 0, 4)
+    : clampInt(payload.galeLimit ?? parseGaleLimit(payload.protection) ?? config.galeLimit ?? 1, 0, 4);
+  const attempts = Math.max(1, maxGale + 1);
+  const coverTie = moduleKey === "ties_only" || payload.coverTie === true || config.coverTie === true || normalizeSearchText(readRecord(payload.variables).tieProtection).includes("ATIVA");
+
+  for (let index = 0; index < Math.min(futureRounds.length, attempts); index += 1) {
+    const round = futureRounds[index];
+    const resultSide = normalizeRoundSide(round.result ?? round.winner);
+    if (!resultSide) continue;
+    if (resultSide === "TIE") {
+      const tieMultiplier = dashboardNumber(round.tieMultiplier ?? round.tie_multiplier ?? round.multiplier);
+      if (entry === "TIE" || coverTie) {
+        return officialResolution({
+          status: "green",
+          label: tieMultiplier ? `Green no empate ${tieMultiplier}x` : "Green no empate",
+          protection: index === 0 ? "SG" : `G${index}`,
+          entry,
+          round,
+          tieMultiplier,
+        });
+      }
+      continue;
+    }
+    if (entry !== "TIE" && resultSide === entry) {
+      return officialResolution({
+        status: index === 0 ? "green" : `green_g${index}`,
+        label: index === 0 ? "Green" : `Green G${index}`,
+        protection: index === 0 ? "SG" : `G${index}`,
+        entry,
+        round,
+      });
+    }
+  }
+
+  if (futureRounds.length >= attempts) {
+    const round = futureRounds[attempts - 1] || futureRounds.at(-1);
+    return officialResolution({
+      status: "red",
+      label: "Red",
+      protection: maxGale <= 0 ? "SG" : `G${maxGale}`,
+      entry,
+      round,
+    });
+  }
+
+  return { ready: false, reason: "awaiting_gale_round" };
+}
+
+function officialResolution({ status, label, protection, entry, round, tieMultiplier = "" }) {
+  return {
+    ready: true,
+    status,
+    label,
+    protection,
+    entry,
+    tieMultiplier,
+    resultRound: readRecord(round),
+    resultRoundId: clampInt(round.id ?? round.roundId ?? round.round ?? 0, 0, Number.MAX_SAFE_INTEGER),
+    resultRoundKey: dashboardRoundKey(round, {}),
+  };
+}
+
+function dashboardRounds(dashboard) {
+  const data = readRecord(dashboard);
+  const rounds = Array.isArray(data.rounds) ? data.rounds.map(readRecord).filter((round) => Object.keys(round).length) : [];
+  return [...rounds].sort(compareDashboardRounds);
+}
+
+function normalizeEntryLoose(value) {
+  const direct = normalizeEntry(value);
+  if (direct) return direct;
+  const text = normalizeSearchText(value);
+  if (text.includes("BANKER") || text.includes("BANCA") || text.includes("🔴")) return "BANKER";
+  if (text.includes("PLAYER") || text.includes("JOGADOR") || text.includes("🔵")) return "PLAYER";
+  if (text.includes("TIE") || text.includes("EMPATE") || text.includes("🟡")) return "TIE";
+  return "";
+}
+
+function normalizeRoundSide(value) {
+  const text = normalizeSearchText(value);
+  if (["B", "BANKER", "BANCA"].includes(text)) return "BANKER";
+  if (["P", "PLAYER", "JOGADOR"].includes(text)) return "PLAYER";
+  if (["T", "TIE", "EMPATE"].includes(text)) return "TIE";
+  return "";
+}
+
+function parseGaleLimit(value) {
+  const text = String(value || "").trim().toUpperCase();
+  if (text === "SG" || text.includes("SEM")) return 0;
+  const match = text.match(/G\s*([0-4])/);
+  return match ? Number(match[1]) : 1;
+}
+
+function hasDuplicateSignalBlock(dispatch) {
+  return Array.isArray(dispatch?.blocked) && dispatch.blocked.some((item) => item?.reason === "duplicate_signal");
 }
 
 function parseRoundIdFromKey(value) {
