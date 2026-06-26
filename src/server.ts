@@ -368,6 +368,7 @@ const CLIENT_REGISTRY_PROTECTION_INTERVAL_MS = 60_000;
 const CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS = 5 * 60_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
 const VALIDATOR_TELEGRAM_TARGET_MS = 200;
+const VALIDATOR_TELEGRAM_DEDUPE_RESERVATION_TTL_MS = 30_000;
 const LIVE_FEED_STALE_MS = 150_000;
 const FREE_TRIAL_MINUTES = 30;
 const ELEVENLABS_API_KEY_SECRET_NAMES = [
@@ -8094,6 +8095,7 @@ async function reserveValidatorNotificationDedupe(env: unknown, notification: Re
       reserved: false,
       duplicate: false,
       status: 503,
+      action: "error",
       error: "Supabase dedupe persistence unavailable.",
     };
   }
@@ -8103,6 +8105,7 @@ async function reserveValidatorNotificationDedupe(env: unknown, notification: Re
       reserved: false,
       duplicate: false,
       status: 400,
+      action: "error",
       error: "Dedupe id obrigatorio.",
     };
   }
@@ -8127,16 +8130,22 @@ async function reserveValidatorNotificationDedupe(env: unknown, notification: Re
         reserved: false,
         duplicate: false,
         status: response.status,
+        action: "error",
         error: readString(readRecord(data), "message") || `Supabase dedupe retornou ${response.status}.`,
       };
     }
     const rows = Array.isArray(data) ? data.map(readRecord) : [];
     const reserved = rows.some((item) => readString(item, "id") === id);
+    if (!reserved) {
+      const retry = await retryReserveValidatorNotificationDedupe(config, row, id);
+      if (retry.reserved || retry.error) return retry;
+    }
     return {
       ok: true as const,
       reserved,
       duplicate: !reserved,
       status: response.status,
+      action: reserved ? "reserved" : "duplicate",
       error: "",
     };
   } catch (error) {
@@ -8145,9 +8154,95 @@ async function reserveValidatorNotificationDedupe(env: unknown, notification: Re
       reserved: false,
       duplicate: false,
       status: 502,
+      action: "error",
       error: errorMessage(error),
     };
   }
+}
+
+async function retryReserveValidatorNotificationDedupe(
+  config: { url: string; key: string },
+  row: Record<string, unknown>,
+  id: string,
+) {
+  const now = new Date().toISOString();
+  const cutoff = new Date(Date.now() - VALIDATOR_TELEGRAM_DEDUPE_RESERVATION_TTL_MS).toISOString();
+  const payloadJson = readRecord(row.payload_json);
+  const retryRow = {
+    ...row,
+    status: "reserved",
+    error: "",
+    payload_json: {
+      ...payloadJson,
+      retryAllowedAt: now,
+      retryReason: "previous_error_or_stale_reservation",
+    },
+    updated_at: now,
+  };
+  const filters = [
+    {
+      action: "retry_allowed_error",
+      query: `id=eq.${encodeURIComponent(id)}&status=eq.error`,
+    },
+    {
+      action: "retry_allowed_stale_reserved",
+      query: `id=eq.${encodeURIComponent(id)}&status=eq.reserved&updated_at=lt.${encodeURIComponent(cutoff)}`,
+    },
+  ];
+
+  for (const filter of filters) {
+    try {
+      const response = await fetch(`${config.url}/rest/v1/${VALIDATOR_NOTIFICATIONS_TABLE}?${filter.query}`, {
+        method: "PATCH",
+        headers: {
+          ...supabasePersistenceHeaders(config.key),
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify(retryRow),
+      });
+      const data = (await response.json().catch(() => null)) as unknown;
+      if (!response.ok) {
+        return {
+          ok: false as const,
+          reserved: false,
+          duplicate: false,
+          status: response.status,
+          action: "error",
+          error: readString(readRecord(data), "message") || `Supabase retry dedupe retornou ${response.status}.`,
+        };
+      }
+      const rows = Array.isArray(data) ? data.map(readRecord) : [];
+      if (rows.some((item) => readString(item, "id") === id)) {
+        return {
+          ok: true as const,
+          reserved: true,
+          duplicate: false,
+          status: response.status,
+          action: filter.action,
+          error: "",
+        };
+      }
+    } catch (error) {
+      return {
+        ok: false as const,
+        reserved: false,
+        duplicate: false,
+        status: 502,
+        action: "error",
+        error: errorMessage(error),
+      };
+    }
+  }
+
+  return {
+    ok: true as const,
+    reserved: false,
+    duplicate: true,
+    status: 200,
+    action: "duplicate",
+    error: "",
+  };
 }
 
 function validatorPatternToRow(pattern: SavedValidatorPattern) {
@@ -8402,6 +8497,7 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
   console.info(
     JSON.stringify({
       event: "[TELEGRAM_AUTO] monitor iniciado",
+      monitor_called: true,
       fast: Boolean(options.fast),
       cachedChannels: liveValidatorChannels.length,
       usableCachedChannels: liveValidatorChannels.filter(isUsableValidatorTelegramChannel).length,
@@ -8444,6 +8540,7 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     latestRound,
     entryChannelKeys,
     options,
+    { suppressInitialOfficialSignals },
   );
   for (const pattern of liveValidatorPatterns) {
     if (!shouldMonitorValidatorPattern(pattern, latestRound)) continue;
@@ -8661,6 +8758,7 @@ function buildAiPatternsModuleSignal(channel: ValidatorNotificationChannel, late
       entryLabel: formatServerSideLabel(confirmed.entry),
       entryCompact: formatServerCompactSide(confirmed.entry),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      protection: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: String(moduleConfig.tieCoverage),
       tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
       confidence: formatServerPercent(confirmed.assertiveness),
@@ -8734,24 +8832,34 @@ function buildPayingNumbersTelegramSendTasks(
   console.info(
     JSON.stringify({
       event: "[NUMEROS_PAGANTES] detectado",
+      moduleKey: "paying_numbers",
+      handler_called: true,
       roundId: latestRound.id,
       activeChannels: channels.length,
       confirmed: card.confirmed,
       reason: card.confirmed ? "confirmed_entry_card" : card.reason,
-      mode: card.mode,
+      readingMode: card.mode,
+      cardStatus: card.status,
       numero: card.numero,
       expectedSide: card.side || "",
-      signalKey: card.signalKey || "",
+      signalId: card.signalKey || "",
+      telegram_send_called: false,
     }),
   );
 
   if (!card.confirmed) {
     for (const channel of channels) {
       logPayingNumbersTelegramDecision(channel, "blocked", card.reason, {
+        moduleKey: "paying_numbers",
         roundId: latestRound.id,
-        mode: card.mode,
+        readingMode: card.mode,
+        cardStatus: card.status,
         numero: card.numero,
         expectedSide: card.side || "",
+        signalId: card.signalKey || "",
+        dedupe_action: "not_checked",
+        telegram_send_called: false,
+        telegram_result: "not_called",
       });
     }
     return tasks;
@@ -8761,10 +8869,14 @@ function buildPayingNumbersTelegramSendTasks(
     const moduleConfig = validatorChannelModuleConfig(channel, "paying_numbers");
     if (!validatorModuleAllowsSignalEntry(moduleConfig, card.side)) {
       logPayingNumbersTelegramDecision(channel, "blocked", "entry_not_allowed", {
+        moduleKey: "paying_numbers",
         roundId: latestRound.id,
-        signalKey: card.signalKey,
+        signalId: card.signalKey,
         expectedSide: card.side,
         allowedEntry: moduleConfig.entryType,
+        dedupe_action: "not_checked",
+        telegram_send_called: false,
+        telegram_result: "not_called",
       });
       continue;
     }
@@ -8772,25 +8884,37 @@ function buildPayingNumbersTelegramSendTasks(
     const signal = createPayingNumbersModuleSignal(channel, moduleConfig, latestRound, card);
     if (shouldSuppressInitialOfficialSignal(signal, dispatcherOptions.suppressInitialOfficialSignals)) {
       logPayingNumbersTelegramDecision(channel, "blocked", "initial_active_state", {
+        moduleKey: signal.moduleKey,
         roundId: latestRound.id,
-        signalKey: signal.signalKey,
+        signalId: signal.signalKey,
         dedupeKey: signal.notificationKey,
+        dedupe_action: "baseline_suppressed",
+        telegram_send_called: false,
+        telegram_result: "not_called",
       });
       continue;
     }
     if (validatorNotificationAlreadySent(signal.notificationKey)) {
       logPayingNumbersTelegramDecision(channel, "blocked", "duplicate_signal", {
+        moduleKey: signal.moduleKey,
         roundId: latestRound.id,
-        signalKey: signal.signalKey,
+        signalId: signal.signalKey,
         dedupeKey: signal.notificationKey,
+        dedupe_action: "memory_sent_duplicate",
+        telegram_send_called: false,
+        telegram_result: "not_called",
       });
       continue;
     }
     if (validatorChannelModuleCoolingDown(channel, "paying_numbers", signal.matchedAtMs)) {
       logPayingNumbersTelegramDecision(channel, "blocked", "cooldown_active", {
+        moduleKey: signal.moduleKey,
         roundId: latestRound.id,
-        signalKey: signal.signalKey,
+        signalId: signal.signalKey,
         cooldownSeconds: moduleConfig.cooldownSeconds,
+        dedupe_action: "not_checked",
+        telegram_send_called: false,
+        telegram_result: "not_called",
       });
       continue;
     }
@@ -8800,11 +8924,14 @@ function buildPayingNumbersTelegramSendTasks(
         event: "[NUMEROS_PAGANTES] confirmado",
         user: maskTelemetryUserId(channel.userId),
         channelId: channel.id,
+        moduleKey: signal.moduleKey,
         roundId: latestRound.id,
-        signalKey: signal.signalKey,
+        signalId: signal.signalKey,
         dedupeKey: signal.notificationKey,
         expectedSide: card.side,
         entryText: formatServerSignalSide(card.side),
+        dedupe_action: "pending_reservation",
+        telegram_send_called: false,
       }),
     );
     entryChannelKeys.add(validatorChannelKey(channel));
@@ -8878,6 +9005,7 @@ function createPayingNumbersModuleSignal(
       entryLabel: formatServerSideLabel(card.side),
       entryCompact: formatServerCompactSide(card.side),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      protection: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: moduleConfig.coverTie ? String(moduleConfig.tieCoverage) : "0",
       tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
       confidence: formatServerPercent(serverReadOptionalNumber(card.reading.assertividade)),
@@ -8953,6 +9081,7 @@ function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, lates
       entryLabel: formatServerSideLabel(side),
       entryCompact: formatServerCompactSide(side),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      protection: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: String(moduleConfig.tieCoverage),
       tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
       confidence: formatServerPercent(confidence),
@@ -8997,6 +9126,7 @@ function buildTiesOnlyModuleSignal(channel: ValidatorNotificationChannel, latest
       entryLabel: formatServerSideLabel("TIE"),
       entryCompact: formatServerCompactSide("TIE"),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
+      protection: moduleConfig.coverTie ? `G${moduleConfig.tieCoverage}` : formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: String(moduleConfig.tieCoverage),
       confidence: formatServerPercent(confidence),
       percentage: formatServerPercent(confidence),
@@ -9044,7 +9174,7 @@ function createValidatorModuleSignal(
       signalKey,
       ...variables,
       entry: variables.entry,
-      protection: variables.gale,
+      protection: variables.protection || variables.gale,
       result: "Aguardando resultado",
       ...payloadJson,
     },
@@ -9089,6 +9219,9 @@ async function sendValidatorModuleTelegramNotification(
         roundId: signal.roundId,
         signalKey: signal.signalKey,
         dedupeKey: signal.notificationKey,
+        dedupe_action: reservationResult.action || reason,
+        telegram_send_called: false,
+        telegram_result: "not_called",
         status: reservationResult.status,
         reason,
         error: reservationResult.error,
@@ -9096,9 +9229,13 @@ async function sendValidatorModuleTelegramNotification(
     );
     if (signal.moduleKey === "paying_numbers") {
       logPayingNumbersTelegramDecision(signal.channel, "blocked", reason, {
+        moduleKey: signal.moduleKey,
         roundId: signal.roundId,
-        signalKey: signal.signalKey,
+        signalId: signal.signalKey,
         dedupeKey: signal.notificationKey,
+        dedupe_action: reservationResult.action || reason,
+        telegram_send_called: false,
+        telegram_result: "not_called",
         status: reservationResult.status,
         error: reservationResult.error,
       });
@@ -9116,8 +9253,10 @@ async function sendValidatorModuleTelegramNotification(
       channelId: signal.channel.id,
       moduleKey: signal.moduleKey,
       roundId: signal.roundId,
-      signalKey: signal.signalKey,
+      signalId: signal.signalKey,
       dedupeKey: signal.notificationKey,
+      dedupe_action: reservationResult.action || "reserved",
+      telegram_send_called: true,
     }),
   );
   const result = isCloudValidatorTelegramChannel(signal.channel)
@@ -9158,8 +9297,11 @@ async function sendValidatorModuleTelegramNotification(
       channelId: signal.channel.id,
       moduleKey: signal.moduleKey,
       roundId: signal.roundId,
-      signalKey: signal.signalKey,
+      signalId: signal.signalKey,
       dedupeKey: signal.notificationKey,
+      dedupe_action: reservationResult.action || "reserved",
+      telegram_send_called: true,
+      telegram_result: result.ok ? "success" : "error",
       status: result.status,
       telegramMessageId: result.ok ? result.messageId : null,
       error: result.ok ? "" : result.error,
@@ -9212,8 +9354,12 @@ async function sendValidatorModuleTelegramNotification(
       result.ok ? "sent" : "blocked",
       result.ok ? "sent_to_telegram" : "telegram_error",
       {
+        moduleKey: signal.moduleKey,
         roundId: signal.roundId,
-        signalKey: signal.signalKey,
+        signalId: signal.signalKey,
+        dedupe_action: reservationResult.action || "reserved",
+        telegram_send_called: true,
+        telegram_result: result.ok ? "success" : "error",
         telegramMessageId: result.ok ? result.messageId : null,
         error: result.ok ? "" : result.error,
       },
@@ -9859,6 +10005,7 @@ function logPayingNumbersTelegramDecision(
   const summary = {
     event: status === "sent" ? "[NUMEROS_PAGANTES] enviado" : `[NUMEROS_PAGANTES] descartado: ${reason}`,
     legacyEvent: "telegram_paying_numbers_decision",
+    moduleKey: "paying_numbers",
     status,
     reason,
     user: maskTelemetryUserId(channel.userId),

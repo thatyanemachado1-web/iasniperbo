@@ -3042,7 +3042,7 @@ function telegramTemplateVariablesForModule(
   key: ValidatorTelegramModuleKey,
   templateKey: ValidatorTelegramTemplateKey,
 ) {
-  const common = ["module", "table", "entry", "entryLabel", "entryCompact", "gale", "result", "time", "round", "confidence", "percentage", "channel", "tieCoverage", "tieProtection"];
+  const common = ["module", "table", "entry", "entryLabel", "entryCompact", "gale", "protection", "result", "time", "round", "confidence", "percentage", "channel", "tieCoverage", "tieProtection"];
   const byModule: Record<ValidatorTelegramModuleKey, string[]> = {
     ai_patterns: ["pattern", "score", "side", "status", "risk"],
     paying_numbers: ["numbers", "number", "side", "score", "status", "risk", "level"],
@@ -3148,6 +3148,7 @@ function telegramModulePreview(key: ValidatorTelegramModuleKey, config: Validato
     entryLabel: telegramEntryPreviewPlainLabel(previewSide),
     entryCompact: telegramEntryPreviewCompactLabel(previewSide),
     gale: formatTelegramProtection(config.galeLimit),
+    protection: formatTelegramProtection(config.galeLimit),
     tieCoverage: config.coverTie ? "4" : "0",
     tieProtection: config.coverTie ? "Ativa" : "Inativa",
     confidence: key === "surf_alert" ? "34,00%" : "100.00%",
