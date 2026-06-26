@@ -8623,15 +8623,6 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     return null;
   }
 
-  if (reading.mode !== "ACTIVE") {
-    logPayingNumbersTelegramDecision(channel, "blocked", "site_reading_not_active", {
-      roundId: latestRound.id,
-      mode: reading.mode,
-      numero: reading.numero ?? null,
-    });
-    return null;
-  }
-
   const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
   if (!expectedSide) {
     logPayingNumbersTelegramDecision(channel, "blocked", "missing_detected_entry", {
@@ -8683,10 +8674,69 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     }));
   }
 
+  if (!stateMatchesReading || !state?.expectedSide) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "no_confirmed_entry_card", {
+      roundId: latestRound.id,
+      signalKey: key,
+      mode: reading.mode,
+      numero: reading.numero ?? null,
+      expectedSide,
+      stateKey: state?.key || "",
+      stateMatched: stateMatchesReading,
+    });
+    return null;
+  }
+
+  if (state.expectedSide !== expectedSide) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "confirmed_entry_mismatch", {
+      roundId: latestRound.id,
+      signalKey: key,
+      expectedSide,
+      confirmedSide: state.expectedSide,
+    });
+    return null;
+  }
+
+  const originKind = readServerNeuralOriginKind(reading.origemTipo);
+  if (originKind === "OPOSTO") {
+    logPayingNumbersTelegramDecision(channel, "blocked", "origin_not_paying_number", {
+      roundId: latestRound.id,
+      signalKey: key,
+      originKind,
+      numero: reading.numero ?? null,
+      expectedSide,
+    });
+    return null;
+  }
+
+  const paganteKind = serverReadPaganteKind(reading);
+  if (paganteKind !== "favorable") {
+    logPayingNumbersTelegramDecision(channel, "blocked", "pagante_not_confirmed", {
+      roundId: latestRound.id,
+      signalKey: key,
+      paganteKind,
+      mode: reading.mode,
+      status: reading.paganteStatus || "",
+      numero: reading.numero ?? null,
+      expectedSide,
+    });
+    return null;
+  }
+
+  if (!validatorModuleAllowsSignalEntry(moduleConfig, state.expectedSide)) {
+    logPayingNumbersTelegramDecision(channel, "blocked", "confirmed_entry_not_allowed", {
+      roundId: latestRound.id,
+      signalKey: key,
+      confirmedSide: state.expectedSide,
+      allowedEntry: moduleConfig.entryType,
+    });
+    return null;
+  }
+
   const status = String(
-    reading.paganteStatus || (stateMatchesReading && state?.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"),
+    reading.paganteStatus || (state.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"),
   );
-  const triggerKey = stateMatchesReading && state?.triggerRoundKey ? state.triggerRoundKey : String(latestRound.id);
+  const triggerKey = state.triggerRoundKey;
   return createValidatorModuleSignal(
     channel,
     "paying_numbers",
@@ -8695,17 +8745,17 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     {
       table: "Bac Bo",
       pattern: "",
-      entry: formatServerSignalSide(expectedSide),
-      entryLabel: formatServerSideLabel(expectedSide),
-      entryCompact: formatServerCompactSide(expectedSide),
+      entry: formatServerSignalSide(state.expectedSide),
+      entryLabel: formatServerSideLabel(state.expectedSide),
+      entryCompact: formatServerCompactSide(state.expectedSide),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: moduleConfig.coverTie ? String(moduleConfig.tieCoverage) : "0",
       tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
       confidence: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
       percentage: formatServerPercent(serverReadOptionalNumber(reading.assertividade)),
       status,
-      risk: serverReadPaganteKind(reading),
-      number: typeof reading.numero === "number" ? `${serverSignalCircle(expectedSide)}${reading.numero}` : "",
+      risk: paganteKind,
+      number: typeof reading.numero === "number" ? `${serverSignalCircle(state.expectedSide)}${reading.numero}` : "",
       level: "",
       round: String(latestRound.id),
       module: "Numeros Pagantes",
@@ -8713,15 +8763,16 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     {
       key,
       numero: reading.numero ?? null,
-      expectedSide,
-      entryText: formatServerSignalSide(expectedSide),
+      expectedSide: state.expectedSide,
+      entryText: formatServerSignalSide(state.expectedSide),
       protection: formatValidatorModuleGale(moduleConfig.galeLimit),
       coverTie: moduleConfig.coverTie,
       tieCoverage: moduleConfig.coverTie ? moduleConfig.tieCoverage : 0,
       result: "Aguardando resultado",
       status,
       source: "site_neuralReading",
-      stateMatched: stateMatchesReading,
+      stateMatched: true,
+      confirmedEntryCard: true,
     },
   );
 }
