@@ -9759,7 +9759,7 @@ async function sendValidatorTelegramResultNotification(
         protection: outcome.galeUsed <= 0 ? "SG" : `G${Math.min(4, outcome.galeUsed)}`,
         variables,
         buttons,
-        forceMessage: moduleKey === "validator",
+        forceMessage: true,
       })
     : await sendTelegramMessage({
         botToken: decodeServerToken(channel.botTokenEncoded),
@@ -10547,8 +10547,8 @@ function buildServerValidatorTelegramMessage(pattern: SavedValidatorPattern, cha
 
 function enforceServerValidatorTemplateIdentity(template: string) {
   return String(template || DEFAULT_VALIDATOR_MESSAGE_TEMPLATES.entry)
-    .replace(/PADR(?:ÃO|AO|ÃƒO|Ã?O|[\uFFFD?]+O)\s+IA\s+CONFIRMADO/gi, "PADRÃO VALIDADOR")
-    .replace(/PADR(?:ÃO|AO|ÃƒO|Ã?O|[\uFFFD?]+O)\s+IA\b/gi, "PADRÃO VALIDADOR");
+    .replace(/PADR\S*O\s+IA\s+CONFIRMADO/gi, "PADR\u00C3O VALIDADOR")
+    .replace(/PADR\S*O\s+IA\b/gi, "PADR\u00C3O VALIDADOR");
 }
 
 function buildServerValidatorAnalyzingMessage(channel: ValidatorNotificationChannel) {
