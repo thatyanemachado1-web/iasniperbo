@@ -7207,6 +7207,7 @@ async function validatorRequestUserId(request: Request, url: URL, env: unknown) 
   if (session) {
     const bindingOk = await sessionMatchesRequestBinding(env, request, session);
     if (bindingOk && (session.scope === "client" || session.scope === "owner" || session.scope === "admin_approver")) {
+      const requestedUserId = normalizeValidatorUserId(request.headers.get("x-validator-user-id"));
       if (session.scope === "client") {
         const client = findClientByEmail(session.email);
         if (!client || !clientHasLiveAccess(client)) {
@@ -7214,8 +7215,14 @@ async function validatorRequestUserId(request: Request, url: URL, env: unknown) 
           return "";
         }
         await syncTelegramEngineUserAccess(env, session.email, client).catch(() => null);
+        return normalizeValidatorUserId(session.email);
       }
-      return normalizeValidatorUserId(session.email);
+      const effectiveUserId = requestedUserId || normalizeValidatorUserId(session.email);
+      if (requestedUserId && requestedUserId !== normalizeValidatorUserId(session.email)) {
+        const requestedClient = findClientByEmail(requestedUserId);
+        await syncTelegramEngineUserAccess(env, requestedUserId, requestedClient).catch(() => null);
+      }
+      return effectiveUserId;
     }
   }
 
