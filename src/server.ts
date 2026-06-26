@@ -391,14 +391,14 @@ const ACTIVE_ENTRY_MODES = ["sniper", "hunter", "aggressive"] as const satisfies
 const SNIPER_NEURAL_ASSERTIVENESS_MIN = 99;
 const DEFAULT_VALIDATOR_MESSAGE_TEMPLATES: ValidatorMessageTemplates = {
   entry:
-    "🤖 <b>ENTRADA CONFIRMADA</b>\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> Ate {{gale}}\n🤝 <b>Proteção Tie:</b> {{tieProtection}}\n📡 <b>Assertividade:</b> {{percentage}}",
-  gale: "🛡️ <b>FAZ O {{gale}}</b>\n🎯 <b>Entrada:</b> {{entry}}",
-  green: "✅ <b>{{result}}</b>\n🧩 <b>Padrao:</b> {{pattern}}",
-  red: "❌ <b>RED</b>\n🧩 <b>Padrao:</b> {{pattern}}",
+    "\u{1F916} <b>PADR\u00C3O VALIDADOR</b>\n\n\u{1F3B2} <b>Mesa:</b> {{table}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}\n\u{1F4CA} <b>Assertividade:</b> {{percentage}}",
+  gale: "\u{1F6E1}\uFE0F <b>FAZ O {{gale}}</b>\n\u{1F3AF} <b>Entrada:</b> {{entry}}",
+  green: "\u2705 <b>{{result}}</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}",
+  red: "\u274C <b>RED</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}",
   scoreboard: "{{wins}} GREEN / {{loss}} RED / {{percentage}}",
   greenStreak: "{{wins}} GREENS SEGUIDOS",
-  preAlert: "🧩 <b>Padrao quase formado</b>\n🎲 <b>Mesa:</b> {{table}}\n📌 <b>Condicao:</b> {{pattern}}\n🎯 <b>Possivel entrada:</b> {{entry}}",
-  analyzing: "🔎 <b>ANALISANDO PADRAO</b>\n🎲 <b>Mesa:</b> {{table}}\nAguardando entrada validada",
+  preAlert: "\u{1F9E9} <b>Padr\u00E3o quase formado</b>\n\u{1F3B2} <b>Mesa:</b> {{table}}\n\u{1F4CC} <b>Condi\u00E7\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Poss\u00EDvel entrada:</b> {{entry}}",
+  analyzing: "\u{1F50E} <b>ANALISANDO PADR\u00C3O</b>\n\u{1F3B2} <b>Mesa:</b> {{table}}\n\u23F3 Aguardando entrada validada",
 };
 type ValidatorTelegramModuleKey = "ai_patterns" | "paying_numbers" | "surf_alert" | "ties_only" | "validator";
 type ValidatorTelegramButtonConfig = {
@@ -450,9 +450,9 @@ const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModul
   ai_patterns:
     "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
+    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entryLabel}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
   surf_alert:
-    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
+    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entryCompact}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
     "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Cobertura:</b> até G{{tieCoverage}}\n📊 <b>Nível:</b> {{level}}",
   validator:
@@ -460,65 +460,65 @@ const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModul
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
-    "✅ <b>{{result}}</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   paying_numbers:
-    "✅ <b>{{result}}</b>\n\n💎 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   surf_alert:
-    "✅ <b>{{result}}</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
   validator:
-    "✅ <b>{{result}}</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_ANALYZING_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "🔎 <b>ANALISANDO PADRAO IA</b>\n🎲 <b>Mesa:</b> {{table}}\n⏳ Aguardando confirmacao real.",
-  paying_numbers: "🔎 <b>ANALISANDO NUMERO PAGANTE</b>\n🔢 <b>Numeros:</b> {{numbers}}\n⏳ Aguardando confirmacao real.",
-  surf_alert: "🔎 <b>ANALISANDO SURF</b>\n🌊 <b>Direcao:</b> {{side}}\n⏳ Aguardando confirmacao real.",
-  ties_only: "🔎 <b>ANALISANDO EMPATE</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}\n⏳ Aguardando confirmacao real.",
-  validator: "🔎 <b>ANALISANDO VALIDADOR</b>\n🧩 <b>Padrao:</b> {{pattern}}\n⏳ Aguardando entrada validada.",
+  ai_patterns: "🔎 <b>ANALISANDO PADRÃO IA</b>\n🎲 <b>Mesa:</b> {{table}}\n⏳ Aguardando confirmação real.",
+  paying_numbers: "🔎 <b>ANALISANDO NÚMERO PAGANTE</b>\n🔢 <b>Números:</b> {{numbers}}\n⏳ Aguardando confirmação real.",
+  surf_alert: "🔎 <b>ANALISANDO SURF</b>\n🌊 <b>Direção:</b> {{side}}\n⏳ Aguardando confirmação real.",
+  ties_only: "🔎 <b>ANALISANDO EMPATE</b>\n🟡 <b>Pressão Tie:</b> {{tie_pressure}}\n⏳ Aguardando confirmação real.",
+  validator: "🔎 <b>ANALISANDO VALIDADOR</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n⏳ Aguardando entrada validada.",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GALE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "🛡️ <b>FAZER {{gale}}</b>\n🎯 <b>Entrada:</b> {{entry}}\n🧩 <b>Padrao:</b> {{pattern}}",
-  paying_numbers: "🛡️ <b>FAZER {{gale}}</b>\n🔢 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
-  surf_alert: "🛡️ <b>FAZER {{gale}}</b>\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
-  ties_only: "🛡️ <b>COBRIR EMPATE {{gale}}</b>\n🟡 <b>Pressao:</b> {{tie_pressure}}",
-  validator: "🛡️ <b>FAZER {{gale}}</b>\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ai_patterns: "🛡️ <b>FAZER {{gale}}</b>\n🎯 <b>Entrada:</b> {{entry}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}",
+  paying_numbers: "🛡️ <b>FAZER {{gale}}</b>\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "🛡️ <b>FAZER {{gale}}</b>\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "🛡️ <b>COBRIR EMPATE {{gale}}</b>\n🟡 <b>Pressão:</b> {{tie_pressure}}",
+  validator: "🛡️ <b>FAZER {{gale}}</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
-    "❌ <b>RED</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "❌ <b>RED</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   paying_numbers:
-    "❌ <b>RED</b>\n\n💎 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "❌ <b>RED</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   surf_alert:
-    "❌ <b>RED</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
-  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate nao confirmou</b>\n🛡️ <b>Protecao:</b> {{gale}}",
-  validator: "❌ <b>RED</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "❌ <b>RED</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate não confirmou</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+  validator: "❌ <b>RED</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_EXPIRED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "⌛ <b>SINAL EXPIRADO</b>\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}",
-  paying_numbers: "⌛ <b>SINAL EXPIRADO</b>\n💎 <b>Modulo:</b> {{module}}\n🔢 <b>Numeros:</b> {{numbers}}",
-  surf_alert: "⌛ <b>SINAL EXPIRADO</b>\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Direcao:</b> {{side}}",
-  ties_only: "⌛ <b>ALERTA DE EMPATE EXPIRADO</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}",
-  validator: "⌛ <b>SINAL EXPIRADO</b>\n🧩 <b>Padrao:</b> {{pattern}}",
+  ai_patterns: "⌛ <b>SINAL EXPIRADO</b>\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}",
+  paying_numbers: "⌛ <b>SINAL EXPIRADO</b>\n💎 <b>Módulo:</b> {{module}}\n🔢 <b>Números:</b> {{numbers}}",
+  surf_alert: "⌛ <b>SINAL EXPIRADO</b>\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Direção:</b> {{side}}",
+  ties_only: "⌛ <b>ALERTA DE EMPATE EXPIRADO</b>\n🟡 <b>Pressão Tie:</b> {{tie_pressure}}",
+  validator: "⌛ <b>SINAL EXPIRADO</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_CANCELED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
-  ai_patterns: "🚫 <b>SINAL CANCELADO</b>\n🤖 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
-  paying_numbers: "🚫 <b>SINAL BLOQUEADO</b>\n💎 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
-  surf_alert: "🚫 <b>SINAL CANCELADO</b>\n🌊 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
-  ties_only: "🚫 <b>ALERTA CANCELADO</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}\n📌 <b>Motivo:</b> {{result}}",
-  validator: "🚫 <b>SINAL CANCELADO</b>\n🧩 <b>Padrao:</b> {{pattern}}\n📌 <b>Motivo:</b> {{result}}",
+  ai_patterns: "🚫 <b>SINAL CANCELADO</b>\n🤖 <b>Módulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  paying_numbers: "🚫 <b>SINAL BLOQUEADO</b>\n💎 <b>Módulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  surf_alert: "🚫 <b>SINAL CANCELADO</b>\n🌊 <b>Módulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  ties_only: "🚫 <b>ALERTA CANCELADO</b>\n🟡 <b>Pressão Tie:</b> {{tie_pressure}}\n📌 <b>Motivo:</b> {{result}}",
+  validator: "🚫 <b>SINAL CANCELADO</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n📌 <b>Motivo:</b> {{result}}",
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns:
-    "✅ <b>{{result}}</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   paying_numbers:
-    "✅ <b>{{result}}</b>\n\n💎 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   surf_alert:
-    "✅ <b>{{result}}</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
   validator:
-    "✅ <b>{{result}}</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
@@ -1434,7 +1434,7 @@ function fallbackLocalAiCommentary(event: string, summary: Record<string, unknow
   if (side === "BANKER" || side === "PLAYER" || side === "TIE") {
     return `Entrada confirmada em ${side}. A leitura veio dos modulos internos e o risco esta monitorado.`;
   }
-  return "Mesa ainda em observacao. Tem movimento, mas nao existe confirmacao limpa para entrada.";
+  return "Mesa ainda em observacao. Tem movimento, mas nao existe confirmação limpa para entrada.";
 }
 
 function cleanLocalAiResponse(value: string) {
@@ -1463,7 +1463,7 @@ function beautifyPortugueseText(value: string) {
     ["confianca", "confianca"],
     ["direcao", "direcao"],
     ["protecao", "protecao"],
-    ["confirmacao", "confirmacao"],
+    ["confirmação", "confirmação"],
     ["proxima", "proxima"],
     ["forcar", "forcar"],
     ["modulos", "modulos"],
@@ -6595,8 +6595,8 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       message:
         "ENTRADA CONFIRMADA\n" +
         "Mesa: Bac Bo\n" +
-        "\u{1F9E9} Padr\u00E3o: \u{1F534}10 \u2192 \u{1F535}7 \u2192 \u{1F7E1}6\n" +
-        "\u{1F3AF} Entrada: \u{1F534} Banker\n" +
+        "\u{1F9E9} Padr\u00E3o: \u{1F534}10\u{1F535}7\u{1F7E1}6\n" +
+        "\u{1F3AF} Entrada: \u{1F534} BANKER\n" +
         "\u{1F6E1}\uFE0F Prote\u00E7\u00E3o: At\u00E9 G1\n" +
         "\u{1F91D} Prote\u00E7\u00E3o Tie: Ativa\n" +
         `Canal: ${channel.name}`,
@@ -7120,7 +7120,7 @@ function normalizeValidatorChannelSignalModules(value: unknown) {
           : defaults.coverTie,
         tieCoverage: clampValidatorModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
         cooldownSeconds: clampValidatorModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
-        template: readString(raw, "template") || defaults.template,
+        template: resolveValidatorModuleTemplate(key, raw.template, defaults.template),
         analyzingTemplate: readString(raw, "analyzingTemplate") || defaults.analyzingTemplate,
         greenTemplate: readString(raw, "greenTemplate") || defaults.greenTemplate,
         galeTemplate: readString(raw, "galeTemplate") || defaults.galeTemplate,
@@ -7134,6 +7134,27 @@ function normalizeValidatorChannelSignalModules(value: unknown) {
     },
     {} as Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>,
   );
+}
+
+function resolveValidatorModuleTemplate(key: ValidatorTelegramModuleKey, value: unknown, defaultTemplate: string) {
+  const template = readString({ value }, "value");
+  return shouldUseDefaultValidatorModuleTemplate(key, template) ? defaultTemplate : template;
+}
+
+function shouldUseDefaultValidatorModuleTemplate(_key: ValidatorTelegramModuleKey, template: string) {
+  const text = normalizeValidatorModuleTemplateFingerprint(template);
+  if (!text) return true;
+  return text.includes("ENTRADA CONFIRMADA");
+}
+
+function normalizeValidatorModuleTemplateFingerprint(value: string) {
+  return String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .trim()
+    .toUpperCase();
 }
 
 function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
@@ -8393,6 +8414,7 @@ async function sendValidatorEntryTelegramNotification(
         roundId,
         entry: entrySide,
         message,
+        variables: buildServerValidatorTelegramVariables(pattern, channel),
         buttons,
       })
     : await sendTelegramMessage({
@@ -8516,6 +8538,8 @@ function buildAiPatternsModuleSignal(channel: ValidatorNotificationChannel, late
       table: "Bac Bo",
       pattern: confirmed.sequenceText,
       entry: formatServerTelegramSide(confirmed.entry),
+      entryLabel: formatServerSideLabel(confirmed.entry),
+      entryCompact: formatServerCompactSide(confirmed.entry),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: String(moduleConfig.tieCoverage),
       tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
@@ -8631,6 +8655,8 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
       table: "Bac Bo",
       pattern: "",
       entry: formatServerSignalSide(expectedSide),
+      entryLabel: formatServerSideLabel(expectedSide),
+      entryCompact: formatServerCompactSide(expectedSide),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: moduleConfig.coverTie ? String(moduleConfig.tieCoverage) : "0",
       tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
@@ -8685,6 +8711,8 @@ function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, lates
       table: "Bac Bo",
       pattern: "",
       entry: formatServerSignalSide(side),
+      entryLabel: formatServerSideLabel(side),
+      entryCompact: formatServerCompactSide(side),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: String(moduleConfig.tieCoverage),
       tieProtection: moduleConfig.coverTie ? "Ativa" : "Inativa",
@@ -8727,6 +8755,8 @@ function buildTiesOnlyModuleSignal(channel: ValidatorNotificationChannel, latest
       table: "Bac Bo",
       pattern: "",
       entry: formatServerSignalSide("TIE"),
+      entryLabel: formatServerSideLabel("TIE"),
+      entryCompact: formatServerCompactSide("TIE"),
       gale: formatValidatorModuleGale(moduleConfig.galeLimit),
       tieCoverage: String(moduleConfig.tieCoverage),
       confidence: formatServerPercent(confidence),
@@ -9237,26 +9267,29 @@ function sanitizeValidatorTelegramOutgoingText(value: unknown) {
     .replace(/\[PREVIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
     .replace(/PADR[\uFFFD?]+O/g, "PADRAO")
     .replace(/Padr[\uFFFD?]+o/gi, "Padrao")
-    .replace(/Prote[\uFFFD?]+o/gi, "Protecao")
-    .replace(/M[\uFFFD?]+dulo/gi, "Modulo")
+    .replace(/Prote[\uFFFD?]+o/gi, "Proteção")
+    .replace(/M[\uFFFD?]+dulo/gi, "Módulo")
     .replace(/N[\uFFFD?]+mero/gi, "Numero")
     .replace(/Confian[\uFFFD?]+a/gi, "Confianca")
     .replace(/\bPADRAO\b/g, "PADR\u00C3O")
     .replace(/\bPadrao\b/g, "Padr\u00E3o")
-    .replace(/\bProtecao\b/gi, "Prote\u00E7\u00E3o")
-    .replace(/\bModulo\b/gi, "M\u00F3dulo")
+    .replace(/\bProteção\b/gi, "Prote\u00E7\u00E3o")
+    .replace(/\bMódulo\b/gi, "M\u00F3dulo")
     .replace(/\bNumero\b/gi, "N\u00FAmero")
     .replace(/\bConfianca\b/gi, "Confian\u00E7a")
     .replace(/^\?{1,4}\s*((?:<b>)?ENTRADA CONFIRMADA(?:<\/b>)?)/gim, "\u{1F916} $1")
     .replace(/^\?{1,4}\s*((?:<b>)?PADR?O IA CONFIRMADO(?:<\/b>)?)/gim, "\u{1F916} $1")
     .replace(/^\?{1,4}\s*((?:<b>)?Mesa:\s*(?:<\/b>)?)/gim, "\u{1F3B2} $1")
-    .replace(/^\?{1,4}\s*((?:<b>)?Padr?o:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1")
+    .replace(/^\?{1,4}\s*((?:<b>)?Padrão:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1")
     .replace(/^\?{1,4}\s*((?:<b>)?Entrada:\s*(?:<\/b>)?)/gim, "\u{1F3AF} $1")
     .replace(/^\?{1,4}\s*((?:<b>)?Prote??o:\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1")
     .replace(/^\?{1,4}\s*((?:<b>)?Assertividade:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1")
     .replace(/\?{1,4}\s*(BANKER|Banker)\b/g, "\u{1F534} $1")
     .replace(/\?{1,4}\s*(PLAYER|Player)\b/g, "\u{1F535} $1")
-    .replace(/\?{1,4}\s*(TIE|Tie)\b/g, "\u{1F7E1} $1");
+    .replace(/\?{1,4}\s*(TIE|Tie)\b/g, "\u{1F7E1} $1")
+    .replace(/\u{1F534}\s*Banker\b/gu, "\u{1F534} BANKER")
+    .replace(/\u{1F535}\s*Player\b/gu, "\u{1F535} PLAYER")
+    .replace(/\u{1F7E1}\s*Tie\b/gu, "\u{1F7E1} TIE");
   return decorateValidatorTelegramPatternLines(decorateKnownValidatorTelegramLines(text));
 }
 
@@ -9290,44 +9323,54 @@ function startsWithValidatorTelegramEmoji(value: string) {
 
 function validatorTelegramEmojiForLine(plain: string) {
   if (!plain || plain.startsWith("[PREVIA DE TESTE]")) return "";
-  if (plain.startsWith("ENTRADA CONFIRMADA")) return "??";
-  if (plain.startsWith("PADRAO IA CONFIRMADO")) return "??";
-  if (plain.startsWith("PADRAO VALIDADOR")) return "??";
-  if (plain.startsWith("NUMERO PAGANTE CONFIRMADO")) return "??";
-  if (plain.startsWith("AVISO DE SURF CONFIRMADO")) return "??";
-  if (plain.startsWith("POSSIVEL EMPATE")) return "??";
-  if (plain.startsWith("MESA:")) return "??";
-  if (plain.startsWith("PADRAO:")) return "??";
-  if (plain.startsWith("ENTRADA:")) return "??";
-  if (plain.startsWith("PROTECAO:")) return "???";
-  if (plain.startsWith("PROTECAO TIE:")) return "??";
-  if (plain.startsWith("COBERTURA:")) return "???";
-  if (plain.startsWith("ASSERTIVIDADE:")) return "??";
-  if (plain.startsWith("NUMERO:")) return "??";
-  if (plain.startsWith("NUMEROS:")) return "??";
-  if (plain.startsWith("STATUS:")) return "??";
-  if (plain.startsWith("RISCO:")) return "??";
-  if (plain.startsWith("CONFIANCA:")) return "??";
-  if (plain.startsWith("NIVEL:")) return "??";
-  if (plain.startsWith("MODULO:")) return "??";
+  if (plain.startsWith("ENTRADA CONFIRMADA")) return "\u{1F916}";
+  if (plain.startsWith("PADRAO IA CONFIRMADO")) return "\u{1F916}";
+  if (plain.startsWith("PADRAO VALIDADOR")) return "\u{1F916}";
+  if (plain.startsWith("NUMERO PAGANTE CONFIRMADO")) return "\u{1F48E}";
+  if (plain.startsWith("AVISO DE SURF CONFIRMADO")) return "\u{1F30A}";
+  if (plain.startsWith("POSSIVEL EMPATE")) return "\u{1F7E1}";
+  if (plain.startsWith("MESA:")) return "\u{1F3B2}";
+  if (plain.startsWith("PADRAO:")) return "\u{1F9E9}";
+  if (plain.startsWith("ENTRADA:")) return "\u{1F3AF}";
+  if (plain.startsWith("PROTECAO:")) return "\u{1F6E1}\uFE0F";
+  if (plain.startsWith("PROTECAO TIE:")) return "\u{1F91D}";
+  if (plain.startsWith("COBERTURA:")) return "\u{1F6E1}\uFE0F";
+  if (plain.startsWith("ASSERTIVIDADE:")) return "\u{1F4CA}";
+  if (plain.startsWith("NUMERO:")) return "\u{1F522}";
+  if (plain.startsWith("NUMEROS:")) return "\u{1F522}";
+  if (plain.startsWith("STATUS:")) return "\u{1F4CC}";
+  if (plain.startsWith("RISCO:")) return "\u26A0\uFE0F";
+  if (plain.startsWith("CONFIANCA:")) return "\u{1F4CA}";
+  if (plain.startsWith("NIVEL:")) return "\u{1F4CA}";
+  if (plain.startsWith("MODULO:")) return "\u{1F916}";
   return "";
 }
 
 function decorateValidatorTelegramPatternLines(value: string) {
-  return String(value || "").replace(/^(\s*(?:\u{1F9E9}\s*)?(?:<b>)?Padr(?:\u00E3o|ao)(?:<\/b>)?:\s*)([^\r\n]+)/gimu, (_, prefix: string, expression: string) => {
-    let nextPrefix = String(prefix || "").replace(/Padrao/gi, "Padr\u00E3o");
-    if (!nextPrefix.includes("\u{1F9E9}")) nextPrefix = nextPrefix.replace(/^(\s*)/, "$1\u{1F9E9} ");
-    return nextPrefix + decorateValidatorTelegramPatternExpression(expression);
-  });
+  const puzzle = "\u{1F9E9}";
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = String(line || "").match(/^(\s*)(?:\u{1F9E9}\s*)?(?:<b>)?Padr(?:\u00E3o|ao):?(?:<\/b>)?:?\s*(.*)$/iu);
+      if (!match) return line;
+      const expression = String(match[2] || "").trim();
+      return `${match[1] || ""}${puzzle} <b>Padr\u00E3o:</b> ${decorateValidatorTelegramPatternExpression(expression)}`;
+    })
+    .join("\n");
 }
 
 function decorateValidatorTelegramPatternExpression(value: unknown) {
-  const parts = String(value || "")
+  const raw = String(value || "");
+  const compactEmojiPattern = raw.match(/[\u{1F534}\u{1F535}\u{1F7E1}]\s*\d*/gu);
+  if (compactEmojiPattern && compactEmojiPattern.length > 1) {
+    return compactEmojiPattern.map((item) => item.replace(/\s+/g, "")).join("");
+  }
+  const parts = raw
     .split(/\s*(?:\u2192|->|>)\s*/u)
     .map((part) => part.trim())
     .filter(Boolean);
   if (parts.length < 2) return formatValidatorTelegramPatternToken(value);
-  return parts.map(formatValidatorTelegramPatternToken).join(" \u2192 ");
+  return parts.map(formatValidatorTelegramPatternToken).join("");
 }
 
 function formatValidatorTelegramPatternToken(token: unknown) {
@@ -9350,7 +9393,7 @@ function formatValidatorTelegramPatternToken(token: unknown) {
         : "";
   if (!side) return clean || source.trim();
   const number = normalized.match(/\d{1,2}/)?.[0] || "";
-  return serverSideCircle(side as Round["result"]) + (number || " " + side);
+  return serverSideCircle(side as Round["result"]) + number;
 }
 
 
@@ -9359,11 +9402,32 @@ function formatValidatorModuleGale(value: unknown) {
   return gale <= 0 ? "SG" : `G${gale}`;
 }
 
+function normalizeServerSideForTelegram(side: unknown): Round["result"] | null {
+  const text = String(side || "").trim().toUpperCase();
+  if (text === "B" || text === "BANKER") return "B";
+  if (text === "P" || text === "PLAYER") return "P";
+  if (text === "T" || text === "TIE") return "T";
+  return null;
+}
+
+function formatServerSideLabel(side: unknown) {
+  const roundSide = normalizeServerSideForTelegram(side);
+  if (roundSide === "B") return "Banker";
+  if (roundSide === "P") return "Player";
+  if (roundSide === "T") return "Tie";
+  return "Automatico";
+}
+
+function formatServerCompactSide(side: unknown) {
+  const roundSide = normalizeServerSideForTelegram(side);
+  if (!roundSide) return "Automatico";
+  return `${serverSideCircle(roundSide)}${formatServerSideLabel(roundSide)}`;
+}
+
 function formatServerSignalSide(side: CurrentSignalSide | NonNullable<NeuralEntryState["expectedSide"]>) {
-  if (side === "BANKER") return "🔴 Banker";
-  if (side === "PLAYER") return "🔵 Player";
-  if (side === "TIE") return "🟡 Tie";
-  return "Aguardando";
+  const roundSide = normalizeServerSideForTelegram(side);
+  if (!roundSide) return "Automatico";
+  return `${serverSideCircle(roundSide)} ${formatServerSideLabel(roundSide).toUpperCase()}`;
 }
 
 function serverSignalCircle(side: CurrentSignalSide | NonNullable<NeuralEntryState["expectedSide"]>) {
@@ -9706,12 +9770,14 @@ function serverScoreForRound(round: Round, side: Round["result"]) {
   return round.bankerScore === round.playerScore ? round.bankerScore : Math.max(round.bankerScore, round.playerScore);
 }
 
-function buildServerValidatorTelegramMessage(pattern: SavedValidatorPattern, channel: ValidatorNotificationChannel) {
+function buildServerValidatorTelegramVariables(pattern: SavedValidatorPattern, channel: ValidatorNotificationChannel) {
   const entry = pattern.pulledSide || validatorEntrySide(pattern.entryType);
   const moduleConfig = validatorChannelModuleConfig(channel, "validator");
   const variables: Record<string, string> = {
     pattern: formatServerTelegramPattern(pattern.pattern),
     entry: entry ? formatServerTelegramSide(entry) : "Aguardando",
+    entryLabel: entry ? formatServerSideLabel(entry) : "Aguardando",
+    entryCompact: entry ? formatServerCompactSide(entry) : "Aguardando",
     gale: formatValidatorModuleGale(pattern.galeLimit),
     wins: String(pattern.wins),
     loss: String(pattern.losses),
@@ -9725,6 +9791,12 @@ function buildServerValidatorTelegramMessage(pattern: SavedValidatorPattern, cha
     risk: pattern.validation?.risk ?? "",
     mode: "Validador Neural",
   };
+  return variables;
+}
+
+function buildServerValidatorTelegramMessage(pattern: SavedValidatorPattern, channel: ValidatorNotificationChannel) {
+  const moduleConfig = validatorChannelModuleConfig(channel, "validator");
+  const variables = buildServerValidatorTelegramVariables(pattern, channel);
   const template =
     pattern.messageOverride?.trim() ||
     moduleConfig.template ||
@@ -9762,13 +9834,13 @@ function validatorEntrySide(entryType: ValidatorEntryType): Round["result"] | nu
 }
 
 function formatServerTelegramPattern(pattern: ValidatorPatternToken[]) {
-  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join(" → ");
+  return pattern.map((token) => `${serverSideCircle(token.side)}${token.score ?? ""}`).join("");
 }
 
 function formatServerTelegramSide(side: Round["result"]) {
-  if (side === "B") return "🔴 Banker";
-  if (side === "P") return "🔵 Player";
-  return "🟡 Tie";
+  const roundSide = normalizeServerSideForTelegram(side);
+  if (!roundSide) return "Automatico";
+  return `${serverSideCircle(roundSide)} ${formatServerSideLabel(roundSide).toUpperCase()}`;
 }
 
 function serverSideCircle(side: Round["result"]) {
@@ -9778,7 +9850,7 @@ function serverSideCircle(side: Round["result"]) {
 }
 
 function formatServerTelegramSequenceText(sequence: string[]) {
-  return sequence.map(formatServerTelegramSequenceToken).join(" → ");
+  return sequence.map(formatServerTelegramSequenceToken).join("");
 }
 
 function formatServerTelegramSequenceToken(token: string) {
@@ -9793,7 +9865,7 @@ function formatServerTelegramSequenceToken(token: string) {
         : "";
   if (!side) return raw;
   const score = normalized.match(/\d+/)?.[0] || "";
-  return `${serverSideCircle(side as Round["result"])}${score || ` ${side}`}`;
+  return `${serverSideCircle(side as Round["result"])}${score}`;
 }
 
 function formatServerPercent(value?: number) {

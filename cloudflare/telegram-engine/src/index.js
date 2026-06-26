@@ -31,9 +31,9 @@ const DEFAULT_MODULE_TEMPLATES = {
   ai_patterns:
     "🤖 <b>PADRÃO IA CONFIRMADO</b>\n\n🎲 <b>Mesa:</b> {{table}}\n🧩 <b>Padrão:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📊 <b>Assertividade:</b> {{confidence}}",
   paying_numbers:
-    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
+    "💎 <b>NÚMERO PAGANTE CONFIRMADO</b>\n\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entryLabel}}\n🛡️ <b>Proteção:</b> {{gale}}\n📌 <b>Status:</b> {{status}}",
   surf_alert:
-    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
+    "🌊 <b>AVISO DE SURF CONFIRMADO</b>\n\n🎯 <b>Entrada:</b> {{entryCompact}}\n⚠️ <b>Risco:</b> {{risk}}\n📊 <b>Confiança:</b> {{confidence}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
     "🟡 <b>POSSÍVEL EMPATE</b>\n\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Cobertura:</b> até G{{tieCoverage}}\n📊 <b>Nível:</b> {{level}}",
   validator:
@@ -41,63 +41,63 @@ const DEFAULT_MODULE_TEMPLATES = {
 };
 const DEFAULT_MODULE_GREEN_TEMPLATES = {
   ai_patterns:
-    "✅ <b>{{result}}</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   paying_numbers:
-    "✅ <b>{{result}}</b>\n\n💎 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   surf_alert:
-    "✅ <b>{{result}}</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
   validator:
-    "✅ <b>{{result}}</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
 const DEFAULT_MODULE_ANALYZING_TEMPLATES = {
-  ai_patterns: "🔎 <b>ANALISANDO PADRAO IA</b>\n🎲 <b>Mesa:</b> {{table}}\n⏳ Aguardando confirmacao real.",
-  paying_numbers: "🔎 <b>ANALISANDO NUMERO PAGANTE</b>\n🔢 <b>Numeros:</b> {{numbers}}\n⏳ Aguardando confirmacao real.",
-  surf_alert: "🔎 <b>ANALISANDO SURF</b>\n🌊 <b>Direcao:</b> {{side}}\n⏳ Aguardando confirmacao real.",
-  ties_only: "🔎 <b>ANALISANDO EMPATE</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}\n⏳ Aguardando confirmacao real.",
-  validator: "🔎 <b>ANALISANDO VALIDADOR</b>\n🧩 <b>Padrao:</b> {{pattern}}\n⏳ Aguardando entrada validada.",
+  ai_patterns: "🔎 <b>ANALISANDO PADRÃO IA</b>\n🎲 <b>Mesa:</b> {{table}}\n⏳ Aguardando confirmação real.",
+  paying_numbers: "🔎 <b>ANALISANDO NÚMERO PAGANTE</b>\n🔢 <b>Números:</b> {{numbers}}\n⏳ Aguardando confirmação real.",
+  surf_alert: "🔎 <b>ANALISANDO SURF</b>\n🌊 <b>Direção:</b> {{side}}\n⏳ Aguardando confirmação real.",
+  ties_only: "🔎 <b>ANALISANDO EMPATE</b>\n🟡 <b>Pressão Tie:</b> {{tie_pressure}}\n⏳ Aguardando confirmação real.",
+  validator: "🔎 <b>ANALISANDO VALIDADOR</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n⏳ Aguardando entrada validada.",
 };
 const DEFAULT_MODULE_GALE_TEMPLATES = {
-  ai_patterns: "🛡️ <b>FAZER {{gale}}</b>\n🎯 <b>Entrada:</b> {{entry}}\n🧩 <b>Padrao:</b> {{pattern}}",
-  paying_numbers: "🛡️ <b>FAZER {{gale}}</b>\n🔢 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
-  surf_alert: "🛡️ <b>FAZER {{gale}}</b>\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
-  ties_only: "🛡️ <b>COBRIR EMPATE {{gale}}</b>\n🟡 <b>Pressao:</b> {{tie_pressure}}",
-  validator: "🛡️ <b>FAZER {{gale}}</b>\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ai_patterns: "🛡️ <b>FAZER {{gale}}</b>\n🎯 <b>Entrada:</b> {{entry}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}",
+  paying_numbers: "🛡️ <b>FAZER {{gale}}</b>\n🔢 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}",
+  surf_alert: "🛡️ <b>FAZER {{gale}}</b>\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}",
+  ties_only: "🛡️ <b>COBRIR EMPATE {{gale}}</b>\n🟡 <b>Pressão:</b> {{tie_pressure}}",
+  validator: "🛡️ <b>FAZER {{gale}}</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}",
 };
 const DEFAULT_MODULE_RED_TEMPLATES = {
   ai_patterns:
-    "❌ <b>RED</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
-  paying_numbers: "❌ <b>RED</b>\n\n💎 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
-  surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
-  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate nao confirmou</b>\n🛡️ <b>Protecao:</b> {{gale}}",
-  validator: "❌ <b>RED</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "❌ <b>RED</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  paying_numbers: "❌ <b>RED</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  surf_alert: "❌ <b>RED</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
+  ties_only: "❌ <b>RED</b>\n\n🟡 <b>Empate não confirmou</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+  validator: "❌ <b>RED</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
 const DEFAULT_MODULE_EXPIRED_TEMPLATES = {
-  ai_patterns: "⌛ <b>SINAL EXPIRADO</b>\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}",
-  paying_numbers: "⌛ <b>SINAL EXPIRADO</b>\n💎 <b>Modulo:</b> {{module}}\n🔢 <b>Numeros:</b> {{numbers}}",
-  surf_alert: "⌛ <b>SINAL EXPIRADO</b>\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Direcao:</b> {{side}}",
-  ties_only: "⌛ <b>ALERTA DE EMPATE EXPIRADO</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}",
-  validator: "⌛ <b>SINAL EXPIRADO</b>\n🧩 <b>Padrao:</b> {{pattern}}",
+  ai_patterns: "⌛ <b>SINAL EXPIRADO</b>\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}",
+  paying_numbers: "⌛ <b>SINAL EXPIRADO</b>\n💎 <b>Módulo:</b> {{module}}\n🔢 <b>Números:</b> {{numbers}}",
+  surf_alert: "⌛ <b>SINAL EXPIRADO</b>\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Direção:</b> {{side}}",
+  ties_only: "⌛ <b>ALERTA DE EMPATE EXPIRADO</b>\n🟡 <b>Pressão Tie:</b> {{tie_pressure}}",
+  validator: "⌛ <b>SINAL EXPIRADO</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}",
 };
 const DEFAULT_MODULE_CANCELED_TEMPLATES = {
-  ai_patterns: "🚫 <b>SINAL CANCELADO</b>\n🤖 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
-  paying_numbers: "🚫 <b>SINAL BLOQUEADO</b>\n💎 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
-  surf_alert: "🚫 <b>SINAL CANCELADO</b>\n🌊 <b>Modulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
-  ties_only: "🚫 <b>ALERTA CANCELADO</b>\n🟡 <b>Pressao Tie:</b> {{tie_pressure}}\n📌 <b>Motivo:</b> {{result}}",
-  validator: "🚫 <b>SINAL CANCELADO</b>\n🧩 <b>Padrao:</b> {{pattern}}\n📌 <b>Motivo:</b> {{result}}",
+  ai_patterns: "🚫 <b>SINAL CANCELADO</b>\n🤖 <b>Módulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  paying_numbers: "🚫 <b>SINAL BLOQUEADO</b>\n💎 <b>Módulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  surf_alert: "🚫 <b>SINAL CANCELADO</b>\n🌊 <b>Módulo:</b> {{module}}\n📌 <b>Motivo:</b> {{result}}",
+  ties_only: "🚫 <b>ALERTA CANCELADO</b>\n🟡 <b>Pressão Tie:</b> {{tie_pressure}}\n📌 <b>Motivo:</b> {{result}}",
+  validator: "🚫 <b>SINAL CANCELADO</b>\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n📌 <b>Motivo:</b> {{result}}",
 };
 const DEFAULT_MODULE_TIE_TEMPLATES = {
   ai_patterns:
-    "✅ <b>{{result}}</b>\n\n🤖 <b>Modulo:</b> {{module}}\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🤖 <b>Módulo:</b> {{module}}\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   paying_numbers:
-    "✅ <b>{{result}}</b>\n\n💎 <b>Numero:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n💎 <b>Número:</b> {{number}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   surf_alert:
-    "✅ <b>{{result}}</b>\n\n🌊 <b>Modulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
   validator:
-    "✅ <b>{{result}}</b>\n\n🧩 <b>Padrao:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Protecao:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
 const MAX_CHANNELS_PER_USER = 20;
 const MAX_NOTIFICATIONS = 1000;
@@ -300,10 +300,10 @@ export class TelegramEngine {
         "<b>ENTRADA CONFIRMADA</b>",
         "",
         "<b>Mesa:</b> Bac Bo",
-        "<b>Padrao:</b> B10 > T7 > P6",
-        "<b>Entrada:</b> B Banker",
-        "<b>Gale:</b> Ate G1",
-        "<b>Protecao Tie:</b> Ativa",
+        "<b>Padr\u00E3o:</b> \u{1F534}10\u{1F535}7\u{1F7E1}6",
+        "<b>Entrada:</b> \u{1F534} BANKER",
+        "<b>Gale:</b> Até G1",
+        "<b>Prote\u00E7\u00E3o Tie:</b> Ativa",
         `<b>Canal:</b> ${escapeHtml(channel.name)}`,
       ].join("\n"),
       buttonLabel: "Abrir Sniper Bo IA",
@@ -394,7 +394,7 @@ export class TelegramEngine {
 
   async dispatchSignal(body) {
     const moduleKey = normalizeModuleKey(body.moduleKey || body.type);
-    if (!moduleKey) return json({ error: "Modulo invalido." }, 400, this.env);
+    if (!moduleKey) return json({ error: "Módulo invalido." }, 400, this.env);
     const entry = normalizeEntry(body.entry);
     const targetUserId = normalizeUserId(body.userId || "");
     const targetChannelId = String(body.channelId || "").trim();
@@ -453,6 +453,8 @@ export class TelegramEngine {
       const templateVariables = {
         ...variables,
         entry: formatEntry(entry),
+        entryLabel: formatEntryLabel(entry),
+        entryCompact: formatEntryCompact(entry),
         module: moduleName(moduleKey),
         gale: finalNotificationProtection,
         protection: finalNotificationProtection,
@@ -838,7 +840,7 @@ function normalizeModuleConfigs(value) {
       coverTie: Object.prototype.hasOwnProperty.call(raw, "coverTie") ? Boolean(raw.coverTie) : key === "ties_only",
       tieCoverage: clampInt(raw.tieCoverage ?? (key === "ties_only" ? 4 : 1), 0, 4),
       cooldownSeconds: clampInt(raw.cooldownSeconds ?? (key === "validator" ? 0 : 2), 0, 300),
-      template: repairTelegramEncodingArtifacts(raw.template || defaultTemplate),
+      template: resolveModuleTemplate(key, raw.template, defaultTemplate),
       analyzingTemplate: repairTelegramEncodingArtifacts(raw.analyzingTemplate || defaultAnalyzingTemplate),
       greenTemplate: repairTelegramEncodingArtifacts(raw.greenTemplate || defaultGreenTemplate),
       galeTemplate: repairTelegramEncodingArtifacts(raw.galeTemplate || defaultGaleTemplate),
@@ -850,6 +852,27 @@ function normalizeModuleConfigs(value) {
     };
     return acc;
   }, {});
+}
+
+function resolveModuleTemplate(key, value, defaultTemplate) {
+  const template = repairTelegramEncodingArtifacts(value || "");
+  return shouldUseDefaultModuleTemplate(key, template) ? defaultTemplate : template;
+}
+
+function shouldUseDefaultModuleTemplate(_key, template) {
+  const text = normalizeModuleTemplateFingerprint(template);
+  if (!text) return true;
+  return text.includes("ENTRADA CONFIRMADA");
+}
+
+function normalizeModuleTemplateFingerprint(value) {
+  return repairTelegramEncodingArtifacts(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, " ")
+    .trim()
+    .toUpperCase();
 }
 
 function defaultModuleButtons() {
@@ -1147,9 +1170,23 @@ function moduleAllowsEntry(config, entry) {
 }
 
 function formatEntry(entry) {
-  if (entry === "BANKER") return "🔴 Banker";
-  if (entry === "PLAYER") return "🔵 Player";
-  if (entry === "TIE") return "🟡 Tie";
+  if (entry === "BANKER") return "\u{1F534} BANKER";
+  if (entry === "PLAYER") return "\u{1F535} PLAYER";
+  if (entry === "TIE") return "\u{1F7E1} TIE";
+  return "Automatico";
+}
+
+function formatEntryLabel(entry) {
+  if (entry === "BANKER") return "Banker";
+  if (entry === "PLAYER") return "Player";
+  if (entry === "TIE") return "Tie";
+  return "Automatico";
+}
+
+function formatEntryCompact(entry) {
+  if (entry === "BANKER") return "\u{1F534}Banker";
+  if (entry === "PLAYER") return "\u{1F535}Player";
+  if (entry === "TIE") return "\u{1F7E1}Tie";
   return "Automatico";
 }
 
@@ -1233,13 +1270,13 @@ function restoreTelegramEmojiMarkers(value) {
     [/^\?{1,4}\s*((?:<b>)?POSSIVEL EMPATE(?:<\/b>)?)/gim, "\u{1F7E1} $1"],
     [/^\?{1,4}\s*((?:<b>)?POSS?VEL EMPATE(?:<\/b>)?)/gim, "\u{1F7E1} $1"],
     [/^\?{1,4}\s*((?:<b>)?Mesa:\s*(?:<\/b>)?)/gim, "\u{1F3B2} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Padrao:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Padr?o:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Padrão:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Padrão:\s*(?:<\/b>)?)/gim, "\u{1F9E9} $1"],
     [/^\?{1,4}\s*((?:<b>)?Entrada:\s*(?:<\/b>)?)/gim, "\u{1F3AF} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Protecao:\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1"],
+    [/^\?{1,4}\s*((?:<b>)?Proteção:\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1"],
     [/^\?{1,4}\s*((?:<b>)?Prote??o:\s*(?:<\/b>)?)/gim, "\u{1F6E1}\uFE0F $1"],
     [/^\?{1,4}\s*((?:<b>)?Assertividade:\s*(?:<\/b>)?)/gim, "\u{1F4CA} $1"],
-    [/^\?{1,4}\s*((?:<b>)?Numero:\s*(?:<\/b>)?)/gim, "\u{1F522} $1"],
+    [/^\?{1,4}\s*((?:<b>)?Número:\s*(?:<\/b>)?)/gim, "\u{1F522} $1"],
     [/^\?{1,4}\s*((?:<b>)?N?mero:\s*(?:<\/b>)?)/gim, "\u{1F522} $1"],
     [/^\?{1,4}\s*((?:<b>)?Status:\s*(?:<\/b>)?)/gim, "\u{1F4CC} $1"],
     [/^\?{1,4}\s*((?:<b>)?Risco:\s*(?:<\/b>)?)/gim, "\u26A0\uFE0F $1"],
@@ -1251,16 +1288,16 @@ function restoreTelegramEmojiMarkers(value) {
     .replace(/\[PREVIA DE TESTE\]/gi, "[PR\u00C9VIA DE TESTE]")
     .replace(/PADR[\uFFFD?]+O/g, "PADRAO")
     .replace(/Padr[\uFFFD?]+o/gi, "Padrao")
-    .replace(/Prote[\uFFFD?]+o/gi, "Protecao")
-    .replace(/M[\uFFFD?]+dulo/gi, "Modulo")
+    .replace(/Prote[\uFFFD?]+o/gi, "Proteção")
+    .replace(/M[\uFFFD?]+dulo/gi, "Módulo")
     .replace(/N[\uFFFD?]+mero/gi, "Numero")
     .replace(/Confian[\uFFFD?]+a/gi, "Confianca")
     .replace(/POSS[\uFFFD?]+VEL/gi, "POSSIVEL")
     .replace(/N[\uFFFD?]+vel/gi, "Nivel")
     .replace(/\bPADRAO\b/g, "PADR\u00C3O")
     .replace(/\bPadrao\b/g, "Padr\u00E3o")
-    .replace(/\bProtecao\b/gi, "Prote\u00E7\u00E3o")
-    .replace(/\bModulo\b/gi, "M\u00F3dulo")
+    .replace(/\bProteção\b/gi, "Prote\u00E7\u00E3o")
+    .replace(/\bMódulo\b/gi, "M\u00F3dulo")
     .replace(/\bNumero\b/gi, "N\u00FAmero")
     .replace(/\bConfianca\b/gi, "Confian\u00E7a")
     .replace(/\bPOSSIVEL\b/gi, "POSS\u00CDVEL")
@@ -1272,7 +1309,10 @@ function restoreTelegramEmojiMarkers(value) {
     .replace(/\?{1,4}\s*(BANKER|Banker)\b/g, red + " $1")
     .replace(/\?{1,4}\s*(PLAYER|Player)\b/g, blue + " $1")
     .replace(/\?{1,4}\s*(TIE|Tie)\b/g, yellow + " $1")
-    .replace(/^\?{1,4}\s*(?=(?:<b>)?(?:PADR?O|Padr?o|Mesa|M?dulo|Entrada|Prote??o|Assertividade|N?mero|Status|Green|Red|RED|Empate|N?MERO|AVISO))/gim, "");
+    .replace(/\u{1F534}\s*Banker\b/gu, "\u{1F534} BANKER")
+    .replace(/\u{1F535}\s*Player\b/gu, "\u{1F535} PLAYER")
+    .replace(/\u{1F7E1}\s*Tie\b/gu, "\u{1F7E1} TIE")
+    .replace(/^\?{1,4}\s*(?=(?:<b>)?(?:PADR?O|Padrão|Mesa|M?dulo|Entrada|Prote??o|Assertividade|N?mero|Status|Green|Red|RED|Empate|N?MERO|AVISO))/gim, "");
 }
 
 function decorateKnownTelegramLines(value) {
@@ -1330,20 +1370,29 @@ function telegramEmojiForLine(plain) {
 
 function decoratePatternLines(message) {
   const puzzle = "\u{1F9E9}";
-  return String(message || "").replace(/^(\s*(?:\u{1F9E9}\s*)?(?:<b>)?Padr(?:\u00E3o|ao)(?:<\/b>)?:\s*)([^\r\n]+)/gimu, (match, prefix, expression) => {
-    let nextPrefix = String(prefix || "").replace(/Padrao/gi, "Padr\u00E3o").replace(/^\s*\?{1,4}\s*/, "");
-    if (!nextPrefix.includes(puzzle)) nextPrefix = nextPrefix.replace(/^(\s*)/, "$1" + puzzle + " ");
-    return nextPrefix + decorateTelegramPatternExpression(expression);
-  });
+  return String(message || "")
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = String(line || "").match(/^(\s*)(?:\u{1F9E9}\s*)?(?:<b>)?Padr(?:\u00E3o|ao):?(?:<\/b>)?:?\s*(.*)$/iu);
+      if (!match) return line;
+      const expression = String(match[2] || "").trim();
+      return `${match[1] || ""}${puzzle} <b>Padr\u00E3o:</b> ${decorateTelegramPatternExpression(expression)}`;
+    })
+    .join("\n");
 }
 
 function decorateTelegramPatternExpression(value) {
-  const parts = String(value || "")
+  const raw = String(value || "");
+  const compactEmojiPattern = raw.match(/[\u{1F534}\u{1F535}\u{1F7E1}]\s*\d*/gu);
+  if (compactEmojiPattern && compactEmojiPattern.length > 1) {
+    return compactEmojiPattern.map((item) => item.replace(/\s+/g, "")).join("");
+  }
+  const parts = raw
     .split(/\s*(?:\u2192|->|>)\s*/u)
     .map((part) => part.trim())
     .filter(Boolean);
   if (parts.length < 2) return formatTelegramPatternToken(value);
-  return parts.map(formatTelegramPatternToken).join(" \u2192 ");
+  return parts.map(formatTelegramPatternToken).join("");
 }
 
 function formatTelegramPatternToken(token) {
@@ -1366,7 +1415,7 @@ function formatTelegramPatternToken(token) {
         : "";
   if (!side) return clean || source.trim();
   const number = normalized.match(/\d{1,2}/)?.[0] || "";
-  return telegramSideCircle(side) + (number || " " + side);
+  return telegramSideCircle(side) + number;
 }
 
 function telegramSideCircle(side) {
@@ -1396,14 +1445,14 @@ function repairTelegramEncodingArtifacts(value) {
     .replace(/âš |Ã¢Å¡ /g, "⚠")
     .replace(/Padr[\uFFFD?]+o/gi, "Padrao")
     .replace(/PADR[\uFFFD?]+O/g, "PADRAO")
-    .replace(/Prote[\uFFFD?]+o/gi, "Protecao")
-    .replace(/M[\uFFFD?]+dulo/gi, "Modulo")
+    .replace(/Prote[\uFFFD?]+o/gi, "Proteção")
+    .replace(/M[\uFFFD?]+dulo/gi, "Módulo")
     .replace(/N[\uFFFD?]+mero/gi, "Numero")
     .replace(/Confian[\uFFFD?]+a/gi, "Confianca")
     .replace(/Padr(?:ÃƒÂ£|Ã£|ï¿½)o/gi, "Padrao")
     .replace(/PADR(?:ÃƒÆ’|Ãƒ|ï¿½)O/g, "PADRAO")
-    .replace(/Prote(?:ÃƒÂ§ÃƒÂ£|Ã§Ã£|ï¿½ï¿½)o/gi, "Protecao")
-    .replace(/M(?:ÃƒÂ³|Ã³|ï¿½)dulo/gi, "Modulo")
+    .replace(/Prote(?:ÃƒÂ§ÃƒÂ£|Ã§Ã£|ï¿½ï¿½)o/gi, "Proteção")
+    .replace(/M(?:ÃƒÂ³|Ã³|ï¿½)dulo/gi, "Módulo")
     .replace(/N(?:ÃƒÂº|Ãº|ï¿½)mero/gi, "Numero")
     .replace(/Confian(?:ÃƒÂ§|Ã§|ï¿½)a/gi, "Confianca")
     .replace(/n(?:ÃƒÂ£|Ã£|ï¿½)o/gi, "nao")
