@@ -6541,24 +6541,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   if (url.pathname === "/validator/channels") {
     if (request.method === "GET") {
-      const durableChannelsEnabled = Boolean(getSupabasePersistenceConfig(env));
-      const storedUserChannels = durableChannelsEnabled
-        ? await withTimeout(
-            fetchStoredValidatorChannels(env, userId),
-            LIVE_STATE_IO_TIMEOUT_MS,
-            "carregar canais do Validador",
-            [] as ValidatorNotificationChannel[],
-          )
-        : null;
-      const userChannels = mergeValidatorChannelList(
-        durableChannelsEnabled
-          ? [...(storedUserChannels ?? []), ...liveValidatorChannels.filter((channel) => channel.userId === userId)]
-          : liveValidatorChannels.filter((channel) => channel.userId === userId),
-      );
-      liveValidatorChannels = [
-        ...userChannels,
-        ...liveValidatorChannels.filter((channel) => channel.userId !== userId),
-      ].slice(0, 1000);
+      const userChannels = await loadValidatorChannelsForUser(env, userId);
       return json({
         channels: userChannels.map(publicValidatorChannel).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       });
@@ -6758,23 +6741,53 @@ async function findValidatorChannelForUser(env: unknown, userId: string, channel
   const normalizedChannelId = readString(channelId);
   if (!normalizedUserId || !normalizedChannelId) return null;
 
-  const cached = liveValidatorChannels.find(
+  const userChannels = await loadValidatorChannelsForUser(env, normalizedUserId);
+  const byId = userChannels.find((channel) => channel.id === normalizedChannelId) || null;
+  if (byId) return byId;
+
+  const selected = liveValidatorChannels.find(
     (channel) => channel.userId === normalizedUserId && channel.id === normalizedChannelId,
   );
-  if (cached) return cached;
-
-  const stored = await fetchStoredValidatorChannel(env, normalizedUserId, normalizedChannelId);
-  if (stored) {
-    liveValidatorChannels = upsertValidatorChannel(stored);
-    return stored;
+  if (selected) {
+    const selectedKey = validatorChannelUniqueKey(selected);
+    const bySelectedKey = userChannels.find((channel) => validatorChannelUniqueKey(channel) === selectedKey) || null;
+    if (bySelectedKey) return bySelectedKey;
+    return selected;
   }
 
-  const storedChannels = await fetchStoredValidatorChannels(env, normalizedUserId);
-  const storedFromList = storedChannels.find((channel) => channel.id === normalizedChannelId) || null;
-  if (storedFromList) {
-    liveValidatorChannels = upsertValidatorChannel(storedFromList);
-  }
-  return storedFromList;
+  console.warn(
+    JSON.stringify({
+      event: "[VALIDATOR_CHANNEL] not_found",
+      user: maskTelemetryUserId(normalizedUserId),
+      channelId: normalizedChannelId,
+      loadedChannels: userChannels.length,
+    }),
+  );
+  return null;
+}
+
+async function loadValidatorChannelsForUser(env: unknown, userId: string) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  if (!normalizedUserId) return [] as ValidatorNotificationChannel[];
+
+  const hydratedChannels = getSupabasePersistenceConfig(env)
+    ? await withTimeout(
+        fetchStoredValidatorChannels(env, normalizedUserId),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "carregar canais do Validador",
+        [] as ValidatorNotificationChannel[],
+      )
+    : [];
+
+  const userChannels = mergeValidatorChannelList(
+    hydratedChannels,
+    liveValidatorChannels.filter((channel) => channel.userId === normalizedUserId),
+  );
+  liveValidatorChannels = [
+    ...userChannels,
+    ...liveValidatorChannels.filter((channel) => channel.userId !== normalizedUserId),
+  ].slice(0, 1000);
+  return userChannels;
 }
 
 async function validateTelegramChannelAccess(request: Request, botToken: string, chatId: string) {
