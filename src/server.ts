@@ -6648,23 +6648,9 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     if (!botToken || !channel.chatId) {
       return json({ error: "Canal Telegram sem Bot Token ou Chat ID. Salve o canal novamente." }, 400);
     }
-    const result = await sendTelegramMessage({
-      botToken,
-      chatId: channel.chatId,
-      message:
-        "ENTRADA CONFIRMADA\n" +
-        "Mesa: Bac Bo\n" +
-        "\u{1F9E9} Padr\u00E3o: \u{1F534}10\u{1F535}7\u{1F7E1}6\n" +
-        "\u{1F3AF} Entrada: \u{1F534} BANKER\n" +
-        "\u{1F6E1}\uFE0F Prote\u00E7\u00E3o: At\u00E9 G1\n" +
-        "\u{1F91D} Prote\u00E7\u00E3o Tie: Ativa\n" +
-        `Canal: ${channel.name}`,
-      buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeTelegramButtonUrl(channel.buttonLink),
-      allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
-    });
-    if (!result.ok) return json({ error: result.error }, result.status);
-    return json({ ok: true, messageId: result.messageId });
+    const validation = await validateTelegramChannelAccess(request, botToken, channel.chatId);
+    if (!validation.ok) return json({ error: validation.error }, validation.status);
+    return json({ ok: true, messageId: validation.messageId, channelId: channel.id });
   }
 
   const channelMatch = url.pathname.match(/^\/validator\/channels\/([^/]+)$/);
@@ -6726,6 +6712,14 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       const body = readRecord(await request.json().catch(() => ({})));
       const next = normalizeServerNotificationChannel({ ...current, ...body, id: current.id }, userId, current);
       if (!next) return json({ error: "Canal invalido." }, 400);
+      if (validatorChannelActivatesAnyModule(current, next)) {
+        const botToken = decodeServerToken(next.botTokenEncoded);
+        if (!botToken || !next.chatId) {
+          return json({ error: "Canal Telegram sem Bot Token ou Chat ID. Salve o canal novamente." }, 400);
+        }
+        const validation = await validateTelegramChannelAccess(request, botToken, next.chatId);
+        if (!validation.ok) return json({ error: validation.error }, validation.status);
+      }
       liveValidatorChannels = upsertValidatorChannel(next);
       await persistValidatorChannel(env, next);
       await saveLiveState(env);
@@ -7447,6 +7441,17 @@ function validatorChannelSignalModules(channel?: ValidatorNotificationChannel | 
   const modulesRecord = readRecord(record.signalModules);
   const templateModulesRecord = readRecord(templatesRecord.signalModules);
   return normalizeValidatorChannelSignalModules(hasRecordFields(modulesRecord) ? modulesRecord : templateModulesRecord);
+}
+
+function validatorChannelActivatesAnyModule(
+  current: ValidatorNotificationChannel,
+  next: ValidatorNotificationChannel,
+) {
+  const currentModules = validatorChannelSignalModules(current);
+  const nextModules = validatorChannelSignalModules(next);
+  return VALIDATOR_TELEGRAM_MODULE_KEYS.some(
+    (key) => Boolean(nextModules[key]?.enabled) && !Boolean(currentModules[key]?.enabled),
+  );
 }
 
 function validatorChannelModuleConfig(channel: ValidatorNotificationChannel, key: ValidatorTelegramModuleKey) {
