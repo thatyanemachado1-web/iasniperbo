@@ -675,12 +675,13 @@ function NeuralValidatorPage() {
     if (telegramSendKeysRef.current.has(sendKey) || wasTelegramNotificationSent(sendKey)) return;
 
     telegramSendKeysRef.current.add(sendKey);
-    markTelegramNotificationSent(sendKey);
     try {
       await postValidatorLiveHitTelegram({
         patternId: patternItem.id,
         detectedRoundId: hit.detectedRoundId,
+        pattern: patternItem,
       });
+      markTelegramNotificationSent(sendKey);
       showNotice(`Sinal enviado no Telegram: ${channel.name}.`);
     } catch (error) {
       telegramSendKeysRef.current.delete(sendKey);
@@ -3424,6 +3425,7 @@ async function previewServerValidatorChannel(
 async function postValidatorLiveHitTelegram(payload: {
   patternId: string;
   detectedRoundId: number;
+  pattern?: SavedValidatorPattern;
 }) {
   const response = await fetch("/validator/live-hit/send", {
     method: "POST",

@@ -6303,15 +6303,57 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     const body = readRecord(await request.json().catch(() => ({})));
     const patternId = readString(body, "patternId");
     const detectedRoundId = Math.floor(Number(body.detectedRoundId) || 0);
-    const pattern = liveValidatorPatterns.find((item) => item.userId === userId && item.id === patternId);
-    if (!pattern) return json({ error: "Padrao nao encontrado." }, 404);
+    const incomingPattern = normalizeServerSavedPattern(body.pattern, userId);
+    let pattern = liveValidatorPatterns.find((item) => item.userId === userId && item.id === patternId);
+    if (!pattern && incomingPattern && incomingPattern.id === patternId) {
+      pattern = incomingPattern;
+      liveValidatorPatterns = upsertValidatorPattern(incomingPattern);
+      await persistValidatorPattern(env, incomingPattern);
+    }
+    console.info(
+      JSON.stringify({
+        event: "[VALIDATOR_DISPATCH] live_hit_received",
+        user: maskTelemetryUserId(userId),
+        patternId,
+        detectedRoundId,
+        patternFound: Boolean(pattern),
+        incomingPattern: Boolean(incomingPattern),
+        channelsForUser: liveValidatorChannels.filter((channel) => channel.userId === userId).length,
+      }),
+    );
+    if (!pattern) {
+      console.warn(
+        JSON.stringify({
+          event: "[VALIDATOR_DISPATCH] blocked",
+          user: maskTelemetryUserId(userId),
+          patternId,
+          detectedRoundId,
+          reason: "pattern_not_found",
+        }),
+      );
+      return json({ error: "Padrao nao encontrado no servidor. Salve a estrategia novamente." }, 404);
+    }
     if (!pattern.isActive) return json({ error: "Padrao inativo." }, 400);
     if (!validatorPatternAllowsTelegramForward(pattern)) {
       return json({ error: "Padrao esta em monitorar/desativado." }, 400);
     }
 
     const channel = findValidatorTelegramChannelForPattern(pattern);
-    if (!channel) return json({ error: "Nenhum canal Telegram ativo com token e Chat ID." }, 400);
+    if (!channel) {
+      console.warn(
+        JSON.stringify({
+          event: "[VALIDATOR_DISPATCH] blocked",
+          user: maskTelemetryUserId(userId),
+          patternId: pattern.id,
+          detectedRoundId,
+          reason: "channel_not_found",
+          telegramChannelId: pattern.telegramChannelId,
+          userChannels: liveValidatorChannels.filter((item) => item.userId === pattern.userId).length,
+          usableChannels: liveValidatorChannels.filter((item) => item.userId === pattern.userId && isUsableValidatorTelegramChannel(item)).length,
+        }),
+      );
+      return json({ error: "Nenhum canal Telegram ativo com token e Chat ID." }, 400);
+    }
 
     const roundId = detectedRoundId || Date.now();
     const notificationKey = `${pattern.userId}:${pattern.id}:${channel.id}:${roundId}`;
@@ -6320,6 +6362,16 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     }
 
     if (!validatorChannelModuleEnabled(channel, "validator", true)) {
+      console.warn(
+        JSON.stringify({
+          event: "[VALIDATOR_DISPATCH] blocked",
+          user: maskTelemetryUserId(pattern.userId),
+          patternId: pattern.id,
+          channelId: channel.id,
+          roundId,
+          reason: "validator_module_inactive",
+        }),
+      );
       return json({ error: "Seguir Validador esta inativo neste canal." }, 400);
     }
 
@@ -6349,6 +6401,20 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
           buttons,
           allowInsecureNodeFallback: isLocalDevelopmentRequest(request),
         });
+    console[result.ok ? "info" : "warn"](
+      JSON.stringify({
+        event: result.ok ? "[VALIDATOR_DISPATCH] sent" : "[VALIDATOR_DISPATCH] telegram_error",
+        user: maskTelemetryUserId(pattern.userId),
+        patternId: pattern.id,
+        channelId: channel.id,
+        roundId,
+        cloudChannel: isCloudValidatorTelegramChannel(channel),
+        telegramResult: result.ok ? "success" : "error",
+        status: result.status,
+        messageId: result.ok ? result.messageId : null,
+        error: result.ok ? "" : result.error,
+      }),
+    );
 
     const notification = {
       id: notificationKey,
