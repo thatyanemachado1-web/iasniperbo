@@ -594,6 +594,8 @@ export class TelegramEngine {
         return json({ ok: false, ...log }, 502, this.env);
       }
 
+      const resultCard = readPayingNumbersOfficialResult(dashboardResult.dashboard);
+      const resultDispatch = await this.dispatchPayingNumbersOfficialResult(resultCard, source);
       const card = readPayingNumbersOfficialCard(dashboardResult.dashboard);
       const baseLog = {
         event: "[TELEGRAM_AUTO] card detectado",
@@ -601,6 +603,9 @@ export class TelegramEngine {
         moduleKey: "paying_numbers",
         monitor_called: true,
         handler_called: true,
+        resultStatus: resultCard.status || "",
+        resultSignalId: resultCard.signalId || "",
+        resultDispatch,
         readingMode: card.mode,
         cardStatus: card.status,
         expectedSide: card.entry || "",
@@ -618,6 +623,7 @@ export class TelegramEngine {
           telegram_send_called: false,
           telegram_result: "not_called",
           reason: card.reason,
+          resultDispatch,
         };
         await this.markPayingNumbersBaselineReady(card);
         await this.state.storage.put("dashboard-monitor:last", log);
@@ -633,6 +639,7 @@ export class TelegramEngine {
           telegram_send_called: false,
           telegram_result: "not_called",
           reason: baseline.reason,
+          resultDispatch,
         };
         await this.state.storage.put("dashboard-monitor:last", log);
         return json({ ok: true, ...log }, 200, this.env);
@@ -658,6 +665,7 @@ export class TelegramEngine {
         dedupe_action: sentCount ? "reserved" : "blocked",
         telegram_send_called: sentCount > 0,
         telegram_result: sentCount ? "sent" : "not_sent",
+        resultDispatch,
         dispatch,
       };
       await this.state.storage.put("dashboard-monitor:last", log);
@@ -695,6 +703,64 @@ export class TelegramEngine {
     return lastError;
   }
 
+  async dispatchPayingNumbersOfficialResult(resultCard, source) {
+    if (!resultCard.confirmed) {
+      return {
+        ok: true,
+        sentCount: 0,
+        blockedCount: 0,
+        reason: resultCard.reason,
+        dedupe_action: "not_checked",
+        telegram_send_called: false,
+      };
+    }
+
+    const baseline = await this.shouldSuppressPayingNumbersResultBaseline(resultCard);
+    if (baseline.suppressed) {
+      return {
+        ok: true,
+        sentCount: 0,
+        blockedCount: 0,
+        reason: baseline.reason,
+        signalId: resultCard.signalId,
+        dedupe_action: "baseline_suppressed",
+        telegram_send_called: false,
+      };
+    }
+
+    const response = await this.dispatchSignal({
+      moduleKey: "paying_numbers",
+      signalKey: resultCard.signalId,
+      roundId: resultCard.roundIdNumber,
+      entry: resultCard.entry,
+      result: resultCard.label,
+      protection: resultCard.protection,
+      variables: resultCard.variables,
+    });
+    const dispatch = await response.json().catch(() => ({}));
+    const sentCount = Array.isArray(dispatch.sent) ? dispatch.sent.length : 0;
+    const blockedCount = Array.isArray(dispatch.blocked) ? dispatch.blocked.length : 0;
+    const payload = {
+      ok: true,
+      source,
+      signalId: resultCard.signalId,
+      label: resultCard.label,
+      status: resultCard.status,
+      sentCount,
+      blockedCount,
+      dedupe_action: sentCount ? "reserved" : "blocked",
+      telegram_send_called: sentCount > 0,
+      telegram_result: sentCount ? "sent" : "not_sent",
+      dispatch,
+    };
+    await this.state.storage.put("dashboard-monitor:last-result", {
+      event: "[TELEGRAM_AUTO] resultado",
+      checkedAt: new Date().toISOString(),
+      ...payload,
+    });
+    return payload;
+  }
+
   async markPayingNumbersBaselineReady(card) {
     const key = "dashboard-monitor:paying_numbers:baseline-ready";
     if (await this.state.storage.get(key)) return;
@@ -717,6 +783,23 @@ export class TelegramEngine {
       firstReason: "active_on_monitor_start",
     });
     return { suppressed: true, reason: "active_on_monitor_start" };
+  }
+
+  async shouldSuppressPayingNumbersResultBaseline(resultCard) {
+    const key = "dashboard-monitor:paying_numbers:result-baseline-ready";
+    const existing = await this.state.storage.get(key);
+    if (existing) return { suppressed: false, reason: "" };
+
+    const finishedAtMs = Date.parse(resultCard.finishedAt || "");
+    const ageMs = Number.isFinite(finishedAtMs) ? Date.now() - finishedAtMs : 0;
+    await this.state.storage.put(key, {
+      readyAt: new Date().toISOString(),
+      firstSignalId: resultCard.signalId || "",
+      firstFinishedAt: resultCard.finishedAt || "",
+      firstAgeMs: ageMs,
+    });
+    if (ageMs > 120000) return { suppressed: true, reason: "old_result_on_monitor_start" };
+    return { suppressed: false, reason: "" };
   }
 
   async sendAdHocTelegram(body) {
@@ -1080,6 +1163,95 @@ function readPayingNumbersOfficialCard(dashboard) {
       result: "Aguardando resultado",
     },
   };
+}
+
+function readPayingNumbersOfficialResult(dashboard) {
+  const data = readRecord(dashboard);
+  const result = readRecord(data.neuralEntryLastResult);
+  if (!Object.keys(result).length || !result.id) {
+    return { confirmed: false, reason: "result_missing", status: "", signalId: "" };
+  }
+
+  const snapshot = readRecord(result.readingSnapshot);
+  const entry = normalizeEntry(result.expectedSide || result.origem || snapshot.direcao || snapshot.origem || "");
+  const outcome = String(result.outcome || "").trim().toUpperCase();
+  const kind = String(result.kind || "").trim().toLowerCase();
+  const resultRoundKey = dashboardText(result.resultRoundKey || "");
+  const resultRoundId = parseRoundIdFromKey(resultRoundKey) || clampInt(result.roundId ?? result.resultRoundId ?? 0, 0, Number.MAX_SAFE_INTEGER);
+  const number = dashboardNumber(result.numero ?? snapshot.numero);
+  const tieMultiplier = dashboardNumber(result.tieMultiplier);
+  if (!entry) return { confirmed: false, reason: "result_missing_entry", status: outcome || kind, signalId: "" };
+  if (!outcome && !kind) return { confirmed: false, reason: "result_missing_status", status: "", signalId: "" };
+
+  const resultLabel = payingNumbersResultLabel(outcome, kind, tieMultiplier);
+  const protection = payingNumbersResultProtection(kind);
+  const status = outcome || kind.toUpperCase();
+  const signalId = ["paying", "Bac Bo", "result", result.id, resultRoundKey || resultRoundId || "sem-rodada", status].join(":");
+  const confidence = formatDashboardPercent(snapshot.assertividade ?? result.assertividade ?? result.confidence);
+  const numberText = `${telegramSideCircle(entry)}${number || ""}`;
+
+  return {
+    confirmed: true,
+    reason: "official_result",
+    entry,
+    outcome,
+    kind,
+    status,
+    label: resultLabel,
+    protection,
+    signalId,
+    roundId: resultRoundKey,
+    roundIdNumber: resultRoundId,
+    number,
+    finishedAt: dashboardText(result.finishedAt || ""),
+    variables: {
+      table: "Bac Bo",
+      pattern: "",
+      number: numberText,
+      numbers: numberText,
+      entry: formatEntry(entry),
+      entryLabel: formatEntryLabel(entry),
+      entryCompact: formatEntryCompact(entry),
+      side: entry,
+      status,
+      confidence,
+      percentage: confidence,
+      gale: protection,
+      protection,
+      tieCoverage: "0",
+      tieProtection: "Inativa",
+      tieMultiplier: tieMultiplier ? `${tieMultiplier}x` : "",
+      result: resultLabel,
+      round: resultRoundKey || String(resultRoundId || ""),
+      roundId: resultRoundId,
+      time: dashboardText(result.finishedAt || ""),
+      module: "Numeros Pagantes",
+    },
+  };
+}
+
+function payingNumbersResultLabel(outcome, kind, tieMultiplier) {
+  if (outcome === "TIE" || kind === "tie_sg" || kind === "tie_g1") {
+    return tieMultiplier ? `Green no empate ${tieMultiplier}x` : "Green no empate";
+  }
+  if (outcome === "RED" || kind === "red") return "Red";
+  if (kind === "g1") return "Green G1";
+  return "Green";
+}
+
+function payingNumbersResultProtection(kind) {
+  if (kind === "g1" || kind === "tie_g1" || kind === "red") return "G1";
+  return "SG";
+}
+
+function parseRoundIdFromKey(value) {
+  const text = String(value || "");
+  const parts = text.split(":");
+  for (const part of parts) {
+    const number = Number(part);
+    if (Number.isInteger(number) && number > 0) return number;
+  }
+  return 0;
 }
 
 function latestDashboardRound(dashboard) {
