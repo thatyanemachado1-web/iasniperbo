@@ -8631,7 +8631,8 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     return null;
   }
 
-  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
+  const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
+  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem) || state?.expectedSide;
   if (!expectedSide) {
     logPayingNumbersTelegramDecision(channel, "blocked", "missing_detected_entry", {
       roundId: latestRound.id,
@@ -8640,7 +8641,7 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     return null;
   }
 
-  const key = serverNeuralEntryKey(reading);
+  const key = serverNeuralEntryKey(reading) || state?.key || "";
   if (!key) {
     logPayingNumbersTelegramDecision(channel, "blocked", "missing_signal_key", {
       roundId: latestRound.id,
@@ -8650,12 +8651,8 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
     return null;
   }
 
-  const state = normalizeServerNeuralEntryState(liveDashboardData.neuralEntryState);
-  const stateReading = state?.readingSnapshot ?? (state ? neuralReadingForEntryState(state) : null);
-  const stateReadingKey = stateReading ? serverNeuralEntryKey(stateReading) : "";
-  const stateMatchesReading =
-    Boolean(state && stateReadingKey === key) &&
-    (!state?.expectedSide || state.expectedSide === expectedSide);
+  const confirmedCard = readServerConfirmedNeuralEntryCard(reading, state);
+  const stateMatchesReading = Boolean(confirmedCard.stateMatchesReading);
   if (state && !stateMatchesReading) {
     console.info(JSON.stringify({
       event: "telegram_paying_numbers_decision",
@@ -8666,17 +8663,13 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
       roundId: latestRound.id,
       signalKey: key,
       stateKey: state.key,
-      stateReadingKey,
+      stateReadingKey: confirmedCard.stateReadingKey,
       expectedSide,
       stateExpectedSide: state.expectedSide,
     }));
   }
 
-  const confirmedEntrySide = stateMatchesReading && state?.expectedSide
-    ? state.expectedSide
-    : reading.mode === "ACTIVE"
-      ? expectedSide
-      : null;
+  const confirmedEntrySide = confirmedCard.side;
 
   if (!confirmedEntrySide) {
     logPayingNumbersTelegramDecision(channel, "blocked", "no_confirmed_entry_card", {
@@ -8704,7 +8697,7 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
   const status = String(
     reading.paganteStatus || (stateMatchesReading && state?.status === "awaiting_g1" ? "AGUARDANDO_G1" : "ENTRADA_ATIVA"),
   );
-  const triggerKey = stateMatchesReading && state?.triggerRoundKey ? state.triggerRoundKey : String(latestRound.id);
+  const triggerKey = confirmedCard.triggerRoundKey || String(latestRound.id);
   return createValidatorModuleSignal(
     channel,
     "paying_numbers",
@@ -8743,6 +8736,49 @@ function buildPayingNumbersModuleSignal(channel: ValidatorNotificationChannel, l
       confirmedEntryCard: true,
     },
   );
+}
+
+function readServerConfirmedNeuralEntryCard(
+  reading: NeuralReading,
+  state: NeuralEntryState | null,
+): {
+  side: NeuralEntryState["expectedSide"];
+  stateMatchesReading: boolean;
+  stateReadingKey: string;
+  triggerRoundKey: string;
+} {
+  const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
+  const key = serverNeuralEntryKey(reading);
+  const stateReading = state?.readingSnapshot ?? (state ? neuralReadingForEntryState(state) : null);
+  const stateReadingKey = stateReading ? serverNeuralEntryKey(stateReading) : "";
+  const stateMatchesReading =
+    Boolean(state && stateReadingKey === key) &&
+    (!state?.expectedSide || state.expectedSide === expectedSide);
+
+  if (state?.expectedSide) {
+    return {
+      side: state.expectedSide,
+      stateMatchesReading,
+      stateReadingKey,
+      triggerRoundKey: state.triggerRoundKey || "",
+    };
+  }
+
+  if (reading.mode === "ACTIVE" && expectedSide) {
+    return {
+      side: expectedSide,
+      stateMatchesReading,
+      stateReadingKey,
+      triggerRoundKey: "",
+    };
+  }
+
+  return {
+    side: null,
+    stateMatchesReading,
+    stateReadingKey,
+    triggerRoundKey: "",
+  };
 }
 
 function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, latestRound: Round) {
