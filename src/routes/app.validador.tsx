@@ -91,7 +91,7 @@ export const Route = createFileRoute("/app/validador")({
 });
 
 const engine = new NeuralValidatorEngine();
-const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v2";
+const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v3";
 const VALIDATOR_DELETED_PATTERNS_KEY = "sniper_neural_validator_deleted_patterns_v1";
 const VALIDATOR_CLIENT_HISTORY_LIMIT = 200;
 
@@ -328,6 +328,21 @@ function NeuralValidatorPage() {
     () => detectLiveHits(savedPatterns, historyRounds),
     [savedPatterns, historyRounds],
   );
+  const validatorTelegramReadySignature = useMemo(
+    () =>
+      channels
+        .map((channel) => {
+          const modules = normalizeTelegramModuleConfigs(channel.signalModules);
+          return [
+            channel.id,
+            channel.isActive ? "1" : "0",
+            channel.chatId ? "chat" : "no-chat",
+            modules.validator.enabled ? "validator-on" : "validator-off",
+          ].join(":");
+        })
+        .join("|"),
+    [channels],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -365,11 +380,14 @@ function NeuralValidatorPage() {
         confirmedChannels = mergeValidatorChannels(serverChannels);
         writeNotificationChannels(confirmedChannels);
         setChannels(confirmedChannels);
-      } catch {
+      } catch (error) {
         if (cancelled) return;
-        confirmedChannels = [];
-        writeNotificationChannels([]);
-        setChannels([]);
+        confirmedChannels = readNotificationChannels();
+        console.warn("[VALIDATOR_CHANNELS] load_failed_preserving_local", {
+          error: error instanceof Error ? error.message : String(error),
+          localChannels: confirmedChannels.length,
+        });
+        setChannels(confirmedChannels);
       }
 
       try {
@@ -479,7 +497,7 @@ function NeuralValidatorPage() {
       if (changed) writeSavedPatterns(next);
       return changed ? next : current;
     });
-  }, [liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|")]);
+  }, [liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|"), validatorTelegramReadySignature]);
 
   function addToken(side: RoundResult, scoreText = tokenScore) {
     const score = Number(scoreText);
@@ -662,12 +680,36 @@ function NeuralValidatorPage() {
       channels.find((item) => item.isActive && item.chatId) ||
       channels[0];
     if (!channel || !channel.isActive) {
+      console.info("[VALIDATOR_LIVE_HIT] blocked", {
+        reason: "no_active_channel",
+        patternId: patternItem.id,
+        detectedRoundId: hit.detectedRoundId,
+        channels: channels.length,
+      });
       showNotice("Padrao detectado no site. Telegram nao enviado: nenhum canal ativo.");
       return;
     }
 
     if (!channel.chatId) {
+      console.info("[VALIDATOR_LIVE_HIT] blocked", {
+        reason: "channel_without_chat_id",
+        patternId: patternItem.id,
+        channelId: channel.id,
+        detectedRoundId: hit.detectedRoundId,
+      });
       showNotice("Padrao detectado no site. Telegram nao enviado: canal sem Chat ID.");
+      return;
+    }
+
+    const moduleConfig = normalizeTelegramModuleConfigs(channel.signalModules).validator;
+    if (!moduleConfig.enabled) {
+      console.info("[VALIDATOR_LIVE_HIT] blocked", {
+        reason: "validator_module_inactive",
+        patternId: patternItem.id,
+        channelId: channel.id,
+        detectedRoundId: hit.detectedRoundId,
+      });
+      showNotice("Padrao detectado no site. Telegram nao enviado: Seguir Validador esta inativo.");
       return;
     }
 
@@ -676,16 +718,32 @@ function NeuralValidatorPage() {
 
     telegramSendKeysRef.current.add(sendKey);
     try {
+      console.info("[VALIDATOR_LIVE_HIT] sending", {
+        patternId: patternItem.id,
+        channelId: channel.id,
+        detectedRoundId: hit.detectedRoundId,
+      });
       await postValidatorLiveHitTelegram({
         patternId: patternItem.id,
         detectedRoundId: hit.detectedRoundId,
         pattern: patternItem,
       });
       markTelegramNotificationSent(sendKey);
+      console.info("[VALIDATOR_LIVE_HIT] sent", {
+        patternId: patternItem.id,
+        channelId: channel.id,
+        detectedRoundId: hit.detectedRoundId,
+      });
       showNotice(`Sinal enviado no Telegram: ${channel.name}.`);
     } catch (error) {
       telegramSendKeysRef.current.delete(sendKey);
       forgetTelegramNotificationSent(sendKey);
+      console.warn("[VALIDATOR_LIVE_HIT] error", {
+        patternId: patternItem.id,
+        channelId: channel.id,
+        detectedRoundId: hit.detectedRoundId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       showNotice(error instanceof Error ? error.message : "Falha ao enviar sinal no Telegram.");
     }
   }
