@@ -106,12 +106,17 @@ export default {
       return json({ error: "Unauthorized" }, 401, env);
     }
     if (!env.TELEGRAM_ENGINE) return json({ error: "Durable Object binding missing" }, 500, env);
-
     const id = env.TELEGRAM_ENGINE.idFromName("global");
     return env.TELEGRAM_ENGINE.get(id).fetch(request);
   },
-};
 
+  async scheduled(_event, env, ctx) {
+    if (!env.TELEGRAM_ENGINE) return;
+    const id = env.TELEGRAM_ENGINE.idFromName("global");
+    const request = new Request("https://internal.sniperbo/engine/notifications/purge", { method: "POST" });
+    ctx.waitUntil(env.TELEGRAM_ENGINE.get(id).fetch(request));
+  },
+};
 export class TelegramEngine {
   constructor(state, env) {
     this.state = state;
