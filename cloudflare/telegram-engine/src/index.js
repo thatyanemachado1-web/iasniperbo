@@ -1613,7 +1613,7 @@ function payingNumbersResultProtection(kind) {
 function isPendingOfficialEntryNotification(notification) {
   const payload = readRecord(notification.payloadJson);
   const moduleKey = normalizeModuleKey(payload.moduleKey || String(notification.type || "").replace("module:", ""));
-  if (!["ai_patterns", "paying_numbers", "surf_alert", "ties_only"].includes(moduleKey)) return false;
+  if (!["ai_patterns", "paying_numbers", "surf_alert", "ties_only", "validator"].includes(moduleKey)) return false;
   if (payload.resultSentAt || payload.resultStatus) return false;
   if (payload.signalKind && payload.signalKind !== "entry") return false;
   if (String(notification.status || "") !== "sent") return false;
