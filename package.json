@@ -13,6 +13,7 @@
     "signals:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start_official_signals_api.ps1",
     "watchdog:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/watch_sniperbo_official.ps1",
     "lint": "eslint .",
+    "test:telegram-v2": "node --experimental-strip-types scripts/telegram-auto-v2.test.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {

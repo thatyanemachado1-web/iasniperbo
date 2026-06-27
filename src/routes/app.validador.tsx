@@ -836,7 +836,21 @@ function NeuralValidatorPage() {
       },
       updatedAt: new Date().toISOString(),
     };
-    void saveServerValidatorChannel(updated)
+    const savePromise =
+      channel.botTokenEncoded === "__cloudflare__" && patch.signalModules
+        ? fetch(`/telegram/channels/${encodeURIComponent(channel.id)}`, {
+            method: "PATCH",
+            cache: "no-store",
+            headers: validatorApiHeaders(true),
+            body: JSON.stringify({ channel: { signalModules: updated.signalModules, isActive: updated.isActive } }),
+          }).then(async (response) => {
+            const data = (await response.json().catch(() => null)) as { channel?: ValidatorNotificationChannel; error?: string } | null;
+            if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou a atualizacao.");
+            if (!data?.channel) throw new Error("Servidor nao retornou o canal salvo.");
+            return data.channel;
+          })
+        : saveServerValidatorChannel(updated);
+    void savePromise
       .then((serverChannel) => setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(serverChannel)))))
       .catch((error) => {
         showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a atualizacao.");
