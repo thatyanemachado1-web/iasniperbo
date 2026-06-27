@@ -6736,21 +6736,7 @@ async function testDirectValidatorChannel(request: Request, channel: ValidatorNo
 }
 
 async function testCloudValidatorChannel(env: unknown, clientId: string, channelId: string) {
-  const response = await sendTelegramEngineSignal(env, {
-    userId: clientId,
-    channelId,
-    moduleKey: "validator",
-    signalKey: `connection-test:${channelId}:${Date.now()}`,
-    roundId: Date.now(),
-    entry: "",
-    message: TELEGRAM_CONNECTION_TEST_MESSAGE,
-    forceMessage: true,
-  });
-  if (!response.ok) return response;
-  const messageId = response.messageId;
-  return messageId
-    ? { ok: true as const, status: 200, messageId }
-    : { ok: false as const, status: 502, error: "Cloudflare Telegram nao retornou message_id." };
+  return testSavedCloudValidatorChannel(env, clientId, channelId);
 }
 
 async function testSavedCloudValidatorChannel(env: unknown, clientId: string, channelId: string) {
@@ -7040,18 +7026,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     const moduleConfig = validatorChannelModuleConfig(channel, "validator");
     const buttons = validatorModuleTelegramButtons(moduleConfig, channel);
     const result = isCloudValidatorTelegramChannel(channel)
-      ? await sendTelegramEngineSignal(env, {
-          userId: pattern.userId,
-          channelId: channel.id,
-          moduleKey: "validator",
-          signalKey: notificationKey,
-          roundId,
-          entry: entrySide,
-          message,
-          variables: buildServerValidatorTelegramVariables(pattern, channel),
-          buttons,
-          forceMessage: true,
-        })
+      ? await sendCloudValidatorChannelPreview(env, pattern.userId, channel.id, message, buttons)
       : await sendTelegramMessage({
           botToken: decodeServerToken(channel.botTokenEncoded),
           chatId: channel.chatId,
@@ -7381,16 +7356,13 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
       if (!next) return json({ error: "Canal invalido." }, 400);
       if (validatorChannelActivatesAnyModule(current, next)) {
         if (isCloudValidatorTelegramChannel(next)) {
-          const result = await sendTelegramEngineSignal(env, {
+          const result = await sendCloudValidatorChannelPreview(
+            env,
             userId,
-            channelId: next.id,
-            moduleKey: "validator",
-            signalKey: `activation-test:${next.id}:${Date.now()}`,
-            roundId: Date.now(),
-            entry: "",
-            message: "[TESTE CONEXAO TELEGRAM]\nCentral Telegram conectada com sucesso.",
-            forceMessage: true,
-          });
+            next.id,
+            "[TESTE CONEXAO TELEGRAM]\nCentral Telegram conectada com sucesso.",
+            [],
+          );
           if (!result.ok) return json({ error: result.error }, result.status || 502);
         } else {
           const botToken = decodeServerToken(next.botTokenEncoded);
@@ -9646,18 +9618,7 @@ async function sendValidatorEntryTelegramNotification(
   const moduleConfig = validatorChannelModuleConfig(channel, "validator");
   const buttons = validatorModuleTelegramButtons(moduleConfig, channel);
   const result = isCloudValidatorTelegramChannel(channel)
-    ? await sendTelegramEngineSignal(env, {
-        userId: pattern.userId,
-        channelId: channel.id,
-        moduleKey: "validator",
-        signalKey: notificationKey,
-        roundId,
-        entry: entrySide,
-        message,
-        variables: buildServerValidatorTelegramVariables(pattern, channel),
-        buttons,
-        forceMessage: true,
-      })
+    ? await sendCloudValidatorChannelPreview(env, pattern.userId, channel.id, message, buttons)
     : await sendTelegramMessage({
         botToken: decodeServerToken(channel.botTokenEncoded),
         chatId: channel.chatId,
@@ -10230,6 +10191,7 @@ async function sendValidatorModuleTelegramNotification(
   const telegramSendStartedAtMs = Date.now();
   const moduleConfig = validatorChannelModuleConfig(signal.channel, signal.moduleKey);
   const buttons = validatorModuleTelegramButtons(moduleConfig, signal.channel);
+  const cloudChannel = isCloudValidatorTelegramChannel(signal.channel);
   const reservedAt = new Date().toISOString();
   const reservation = {
     id: signal.notificationKey,
@@ -10248,7 +10210,16 @@ async function sendValidatorModuleTelegramNotification(
     sentAt: signal.detectedAt,
     updatedAt: reservedAt,
   };
-  const reservationResult = await reserveValidatorNotificationDedupe(env, reservation);
+  const reservationResult = cloudChannel
+    ? {
+        ok: true as const,
+        reserved: true,
+        duplicate: false,
+        status: 200,
+        action: "delegated_to_cloudflare",
+        error: "",
+      }
+    : await reserveValidatorNotificationDedupe(env, reservation);
   if (!reservationResult.ok || !reservationResult.reserved) {
     const reason = reservationResult.duplicate ? "persistent_duplicate" : "dedupe_persistence_unavailable";
     console.warn(
@@ -10283,10 +10254,12 @@ async function sendValidatorModuleTelegramNotification(
     }
     return false;
   }
-  liveValidatorNotifications = [
-    reservation,
-    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== signal.notificationKey),
-  ].slice(0, 1000);
+  if (!cloudChannel) {
+    liveValidatorNotifications = [
+      reservation,
+      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== signal.notificationKey),
+    ].slice(0, 1000);
+  }
   console.info(
     JSON.stringify({
       event: "[TELEGRAM_AUTO] enviando",
@@ -10300,28 +10273,8 @@ async function sendValidatorModuleTelegramNotification(
       telegram_send_called: true,
     }),
   );
-  const result = isCloudValidatorTelegramChannel(signal.channel)
-    ? await sendTelegramEngineSignal(env, {
-        userId: signal.channel.userId,
-        channelId: signal.channel.id,
-        moduleKey: signal.moduleKey,
-        signalKey: signal.signalKey,
-        roundId: signal.roundId,
-        entry:
-          readString(signal.payloadJson, "expectedSide") ||
-          readString(signal.payloadJson, "side") ||
-          readString(signal.payloadJson, "entry"),
-        message: signal.message,
-        result: readString(signal.payloadJson, "result") || "Aguardando resultado",
-        protection: readString(signal.payloadJson, "protection") || readString(signal.payloadJson, "gale"),
-        variables: validatorTelegramPayloadVariables(signal.moduleKey, signal.payloadJson, {
-          label: readString(signal.payloadJson, "result") || "Aguardando resultado",
-          roundId: signal.roundId,
-          tieMultiplier: "",
-        }),
-        buttons,
-        forceMessage: true,
-      })
+  const result = cloudChannel
+    ? await sendCloudValidatorChannelPreview(env, signal.channel.userId, signal.channel.id, signal.message, buttons)
     : await sendTelegramMessage({
         botToken: decodeServerToken(signal.channel.botTokenEncoded),
         chatId: signal.channel.chatId,
@@ -10528,23 +10481,13 @@ async function sendValidatorTelegramResultNotification(
   const sentAt = new Date().toISOString();
   const message = renderValidatorTelegramTemplate(template, variables);
   const result = isCloudValidatorTelegramChannel(channel)
-    ? await sendTelegramEngineSignal(env, {
-        userId: readString(originalNotification, "userId") || readString(originalNotification, "user_id"),
-        channelId: channel.id,
-        moduleKey,
-        signalKey: resultNotificationKey,
-        roundId: outcome.roundId,
-        entry:
-          readString(payloadJson, "expectedSide") ||
-          readString(payloadJson, "side") ||
-          readString(payloadJson, "entry"),
+    ? await sendCloudValidatorChannelPreview(
+        env,
+        readString(originalNotification, "userId") || readString(originalNotification, "user_id"),
+        channel.id,
         message,
-        result: outcome.label,
-        protection: outcome.galeUsed <= 0 ? "SG" : `G${Math.min(4, outcome.galeUsed)}`,
-        variables,
         buttons,
-        forceMessage: true,
-      })
+      )
     : await sendTelegramMessage({
         botToken: decodeServerToken(channel.botTokenEncoded),
         chatId: channel.chatId,
@@ -11194,16 +11137,7 @@ async function sendValidatorAnalyzingMessages(
     const sentAt = new Date().toISOString();
     const message = buildServerValidatorAnalyzingMessage(channel);
     const result = isCloudValidatorTelegramChannel(channel)
-      ? await sendTelegramEngineSignal(env, {
-          userId: channel.userId,
-          channelId: channel.id,
-          moduleKey: "validator",
-          signalKey: notificationKey,
-          roundId: latestRound.id,
-          entry: "",
-          message,
-          forceMessage: true,
-        })
+      ? await sendCloudValidatorChannelPreview(env, channel.userId, channel.id, message, [])
       : await sendTelegramMessage({
           botToken: decodeServerToken(channel.botTokenEncoded),
           chatId: channel.chatId,
