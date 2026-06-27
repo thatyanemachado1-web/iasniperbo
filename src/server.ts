@@ -8680,7 +8680,7 @@ async function fetchStoredActiveValidatorChannels(env: unknown) {
   const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(env, VALIDATOR_CHANNELS_TABLE, "select=*&is_active=eq.true&order=updated_at.desc&limit=1000"),
     fetchValidatorChannelStateChannels(env),
-    fetchValidatorChannelDeletedIds(env),
+    fetchValidatorChannelDeletedRefs(env),
   ]);
   const storedChannels = rows
     .map(validatorChannelFromRow)
@@ -8949,6 +8949,7 @@ function isValidatorChannelDeleted(
   },
 ) {
   const code = normalizeValidatorChannelCode(channel.chatId);
+  if (deletedRefs.ids.has(channel.id) || (code && deletedRefs.codes.has(code))) return true;
   const channelTime = stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>);
   const idDeletedAt =
     deletedRefs.idTimes?.get(channel.id) || (deletedRefs.ids.has(channel.id) ? Number.MAX_SAFE_INTEGER : 0);
