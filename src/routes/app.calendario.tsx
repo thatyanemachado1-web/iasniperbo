@@ -642,7 +642,7 @@ function CalendarHoursOverview({
   onSelectHour: (hour: number) => void;
 }) {
   const selectedDay = calendar.month.days.find((day) => day.date === selectedDate) || null;
-  const weekdayRows = buildWeekdayHourRows(calendar);
+  const weekRows = buildSelectedWeekHourRows(calendar, selectedDate);
   return (
     <div className="mt-5 space-y-4 rounded-2xl border border-neon-cyan/20 bg-background/30 p-3 sm:p-4">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -683,6 +683,9 @@ function CalendarHoursOverview({
       )}
 
       <div className="hidden lg:block">
+        <div className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">
+          Semana real do dia selecionado
+        </div>
         <div
           className="grid items-center gap-0.5 text-center"
           style={{ gridTemplateColumns: "42px repeat(24, minmax(18px, 1fr))" }}
@@ -693,13 +696,13 @@ function CalendarHoursOverview({
               {hour}
             </div>
           ))}
-          {weekdayRows.map((row) => (
-            <div key={row.label} className="contents">
+          {weekRows.map((row) => (
+            <div key={row.date} className="contents">
               <div className="text-left text-[9px] font-black uppercase text-muted-foreground">
                 {row.label}
               </div>
               {row.hours.map((cell) => (
-                <WeekdayHourCell key={`${row.label}-${cell.hour}`} cell={cell} />
+                <WeekdayHourCell key={`${row.date}-${cell.hour}`} cell={cell} />
               ))}
             </div>
           ))}
@@ -707,12 +710,12 @@ function CalendarHoursOverview({
       </div>
 
       <div className="space-y-3 lg:hidden">
-        {weekdayRows.map((row) => (
-          <div key={row.label}>
+        {weekRows.map((row) => (
+          <div key={row.date}>
             <div className="mb-1 text-[10px] font-black uppercase text-muted-foreground">{row.fullLabel}</div>
             <div className="grid grid-cols-6 gap-1.5">
               {row.hours.map((cell) => (
-                <WeekdayHourCell key={`${row.label}-${cell.hour}`} cell={cell} showHour />
+                <WeekdayHourCell key={`${row.date}-${cell.hour}`} cell={cell} showHour />
               ))}
             </div>
           </div>
@@ -1470,37 +1473,60 @@ function InfoLine({ icon, label, value }: { icon: ReactNode; label: string; valu
   );
 }
 
-function buildWeekdayHourRows(calendar: NeuralCalendarPayload) {
-  const buckets = new Map<string, { weightedScore: number; totalRounds: number }>();
+function buildSelectedWeekHourRows(calendar: NeuralCalendarPayload, selectedDate: string) {
+  const buckets = new Map<string, { score: number; totalRounds: number }>();
   for (const item of calendar.month.heatmap) {
-    const weekday = weekdayIndexFromDate(item.date);
-    const key = `${weekday}:${item.hour}`;
-    const current = buckets.get(key) || { weightedScore: 0, totalRounds: 0 };
     const totalRounds = Math.max(0, Math.floor(Number(item.totalRounds) || 0));
-    current.weightedScore += (Number(item.score) || 0) * totalRounds;
-    current.totalRounds += totalRounds;
-    buckets.set(key, current);
+    buckets.set(`${item.date}:${item.hour}`, {
+      score: totalRounds ? Number(item.score) || 0 : 0,
+      totalRounds,
+    });
   }
 
-  return weekdayMeta.map((weekday) => ({
-    ...weekday,
+  const [selectedYear, selectedMonth, selectedDay] = (selectedDate || "").split("-").map(Number);
+  const baseDate =
+    selectedYear && selectedMonth && selectedDay
+      ? new Date(Date.UTC(selectedYear, selectedMonth - 1, selectedDay))
+      : new Date(Date.UTC(calendar.month.year, calendar.month.month - 1, 1));
+  const weekStart = new Date(baseDate);
+  weekStart.setUTCDate(baseDate.getUTCDate() - baseDate.getUTCDay());
+
+  return Array.from({ length: 7 }, (_, dayOffset) => {
+    const date = new Date(weekStart);
+    date.setUTCDate(weekStart.getUTCDate() + dayOffset);
+    const dateKey = calendarDateKey(date);
+    const weekday = weekdayMeta[date.getUTCDay()] || weekdayMeta[0];
+    const isCurrentMonth = date.getUTCFullYear() === calendar.month.year && date.getUTCMonth() + 1 === calendar.month.month;
+
+    return {
+      ...weekday,
+      date: dateKey,
+      label: isCurrentMonth ? `${weekday.label} ${String(date.getUTCDate()).padStart(2, "0")}` : weekday.label,
+      fullLabel: isCurrentMonth ? `${weekday.fullLabel} · ${formatDateShort(dateKey)}` : `${weekday.fullLabel} · fora do mês`,
     hours: Array.from({ length: 24 }, (_, hour): WeekdayHourCellData => {
-      const bucket = buckets.get(`${weekday.index}:${hour}`);
+        const bucket = isCurrentMonth ? buckets.get(`${dateKey}:${hour}`) : null;
       const totalRounds = bucket?.totalRounds ?? 0;
       return {
-        label: weekday.fullLabel,
+          label: isCurrentMonth ? `${weekday.fullLabel} ${formatDateShort(dateKey)}` : weekday.fullLabel,
         hour,
-        score: totalRounds ? Math.round((bucket?.weightedScore ?? 0) / totalRounds) : 0,
+          score: totalRounds ? Math.round(bucket?.score ?? 0) : 0,
         totalRounds,
       };
     }),
-  }));
+    };
+  });
 }
 
 function weekdayIndexFromDate(date: string) {
   const [year, month, day] = date.split("-").map(Number);
   const parsed = new Date(Date.UTC(year || 1970, (month || 1) - 1, day || 1));
   return parsed.getUTCDay();
+}
+
+function calendarDateKey(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    date.getUTCDate(),
+  ).padStart(2, "0")}`;
 }
 
 function canMoveMonth(delta: number, year: number, month: number, allowedYears: number[]) {
