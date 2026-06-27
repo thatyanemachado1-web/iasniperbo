@@ -7,7 +7,6 @@ import {
   probeTelegramAutoV2ModuleCard,
   type TelegramAutoV2ModuleKey,
   TELEGRAM_AUTO_V2_GLOBAL_MODULES,
-  telegramAutoV2SentBlocksRetry,
 } from "./lib/telegramAutoV2";
 import bcrypt from "bcryptjs";
 import { mockDashboardData } from "./data/mockDashboardData";
@@ -577,6 +576,7 @@ let validatorMonitorCachePromise: Promise<void> | null = null;
 let validatorOfficialDispatchersBootstrapped = false;
 let validatorInitialOfficialSignalKeys = new Set<string>();
 const telegramAutoV2ProcessedSignals = new Map<string, number>();
+const telegramAutoV2InFlightReservations = new Set<string>();
 const TELEGRAM_V2_PROCESSED_SIGNAL_TTL_MS = 1000 * 60 * 60 * 6;
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 const localAiRateBuckets = new Map<string, { count: number; resetAt: number }>();
@@ -9666,6 +9666,9 @@ type ValidatorMonitorOptions = {
   fast?: boolean;
   roundReceivedAtMs?: number;
   trigger?: string;
+  v2OnlyAllowedSignals?: Set<string>;
+  v2OnlyAllowedModules?: Set<ValidatorTelegramModuleKey>;
+  onTaskBuilt?: (moduleKey: ValidatorTelegramModuleKey) => void;
 };
 
 function logTelegramAutoV2Event(event: string, payload: Record<string, unknown>) {
@@ -9687,27 +9690,40 @@ function pruneTelegramAutoV2ProcessedSignals(now = Date.now()) {
   }
 }
 
-function telegramAutoV2SignalWasProcessed(signalKey: string) {
-  const cleanSignal = String(signalKey || "").trim();
+function telegramAutoV2ProcessedSignalId(moduleKey: string, signalKey: string, roundId: number) {
+  return `${moduleKey}:${String(signalKey || "").trim()}:round:${Math.floor(Number(roundId) || 0)}`;
+}
+
+function telegramAutoV2SignalWasProcessed(signalId: string) {
+  const cleanSignal = String(signalId || "").trim();
   if (!cleanSignal) return false;
   pruneTelegramAutoV2ProcessedSignals();
   return telegramAutoV2ProcessedSignals.has(cleanSignal);
 }
 
-function markTelegramAutoV2SignalProcessed(signalKey: string) {
-  const cleanSignal = String(signalKey || "").trim();
+function markTelegramAutoV2SignalProcessed(signalId: string) {
+  const cleanSignal = String(signalId || "").trim();
   if (!cleanSignal) return;
   const now = Date.now();
   pruneTelegramAutoV2ProcessedSignals(now);
   telegramAutoV2ProcessedSignals.set(cleanSignal, now);
 }
 
-function resolveLatestConfirmedTelegramAutoV2Card(latestRound: Round | null) {
-  return (
-    detectGlobalConfirmedCards(liveDashboardData, latestRound).find(
-      (card) => card.moduleKey === "paying_numbers" && card.confirmed && card.signalKey,
-    ) || null
-  );
+function extractTelegramAutoV2CardSide(card: {
+  signalKey: string;
+  meta?: Record<string, unknown>;
+  moduleKey: string;
+}) {
+  const fromMeta = normalizeSignalSide(readString(readRecord(card.meta), "side"));
+  if (fromMeta) return fromMeta;
+  const fromSignal = card.signalKey.split(":").find((part) => part === "B" || part === "P" || part === "T");
+  if (fromSignal === "B" || fromSignal === "P" || fromSignal === "T") return fromSignal;
+  if (card.moduleKey === "ties_only") return "TIE";
+  return "";
+}
+
+function resolveConfirmedTelegramAutoV2Cards(latestRound: Round | null) {
+  return detectGlobalConfirmedCards(liveDashboardData, latestRound).filter((card) => card.confirmed && card.signalKey);
 }
 
 function resolveTelegramAutoV2LatestRound(dashboard: LiveDashboardData = liveDashboardData): Round | null {
@@ -9860,6 +9876,7 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
       channel.id,
       "validator",
       `${pattern.userId}:${pattern.id}:${latestRound.id}`,
+      latestRound.id,
     );
     if (telegramAutoV2DedupeBlocksSend(notificationKey)) continue;
     entrySendTasks.push(() =>
@@ -9927,9 +9944,8 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
   }
 
   const latestRound = resolveTelegramAutoV2LatestRound(liveDashboardData);
-  const confirmedCard = resolveLatestConfirmedTelegramAutoV2Card(latestRound);
-
-  if (!latestRound || !confirmedCard?.signalKey) {
+  const confirmedCards = latestRound ? resolveConfirmedTelegramAutoV2Cards(latestRound) : [];
+  if (!latestRound || !confirmedCards.length) {
     logTelegramAutoV2Event("no_confirmed_card_skip", {
       trigger: options.trigger || "unknown",
       reason: latestRound ? "no_confirmed_card" : "missing_latest_round",
@@ -9938,29 +9954,49 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
     return false;
   }
 
-  if (telegramAutoV2SignalWasProcessed(confirmedCard.signalKey)) {
-    logTelegramAutoV2Event("repeated_signal_skip", {
-      trigger: options.trigger || "unknown",
-      module_key: confirmedCard.moduleKey,
-      signalKey: confirmedCard.signalKey,
-      roundId: confirmedCard.roundId,
-    });
-    return false;
+  const freshCards: Array<{
+    card: (typeof confirmedCards)[number];
+    signalId: string;
+  }> = [];
+  for (const card of confirmedCards) {
+    const signalId = telegramAutoV2ProcessedSignalId(card.moduleKey, card.signalKey, card.roundId || latestRound.id);
+    if (telegramAutoV2SignalWasProcessed(signalId)) {
+      logTelegramAutoV2Event("repeated_signal_skip", {
+        trigger: options.trigger || "unknown",
+        card_source: readString(readRecord(card.meta), "card_source"),
+        visual_title: readString(readRecord(card.meta), "visual_title"),
+        card_name: readString(readRecord(card.meta), "card_name"),
+        module_key: card.moduleKey,
+        side: extractTelegramAutoV2CardSide(card),
+        side_escolhido: extractTelegramAutoV2CardSide(card),
+        signalKey: card.signalKey,
+        roundId: card.roundId || latestRound.id,
+      });
+      continue;
+    }
+    freshCards.push({ card, signalId });
   }
-
-  markTelegramAutoV2SignalProcessed(confirmedCard.signalKey);
-  logTelegramAutoV2Event("new_confirmed_card_detected", {
-    trigger: options.trigger || "unknown",
-    module_key: confirmedCard.moduleKey,
-    signalKey: confirmedCard.signalKey,
-    roundId: confirmedCard.roundId,
-  });
+  if (!freshCards.length) return false;
+  for (const { card, signalId } of freshCards) {
+    markTelegramAutoV2SignalProcessed(signalId);
+    logTelegramAutoV2Event("new_confirmed_card_detected", {
+      trigger: options.trigger || "unknown",
+      card_source: readString(readRecord(card.meta), "card_source"),
+      visual_title: readString(readRecord(card.meta), "visual_title"),
+      card_name: readString(readRecord(card.meta), "card_name"),
+      module_key: card.moduleKey,
+      side: extractTelegramAutoV2CardSide(card),
+      side_escolhido: extractTelegramAutoV2CardSide(card),
+      signalKey: card.signalKey,
+      roundId: card.roundId || latestRound.id,
+    });
+  }
 
   logTelegramAutoV2Event("engine_fetch_started", {
     trigger: options.trigger || "unknown",
-    module_key: confirmedCard.moduleKey,
-    signalKey: confirmedCard.signalKey,
-    roundId: confirmedCard.roundId,
+    confirmedModules: freshCards.map(({ card }) => card.moduleKey),
+    signalKeys: freshCards.map(({ card }) => card.signalKey),
+    roundId: latestRound.id,
   });
 
   await withTimeout(
@@ -9970,18 +10006,31 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
     undefined,
   );
 
+  const taskCountsByModule = new Map<ValidatorTelegramModuleKey, number>();
   const entryChannelKeys = new Set<string>();
-  const entrySendTasks = buildPayingNumbersTelegramSendTasks(env, latestRound, entryChannelKeys, options, {});
+  const allowedSignalKeys = new Set(freshCards.map(({ card }) => card.signalKey));
+  const allowedModules = new Set(freshCards.map(({ card }) => card.moduleKey as ValidatorTelegramModuleKey));
+  const entrySendTasks = buildValidatorModuleTelegramSendTasks(
+    env,
+    latestRound,
+    entryChannelKeys,
+    {
+      ...options,
+      v2OnlyAllowedSignals: allowedSignalKeys,
+      v2OnlyAllowedModules: allowedModules,
+      onTaskBuilt: (moduleKey) => {
+        taskCountsByModule.set(moduleKey, (taskCountsByModule.get(moduleKey) || 0) + 1);
+      },
+    },
+    {},
+  );
 
   logTelegramAutoV2Event("tasks_built", {
     trigger: options.trigger || "unknown",
-    module_key: "paying_numbers",
     tasks_built: entrySendTasks.length,
-    signalKey: confirmedCard.signalKey,
+    tasks_built_by_module: Object.fromEntries(taskCountsByModule.entries()),
+    confirmedModules: [...allowedModules],
     roundId: latestRound.id,
-    eligibleChannels: liveValidatorChannels.filter((channel) =>
-      channelEligibleForTelegramAutoV2(channel, "paying_numbers"),
-    ).length,
   });
 
   if (!entrySendTasks.length) return false;
@@ -9991,9 +10040,9 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
   if (sentCount > 0) {
     logTelegramAutoV2Event("telegram_sent", {
       trigger: options.trigger || "unknown",
-      module_key: "paying_numbers",
+      modules: [...allowedModules],
       sentCount,
-      signalKey: confirmedCard.signalKey,
+      signalKeys: [...allowedSignalKeys],
       roundId: latestRound.id,
     });
   }
@@ -10080,6 +10129,8 @@ function buildValidatorModuleTelegramSendTasks(
   options: ValidatorMonitorOptions,
   _dispatcherOptions: { suppressInitialOfficialSignals?: boolean } = {},
 ) {
+  const allowedModules = options.v2OnlyAllowedModules || null;
+  const allowedSignals = options.v2OnlyAllowedSignals || null;
   const confirmedCards = new Map(
     detectGlobalConfirmedCards(liveDashboardData, latestRound).map((card) => [card.moduleKey, card]),
   );
@@ -10093,10 +10144,12 @@ function buildValidatorModuleTelegramSendTasks(
   for (const channel of liveValidatorChannels) {
     for (const moduleKey of VALIDATOR_TELEGRAM_MODULE_KEYS) {
       if (moduleKey === "validator" || moduleKey === "paying_numbers") continue;
+      if (allowedModules && !allowedModules.has(moduleKey)) continue;
       if (!channelEligibleForTelegramAutoV2(channel, moduleKey)) continue;
       if (!confirmedCards.has(moduleKey)) continue;
       const signal = buildValidatorChannelModuleSignal(channel, moduleKey, latestRound);
       if (!signal) continue;
+      if (allowedSignals && !allowedSignals.has(signal.signalKey)) continue;
       if (telegramAutoV2DedupeBlocksSend(signal.notificationKey)) {
         logTelegramAutoV2Event("dedupe bloqueou envio", {
           module_key: moduleKey,
@@ -10112,6 +10165,7 @@ function buildValidatorModuleTelegramSendTasks(
       }
       entryChannelKeys.add(validatorChannelKey(channel));
       tasks.push(() => sendValidatorModuleTelegramNotification(env, signal, options));
+      options.onTaskBuilt?.(moduleKey);
     }
   }
   console.info(
@@ -10234,6 +10288,8 @@ function buildPayingNumbersTelegramSendTasks(
   dispatcherOptions: { suppressInitialOfficialSignals?: boolean } = {},
 ) {
   const tasks: Array<() => Promise<boolean>> = [];
+  const allowedModules = options.v2OnlyAllowedModules || null;
+  if (allowedModules && !allowedModules.has("paying_numbers")) return tasks;
   const v2Probe = detectPayingNumbersConfirmedCard(liveDashboardData, latestRound);
   const channels = liveValidatorChannels.filter((channel) => channelEligibleForTelegramAutoV2(channel, "paying_numbers"));
   const card = v2Probe.confirmed
@@ -10242,7 +10298,12 @@ function buildPayingNumbersTelegramSendTasks(
 
   logTelegramAutoV2Event(v2Probe.confirmed ? "card detectado" : "card nao confirmado", {
     card_detected: v2Probe.confirmed,
+    card_source: readString(readRecord(v2Probe.meta), "card_source"),
+    visual_title: readString(readRecord(v2Probe.meta), "visual_title"),
+    card_name: readString(readRecord(v2Probe.meta), "card_name"),
     module_key: "paying_numbers",
+    side: readString(readRecord(v2Probe.meta), "side") || card.side || "",
+    side_escolhido: readString(readRecord(v2Probe.meta), "side") || card.side || "",
     handler_called: true,
     roundId: latestRound.id,
     eligibleChannels: channels.length,
@@ -10354,6 +10415,7 @@ function buildPayingNumbersTelegramSendTasks(
     );
     entryChannelKeys.add(validatorChannelKey(channel));
     tasks.push(() => sendValidatorModuleTelegramNotification(env, signal, options));
+    options.onTaskBuilt?.("paying_numbers");
   }
   return tasks;
 }
@@ -10390,12 +10452,28 @@ function resolvePayingNumbersTelegramCard(
   const direct = readServerPayingNumbersConfirmedCard(dashboard.neuralReading ?? null, latestRound);
   if (direct.confirmed) return direct;
 
-  const side = readServerNeuralSide(
-    dashboard.neuralReading?.direcao ??
-      dashboard.neuralReading?.origem ??
-      dashboard.currentSignal?.side ??
-      dashboard.neuralEntryState?.expectedSide,
-  );
+  const sideTextCandidates = [
+    dashboard.neuralReading?.direcao,
+    dashboard.neuralReading?.origem,
+    dashboard.currentSignal?.side,
+    dashboard.neuralEntryState?.expectedSide,
+    readString(readRecord(probe.meta), "side"),
+    dashboard.neuralReading?.paganteStatus,
+    dashboard.neuralReading?.paganteAlert,
+    dashboard.currentSignal?.id,
+  ];
+  const side =
+    sideTextCandidates
+      .map((value) => {
+        const normalized = String(value || "")
+          .trim()
+          .toUpperCase();
+        if (!normalized) return "";
+        if (["B", "BANKER", "BANCA"].includes(normalized) || normalized.includes("BANKER")) return "B";
+        if (["P", "PLAYER", "JOGADOR"].includes(normalized) || normalized.includes("PLAYER")) return "P";
+        return "";
+      })
+      .find(Boolean) || "";
   if (!probe.confirmed || !side) return null;
 
   const reading =
@@ -10531,7 +10609,7 @@ function buildSurfAlertModuleSignal(channel: ValidatorNotificationChannel, lates
     channel,
     "surf_alert",
     latestRound,
-    `surf:${readString(alert, "id") || latestRound.id}:${side}:${Math.round(risk)}`,
+    `surf:${readString(alert, "id") || latestRound.id}:${side}:round:${latestRound.id}`,
     {
       table: "Bac Bo",
       pattern: "",
@@ -10576,7 +10654,7 @@ function buildTiesOnlyModuleSignal(channel: ValidatorNotificationChannel, latest
     channel,
     "ties_only",
     latestRound,
-    `tie:${readString(alert, "id") || latestRound.id}:${level}:${Math.round(confidence)}`,
+    `tie:${readString(alert, "id") || latestRound.id}:${level}:round:${latestRound.id}`,
     {
       table: "Bac Bo",
       pattern: "",
@@ -10622,7 +10700,7 @@ function createValidatorModuleSignal(
     moduleKey,
     channel,
     signalKey,
-    notificationKey: buildTelegramAutoV2NotificationKey(channel.id, moduleKey, signalKey),
+    notificationKey: buildTelegramAutoV2NotificationKey(channel.id, moduleKey, signalKey, latestRound.id),
     roundId: latestRound.id,
     message: renderValidatorTelegramTemplate(moduleConfig.template, variables),
     detectedAt,
@@ -10670,27 +10748,40 @@ async function sendValidatorModuleTelegramNotification(
   const reservationResult =
     cloudChannel && !dedupeConfigured
       ? (() => {
-          const existing = telegramAutoV2ExistingNotification(signal.notificationKey);
-          if (existing && telegramAutoV2SentBlocksRetry(readString(existing, "status"))) {
+          if (telegramAutoV2InFlightReservations.has(signal.notificationKey)) {
             return {
               ok: true as const,
               reserved: false,
               duplicate: true,
               status: 200,
-              action: "in_memory_dedupe_sent",
+              action: "in_memory_reserved_recent",
               error: "",
             };
           }
+          const existing = telegramAutoV2ExistingNotification(signal.notificationKey);
+          const inMemoryDedupe = telegramAutoV2InMemoryDedupeDecision(existing);
+          if (inMemoryDedupe.blocked) {
+            return {
+              ok: true as const,
+              reserved: false,
+              duplicate: true,
+              status: 200,
+              action: inMemoryDedupe.action,
+              error: "",
+            };
+          }
+          telegramAutoV2InFlightReservations.add(signal.notificationKey);
           return {
             ok: true as const,
             reserved: true,
             duplicate: false,
             status: 200,
-            action: existing ? "in_memory_retry" : "in_memory_reserved",
+            action: existing ? inMemoryDedupe.action : "in_memory_reserved",
             error: "",
           };
         })()
       : await reserveValidatorNotificationDedupe(env, reservation);
+  const reservedInMemory = cloudChannel && !dedupeConfigured && reservationResult.reserved && !reservationResult.duplicate;
   if (!reservationResult.ok || !reservationResult.reserved) {
     const reason = reservationResult.duplicate ? "persistent_duplicate" : "dedupe_persistence_unavailable";
     logTelegramAutoV2Event("dedupe bloqueou envio", {
@@ -10750,17 +10841,25 @@ async function sendValidatorModuleTelegramNotification(
       telegram_send_called: true,
     }),
   );
-  const result = cloudChannel
-    ? await sendCloudValidatorChannelPreview(env, signal.channel.userId, signal.channel.id, signal.message, buttons)
-    : await sendTelegramMessage({
-        botToken: decodeServerToken(signal.channel.botTokenEncoded),
-        chatId: signal.channel.chatId,
-        message: signal.message,
-        buttonLabel: "Abrir Sniper Bo IA",
-        buttonUrl: normalizeTelegramButtonUrl(signal.channel.buttonLink),
-        buttons,
-        allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
-      });
+  let result: Awaited<ReturnType<typeof sendCloudValidatorChannelPreview>>;
+  try {
+    result = await (cloudChannel
+      ? sendCloudValidatorChannelPreview(env, signal.channel.userId, signal.channel.id, signal.message, buttons)
+      : sendTelegramMessage({
+          botToken: decodeServerToken(signal.channel.botTokenEncoded),
+          chatId: signal.channel.chatId,
+          message: signal.message,
+          buttonLabel: "Abrir Sniper Bo IA",
+          buttonUrl: normalizeTelegramButtonUrl(signal.channel.buttonLink),
+          buttons,
+          allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
+        }));
+  } catch (error) {
+    if (reservedInMemory) {
+      telegramAutoV2InFlightReservations.delete(signal.notificationKey);
+    }
+    throw error;
+  }
   const telegramRespondedAtMs = Date.now();
   logTelegramAutoV2Event(result.ok ? "telegram enviado" : "telegram erro", {
     module_key: signal.moduleKey,
@@ -10847,6 +10946,9 @@ async function sendValidatorModuleTelegramNotification(
         error: result.ok ? "" : result.error,
       },
     );
+  }
+  if (reservedInMemory) {
+    telegramAutoV2InFlightReservations.delete(signal.notificationKey);
   }
   return true;
 }
@@ -16140,14 +16242,38 @@ async function handleTelegramV2DiagnosticsRequest(request: Request, url: URL, en
 }
 
 function telegramAutoV2DedupeBlocksSend(key: string) {
-  const existing = liveValidatorNotifications.find((item) => readString(item, "id") === key);
-  if (!existing) return false;
-  const status = readString(existing, "status");
-  return telegramAutoV2SentBlocksRetry(status);
+  const decision = telegramAutoV2InMemoryDedupeDecision(telegramAutoV2ExistingNotification(key));
+  return decision.blocked;
 }
 
 function telegramAutoV2ExistingNotification(key: string) {
   return liveValidatorNotifications.find((item) => readString(item, "id") === key) || null;
+}
+
+function notificationUpdatedAtMs(notification: Record<string, unknown> | null) {
+  const updatedAt = readString(readRecord(notification), "updatedAt") || readString(readRecord(notification), "updated_at");
+  const parsed = updatedAt ? Date.parse(updatedAt) : NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function telegramAutoV2InMemoryDedupeDecision(notification: Record<string, unknown> | null) {
+  if (!notification) return { blocked: false, action: "in_memory_reserved" };
+  const status = readString(notification, "status");
+  if (status === "sent") {
+    return { blocked: true, action: "in_memory_sent_duplicate" };
+  }
+  if (status === "reserved") {
+    const updatedAtMs = notificationUpdatedAtMs(notification);
+    const ageMs = updatedAtMs ? Math.max(0, Date.now() - updatedAtMs) : 0;
+    if (!updatedAtMs || ageMs <= VALIDATOR_TELEGRAM_DEDUPE_RESERVATION_TTL_MS) {
+      return { blocked: true, action: "in_memory_reserved_recent" };
+    }
+    return { blocked: false, action: "in_memory_retry_stale_reserved" };
+  }
+  if (status === "error" || status === "failed") {
+    return { blocked: false, action: "in_memory_retry_error" };
+  }
+  return { blocked: false, action: "in_memory_retry" };
 }
 
 function normalizeMigrationPaidPlanId(rawPlan: unknown, rawStatus: unknown): BillingPlanId | null {

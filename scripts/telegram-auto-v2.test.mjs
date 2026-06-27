@@ -109,7 +109,39 @@ assert.equal(
   true,
 );
 
-const dedupeKey = buildTelegramAutoV2NotificationKey("channel-1", "paying_numbers", "paying:991");
+const playerFromVisualCard = detectPayingNumbersConfirmedCard(
+  {
+    rounds: [latestRound],
+    neuralReading: {
+      mode: "SCANNING",
+      paganteStatus: "ENTRADA CONFIRMADA PLAYER",
+      numero: 9,
+    },
+  },
+  latestRound,
+);
+assert.equal(playerFromVisualCard.confirmed, true);
+assert.match(playerFromVisualCard.signalKey, /:P:round:991$/);
+
+const bankerFromCurrentSignal = detectPayingNumbersConfirmedCard(
+  {
+    rounds: [latestRound],
+    neuralReading: { mode: "SCANNING", numero: 4 },
+    currentSignal: {
+      id: "entrada-confirmada-banker",
+      side: "BANKER",
+      status: "active",
+    },
+  },
+  latestRound,
+);
+assert.equal(bankerFromCurrentSignal.confirmed, true);
+assert.match(bankerFromCurrentSignal.signalKey, /:B:round:991$/);
+
+assert.equal(detectSurfConfirmedCard(surfDashboard, latestRound).signalKey, "surf:surf-1:B:round:991");
+assert.equal(detectTiesConfirmedCard(tieDashboard, latestRound).signalKey, "tie:tie-1:alto:round:991");
+
+const dedupeKey = buildTelegramAutoV2NotificationKey("channel-1", "paying_numbers", "paying:991", 991);
 assert.match(dedupeKey, /^v2:channel-1:paying_numbers:/);
 assert.equal(telegramAutoV2SentBlocksRetry("sent"), true);
 assert.equal(telegramAutoV2AllowsRetry("error"), true);
