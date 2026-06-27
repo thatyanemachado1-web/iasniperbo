@@ -4,6 +4,7 @@ import {
   buildTelegramAutoV2NotificationKey,
   detectGlobalConfirmedCards,
   detectPayingNumbersConfirmedCard,
+  probeTelegramAutoV2ModuleCard,
   type TelegramAutoV2ModuleKey,
   TELEGRAM_AUTO_V2_GLOBAL_MODULES,
   telegramAutoV2SentBlocksRetry,
@@ -3178,7 +3179,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     }
     runBackgroundTask(
       ctx,
-      processValidatorLiveMonitoring(env, { fast: true, roundReceivedAtMs: Date.now() }),
+      processValidatorLiveMonitoring(env, { fast: true, roundReceivedAtMs: Date.now(), trigger: "GET /dashboard" }),
       "monitorar sinais no read do dashboard",
     );
     return json(publicDashboardSnapshot(liveDashboardData));
@@ -3199,6 +3200,15 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       incomingRounds.length &&
       compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, incomingState) > 0
     ) {
+      runBackgroundTask(
+        ctx,
+        processValidatorLiveMonitoring(env, {
+          fast: true,
+          roundReceivedAtMs: Date.now(),
+          trigger: `${url.pathname}:stale_skip`,
+        }),
+        "telegram v2 pos dashboard stale skip",
+      );
       return json({
         ok: true,
         ignored: "stale",
@@ -3211,6 +3221,20 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     }
     const dashboardBeforeUpdate = liveDashboardData;
     liveDashboardData = updateDashboardData(liveDashboardData, body);
+    const monitorOptions = {
+      allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
+      fast: true,
+      roundReceivedAtMs: Date.now(),
+      trigger: url.pathname,
+    };
+    logTelegramAutoV2Event("dashboard atualizado", {
+      trigger: url.pathname,
+      updatedAt: liveDashboardData.updatedAt || "",
+      neuralMode: liveDashboardData.neuralReading?.mode || "",
+      signalStatus: liveDashboardData.currentSignal?.status || "",
+      signalSide: liveDashboardData.currentSignal?.side || "",
+      roundCount: Array.isArray(liveDashboardData.rounds) ? liveDashboardData.rounds.length : 0,
+    });
     const engineCalendarChange = trackEngineCalendarAggregates(dashboardBeforeUpdate, liveDashboardData);
     const calendarChange = incomingRounds.length
       ? trackNeuralCalendarRounds(incomingRounds)
@@ -3231,17 +3255,18 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     if (url.pathname === "/dashboard/publish" || url.pathname === "/dashboard/signal") {
       const saveStatus = await saveStateTask;
       const monitorStatus = await withTimeout(
-        processValidatorLiveMonitoring(env, {
-          allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-          fast: true,
-          roundReceivedAtMs: Date.now(),
-        }),
+        processValidatorLiveMonitoring(env, monitorOptions),
         LIVE_STATE_IO_TIMEOUT_MS,
         "monitorar sinais imediatamente",
         false,
       );
       return json({ ok: true, saved: saveStatus, monitor: monitorStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
     }
+    runBackgroundTask(
+      ctx,
+      processValidatorLiveMonitoring(env, monitorOptions),
+      "telegram v2 pos POST dashboard",
+    );
     return json({ ok: true, saved: "queued", dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
 
@@ -9604,7 +9629,55 @@ type ValidatorMonitorOptions = {
   allowInsecureTelegramFallback?: boolean;
   fast?: boolean;
   roundReceivedAtMs?: number;
+  trigger?: string;
 };
+
+function logTelegramAutoV2Event(event: string, payload: Record<string, unknown>) {
+  console.info(JSON.stringify({ event: `[TELEGRAM_V2] ${event}`, ...payload }));
+}
+
+function resolveTelegramAutoV2LatestRound(dashboard: LiveDashboardData = liveDashboardData): Round | null {
+  if (Array.isArray(liveValidatorRoundHistory) && liveValidatorRoundHistory.length) {
+    const fromHistory = liveValidatorRoundHistory.at(-1);
+    if (fromHistory && Number(fromHistory.id) > 0) return fromHistory;
+  }
+
+  const dashboardRounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
+  const fromDashboard = dashboardRounds.at(-1);
+  if (fromDashboard && Number(fromDashboard.id) > 0) return fromDashboard;
+
+  const entryState = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
+  const triggerRoundId = parseMonitorRoundId(entryState?.triggerRoundKey || "");
+  if (triggerRoundId > 0) {
+    return buildSyntheticMonitorRound(triggerRoundId, fromDashboard || null);
+  }
+
+  const signalId = String(dashboard.currentSignal?.id || "");
+  const signalRoundId = parseMonitorRoundId(signalId);
+  if (signalRoundId > 0) {
+    return buildSyntheticMonitorRound(signalRoundId, fromDashboard || null);
+  }
+
+  return null;
+}
+
+function parseMonitorRoundId(value: string) {
+  const matches = String(value || "").match(/\d{3,}/g);
+  if (!matches?.length) return 0;
+  const parsed = Number(matches.at(-1));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function buildSyntheticMonitorRound(id: number, template: Round | null): Round {
+  return {
+    id,
+    result: template?.result || "B",
+    bankerScore: template?.bankerScore ?? 0,
+    playerScore: template?.playerScore ?? 0,
+    tieMultiplier: template?.tieMultiplier ?? null,
+    time: template?.time || new Date().toISOString(),
+  };
+}
 
 async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMonitorOptions = {}) {
   await withTimeout(
@@ -9616,29 +9689,62 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
   if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
     liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
   }
-  const latestRound = liveValidatorRoundHistory.at(-1);
-  if (!latestRound) return false;
-  validatorOfficialDispatchersBootstrapped = true;
-  const confirmedCards = detectGlobalConfirmedCards(liveDashboardData, latestRound);
-  console.info(
-    JSON.stringify({
-      event: "[TELEGRAM_V2] monitor iniciado",
-      monitor_called: true,
-      fast: Boolean(options.fast),
-      cachedChannels: liveValidatorChannels.length,
-      usableCachedChannels: liveValidatorChannels.filter(isUsableValidatorTelegramChannel).length,
-      eligiblePremiumChannels: liveValidatorChannels.filter((channel) =>
-        TELEGRAM_AUTO_V2_GLOBAL_MODULES.some((moduleKey) => channelEligibleForTelegramAutoV2(channel, moduleKey)),
-      ).length,
-      cachedPatterns: liveValidatorPatterns.length,
-      confirmedModules: confirmedCards.map((card) => card.moduleKey),
-      roundId: latestRound.id,
-      neuralMode: liveDashboardData.neuralReading?.mode || "",
-      neuralStatus: liveDashboardData.neuralReading?.paganteStatus || "",
-      tieStatus: readString(readRecord(liveDashboardData.currentTieAlert), "status"),
-      surfAlert: Boolean(readRecord(liveDashboardData.currentSurfAlert).surf_alert),
-    }),
+  const latestRound = resolveTelegramAutoV2LatestRound(liveDashboardData);
+  const cardProbes = TELEGRAM_AUTO_V2_GLOBAL_MODULES.map((moduleKey) =>
+    probeTelegramAutoV2ModuleCard(liveDashboardData, latestRound, moduleKey),
   );
+  const confirmedCards = cardProbes
+    .filter((probe) => probe.confirmed && probe.signalKey)
+    .map((probe) => ({
+      moduleKey: probe.moduleKey as Exclude<TelegramAutoV2ModuleKey, "validator">,
+      confirmed: true as const,
+      signalKey: probe.signalKey,
+      roundId: probe.roundId,
+      reason: probe.reason,
+      meta: { reason: probe.reason },
+    }));
+
+  logTelegramAutoV2Event("monitor iniciado", {
+    monitor_called: true,
+    trigger: options.trigger || "unknown",
+    fast: Boolean(options.fast),
+    hasLatestRound: Boolean(latestRound),
+    cachedChannels: liveValidatorChannels.length,
+    usableCachedChannels: liveValidatorChannels.filter(isUsableValidatorTelegramChannel).length,
+    eligiblePremiumChannels: liveValidatorChannels.filter((channel) =>
+      TELEGRAM_AUTO_V2_GLOBAL_MODULES.some((moduleKey) => channelEligibleForTelegramAutoV2(channel, moduleKey)),
+    ).length,
+    cachedPatterns: liveValidatorPatterns.length,
+    confirmedModules: confirmedCards.map((card) => card.moduleKey),
+    roundId: latestRound?.id ?? null,
+    neuralMode: liveDashboardData.neuralReading?.mode || "",
+    neuralStatus: liveDashboardData.neuralReading?.paganteStatus || "",
+    signalStatus: liveDashboardData.currentSignal?.status || "",
+    signalSide: liveDashboardData.currentSignal?.side || "",
+    tieStatus: readString(readRecord(liveDashboardData.currentTieAlert), "status"),
+    surfAlert: Boolean(readRecord(liveDashboardData.currentSurfAlert).surf_alert),
+    dashboardUpdatedAt: liveDashboardData.updatedAt || "",
+  });
+
+  for (const probe of cardProbes) {
+    logTelegramAutoV2Event(probe.confirmed ? "card detectado" : "card nao confirmado", {
+      card_detected: probe.confirmed,
+      module_key: probe.moduleKey,
+      reason: probe.reason,
+      signalKey: probe.signalKey,
+      roundId: probe.roundId,
+    });
+  }
+
+  if (!latestRound) {
+    logTelegramAutoV2Event("monitor encerrado", {
+      reason: "missing_latest_round",
+      tasks_built: 0,
+    });
+    return false;
+  }
+
+  validatorOfficialDispatchersBootstrapped = true;
 
   let changed = false;
   const entryChannelKeys = new Set<string>();
@@ -9798,6 +9904,13 @@ function buildValidatorModuleTelegramSendTasks(
       const signal = buildValidatorChannelModuleSignal(channel, moduleKey, latestRound);
       if (!signal) continue;
       if (telegramAutoV2DedupeBlocksSend(signal.notificationKey)) {
+        logTelegramAutoV2Event("dedupe bloqueou envio", {
+          module_key: moduleKey,
+          dedupe_result: "blocked_sent",
+          dedupeKey: signal.notificationKey,
+          roundId: latestRound.id,
+          signalKey: signal.signalKey,
+        });
         continue;
       }
       if (validatorChannelModuleCoolingDown(channel, moduleKey, signal.matchedAtMs)) {
@@ -9810,6 +9923,7 @@ function buildValidatorModuleTelegramSendTasks(
   console.info(
     JSON.stringify({
       event: "[TELEGRAM_V2] tasks criadas",
+      tasks_built: tasks.length,
       roundId: latestRound.id,
       confirmedModules: [...confirmedCards.keys()],
       taskCount: tasks.length,
@@ -9932,25 +10046,22 @@ function buildPayingNumbersTelegramSendTasks(
     ? readServerPayingNumbersConfirmedCard(liveDashboardData.neuralReading ?? null, latestRound)
     : readServerPayingNumbersConfirmedCard(liveDashboardData.neuralReading ?? null, latestRound);
 
-  console.info(
-    JSON.stringify({
-      event: "[TELEGRAM_V2] card detectado",
-      moduleKey: "paying_numbers",
-      handler_called: true,
-      roundId: latestRound.id,
-      eligibleChannels: channels.length,
-      confirmed: v2Probe.confirmed,
-      reason: v2Probe.confirmed ? v2Probe.reason : v2Probe.reason,
-      readingMode: card.mode,
-      cardStatus: card.status,
-      numero: card.numero,
-      expectedSide: card.side || "",
-      signalId: v2Probe.signalKey || card.signalKey || "",
-      telegram_send_called: false,
-    }),
-  );
+  logTelegramAutoV2Event(v2Probe.confirmed ? "card detectado" : "card nao confirmado", {
+    card_detected: v2Probe.confirmed,
+    module_key: "paying_numbers",
+    handler_called: true,
+    roundId: latestRound.id,
+    eligibleChannels: channels.length,
+    reason: v2Probe.reason,
+    readingMode: card.mode,
+    cardStatus: card.status,
+    numero: card.numero,
+    expectedSide: card.side || "",
+    signalId: v2Probe.signalKey || card.signalKey || "",
+    telegram_send_called: false,
+  });
 
-  if (!v2Probe.confirmed || !card.confirmed) {
+  if (!v2Probe.confirmed) {
     for (const channel of channels) {
       logPayingNumbersTelegramDecision(channel, "blocked", card.reason, {
         moduleKey: "paying_numbers",
@@ -9961,6 +10072,7 @@ function buildPayingNumbersTelegramSendTasks(
         expectedSide: card.side || "",
         signalId: card.signalKey || "",
         dedupe_action: "not_checked",
+        dedupe_result: "not_checked",
         telegram_send_called: false,
         telegram_result: "not_called",
       });
@@ -9968,23 +10080,36 @@ function buildPayingNumbersTelegramSendTasks(
     return tasks;
   }
 
+  const confirmedCard = resolvePayingNumbersTelegramCard(liveDashboardData, latestRound, v2Probe);
+  if (!confirmedCard) {
+    logTelegramAutoV2Event("card nao confirmado", {
+      card_detected: false,
+      module_key: "paying_numbers",
+      reason: "unable_to_build_confirmed_card",
+      roundId: latestRound.id,
+      signalKey: v2Probe.signalKey,
+    });
+    return tasks;
+  }
+
   for (const channel of channels) {
     const moduleConfig = validatorChannelModuleConfig(channel, "paying_numbers");
-    if (!validatorModuleAllowsSignalEntry(moduleConfig, card.side)) {
+    if (!validatorModuleAllowsSignalEntry(moduleConfig, confirmedCard.side)) {
       logPayingNumbersTelegramDecision(channel, "blocked", "entry_not_allowed", {
         moduleKey: "paying_numbers",
         roundId: latestRound.id,
-        signalId: card.signalKey,
-        expectedSide: card.side,
+        signalId: confirmedCard.signalKey,
+        expectedSide: confirmedCard.side,
         allowedEntry: moduleConfig.entryType,
         dedupe_action: "not_checked",
+        dedupe_result: "not_checked",
         telegram_send_called: false,
         telegram_result: "not_called",
       });
       continue;
     }
 
-    const signal = createPayingNumbersModuleSignal(channel, moduleConfig, latestRound, card);
+    const signal = createPayingNumbersModuleSignal(channel, moduleConfig, latestRound, confirmedCard);
     if (telegramAutoV2DedupeBlocksSend(signal.notificationKey)) {
       logPayingNumbersTelegramDecision(channel, "blocked", "duplicate_signal", {
         moduleKey: signal.moduleKey,
@@ -9992,8 +10117,16 @@ function buildPayingNumbersTelegramSendTasks(
         signalId: signal.signalKey,
         dedupeKey: signal.notificationKey,
         dedupe_action: "memory_sent_duplicate",
+        dedupe_result: "blocked_sent",
         telegram_send_called: false,
         telegram_result: "not_called",
+      });
+      logTelegramAutoV2Event("dedupe bloqueou envio", {
+        module_key: signal.moduleKey,
+        dedupe_result: "blocked_sent",
+        dedupeKey: signal.notificationKey,
+        roundId: latestRound.id,
+        signalKey: signal.signalKey,
       });
       continue;
     }
@@ -10054,6 +10187,46 @@ type ServerPayingNumbersConfirmedCard =
       numero: number | null;
       status: string;
     };
+
+function resolvePayingNumbersTelegramCard(
+  dashboard: LiveDashboardData,
+  latestRound: Round,
+  probe: ReturnType<typeof detectPayingNumbersConfirmedCard>,
+): Extract<ServerPayingNumbersConfirmedCard, { confirmed: true }> | null {
+  const direct = readServerPayingNumbersConfirmedCard(dashboard.neuralReading ?? null, latestRound);
+  if (direct.confirmed) return direct;
+
+  const side = readServerNeuralSide(
+    dashboard.neuralReading?.direcao ??
+      dashboard.neuralReading?.origem ??
+      dashboard.currentSignal?.side ??
+      dashboard.neuralEntryState?.expectedSide,
+  );
+  if (!probe.confirmed || !side) return null;
+
+  const reading =
+    dashboard.neuralReading ??
+    ({
+      mode: "ACTIVE",
+      direcao: side,
+      origem: side,
+      numero: null,
+      validade: "G1",
+      paganteStatus: "ENTRADA CONFIRMADA",
+    } as NeuralReading);
+
+  return {
+    confirmed: true,
+    reason: probe.reason,
+    reading,
+    key: serverPayingNumbersReadingKey(reading, side) || probe.signalKey,
+    signalKey: probe.signalKey,
+    side,
+    mode: "ACTIVE",
+    numero: typeof reading.numero === "number" ? reading.numero : null,
+    status: String(reading.paganteStatus || "ENTRADA CONFIRMADA"),
+  };
+}
 
 function readServerPayingNumbersConfirmedCard(
   reading: NeuralReading | null,
@@ -10326,6 +10499,14 @@ async function sendValidatorModuleTelegramNotification(
       : await reserveValidatorNotificationDedupe(env, reservation);
   if (!reservationResult.ok || !reservationResult.reserved) {
     const reason = reservationResult.duplicate ? "persistent_duplicate" : "dedupe_persistence_unavailable";
+    logTelegramAutoV2Event("dedupe bloqueou envio", {
+      module_key: signal.moduleKey,
+      dedupe_result: reservationResult.duplicate ? "blocked_sent" : reason,
+      dedupeKey: signal.notificationKey,
+      roundId: signal.roundId,
+      signalKey: signal.signalKey,
+      telegram_response: "not_called",
+    });
     console.warn(
       JSON.stringify({
         event: "[TELEGRAM_AUTO] envio bloqueado por dedupe persistente",
@@ -10387,6 +10568,17 @@ async function sendValidatorModuleTelegramNotification(
         allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
       });
   const telegramRespondedAtMs = Date.now();
+  logTelegramAutoV2Event(result.ok ? "telegram enviado" : "telegram erro", {
+    module_key: signal.moduleKey,
+    dedupe_result: reservationResult.action || "reserved",
+    telegram_response: result.ok ? "success" : "error",
+    roundId: signal.roundId,
+    signalKey: signal.signalKey,
+    dedupeKey: signal.notificationKey,
+    status: result.status,
+    telegramMessageId: result.ok ? result.messageId : null,
+    error: result.ok ? "" : result.error,
+  });
   console[result.ok ? "info" : "warn"](
     JSON.stringify({
       event: result.ok ? "[TELEGRAM_AUTO] enviado com sucesso" : "[TELEGRAM_AUTO] erro: motivo completo",

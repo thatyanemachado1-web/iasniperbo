@@ -78,6 +78,33 @@ function roundKey(round: Round | null | undefined, fallbackId = 0) {
   return Number.isFinite(id) && id > 0 ? String(id) : String(fallbackId || "");
 }
 
+function readPayingNumbersSideFromDashboard(dashboard: DashboardData) {
+  const reading = (dashboard.neuralReading || null) as NeuralReading | null;
+  const entryState = readRecord((dashboard as DashboardData & { neuralEntryState?: unknown }).neuralEntryState);
+  const currentSignal = readRecord(dashboard.currentSignal as unknown);
+  const fromReading = normalizeSide(reading?.direcao ?? reading?.origem ?? reading?.expectedSide);
+  if (fromReading) return fromReading;
+  const fromEntryState = normalizeSide(entryState.expectedSide ?? entryState.expected_side);
+  if (fromEntryState) return fromEntryState;
+  const signalStatus = readString(currentSignal, "status").toLowerCase();
+  if (signalStatus === "pending" || signalStatus === "g1") {
+    return normalizeSide(currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao);
+  }
+  return "";
+}
+
+function readPayingNumbersActiveMode(dashboard: DashboardData) {
+  const reading = (dashboard.neuralReading || null) as NeuralReading | null;
+  const entryState = readRecord((dashboard as DashboardData & { neuralEntryState?: unknown }).neuralEntryState);
+  const currentSignal = readRecord(dashboard.currentSignal as unknown);
+  const readingMode = normalizeText(reading?.mode);
+  if (readingMode === "ACTIVE") return "ACTIVE";
+  if (Object.keys(entryState).length && readString(entryState, "status")) return "ACTIVE";
+  const signalStatus = readString(currentSignal, "status").toLowerCase();
+  if ((signalStatus === "pending" || signalStatus === "g1") && normalizeSide(currentSignal.side)) return "ACTIVE";
+  return readingMode;
+}
+
 export function detectPayingNumbersConfirmedCard(
   dashboard: DashboardData,
   latestRound: Round | null,
@@ -85,13 +112,12 @@ export function detectPayingNumbersConfirmedCard(
   const reading = (dashboard.neuralReading || null) as NeuralReading | null;
   const round = latestRoundFromDashboard(dashboard, latestRound);
   const roundId = Number(round?.id) || 0;
-  const mode = normalizeText(reading?.mode);
-  const status = readString(readRecord(reading as unknown as Record<string, unknown>), "paganteStatus") || normalizeText(reading?.paganteStatus);
-  const side = normalizeSide(reading?.direcao ?? reading?.origem ?? reading?.expectedSide);
+  const mode = readPayingNumbersActiveMode(dashboard);
+  const side = readPayingNumbersSideFromDashboard(dashboard);
   const numero = typeof reading?.numero === "number" ? reading.numero : null;
   const signalKey = side && roundId ? `paying:Bac Bo:${numero ?? "na"}:${side}:round:${roundId}` : "";
 
-  if (!reading) {
+  if (!reading && !side) {
     return { moduleKey: "paying_numbers", confirmed: false, reason: "site_reading_missing", signalKey, roundId };
   }
   if (mode !== "ACTIVE") {
@@ -102,9 +128,6 @@ export function detectPayingNumbersConfirmedCard(
   }
   if (!roundId) {
     return { moduleKey: "paying_numbers", confirmed: false, reason: "missing_round_id", signalKey, roundId };
-  }
-  if (!isConfirmedStatusText(status) && !isConfirmedStatusText(reading.paganteStatus)) {
-    return { moduleKey: "paying_numbers", confirmed: false, reason: "entry_not_confirmed", signalKey, roundId };
   }
   return {
     moduleKey: "paying_numbers",
@@ -221,16 +244,25 @@ export function detectTiesConfirmedCard(
   return { moduleKey: "ties_only", confirmed: true, reason: "confirmed_tie_card", signalKey, roundId };
 }
 
+export function probeTelegramAutoV2ModuleCard(
+  dashboard: DashboardData,
+  latestRound: Round | null,
+  moduleKey: TelegramAutoV2ModuleKey,
+): TelegramAutoV2CardProbe {
+  if (moduleKey === "ai_patterns") return detectAiPatternsConfirmedCard(dashboard, latestRound);
+  if (moduleKey === "paying_numbers") return detectPayingNumbersConfirmedCard(dashboard, latestRound);
+  if (moduleKey === "surf_alert") return detectSurfConfirmedCard(dashboard, latestRound);
+  if (moduleKey === "ties_only") return detectTiesConfirmedCard(dashboard, latestRound);
+  return { moduleKey: "validator", confirmed: false, reason: "unsupported_module", signalKey: "", roundId: 0 };
+}
+
 export function detectGlobalConfirmedCards(
   dashboard: DashboardData,
   latestRound: Round | null,
 ): TelegramAutoV2ConfirmedCard[] {
-  const probes = [
-    detectAiPatternsConfirmedCard(dashboard, latestRound),
-    detectPayingNumbersConfirmedCard(dashboard, latestRound),
-    detectSurfConfirmedCard(dashboard, latestRound),
-    detectTiesConfirmedCard(dashboard, latestRound),
-  ];
+  const probes = TELEGRAM_AUTO_V2_GLOBAL_MODULES.map((moduleKey) =>
+    probeTelegramAutoV2ModuleCard(dashboard, latestRound, moduleKey),
+  );
   return probes
     .filter((probe): probe is TelegramAutoV2ConfirmedCard => probe.confirmed && Boolean(probe.signalKey))
     .map((probe) => ({

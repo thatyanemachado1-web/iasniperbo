@@ -86,6 +86,29 @@ assert.equal(
   false,
 );
 
+assert.equal(
+  detectPayingNumbersConfirmedCard(
+    {
+      rounds: [latestRound],
+      neuralReading: { mode: "ACTIVE", direcao: "B", origem: "B", numero: 7, validade: "G1" },
+      currentSignal: { id: "signal-1", side: "BANKER", status: "pending", protection: "G1", strength: 80 },
+    },
+    latestRound,
+  ).confirmed,
+  true,
+);
+
+assert.equal(
+  detectPayingNumbersConfirmedCard(
+    {
+      rounds: [latestRound],
+      currentSignal: { id: "neural-entry:7:B:round:991", side: "BANKER", status: "pending", protection: "G1", strength: 80 },
+    },
+    latestRound,
+  ).confirmed,
+  true,
+);
+
 const dedupeKey = buildTelegramAutoV2NotificationKey("channel-1", "paying_numbers", "paying:991");
 assert.match(dedupeKey, /^v2:channel-1:paying_numbers:/);
 assert.equal(telegramAutoV2SentBlocksRetry("sent"), true);
