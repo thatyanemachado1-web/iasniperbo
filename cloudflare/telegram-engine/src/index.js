@@ -207,6 +207,23 @@ export class TelegramEngine {
         return this.runDashboardMonitor({ source: "manual" });
       }
 
+      if (request.method === "GET" && url.pathname === "/engine/monitor/status") {
+        return json(
+          {
+            ok: true,
+            alarmAt: await this.state.storage.getAlarm?.(),
+            last: (await this.state.storage.get("dashboard-monitor:last")) || null,
+            lastAiPatterns: (await this.state.storage.get("dashboard-monitor:last:ai_patterns")) || null,
+            lastSurf: (await this.state.storage.get("dashboard-monitor:last:surf_alert")) || null,
+            lastOfficialResults: (await this.state.storage.get("dashboard-monitor:last-official-results")) || null,
+            lastResult: (await this.state.storage.get("dashboard-monitor:last-result")) || null,
+            lastError: (await this.state.storage.get("dashboard-monitor:last-error")) || null,
+          },
+          200,
+          this.env,
+        );
+      }
+
       if (request.method === "POST" && url.pathname === "/engine/users/provision") {
         return this.provisionUserWorkspace(await readJson(request));
       }
@@ -706,6 +723,7 @@ export class TelegramEngine {
       return json({ ok: true, ...log }, 200, this.env);
     } finally {
       await this.state.storage.delete("dashboard-monitor:lock");
+      await this.ensureDashboardMonitorAlarm(DASHBOARD_MONITOR_INTERVAL_MS, true);
     }
   }
 

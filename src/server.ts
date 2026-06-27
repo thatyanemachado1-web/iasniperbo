@@ -6891,7 +6891,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   const userId = await validatorRequestUserId(request, url, env);
   if (!userId) return json({ error: "Nao autorizado." }, 401);
-  const shouldForwardToTelegramEngine = isChannelsRoute || isNotificationsRoute;
+  const shouldForwardToTelegramEngine = isChannelsRoute;
   if (shouldForwardToTelegramEngine) {
     if (!getTelegramEngineConfig(env)) {
       return json({ error: "Telegram Engine secrets missing" }, 500);
@@ -6924,6 +6924,19 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
   );
 
   if (request.method === "GET" && isNotificationsRoute) {
+    let cloudNotifications: Array<Record<string, unknown>> = [];
+    if (getTelegramEngineConfig(env)) {
+      const cloudResponse = await forwardTelegramEngineRequest(request, url, env, userId).catch((error) => {
+        console.warn("Cloudflare Telegram Engine notifications unavailable.", error);
+        return null;
+      });
+      if (cloudResponse?.ok) {
+        const cloudData = readRecord(await cloudResponse.json().catch(() => ({})));
+        cloudNotifications = Array.isArray(cloudData.notifications)
+          ? cloudData.notifications.map(readRecord).filter(hasRecordFields)
+          : [];
+      }
+    }
     const storedNotifications = getSupabasePersistenceConfig(env)
       ? await withTimeout(
           fetchStoredRecentValidatorNotifications(env),
@@ -6932,7 +6945,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
           [] as Array<Record<string, unknown>>,
         )
       : [];
-    const notifications = mergeValidatorNotifications(storedNotifications, liveValidatorNotifications)
+    const notifications = mergeValidatorNotifications(cloudNotifications, storedNotifications, liveValidatorNotifications)
       .filter(
         (notification) =>
           normalizeValidatorUserId(readString(notification, "userId") || readString(notification, "user_id")) ===
