@@ -12,6 +12,7 @@ import bcrypt from "bcryptjs";
 import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { DEFAULT_PATTERN_MINER_CONFIG, PatternMinerEngine } from "./patternMiner/PatternMinerEngine";
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
@@ -61,6 +62,7 @@ import type {
   CrmResponse,
   CrmSummary,
 } from "./types/crm";
+import type { PatternMinerSnapshot } from "./types/patternMiner";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -571,6 +573,12 @@ let clientRegistrySnapshotSavedAt = 0;
 let clientRegistrySnapshotFingerprint = "";
 const validatorRoundPrunedAt = new Map<string, number>();
 const serverValidatorEngine = new NeuralValidatorEngine();
+const TELEGRAM_V2_PATTERN_MINER_HISTORY_LIMIT = 5000;
+const telegramAutoV2PatternMinerEngine = new PatternMinerEngine({
+  ...DEFAULT_PATTERN_MINER_CONFIG,
+  historyLimit: TELEGRAM_V2_PATTERN_MINER_HISTORY_LIMIT,
+});
+let telegramAutoV2PatternMinerSnapshotCache: { key: string; snapshot: PatternMinerSnapshot } | null = null;
 let validatorMonitorCacheLoadedAt = 0;
 let validatorMonitorCachePromise: Promise<void> | null = null;
 let validatorOfficialDispatchersBootstrapped = false;
@@ -9774,6 +9782,52 @@ function buildSyntheticMonitorRound(id: number, template: Round | null): Round {
   };
 }
 
+function ensureTelegramAutoV2PatternMinerSnapshot(latestRound: Round | null) {
+  const snapshotRecord = readRecord(liveDashboardData.patternMinerSnapshot || liveDashboardData.patternMiner);
+  const hasIncomingEntryAlerts =
+    Array.isArray(snapshotRecord.entryAlerts) && snapshotRecord.entryAlerts.length > 0;
+  if (hasIncomingEntryAlerts) return;
+
+  const roundsSource =
+    Array.isArray(liveValidatorRoundHistory) && liveValidatorRoundHistory.length
+      ? liveValidatorRoundHistory
+      : Array.isArray(liveDashboardData.rounds)
+        ? liveDashboardData.rounds
+        : [];
+  if (roundsSource.length < 6) return;
+
+  const markerRound = latestRound || roundsSource.at(-1) || null;
+  const cacheKey = `${roundsSource.length}:${markerRound ? roundHistoryKey(markerRound) : ""}`;
+  if (telegramAutoV2PatternMinerSnapshotCache?.key === cacheKey) {
+    liveDashboardData.patternMinerSnapshot =
+      telegramAutoV2PatternMinerSnapshotCache.snapshot as unknown as LiveDashboardData["patternMinerSnapshot"];
+    return;
+  }
+
+  try {
+    const snapshot = telegramAutoV2PatternMinerEngine.analyze(
+      roundsSource.slice(-TELEGRAM_V2_PATTERN_MINER_HISTORY_LIMIT),
+    );
+    telegramAutoV2PatternMinerSnapshotCache = { key: cacheKey, snapshot };
+    liveDashboardData.patternMinerSnapshot =
+      snapshot as unknown as LiveDashboardData["patternMinerSnapshot"];
+    if (Array.isArray(snapshot.entryAlerts) && snapshot.entryAlerts.length) {
+      logTelegramAutoV2Event("pattern_snapshot_fallback", {
+        source: "server_rounds_fallback",
+        entryAlerts: snapshot.entryAlerts.length,
+        analyzedRounds: snapshot.analyzedRounds,
+      });
+    }
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_V2] pattern snapshot fallback failed",
+        error: errorMessage(error),
+      }),
+    );
+  }
+}
+
 async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMonitorOptions = {}) {
   if (telegramV2OnlyEnabled(env)) {
     logTelegramAutoV2Event("legacy_disabled", {
@@ -9793,6 +9847,7 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
   }
   const latestRound = resolveTelegramAutoV2LatestRound(liveDashboardData);
+  ensureTelegramAutoV2PatternMinerSnapshot(latestRound);
   const cardProbes = TELEGRAM_AUTO_V2_GLOBAL_MODULES.map((moduleKey) =>
     probeTelegramAutoV2ModuleCard(liveDashboardData, latestRound, moduleKey),
   );
@@ -9949,6 +10004,7 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
   }
 
   const latestRound = resolveTelegramAutoV2LatestRound(liveDashboardData);
+  ensureTelegramAutoV2PatternMinerSnapshot(latestRound);
   const confirmedCards = latestRound ? resolveConfirmedTelegramAutoV2Cards(latestRound) : [];
   if (!latestRound || !confirmedCards.length) {
     logTelegramAutoV2Event("no_confirmed_card_skip", {
