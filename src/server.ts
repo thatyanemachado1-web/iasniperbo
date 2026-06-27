@@ -6445,10 +6445,14 @@ async function telegramServiceCreateChannel(env: unknown, request: Request, clie
 
 async function telegramServiceTestChannel(env: unknown, request: Request, clientId: string, channelId: string) {
   const channel = await findValidatorChannelForUser(env, clientId, channelId);
-  if (!channel) return json({ error: "Canal nao encontrado." }, 404);
+  if (!channel) {
+    const cloudResult = await testSavedCloudValidatorChannel(env, clientId, channelId);
+    if (!cloudResult.ok) return json({ error: cloudResult.error }, cloudResult.status || 404);
+    return json({ ok: true, messageId: cloudResult.messageId, channelId });
+  }
 
   const result = isCloudValidatorTelegramChannel(channel)
-    ? await testCloudValidatorChannel(env, clientId, channel.id)
+    ? await testSavedCloudValidatorChannel(env, clientId, channel.id)
     : await testDirectValidatorChannel(request, channel);
 
   if (!result.ok) {
@@ -6690,6 +6694,19 @@ async function testCloudValidatorChannel(env: unknown, clientId: string, channel
     entry: "",
     message: TELEGRAM_CONNECTION_TEST_MESSAGE,
     forceMessage: true,
+  });
+  if (!response.ok) return response;
+  const messageId = response.messageId;
+  return messageId
+    ? { ok: true as const, status: 200, messageId }
+    : { ok: false as const, status: 502, error: "Cloudflare Telegram nao retornou message_id." };
+}
+
+async function testSavedCloudValidatorChannel(env: unknown, clientId: string, channelId: string) {
+  const normalizedChannelId = readString(channelId);
+  if (!normalizedChannelId) return { ok: false as const, status: 400, error: "Canal Telegram obrigatorio." };
+  const response = await callCloudValidatorChannelEndpoint(env, clientId, "/validator/channels/test", {
+    channelId: normalizedChannelId,
   });
   if (!response.ok) return response;
   const messageId = response.messageId;
@@ -7220,18 +7237,13 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     const body = readRecord(await request.json().catch(() => ({})));
     const channelId = readString(body, "channelId");
     const channel = await findValidatorChannelForUser(env, userId, channelId);
-    if (!channel) return json({ error: "Canal nao encontrado." }, 404);
+    if (!channel) {
+      const cloudResult = await testSavedCloudValidatorChannel(env, userId, channelId);
+      if (!cloudResult.ok) return json({ error: cloudResult.error }, cloudResult.status || 404);
+      return json({ ok: true, messageId: cloudResult.messageId, channelId });
+    }
     if (isCloudValidatorTelegramChannel(channel)) {
-      const result = await sendTelegramEngineSignal(env, {
-        userId,
-        channelId: channel.id,
-        moduleKey: "validator",
-        signalKey: `connection-test:${channel.id}:${Date.now()}`,
-        roundId: Date.now(),
-        entry: "",
-        message: "[TESTE CONEXAO TELEGRAM]\nCentral Telegram conectada com sucesso.",
-        forceMessage: true,
-      });
+      const result = await testSavedCloudValidatorChannel(env, userId, channel.id);
       if (!result.ok) return json({ error: result.error }, result.status || 502);
       return json({ ok: true, messageId: result.messageId, channelId: channel.id });
     }
