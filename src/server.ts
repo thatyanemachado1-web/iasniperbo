@@ -3168,11 +3168,10 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       liveDashboardData = cycle.dashboard;
       runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
-    await withTimeout(
+    runBackgroundTask(
+      ctx,
       processValidatorLiveMonitoring(env, { fast: true, roundReceivedAtMs: Date.now() }),
-      LIVE_STATE_IO_TIMEOUT_MS,
       "monitorar sinais no read do dashboard",
-      false,
     );
     return json(publicDashboardSnapshot(liveDashboardData));
   }
@@ -3210,17 +3209,6 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       : emptyNeuralCalendarChangeSet();
     const saveStateTask = saveLiveState(env);
     runBackgroundTask(ctx, saveStateTask, "salvar estado vivo do dashboard");
-    const roundReceivedAtMs = Date.now();
-    const monitorStatus = await withTimeout(
-      processValidatorLiveMonitoring(env, {
-        allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
-        fast: true,
-        roundReceivedAtMs,
-      }),
-      LIVE_STATE_IO_TIMEOUT_MS,
-      "monitorar sinais imediatamente",
-      false,
-    );
     runBackgroundTask(
       ctx,
       persistDashboardRoundIngestion(
@@ -3229,15 +3217,14 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
         calendarChange,
         engineCalendarChange,
         isLocalDevelopmentRequest(request),
-        { skipMonitor: true },
       ),
-      "persistir rodada",
+      "persistir rodada e monitorar sinais",
     );
     if (url.pathname === "/dashboard/publish" || url.pathname === "/dashboard/signal") {
       const saveStatus = await saveStateTask;
-      return json({ ok: true, saved: saveStatus, monitor: monitorStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
+      return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
     }
-    return json({ ok: true, saved: "queued", monitor: monitorStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
+    return json({ ok: true, saved: "queued", dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
 
   return null;
@@ -3261,7 +3248,6 @@ async function persistDashboardRoundIngestion(
   calendarChange: NeuralCalendarChangeSet,
   engineCalendarChange: EngineCalendarAggregateChangeSet,
   allowInsecureTelegramFallback: boolean,
-  options: { skipMonitor?: boolean } = {},
 ) {
   const roundReceivedAtMs = Date.now();
   const writes = [
@@ -3292,9 +3278,7 @@ async function persistDashboardRoundIngestion(
       ),
     );
   }
-  const monitorTask = options.skipMonitor
-    ? Promise.resolve(false)
-    : processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback, fast: true, roundReceivedAtMs });
+  const monitorTask = processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback, fast: true, roundReceivedAtMs });
   await Promise.all([...writes, monitorTask]);
   await saveLiveState(env);
 }
