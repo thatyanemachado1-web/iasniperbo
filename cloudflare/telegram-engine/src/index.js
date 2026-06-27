@@ -6,6 +6,7 @@ const ENGINE_SECRET_NAMES = [
   "TELEGRAM_ENGINE_SECRET",
   "CLOUDFLARE_TELEGRAM_ENGINE_SECRET",
   "LEGACY_ENGINE_API_SECRET",
+  "SNIPER_ENGINE_BRIDGE",
   "SNIPER_PUBLISHER_TOKEN",
   "SNIPER_DASHBOARD_TOKEN",
   "SNIPER_ADMIN_TOKEN",
@@ -102,8 +103,8 @@ const DEFAULT_MODULE_TIE_TEMPLATES = {
 const MAX_CHANNELS_PER_USER = 20;
 const MAX_NOTIFICATIONS = 1000;
 const DEFAULT_ACCESS_GRACE_DAYS = 5;
-const DASHBOARD_MONITOR_INTERVAL_MS = 2500;
-const DASHBOARD_MONITOR_ERROR_INTERVAL_MS = 7500;
+const DASHBOARD_MONITOR_INTERVAL_MS = 30000;
+const DASHBOARD_MONITOR_ERROR_INTERVAL_MS = 120000;
 
 export default {
   async fetch(request, env) {
@@ -118,9 +119,48 @@ export default {
     if (!token || !secrets.includes(token)) {
       return json({ error: "Unauthorized" }, 401, env);
     }
+
+    const fallback = await handleTelegramEngineDoFallback(request, env, url);
+    if (fallback) return fallback;
+
+    if (request.method === "GET" && url.pathname === "/engine/debug/telegram-probe") {
+      const probes = [];
+      for (const name of [
+        ...ENGINE_SECRET_NAMES,
+        "TELEGRAM_EMERGENCY_BOT_TOKEN",
+        "TELEGRAM_SMOKE_BOT_TOKEN",
+      ]) {
+        const value = normalizeSecret(env[name]);
+        if (!looksLikeTelegramBotToken(value)) continue;
+        const me = await fetch(`https://api.telegram.org/bot${value}/getMe`)
+          .then((response) => response.json())
+          .catch(() => ({ ok: false }));
+        let sampleChatId = "";
+        if (me?.ok) {
+          const updates = await fetch(`https://api.telegram.org/bot${value}/getUpdates`)
+            .then((response) => response.json())
+            .catch(() => ({ ok: false, result: [] }));
+          sampleChatId = String(updates?.result?.at(-1)?.message?.chat?.id || "");
+        }
+        probes.push({
+          name,
+          ok: Boolean(me?.ok),
+          username: me?.result?.username || "",
+          sampleChatId,
+        });
+      }
+      return json({ probes }, 200, env);
+    }
+
     if (!env.TELEGRAM_ENGINE) return json({ error: "Durable Object binding missing" }, 500, env);
     const id = env.TELEGRAM_ENGINE.idFromName("global");
-    return env.TELEGRAM_ENGINE.get(id).fetch(request);
+    try {
+      return await env.TELEGRAM_ENGINE.get(id).fetch(request);
+    } catch (error) {
+      const degraded = await handleTelegramEngineDoFallback(request, env, url, error);
+      if (degraded) return degraded;
+      throw error;
+    }
   },
 
   async scheduled(_event, env, ctx) {
@@ -2116,6 +2156,129 @@ function corsHeaders(env = {}) {
     "access-control-allow-headers": "authorization,content-type,x-validator-user-id",
     "access-control-max-age": "86400",
   };
+}
+
+function isDoQuotaError(error) {
+  const message = errorMessage(error);
+  return /Durable Objects free tier|Exceeded allowed (volume|rows|duration)/i.test(message);
+}
+
+function looksLikeTelegramBotToken(value) {
+  return /^\d+:[A-Za-z0-9_-]{20,}$/.test(String(value || "").trim());
+}
+
+function readEmergencyTelegramChannel(env = {}) {
+  const botToken =
+    normalizeSecret(env.TELEGRAM_EMERGENCY_BOT_TOKEN) ||
+    normalizeSecret(env.TELEGRAM_SMOKE_BOT_TOKEN) ||
+    acceptedEngineSecrets(env).find((secret) => looksLikeTelegramBotToken(secret)) ||
+    "";
+  const chatId = String(env.TELEGRAM_EMERGENCY_CHAT_ID || env.TELEGRAM_SMOKE_CHAT_ID || "").trim();
+  const userId = normalizeUserId(env.TELEGRAM_EMERGENCY_USER_ID || env.TELEGRAM_SMOKE_USER_ID || "smoke@sniperbo.local");
+  if (!botToken || !chatId) return null;
+  const now = new Date().toISOString();
+  return {
+    id: "telegram-emergency-channel",
+    userId,
+    name: "Telegram Emergency",
+    botTokenMasked: `${botToken.slice(0, 6)}...`,
+    chatId,
+    buttonLink: "https://sniperbo.com",
+    isActive: true,
+    analyzingEnabled: false,
+    analyzingCooldownRounds: 3,
+    signalModules: normalizeModuleConfigs({
+      paying_numbers: { enabled: true, entryType: "AUTO", galeLimit: 1, coverTie: false, tieCoverage: 1 },
+      ai_patterns: { enabled: false },
+      surf_alert: { enabled: false },
+      ties_only: { enabled: false },
+      validator: { enabled: false },
+    }),
+    connectionStatus: "connected",
+    lastTestedAt: now,
+    updatedAt: now,
+    createdAt: now,
+  };
+}
+
+async function handleTelegramEngineDoFallback(request, env, url, error = null) {
+  const degraded = Boolean(error && isDoQuotaError(error));
+  const emergencyChannel = readEmergencyTelegramChannel(env);
+  if (!emergencyChannel) return null;
+
+  if (request.method === "GET" && url.pathname === "/engine/channels/active") {
+    return json({ channels: [publicChannel(emergencyChannel)], degraded }, 200, env);
+  }
+
+  const userId = normalizeUserId(request.headers.get("x-validator-user-id") || emergencyChannel.userId);
+  if (request.method === "GET" && url.pathname === "/validator/channels") {
+    if (userId && userId !== emergencyChannel.userId) return json({ channels: [] }, 200, env);
+    return json({ channels: [publicChannel(emergencyChannel)], degraded }, 200, env);
+  }
+
+  if (request.method === "POST" && url.pathname === "/validator/channels/preview") {
+    const body = await readJson(request);
+    const channelId = String(body.channelId || body.id || "").trim();
+    if (channelId && channelId !== emergencyChannel.id) {
+      return json({ error: "Canal nao encontrado." }, 404, env);
+    }
+    const botToken =
+      normalizeSecret(env.TELEGRAM_EMERGENCY_BOT_TOKEN) ||
+      normalizeSecret(env.TELEGRAM_SMOKE_BOT_TOKEN) ||
+      acceptedEngineSecrets(env).find((secret) => looksLikeTelegramBotToken(secret)) ||
+      "";
+    const result = await sendTelegramMessage({
+      botToken,
+      chatId: emergencyChannel.chatId,
+      message: String(body.message || "Teste Telegram V2"),
+      buttonLabel: "Abrir Sniper Bo IA",
+      buttonUrl: normalizeUrl(emergencyChannel.buttonLink),
+      buttons: Array.isArray(body.buttons) ? body.buttons : [],
+    });
+    if (!result.ok) return json({ error: result.error }, result.status || 502, env);
+    return json({ ok: true, messageId: result.messageId, degraded }, 200, env);
+  }
+
+  if (request.method === "POST" && url.pathname === "/validator/channels/test") {
+    const body = await readJson(request);
+    const channelId = String(body.channelId || body.id || "").trim();
+    if (channelId && channelId !== emergencyChannel.id) {
+      return json({ error: "Canal nao encontrado." }, 404, env);
+    }
+    const botToken =
+      normalizeSecret(env.TELEGRAM_EMERGENCY_BOT_TOKEN) ||
+      normalizeSecret(env.TELEGRAM_SMOKE_BOT_TOKEN) ||
+      acceptedEngineSecrets(env).find((secret) => looksLikeTelegramBotToken(secret)) ||
+      "";
+    const result = await sendTelegramMessage({
+      botToken,
+      chatId: emergencyChannel.chatId,
+      message: "[TESTE TELEGRAM]\nCanal conectado com sucesso.",
+    });
+    if (!result.ok) return json({ error: result.error }, result.status || 502, env);
+    return json({ ok: true, messageId: result.messageId, channelId: emergencyChannel.id, degraded }, 200, env);
+  }
+
+  if (degraded && request.method === "POST" && url.pathname === "/engine/signal") {
+    const body = await readJson(request);
+    const botToken =
+      normalizeSecret(env.TELEGRAM_EMERGENCY_BOT_TOKEN) ||
+      normalizeSecret(env.TELEGRAM_SMOKE_BOT_TOKEN) ||
+      acceptedEngineSecrets(env).find((secret) => looksLikeTelegramBotToken(secret)) ||
+      "";
+    const result = await sendTelegramMessage({
+      botToken,
+      chatId: emergencyChannel.chatId,
+      message: String(body.message || "Sinal Telegram V2"),
+      buttonLabel: "Abrir Sniper Bo IA",
+      buttonUrl: normalizeUrl(emergencyChannel.buttonLink),
+      buttons: Array.isArray(body.buttons) ? body.buttons : [],
+    });
+    if (!result.ok) return json({ error: result.error }, result.status || 502, env);
+    return json({ ok: true, sent: [{ messageId: result.messageId, channelId: emergencyChannel.id }], degraded }, 200, env);
+  }
+
+  return null;
 }
 
 function bearerToken(request) {

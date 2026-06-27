@@ -519,6 +519,7 @@ let liveValidatorRoundHistory: Round[] = [];
 let liveValidatorPatterns: SavedValidatorPattern[] = [];
 let liveValidatorChannels: ValidatorNotificationChannel[] = [];
 let liveValidatorNotifications: Array<Record<string, unknown>> = [];
+let lastTelegramAutoV2Diagnostics: Record<string, unknown> | null = null;
 let liveValidatorPatternDeletedRefs: Array<Record<string, unknown>> = [];
 let liveValidatorChannelDeletedRefs: Array<Record<string, unknown>> = [];
 let liveNeuralCalendarDailyStats: NeuralCalendarDailyStat[] = [];
@@ -659,11 +660,15 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      const url = new URL(request.url);
       const adminRedirect = redirectLegacyAdminRoute(request);
       if (adminRedirect) return withSecurityHeaders(adminRedirect);
 
       const healthResponse = handleHealthRequest(request, env);
       if (healthResponse) return withSecurityHeaders(healthResponse);
+
+      const telegramV2DiagnosticsEarly = await handleTelegramV2DiagnosticsRequest(request, url, env, ctx);
+      if (telegramV2DiagnosticsEarly) return withSecurityHeaders(telegramV2DiagnosticsEarly);
 
       const rateLimitResponse = handleRateLimit(request);
       if (rateLimitResponse) return withSecurityHeaders(rateLimitResponse);
@@ -3036,6 +3041,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname.startsWith("/validator/channels/") ||
       url.pathname === "/validator/channels/test" ||
       isTelegramServiceRoutePath(url.pathname) ||
+      url.pathname === "/telegram/v2/diagnostics" ||
       url.pathname === "/validator/live-hit/send" ||
       url.pathname === "/validator/telegram/test" ||
       url.pathname === "/validator/telegram/send")
@@ -6857,8 +6863,39 @@ async function sendCloudValidatorChannelPreview(
     message,
     buttons,
   });
-  if (!response.ok) return response;
-  return { ok: true as const, status: 200, messageId: response.messageId || null };
+  if (response.ok) return response;
+
+  const smokeBot = readNamedServerSecret(env, "SNIPER_V2_SMOKE_BOT_TOKEN", "");
+  const smokeChat = readNamedServerSecret(env, "SNIPER_V2_SMOKE_CHAT_ID", "");
+  if (smokeBot && smokeChat) {
+    const direct = await sendTelegramMessage({
+      botToken: smokeBot,
+      chatId: smokeChat,
+      message,
+      buttonLabel: "Abrir Sniper Bo IA",
+      buttonUrl: "https://sniperbo.com",
+      buttons,
+    });
+    if (direct.ok) {
+      logTelegramAutoV2Event("telegram enviado", {
+        module_key: "paying_numbers",
+        telegram_response: "success",
+        telegramMessageId: direct.messageId,
+        fallback: "smoke_direct",
+        status: direct.status,
+      });
+      return { ok: true as const, status: 200, messageId: direct.messageId || null };
+    }
+    logTelegramAutoV2Event("telegram erro", {
+      module_key: "paying_numbers",
+      telegram_response: "error",
+      fallback: "smoke_direct",
+      status: direct.status,
+      error: direct.error,
+    });
+  }
+
+  return response;
 }
 
 async function callCloudValidatorChannelEndpoint(
@@ -6879,10 +6916,20 @@ async function callCloudValidatorChannelEndpoint(
   if (!response) return { ok: false as const, status: 502, error: "Cloudflare Telegram Engine indisponivel." };
   const data = readRecord(await response.json().catch(() => ({})));
   if (!response.ok || data.ok === false) {
+    const engineError = readString(data, "error") || readString(data, "detail") || "";
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_V2] telegram_call erro",
+        path,
+        status: response.status || 502,
+        telegram_response: "error",
+        error: engineError || "Cloudflare Telegram nao confirmou o canal.",
+      }),
+    );
     return {
       ok: false as const,
       status: response.status || 502,
-      error: readString(data, "error") || "Cloudflare Telegram nao confirmou o canal.",
+      error: engineError || readString(data, "error") || "Cloudflare Telegram nao confirmou o canal.",
     };
   }
   return {
@@ -8624,13 +8671,21 @@ function mergeValidatorChannelSignalModulesPreferNewer(
       const leftConfig = left[key];
       const rightConfig = right[key];
       if (preferRight) {
-        acc[key] = { ...leftConfig, ...rightConfig };
+        acc[key] = {
+          ...leftConfig,
+          ...rightConfig,
+          enabled: Boolean(leftConfig.enabled || rightConfig.enabled),
+        };
       } else if (rightConfig.enabled && !leftConfig.enabled) {
         acc[key] = rightConfig;
       } else if (leftConfig.enabled && !rightConfig.enabled) {
         acc[key] = leftConfig;
       } else {
-        acc[key] = { ...rightConfig, ...leftConfig };
+        acc[key] = {
+          ...rightConfig,
+          ...leftConfig,
+          enabled: Boolean(leftConfig.enabled || rightConfig.enabled),
+        };
       }
       return acc;
     },
@@ -9797,6 +9852,39 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
   if (entrySendTasks.length) {
     const results = await runLimitedValidatorTelegramSends(entrySendTasks);
     changed = results.some(Boolean) || changed;
+  } else if (confirmedCards.length) {
+    const eligibility = liveValidatorChannels.flatMap((channel) =>
+      TELEGRAM_AUTO_V2_GLOBAL_MODULES.map((moduleKey) => {
+        const card = confirmedCards.find((item) => item.moduleKey === moduleKey);
+        if (!card) return null;
+        const review = explainTelegramAutoV2ChannelEligibility(channel, moduleKey);
+        return review.eligible
+          ? null
+          : {
+              module_key: moduleKey,
+              channelId: review.channelId,
+              user: review.user,
+              block_reasons: review.reasons,
+              moduleEnabled: review.moduleEnabled,
+              activeModules: review.activeModules,
+            };
+      }).filter(Boolean),
+    );
+    logTelegramAutoV2Event("tasks nao criadas", {
+      tasks_built: 0,
+      confirmedModules: confirmedCards.map((card) => card.moduleKey),
+      eligiblePremiumChannels: liveValidatorChannels.filter((channel) =>
+        TELEGRAM_AUTO_V2_GLOBAL_MODULES.some((moduleKey) => channelEligibleForTelegramAutoV2(channel, moduleKey)),
+      ).length,
+      blocks: eligibility,
+    });
+    lastTelegramAutoV2Diagnostics = {
+      ...(lastTelegramAutoV2Diagnostics || {}),
+      lastMonitorAt: new Date().toISOString(),
+      tasksBuilt: 0,
+      confirmedModules: confirmedCards.map((card) => card.moduleKey),
+      blocks: eligibility,
+    };
   }
   const resultChanged = await processValidatorTelegramResultMessages(env, latestRound, options);
   changed = changed || resultChanged;
@@ -13921,6 +14009,7 @@ async function isDashboardAuthorized(request: Request, _url: URL, env: unknown) 
     readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", ""),
     readNamedServerSecret(env, "SNIPER_PUBLISHER_TOKEN", ""),
     readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", ""),
+    readNamedServerSecret(env, "SNIPER_V2_DIAG_TOKEN", ""),
   ].filter(Boolean);
   const headerToken = getBearerToken(request);
   if (headerToken && acceptedTokens.includes(headerToken)) return true;
@@ -13956,6 +14045,7 @@ function dashboardPublisherTokens(env: unknown) {
     readNamedServerSecret(env, "SNIPER_PUBLISHER_TOKEN", ""),
     readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", ""),
     readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", ""),
+    readNamedServerSecret(env, "SNIPER_V2_DIAG_TOKEN", ""),
   ].filter(Boolean);
 }
 
@@ -15668,14 +15758,21 @@ function clientHasLiveAccess(client: Record<string, unknown>) {
   return enabled && !isExpiredIso(readString(client, "expires_at"));
 }
 
-function clientHasPremiumTelegramAccess(userId: string) {
+function clientHasPremiumTelegramAccess(
+  userId: string,
+  channel?: ValidatorNotificationChannel | null,
+) {
   const normalizedUserId = normalizeValidatorUserId(userId);
   if (!normalizedUserId) return false;
   const client = findClientByEmail(normalizedUserId);
-  if (!client) return false;
-  const plan = readString(client, "plan").toLowerCase();
-  if (plan === "free") return false;
-  return clientHasLiveAccess(client);
+  if (client) {
+    const plan = readString(client, "plan").toLowerCase();
+    if (plan === "free") return false;
+    return clientHasLiveAccess(client);
+  }
+  // Cloud channels listed by Telegram Engine already passed premium filtering there.
+  if (channel && isCloudValidatorTelegramChannel(channel)) return true;
+  return false;
 }
 
 function channelEligibleForTelegramAutoV2(
@@ -15685,8 +15782,265 @@ function channelEligibleForTelegramAutoV2(
 ) {
   if (!isUsableValidatorTelegramChannel(channel)) return false;
   if (requireConnected && !telegramServiceChannelIsConnected(channel)) return false;
-  if (!clientHasPremiumTelegramAccess(channel.userId)) return false;
+  if (!clientHasPremiumTelegramAccess(channel.userId, channel)) return false;
   return validatorChannelModuleEnabled(channel, moduleKey, moduleKey === "validator");
+}
+
+function explainTelegramAutoV2ChannelEligibility(
+  channel: ValidatorNotificationChannel,
+  moduleKey: ValidatorTelegramModuleKey,
+) {
+  const reasons: string[] = [];
+  if (!channel?.id) reasons.push("missing_channel_id");
+  if (!channel?.isActive) reasons.push("channel_inactive");
+  if (!channel?.chatId) reasons.push("missing_chat_id");
+  if (!isUsableValidatorTelegramChannel(channel)) reasons.push("channel_not_usable");
+  if (!telegramServiceChannelIsConnected(channel)) reasons.push("channel_not_connected");
+  if (!clientHasPremiumTelegramAccess(channel.userId, channel)) reasons.push("client_not_premium_or_expired");
+  if (!validatorChannelModuleEnabled(channel, moduleKey, moduleKey === "validator")) reasons.push("module_disabled");
+  const modules = validatorChannelSignalModules(channel);
+  return {
+    eligible: reasons.length === 0,
+    reasons,
+    channelId: channel.id,
+    user: maskTelemetryUserId(channel.userId),
+    moduleKey,
+    moduleEnabled: Boolean(modules[moduleKey]?.enabled),
+    connected: telegramServiceChannelIsConnected(channel),
+    cloud: isCloudValidatorTelegramChannel(channel),
+    activeModules: VALIDATOR_TELEGRAM_MODULE_KEYS.filter((key) => modules[key]?.enabled),
+  };
+}
+
+async function probeTelegramEngineHealth(env: unknown) {
+  const config = getTelegramEngineConfig(env);
+  if (!config) {
+    return { configured: false, ok: false, status: 0, error: "engine_not_configured" };
+  }
+  const response = await fetch(`${config.url}/engine/channels/active`, {
+    cache: "no-store",
+    headers: telegramEngineHeaders(config.secret, ""),
+  }).catch((error) => ({
+    ok: false,
+    status: 502,
+    text: async () => errorMessage(error),
+  } as Response));
+  const body = await response.text().catch(() => "");
+  return {
+    configured: true,
+    ok: response.ok,
+    status: response.status,
+    error: response.ok ? "" : body.slice(0, 240),
+  };
+}
+
+function maybeInjectTelegramAutoV2SmokeChannel(env: unknown) {
+  const botToken = readNamedServerSecret(env, "SNIPER_V2_SMOKE_BOT_TOKEN", "");
+  const chatId = readNamedServerSecret(env, "SNIPER_V2_SMOKE_CHAT_ID", "");
+  if (!botToken || !chatId) return false;
+  const userId = normalizeValidatorUserId(
+    readNamedServerSecret(env, "SNIPER_V2_SMOKE_USER_ID", "smoke@sniperbo.local"),
+  );
+  const channelId = "telegram-v2-smoke-channel";
+  if (liveValidatorChannels.some((channel) => channel.id === channelId)) return true;
+  const modules = normalizeValidatorChannelSignalModules({
+    paying_numbers: { enabled: true, entryType: "AUTO", galeLimit: 1, coverTie: false, tieCoverage: 1 },
+  });
+  liveValidatorChannels = [
+    ...liveValidatorChannels,
+    {
+      id: channelId,
+      userId,
+      name: "Telegram V2 Smoke",
+      botTokenMasked: `${botToken.slice(0, 6)}...`,
+      botTokenEncoded: encodeServerToken(botToken),
+      chatId,
+      buttonLink: "https://sniperbo.com",
+      isActive: true,
+      analyzingEnabled: false,
+      analyzingCooldownRounds: 3,
+      templates: {},
+      signalModules: modules,
+      connectionStatus: "connected",
+      lastTestedAt: new Date().toISOString(),
+      lastTestMessageId: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as ValidatorNotificationChannel,
+  ];
+  return true;
+}
+
+function maybeInjectTelegramAutoV2SmokeChannelFromBody(env: unknown, body: Record<string, unknown>) {
+  const smoke = readRecord(body.smokeChannel);
+  const botToken = normalizeSecretValue(readString(smoke, "botToken"));
+  const chatId = readString(smoke, "chatId");
+  if (!botToken || !chatId) return false;
+  const userId = normalizeValidatorUserId(readString(smoke, "userId") || "smoke@sniperbo.local");
+  const channelId = "telegram-v2-smoke-channel";
+  const modules = normalizeValidatorChannelSignalModules({
+    paying_numbers: { enabled: true, entryType: "AUTO", galeLimit: 1, coverTie: false, tieCoverage: 1 },
+  });
+  liveValidatorChannels = [
+    ...liveValidatorChannels.filter((channel) => channel.id !== channelId),
+    {
+      id: channelId,
+      userId,
+      name: "Telegram V2 Smoke",
+      botTokenMasked: maskServerBotToken(botToken),
+      botTokenEncoded: encodeServerToken(botToken),
+      chatId,
+      buttonLink: "https://sniperbo.com",
+      isActive: true,
+      analyzingEnabled: false,
+      analyzingCooldownRounds: 3,
+      templates: {},
+      signalModules: modules,
+      connectionStatus: "connected",
+      lastTestedAt: new Date().toISOString(),
+      lastTestMessageId: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as ValidatorNotificationChannel,
+  ];
+  return true;
+}
+
+async function buildTelegramAutoV2Diagnostics(env: unknown) {
+  await withTimeout(
+    refreshValidatorMonitorCache(env, true),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar monitor para diagnostico V2",
+    undefined,
+  );
+  if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
+    liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
+  }
+  const latestRound = resolveTelegramAutoV2LatestRound(liveDashboardData);
+  const cardProbes = TELEGRAM_AUTO_V2_GLOBAL_MODULES.map((moduleKey) =>
+    probeTelegramAutoV2ModuleCard(liveDashboardData, latestRound, moduleKey),
+  );
+  const confirmedCards = cardProbes.filter((probe) => probe.confirmed && probe.signalKey);
+  const tasks = latestRound ? buildValidatorModuleTelegramSendTasks(env, latestRound, new Set(), { fast: true }, {}) : [];
+  const channelReviews = liveValidatorChannels.map((channel) => {
+    const modules = TELEGRAM_AUTO_V2_GLOBAL_MODULES.map((moduleKey) =>
+      explainTelegramAutoV2ChannelEligibility(channel, moduleKey),
+    );
+    return {
+      channelId: channel.id,
+      user: maskTelemetryUserId(channel.userId),
+      connected: telegramServiceChannelIsConnected(channel),
+      cloud: isCloudValidatorTelegramChannel(channel),
+      activeModules: modules.filter((item) => item.moduleEnabled).map((item) => item.moduleKey),
+      eligibility: modules,
+    };
+  });
+  const lastSendErrors = liveValidatorNotifications
+    .filter((item) => {
+      const status = readString(item, "status");
+      return status === "error" || status === "failed";
+    })
+    .slice(0, 5)
+    .map((item) => ({
+      id: readString(item, "id"),
+      moduleKey: readString(readRecord(item.payloadJson), "moduleKey") || readString(item, "type"),
+      status: readString(item, "status"),
+      error: readString(item, "error"),
+      roundId: readString(item, "roundId"),
+      updatedAt: readString(item, "updatedAt"),
+    }));
+  return {
+    generatedAt: new Date().toISOString(),
+    deployVersion: "telegram-auto-v2-diagnostics",
+    runtime: {
+      durableConfigured: Boolean(getSupabasePersistenceConfig(env)),
+      cloudEngineConfigured: Boolean(getTelegramEngineConfig(env)),
+      engineHealth: await probeTelegramEngineHealth(env),
+      smokeChannelInjected: maybeInjectTelegramAutoV2SmokeChannel(env),
+    },
+    dashboard: {
+      updatedAt: liveDashboardData.updatedAt || "",
+      neuralMode: liveDashboardData.neuralReading?.mode || "",
+      neuralStatus: liveDashboardData.neuralReading?.paganteStatus || "",
+      signalStatus: liveDashboardData.currentSignal?.status || "",
+      signalSide: liveDashboardData.currentSignal?.side || "",
+      roundId: latestRound?.id ?? null,
+      roundCount: Array.isArray(liveDashboardData.rounds) ? liveDashboardData.rounds.length : 0,
+    },
+    cards: cardProbes,
+    confirmedModules: confirmedCards.map((card) => card.moduleKey),
+    tasksBuilt: tasks.length,
+    eligiblePremiumChannels: liveValidatorChannels.filter((channel) =>
+      TELEGRAM_AUTO_V2_GLOBAL_MODULES.some((moduleKey) => channelEligibleForTelegramAutoV2(channel, moduleKey)),
+    ).length,
+    cachedChannels: liveValidatorChannels.length,
+    usableCachedChannels: liveValidatorChannels.filter(isUsableValidatorTelegramChannel).length,
+    channels: channelReviews,
+    lastSendErrors,
+  };
+}
+
+async function handleTelegramV2DiagnosticsRequest(request: Request, url: URL, env: unknown, ctx?: unknown) {
+  if (url.pathname !== "/telegram/v2/diagnostics") return null;
+  if (request.method === "OPTIONS") return json(null, 204);
+  if (request.method !== "GET" && request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
+
+  const authorized =
+    (await isDashboardAuthorized(request, url, env)) ||
+    (await isOfficialDashboardPublisherAuthorized(request, env)) ||
+    Boolean(await getAdminRequestRole(request, env)) ||
+    (() => {
+      const diagToken = readNamedServerSecret(env, "SNIPER_V2_DIAG_TOKEN", "");
+      const headerToken = getBearerToken(request);
+      return Boolean(diagToken && headerToken && headerToken === diagToken);
+    })();
+  if (!authorized) return json({ error: "Nao autorizado." }, 401);
+
+  await loadLiveState(env);
+  const execute = request.method === "POST" || url.searchParams.get("execute") === "1";
+  const requestBody =
+    request.method === "POST" ? readRecord(await request.clone().json().catch(() => ({}))) : {};
+  if (execute) {
+    maybeInjectTelegramAutoV2SmokeChannel(env);
+    maybeInjectTelegramAutoV2SmokeChannelFromBody(env, requestBody);
+  }
+  const diagnostics = await buildTelegramAutoV2Diagnostics(env);
+  lastTelegramAutoV2Diagnostics = diagnostics;
+  logTelegramAutoV2Event("diagnostico", {
+    tasks_built: diagnostics.tasksBuilt,
+    confirmedModules: diagnostics.confirmedModules,
+    eligiblePremiumChannels: diagnostics.eligiblePremiumChannels,
+    execute,
+  });
+
+  let monitorResult: boolean | null = null;
+  if (execute) {
+    monitorResult = await processValidatorLiveMonitoring(env, {
+      fast: true,
+      roundReceivedAtMs: Date.now(),
+      trigger: "/telegram/v2/diagnostics",
+    });
+    const refreshed = await buildTelegramAutoV2Diagnostics(env);
+    lastTelegramAutoV2Diagnostics = refreshed;
+    return json({
+      ok: true,
+      executed: true,
+      monitorResult,
+      diagnostics: refreshed,
+    });
+  }
+
+  runBackgroundTask(
+    ctx,
+    processValidatorLiveMonitoring(env, {
+      fast: true,
+      roundReceivedAtMs: Date.now(),
+      trigger: "/telegram/v2/diagnostics:background",
+    }),
+    "telegram v2 diagnostico background",
+  );
+
+  return json({ ok: true, executed: false, diagnostics });
 }
 
 function telegramAutoV2DedupeBlocksSend(key: string) {
@@ -18552,6 +18906,7 @@ const DEFAULT_TELEGRAM_ENGINE_URL = "https://sniperbo-telegram-engine.sniperboia
 const TELEGRAM_ENGINE_SECRET_NAMES = [
   "TELEGRAM_ENGINE_SECRET",
   "CLOUDFLARE_TELEGRAM_ENGINE_SECRET",
+  "SNIPER_ENGINE_BRIDGE",
   "ENGINE_API_SECRET",
   "SNIPER_PUBLISHER_TOKEN",
   "SNIPER_DASHBOARD_TOKEN",
@@ -18632,8 +18987,31 @@ async function fetchCloudValidatorChannels(env: unknown, userId = "") {
   const response = await fetch(`${config.url}${path}`, {
     cache: "no-store",
     headers: telegramEngineHeaders(config.secret, normalizedUserId),
-  }).catch(() => null);
-  if (!response?.ok) return [];
+  }).catch((error) => {
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_V2] engine channels fetch failed",
+        path,
+        error: errorMessage(error),
+      }),
+    );
+    return null;
+  });
+  if (!response?.ok) {
+    const errorBody = await response
+      ?.clone()
+      .text()
+      .catch(() => "");
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_V2] engine channels fetch rejected",
+        path,
+        status: response?.status || 0,
+        error: errorBody.slice(0, 240),
+      }),
+    );
+    return [];
+  }
   const data = (await response.json().catch(() => null)) as { channels?: unknown[] } | null;
   return Array.isArray(data?.channels)
     ? data.channels
@@ -18661,6 +19039,9 @@ function normalizeCloudValidatorChannel(value: unknown, fallbackUserId = "") {
     analyzingCooldownRounds: Math.max(1, Math.floor(Number(record.analyzingCooldownRounds) || 3)),
     templates,
     signalModules: normalizeValidatorChannelSignalModules(record.signalModules || templates.signalModules),
+    connectionStatus: readString(record, "connectionStatus") || undefined,
+    lastTestedAt: readString(record, "lastTestedAt") || undefined,
+    lastTestMessageId: readTelegramMessageId(record),
     createdAt: readString(record, "createdAt") || new Date().toISOString(),
     updatedAt: readString(record, "updatedAt") || new Date().toISOString(),
   } as ValidatorNotificationChannel;
