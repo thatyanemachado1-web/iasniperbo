@@ -6681,8 +6681,15 @@ async function testDirectValidatorChannel(request: Request, channel: ValidatorNo
 }
 
 async function testCloudValidatorChannel(env: unknown, clientId: string, channelId: string) {
-  const response = await callCloudValidatorChannelEndpoint(env, clientId, "/validator/channels/test", {
+  const response = await sendTelegramEngineSignal(env, {
+    userId: clientId,
     channelId,
+    moduleKey: "validator",
+    signalKey: `connection-test:${channelId}:${Date.now()}`,
+    roundId: Date.now(),
+    entry: "",
+    message: TELEGRAM_CONNECTION_TEST_MESSAGE,
+    forceMessage: true,
   });
   if (!response.ok) return response;
   const messageId = response.messageId;
