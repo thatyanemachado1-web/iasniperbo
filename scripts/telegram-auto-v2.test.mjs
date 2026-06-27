@@ -109,6 +109,18 @@ assert.equal(
   true,
 );
 
+assert.equal(
+  detectPayingNumbersConfirmedCard(
+    {
+      rounds: [latestRound],
+      neuralReading: { mode: "SCANNING", numero: 9 },
+      currentSignal: { id: "signal-991", side: "BANKER", status: "pending" },
+    },
+    latestRound,
+  ).confirmed,
+  true,
+);
+
 const playerFromVisualCard = detectPayingNumbersConfirmedCard(
   {
     rounds: [latestRound],

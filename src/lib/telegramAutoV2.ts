@@ -98,10 +98,19 @@ function readPayingNumbersSideFromDashboard(dashboard: DashboardData) {
   if (fromReadingStatus) return fromReadingStatus;
   const fromEntryState = normalizeSide(entryState.expectedSide ?? entryState.expected_side);
   if (fromEntryState) return fromEntryState;
-  const fromCurrentSignalText = sideFromText(
-    readString(currentSignal, "id") || readString(currentSignal, "side") || readString(currentSignal, "entry"),
-  );
-  if (fromCurrentSignalText) return fromCurrentSignalText;
+  // Prefer explicit side fields first; many signal IDs don't contain PLAYER/BANKER text.
+  const fromCurrentSignalSide = normalizeSide(currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao);
+  if (fromCurrentSignalSide) return fromCurrentSignalSide;
+  const fromCurrentSignalTextCandidates = [
+    readString(currentSignal, "entryLabel"),
+    readString(currentSignal, "entry_text"),
+    readString(currentSignal, "label"),
+    readString(currentSignal, "id"),
+  ];
+  for (const candidate of fromCurrentSignalTextCandidates) {
+    const parsed = sideFromText(candidate);
+    if (parsed) return parsed;
+  }
   const signalStatus = readString(currentSignal, "status").toLowerCase();
   if (signalStatus === "pending" || signalStatus === "g1" || signalStatus === "active" || signalStatus === "confirmed") {
     return normalizeSide(currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao);
