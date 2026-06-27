@@ -106,6 +106,13 @@ const DEFAULT_ACCESS_GRACE_DAYS = 5;
 const DASHBOARD_MONITOR_INTERVAL_MS = 30000;
 const DASHBOARD_MONITOR_ERROR_INTERVAL_MS = 120000;
 
+function legacyTelegramMonitorEnabled(env = {}) {
+  const raw = String(env.TELEGRAM_ENGINE_LEGACY_MONITOR || "0")
+    .trim()
+    .toLowerCase();
+  return ["1", "true", "on", "yes"].includes(raw);
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return corsResponse(env);
@@ -164,6 +171,7 @@ export default {
   },
 
   async scheduled(_event, env, ctx) {
+    if (!legacyTelegramMonitorEnabled(env)) return;
     if (!env.TELEGRAM_ENGINE) return;
     const id = env.TELEGRAM_ENGINE.idFromName("global");
     const request = new Request("https://internal.sniperbo/engine/notifications/purge", { method: "POST" });
@@ -184,7 +192,9 @@ export class TelegramEngine {
     const userId = normalizeUserId(request.headers.get("x-validator-user-id") || "");
 
     try {
-      await this.ensureDashboardMonitorAlarm();
+      if (legacyTelegramMonitorEnabled(this.env)) {
+        await this.ensureDashboardMonitorAlarm();
+      }
 
       if (request.method === "GET" && url.pathname === "/validator/channels") {
         if (!userId) return json({ error: "Missing user" }, 400, this.env);
@@ -244,6 +254,9 @@ export class TelegramEngine {
       }
 
       if ((request.method === "POST" || request.method === "GET") && url.pathname === "/engine/monitor") {
+        if (!legacyTelegramMonitorEnabled(this.env)) {
+          return json({ ok: true, skipped: "legacy_disabled" }, 200, this.env);
+        }
         return this.runDashboardMonitor({ source: "manual" });
       }
 
@@ -287,6 +300,7 @@ export class TelegramEngine {
   }
 
   async alarm() {
+    if (!legacyTelegramMonitorEnabled(this.env)) return;
     try {
       await this.runDashboardMonitor({ source: "alarm" });
     } catch (error) {
@@ -641,6 +655,7 @@ export class TelegramEngine {
   }
 
   async ensureDashboardMonitorAlarm(delayMs = DASHBOARD_MONITOR_INTERVAL_MS, force = false) {
+    if (!legacyTelegramMonitorEnabled(this.env)) return;
     if (!this.state?.storage?.setAlarm) return;
     const currentAlarm = await this.state.storage.getAlarm?.();
     if (!force && currentAlarm && Number(currentAlarm) > Date.now()) return;
@@ -648,6 +663,9 @@ export class TelegramEngine {
   }
 
   async runDashboardMonitor({ source = "manual" } = {}) {
+    if (!legacyTelegramMonitorEnabled(this.env)) {
+      return json({ ok: true, source, skipped: "legacy_disabled" }, 200, this.env);
+    }
     const now = Date.now();
     const lockUntil = Number(await this.state.storage.get("dashboard-monitor:lock") || 0);
     if (lockUntil > now) {

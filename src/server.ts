@@ -576,6 +576,8 @@ let validatorMonitorCacheLoadedAt = 0;
 let validatorMonitorCachePromise: Promise<void> | null = null;
 let validatorOfficialDispatchersBootstrapped = false;
 let validatorInitialOfficialSignalKeys = new Set<string>();
+const telegramAutoV2ProcessedSignals = new Map<string, number>();
+const TELEGRAM_V2_PROCESSED_SIGNAL_TTL_MS = 1000 * 60 * 60 * 6;
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 const localAiRateBuckets = new Map<string, { count: number; resetAt: number }>();
 const localAiCache = new Map<string, { response: string; createdAt: number }>();
@@ -3183,11 +3185,6 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       liveDashboardData = cycle.dashboard;
       runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
-    runBackgroundTask(
-      ctx,
-      processValidatorLiveMonitoring(env, { fast: true, roundReceivedAtMs: Date.now(), trigger: "GET /dashboard" }),
-      "monitorar sinais no read do dashboard",
-    );
     return json(publicDashboardSnapshot(liveDashboardData));
   }
 
@@ -3206,15 +3203,6 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       incomingRounds.length &&
       compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, incomingState) > 0
     ) {
-      runBackgroundTask(
-        ctx,
-        processValidatorLiveMonitoring(env, {
-          fast: true,
-          roundReceivedAtMs: Date.now(),
-          trigger: `${url.pathname}:stale_skip`,
-        }),
-        "telegram v2 pos dashboard stale skip",
-      );
       return json({
         ok: true,
         ignored: "stale",
@@ -3268,12 +3256,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       );
       return json({ ok: true, saved: saveStatus, monitor: monitorStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
     }
-    runBackgroundTask(
-      ctx,
-      processValidatorLiveMonitoring(env, monitorOptions),
-      "telegram v2 pos POST dashboard",
-    );
-    return json({ ok: true, saved: "queued", dashboard: publicDashboardSnapshot(liveDashboardData) });
+    return json({ ok: true, saved: "queued", monitor: "skipped_non_publish_signal", dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
 
   return null;
@@ -3296,9 +3279,8 @@ async function persistDashboardRoundIngestion(
   incomingRounds: Round[],
   calendarChange: NeuralCalendarChangeSet,
   engineCalendarChange: EngineCalendarAggregateChangeSet,
-  allowInsecureTelegramFallback: boolean,
+  _allowInsecureTelegramFallback: boolean,
 ) {
-  const roundReceivedAtMs = Date.now();
   const writes = [
     withTimeout(
       persistValidatorRounds(env, incomingRounds),
@@ -3327,8 +3309,7 @@ async function persistDashboardRoundIngestion(
       ),
     );
   }
-  const monitorTask = processValidatorLiveMonitoring(env, { allowInsecureTelegramFallback, fast: true, roundReceivedAtMs });
-  await Promise.all([...writes, monitorTask]);
+  await Promise.all(writes);
   await saveLiveState(env);
 }
 
@@ -9691,6 +9672,44 @@ function logTelegramAutoV2Event(event: string, payload: Record<string, unknown>)
   console.info(JSON.stringify({ event: `[TELEGRAM_V2] ${event}`, ...payload }));
 }
 
+function telegramV2OnlyEnabled(env: unknown) {
+  const raw = readServerEnvString(env, "TELEGRAM_V2_ONLY", "1")
+    .trim()
+    .toLowerCase();
+  return !["0", "false", "off", "no"].includes(raw);
+}
+
+function pruneTelegramAutoV2ProcessedSignals(now = Date.now()) {
+  for (const [signalKey, processedAt] of telegramAutoV2ProcessedSignals.entries()) {
+    if (now - processedAt > TELEGRAM_V2_PROCESSED_SIGNAL_TTL_MS) {
+      telegramAutoV2ProcessedSignals.delete(signalKey);
+    }
+  }
+}
+
+function telegramAutoV2SignalWasProcessed(signalKey: string) {
+  const cleanSignal = String(signalKey || "").trim();
+  if (!cleanSignal) return false;
+  pruneTelegramAutoV2ProcessedSignals();
+  return telegramAutoV2ProcessedSignals.has(cleanSignal);
+}
+
+function markTelegramAutoV2SignalProcessed(signalKey: string) {
+  const cleanSignal = String(signalKey || "").trim();
+  if (!cleanSignal) return;
+  const now = Date.now();
+  pruneTelegramAutoV2ProcessedSignals(now);
+  telegramAutoV2ProcessedSignals.set(cleanSignal, now);
+}
+
+function resolveLatestConfirmedTelegramAutoV2Card(latestRound: Round | null) {
+  return (
+    detectGlobalConfirmedCards(liveDashboardData, latestRound).find(
+      (card) => card.moduleKey === "paying_numbers" && card.confirmed && card.signalKey,
+    ) || null
+  );
+}
+
 function resolveTelegramAutoV2LatestRound(dashboard: LiveDashboardData = liveDashboardData): Round | null {
   if (Array.isArray(liveValidatorRoundHistory) && liveValidatorRoundHistory.length) {
     const fromHistory = liveValidatorRoundHistory.at(-1);
@@ -9735,6 +9754,14 @@ function buildSyntheticMonitorRound(id: number, template: Round | null): Round {
 }
 
 async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMonitorOptions = {}) {
+  if (telegramV2OnlyEnabled(env)) {
+    logTelegramAutoV2Event("legacy_disabled", {
+      trigger: options.trigger || "unknown",
+      mode: "TELEGRAM_V2_ONLY",
+    });
+    return processTelegramV2OnlyMonitoring(env, options);
+  }
+
   await withTimeout(
     refreshValidatorMonitorCache(env, true),
     LIVE_STATE_IO_TIMEOUT_MS,
@@ -9892,6 +9919,85 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
   changed = changed || analysisChanged;
 
   return changed;
+}
+
+async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorMonitorOptions = {}) {
+  if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
+    liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
+  }
+
+  const latestRound = resolveTelegramAutoV2LatestRound(liveDashboardData);
+  const confirmedCard = resolveLatestConfirmedTelegramAutoV2Card(latestRound);
+
+  if (!latestRound || !confirmedCard?.signalKey) {
+    logTelegramAutoV2Event("no_confirmed_card_skip", {
+      trigger: options.trigger || "unknown",
+      reason: latestRound ? "no_confirmed_card" : "missing_latest_round",
+      roundId: latestRound?.id ?? null,
+    });
+    return false;
+  }
+
+  if (telegramAutoV2SignalWasProcessed(confirmedCard.signalKey)) {
+    logTelegramAutoV2Event("repeated_signal_skip", {
+      trigger: options.trigger || "unknown",
+      module_key: confirmedCard.moduleKey,
+      signalKey: confirmedCard.signalKey,
+      roundId: confirmedCard.roundId,
+    });
+    return false;
+  }
+
+  markTelegramAutoV2SignalProcessed(confirmedCard.signalKey);
+  logTelegramAutoV2Event("new_confirmed_card_detected", {
+    trigger: options.trigger || "unknown",
+    module_key: confirmedCard.moduleKey,
+    signalKey: confirmedCard.signalKey,
+    roundId: confirmedCard.roundId,
+  });
+
+  logTelegramAutoV2Event("engine_fetch_started", {
+    trigger: options.trigger || "unknown",
+    module_key: confirmedCard.moduleKey,
+    signalKey: confirmedCard.signalKey,
+    roundId: confirmedCard.roundId,
+  });
+
+  await withTimeout(
+    refreshValidatorMonitorCache(env, true),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar canais para telegram v2",
+    undefined,
+  );
+
+  const entryChannelKeys = new Set<string>();
+  const entrySendTasks = buildPayingNumbersTelegramSendTasks(env, latestRound, entryChannelKeys, options, {});
+
+  logTelegramAutoV2Event("tasks_built", {
+    trigger: options.trigger || "unknown",
+    module_key: "paying_numbers",
+    tasks_built: entrySendTasks.length,
+    signalKey: confirmedCard.signalKey,
+    roundId: latestRound.id,
+    eligibleChannels: liveValidatorChannels.filter((channel) =>
+      channelEligibleForTelegramAutoV2(channel, "paying_numbers"),
+    ).length,
+  });
+
+  if (!entrySendTasks.length) return false;
+
+  const results = await runLimitedValidatorTelegramSends(entrySendTasks);
+  const sentCount = results.filter(Boolean).length;
+  if (sentCount > 0) {
+    logTelegramAutoV2Event("telegram_sent", {
+      trigger: options.trigger || "unknown",
+      module_key: "paying_numbers",
+      sentCount,
+      signalKey: confirmedCard.signalKey,
+      roundId: latestRound.id,
+    });
+  }
+  return sentCount > 0;
 }
 
 async function sendValidatorEntryTelegramNotification(
@@ -15980,7 +16086,7 @@ async function buildTelegramAutoV2Diagnostics(env: unknown) {
   };
 }
 
-async function handleTelegramV2DiagnosticsRequest(request: Request, url: URL, env: unknown, ctx?: unknown) {
+async function handleTelegramV2DiagnosticsRequest(request: Request, url: URL, env: unknown, _ctx?: unknown) {
   if (url.pathname !== "/telegram/v2/diagnostics") return null;
   if (request.method === "OPTIONS") return json(null, 204);
   if (request.method !== "GET" && request.method !== "POST") return json({ error: "Metodo nao permitido." }, 405);
@@ -16029,16 +16135,6 @@ async function handleTelegramV2DiagnosticsRequest(request: Request, url: URL, en
       diagnostics: refreshed,
     });
   }
-
-  runBackgroundTask(
-    ctx,
-    processValidatorLiveMonitoring(env, {
-      fast: true,
-      roundReceivedAtMs: Date.now(),
-      trigger: "/telegram/v2/diagnostics:background",
-    }),
-    "telegram v2 diagnostico background",
-  );
 
   return json({ ok: true, executed: false, diagnostics });
 }
