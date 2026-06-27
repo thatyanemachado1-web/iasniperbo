@@ -185,7 +185,7 @@ export class TelegramEngine {
       if (channelMatch) {
         if (!userId) return json({ error: "Missing user" }, 400, this.env);
         const channelId = decodeURIComponent(channelMatch[1] || "");
-        if (request.method === "DELETE") return this.deleteChannel(userId, channelId);
+        if (request.method === "DELETE") return this.deleteChannel(userId, channelId, await readJson(request));
         if (request.method === "PATCH") return this.patchChannel(userId, channelId, await readJson(request));
       }
 
@@ -408,18 +408,30 @@ export class TelegramEngine {
     return json({ channel: publicChannel(merged) }, 200, this.env);
   }
 
-  async deleteChannel(userId, channelId) {
+  async deleteChannel(userId, channelId, body = {}) {
     const channel = await this.getChannel(userId, channelId);
+    const chatId = String(channel?.chatId || body.chatId || "").trim();
+    const chatCode = normalizeChannelCode(chatId);
+    const rows = await this.state.storage.list({ prefix: `channel:${userId}:` });
+    let deleted = 0;
+    for (const stored of rows.values()) {
+      if (!stored || stored.userId !== userId) continue;
+      if (stored.id === channelId || (chatCode && stored.chatCode === chatCode)) {
+        await this.state.storage.delete(channelKey(userId, stored.id));
+        deleted += 1;
+      }
+    }
     await this.state.storage.delete(channelKey(userId, channelId));
-    if (channel?.chatId) {
-      await this.state.storage.put(deletedCodeKey(userId, channel.chatId), {
+    if (deleted === 0 && channel) deleted = 1;
+    if (chatId) {
+      await this.state.storage.put(deletedCodeKey(userId, chatId), {
         userId,
         channelId,
-        chatCode: normalizeChannelCode(channel.chatId),
+        chatCode,
         deletedAt: new Date().toISOString(),
       });
     }
-    return json({ ok: true, deleted: channel ? 1 : 0 }, 200, this.env);
+    return json({ ok: true, deleted }, 200, this.env);
   }
 
   async dispatchSignal(body) {
@@ -1097,7 +1109,8 @@ export class TelegramEngine {
     const allowed = [];
     for (const channel of channels) {
       const access = await this.userAccessState(channel.userId);
-      if (access.active) allowed.push(channel);
+      const deletedCodes = await this.deletedCodesForUser(channel.userId);
+      if (access.active && !deletedCodes.has(channel.chatCode)) allowed.push(channel);
     }
     return allowed;
   }
@@ -1224,7 +1237,10 @@ export class TelegramEngine {
   }
 
   async getChannel(userId, channelId) {
-    return await this.state.storage.get(channelKey(userId, channelId)) || null;
+    const channel = (await this.state.storage.get(channelKey(userId, channelId))) || null;
+    if (!channel) return null;
+    const deletedCodes = await this.deletedCodesForUser(userId);
+    return deletedCodes.has(channel.chatCode) ? null : channel;
   }
 
   async findUserChannelByChatId(userId, chatId) {
@@ -1237,7 +1253,12 @@ export class TelegramEngine {
     const code = normalizeChannelCode(chatId);
     if (!code) return null;
     const rows = await this.state.storage.list({ prefix: "channel:" });
-    return [...rows.values()].find((channel) => normalizeChannelCode(channel?.chatId) === code) || null;
+    for (const channel of rows.values()) {
+      if (normalizeChannelCode(channel?.chatId) !== code) continue;
+      const deletedCodes = await this.deletedCodesForUser(channel.userId);
+      if (!deletedCodes.has(code)) return channel;
+    }
+    return null;
   }
 
   async deletedCodesForUser(userId) {

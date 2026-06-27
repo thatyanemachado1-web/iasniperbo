@@ -6407,7 +6407,7 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
         const notificationChannelId = readString(notification, "channelId") || readString(notification, "channel_id");
         return !(notificationUserId === clientId && idsToDelete.has(notificationChannelId));
       });
-      await Promise.allSettled(deletedIds.map((id) => deleteCloudValidatorChannel(env, clientId, id)));
+      await Promise.allSettled(deletedIds.map((id) => deleteCloudValidatorChannel(env, clientId, id, current?.chatId || "")));
       await deleteValidatorChannelRows(env, clientId, deletedIds);
       await deleteValidatorChannelNotificationRows(env, clientId, deletedIds);
       await markValidatorChannelsDeleted(env, clientId, deletedIds, current?.chatId || "");
@@ -6618,7 +6618,7 @@ async function telegramServicePersistChannel(env: unknown, channel: ValidatorNot
     );
   }
   const persistedChannel = cloudResult.ok && cloudResult.channel ? cloudResult.channel : channel;
-  clearValidatorChannelDeletedLive(persistedChannel);
+  await clearValidatorChannelDeletedState(env, persistedChannel);
   liveValidatorChannels = upsertValidatorChannel(persistedChannel);
   await persistValidatorChannel(env, channel);
   await saveLiveState(env);
@@ -6636,8 +6636,8 @@ async function persistCloudValidatorChannel(env: unknown, channel: ValidatorNoti
   const botToken = decodeServerToken(channel.botTokenEncoded);
   const payload = cloudValidatorChannelPayload(channel, botToken);
   const cloudPath = `/validator/channels/${encodeURIComponent(channel.id)}`;
-  const existingCloud = isCloudValidatorTelegramChannel(channel) || !botToken;
-  const response = existingCloud
+  const shouldPatchCloud = isCloudValidatorTelegramChannel(channel) && !botToken;
+  const response = shouldPatchCloud
     ? await callCloudValidatorChannelEndpoint(env, clientId, cloudPath, payload, "PATCH")
     : await saveDirectChannelToCloudValidatorEngine(env, clientId, channel, payload, botToken);
 
@@ -6715,14 +6715,14 @@ function cloudValidatorChannelPayload(channel: ValidatorNotificationChannel, bot
   };
 }
 
-async function deleteCloudValidatorChannel(env: unknown, clientId: string, channelId: string) {
+async function deleteCloudValidatorChannel(env: unknown, clientId: string, channelId: string, chatId = "") {
   const normalizedChannelId = readString(channelId);
   if (!normalizedChannelId) return { ok: false as const, status: 400, error: "Canal Telegram obrigatorio." };
   return callCloudValidatorChannelEndpoint(
     env,
     clientId,
     `/validator/channels/${encodeURIComponent(normalizedChannelId)}`,
-    {},
+    { chatId: readString(chatId) },
     "DELETE",
   );
 }
