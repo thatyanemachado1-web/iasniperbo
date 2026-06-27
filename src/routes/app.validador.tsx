@@ -276,9 +276,7 @@ function NeuralValidatorPage() {
   });
   const [manualResult, setManualResult] = useState<ValidatorResult | null>(null);
   const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
-  const [channels, setChannels] = useState<ValidatorNotificationChannel[]>(() =>
-    markLocalFallbackChannels(readNotificationChannels()),
-  );
+  const [channels, setChannels] = useState<ValidatorNotificationChannel[]>([]);
   const [recentTelegramNotifications, setRecentTelegramNotifications] = useState<ValidatorTelegramNotification[]>([]);
   const [testingTelegramId, setTestingTelegramId] = useState("");
   const [savingChannel, setSavingChannel] = useState(false);
@@ -387,19 +385,18 @@ function NeuralValidatorPage() {
         setChannels(confirmedChannels);
       } catch (error) {
         if (cancelled) return;
-        confirmedChannels = markLocalFallbackChannels(readNotificationChannels());
         console.warn("[VALIDATOR_CHANNELS] load_failed_preserving_local", {
           error: error instanceof Error ? error.message : String(error),
-          localChannels: confirmedChannels.length,
         });
-        setChannels(confirmedChannels);
+        confirmedChannels = [];
+        setChannels([]);
       }
 
       try {
         const serverPatterns = await fetchServerValidatorPatterns();
         if (cancelled) return;
 
-        const syncedChannels = confirmedChannels ?? readNotificationChannels();
+        const syncedChannels = confirmedChannels ?? [];
         const deletedPatternIds = readDeletedValidatorPatternIds();
         const mergedPatterns = autoPrepareAdminTelegramDelivery(
           serverPatterns.filter((item) => !deletedPatternIds.has(item.id)),

@@ -6364,9 +6364,9 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
   if (channelMatch) {
     const channelId = decodeURIComponent(channelMatch[1] || "");
     const current = await findValidatorChannelForUser(env, clientId, channelId);
-    if (!current) return json({ error: "Canal nao encontrado." }, 404);
 
     if (request.method === "PATCH") {
+      if (!current) return json({ error: "Canal nao encontrado." }, 404);
       const body = readRecord(await request.json().catch(() => ({})));
       const next = normalizeServerNotificationChannel({ ...current, ...body, id: current.id }, clientId, current);
       if (!next) return json({ error: "Canal invalido." }, 400);
@@ -6375,14 +6375,51 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
     }
 
     if (request.method === "DELETE") {
+      const idsToDelete = new Set<string>([channelId]);
+      const channelCodeToDelete = current ? normalizeValidatorChannelCode(current.chatId) : "";
+      if (current) {
+        for (const relatedId of validatorChannelRelatedIds(liveValidatorChannels, current)) {
+          idsToDelete.add(relatedId);
+        }
+        for (const relatedId of await findStoredValidatorChannelRelatedIds(env, clientId, current)) {
+          idsToDelete.add(relatedId);
+        }
+      }
+      const deletedIds = [...idsToDelete].filter(Boolean);
       liveValidatorChannels = liveValidatorChannels.filter(
-        (channel) => !(channel.userId === clientId && channel.id === channelId),
+        (channel) =>
+          !(
+            channel.userId === clientId &&
+            (idsToDelete.has(channel.id) ||
+              (channelCodeToDelete && normalizeValidatorChannelCode(channel.chatId) === channelCodeToDelete))
+          ),
       );
-      await deleteValidatorChannelRows(env, clientId, [channelId]);
-      await deleteValidatorChannelNotificationRows(env, clientId, [channelId]);
-      await markValidatorChannelsDeleted(env, clientId, [channelId], current.chatId || "");
+      liveValidatorPatterns = liveValidatorPatterns.map((pattern) =>
+        pattern.userId === clientId && idsToDelete.has(pattern.telegramChannelId)
+          ? { ...pattern, telegramChannelId: "", updatedAt: new Date().toISOString() }
+          : pattern,
+      );
+      liveValidatorNotifications = liveValidatorNotifications.filter((notification) => {
+        const notificationUserId = normalizeValidatorUserId(
+          readString(notification, "userId") || readString(notification, "user_id"),
+        );
+        const notificationChannelId = readString(notification, "channelId") || readString(notification, "channel_id");
+        return !(notificationUserId === clientId && idsToDelete.has(notificationChannelId));
+      });
+      await Promise.allSettled(deletedIds.map((id) => deleteCloudValidatorChannel(env, clientId, id)));
+      await deleteValidatorChannelRows(env, clientId, deletedIds);
+      await deleteValidatorChannelNotificationRows(env, clientId, deletedIds);
+      await markValidatorChannelsDeleted(env, clientId, deletedIds, current?.chatId || "");
+      if (current?.chatId) {
+        await deleteValidatorChannelsByCode(env, clientId, current.chatId);
+      }
+      await Promise.all(
+        liveValidatorPatterns
+          .filter((pattern) => pattern.userId === clientId && pattern.telegramChannelId === "")
+          .map((pattern) => persistValidatorPattern(env, pattern)),
+      );
       await saveLiveState(env);
-      return json({ ok: true, deleted: 1 });
+      return json({ ok: true, deleted: deletedIds.length });
     }
   }
 
@@ -6674,6 +6711,18 @@ function cloudValidatorChannelPayload(channel: ValidatorNotificationChannel, bot
     lastTestedAt: readString(channel as unknown as Record<string, unknown>, "lastTestedAt"),
     lastTestMessageId: readTelegramChannelMessageId(channel),
   };
+}
+
+async function deleteCloudValidatorChannel(env: unknown, clientId: string, channelId: string) {
+  const normalizedChannelId = readString(channelId);
+  if (!normalizedChannelId) return { ok: false as const, status: 400, error: "Canal Telegram obrigatorio." };
+  return callCloudValidatorChannelEndpoint(
+    env,
+    clientId,
+    `/validator/channels/${encodeURIComponent(normalizedChannelId)}`,
+    {},
+    "DELETE",
+  );
 }
 
 async function testDirectValidatorChannel(request: Request, channel: ValidatorNotificationChannel) {
