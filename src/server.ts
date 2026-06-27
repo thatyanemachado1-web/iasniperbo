@@ -17007,8 +17007,9 @@ function isExpiredIso(value: string) {
   return expiration.getTime() < Date.now();
 }
 
-function readString(record: Record<string, unknown>, key: string) {
-  return String(record[key] || "").trim();
+function readString(record: Record<string, unknown> | unknown, key?: string) {
+  if (typeof key === "string") return String((record as Record<string, unknown>)?.[key] || "").trim();
+  return String(record || "").trim();
 }
 
 function errorMessage(error: unknown) {
