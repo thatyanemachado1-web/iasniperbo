@@ -55,6 +55,27 @@ function sideFromText(value: unknown): "B" | "P" | "T" | "" {
   return "";
 }
 
+function sideFromAnyValue(value: unknown): "B" | "P" | "T" | "" {
+  const direct = normalizeSide(value);
+  if (direct) return direct;
+  const text = sideFromText(value);
+  if (text) return text;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = sideFromAnyValue(item);
+      if (nested) return nested;
+    }
+    return "";
+  }
+  if (value && typeof value === "object") {
+    for (const nestedValue of Object.values(value as Record<string, unknown>)) {
+      const nested = sideFromAnyValue(nestedValue);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
 function normalizeText(value: unknown) {
   return String(value || "")
     .normalize("NFD")
@@ -94,10 +115,14 @@ function readPayingNumbersSideFromDashboard(dashboard: DashboardData) {
   const currentSignal = readRecord(dashboard.currentSignal as unknown);
   const fromReading = normalizeSide(reading?.direcao ?? reading?.origem ?? reading?.expectedSide);
   if (fromReading) return fromReading;
+  const fromReadingAny = sideFromAnyValue(reading);
+  if (fromReadingAny) return fromReadingAny;
   const fromReadingStatus = sideFromText(reading?.paganteStatus || reading?.paganteAlert);
   if (fromReadingStatus) return fromReadingStatus;
   const fromEntryState = normalizeSide(entryState.expectedSide ?? entryState.expected_side);
   if (fromEntryState) return fromEntryState;
+  const fromEntryStateAny = sideFromAnyValue(entryState);
+  if (fromEntryStateAny) return fromEntryStateAny;
   // Prefer explicit side fields first; many signal IDs don't contain PLAYER/BANKER text.
   const fromCurrentSignalSide = normalizeSide(currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao);
   if (fromCurrentSignalSide) return fromCurrentSignalSide;
@@ -111,6 +136,8 @@ function readPayingNumbersSideFromDashboard(dashboard: DashboardData) {
     const parsed = sideFromText(candidate);
     if (parsed) return parsed;
   }
+  const fromCurrentSignalAny = sideFromAnyValue(currentSignal);
+  if (fromCurrentSignalAny) return fromCurrentSignalAny;
   const signalStatus = readString(currentSignal, "status").toLowerCase();
   if (signalStatus === "pending" || signalStatus === "g1" || signalStatus === "active" || signalStatus === "confirmed") {
     return normalizeSide(currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao);
@@ -127,9 +154,13 @@ function readPayingNumbersActiveMode(dashboard: DashboardData) {
   if (isConfirmedStatusText(reading?.paganteStatus || reading?.paganteAlert)) return "ACTIVE";
   if (Object.keys(entryState).length && readString(entryState, "status")) return "ACTIVE";
   const signalStatus = readString(currentSignal, "status").toLowerCase();
+  const currentSignalSide =
+    normalizeSide(currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao) ||
+    sideFromAnyValue(currentSignal);
+  const inferredEntrySide = currentSignalSide || sideFromAnyValue(reading) || sideFromAnyValue(entryState);
   if (
     (signalStatus === "pending" || signalStatus === "g1" || signalStatus === "active" || signalStatus === "confirmed") &&
-    normalizeSide(currentSignal.side)
+    inferredEntrySide
   ) {
     return "ACTIVE";
   }

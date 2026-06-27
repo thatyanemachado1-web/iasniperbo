@@ -121,6 +121,22 @@ assert.equal(
   true,
 );
 
+assert.equal(
+  detectPayingNumbersConfirmedCard(
+    {
+      rounds: [latestRound],
+      neuralReading: {
+        mode: "SCANNING",
+        numero: 6,
+        indicator: { label: "Entrada confirmada PLAYER" },
+      },
+      currentSignal: { id: "signal-991", status: "g1" },
+    },
+    latestRound,
+  ).confirmed,
+  true,
+);
+
 const playerFromVisualCard = detectPayingNumbersConfirmedCard(
   {
     rounds: [latestRound],
