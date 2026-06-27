@@ -9673,6 +9673,7 @@ type ValidatorMonitorOptions = {
   v2OnlyAllowedSignals?: Set<string>;
   v2OnlyAllowedModules?: Set<ValidatorTelegramModuleKey>;
   onTaskBuilt?: (moduleKey: ValidatorTelegramModuleKey) => void;
+  onTaskResult?: (moduleKey: ValidatorTelegramModuleKey, sent: boolean) => void;
 };
 
 function logTelegramAutoV2Event(event: string, payload: Record<string, unknown>) {
@@ -9982,7 +9983,6 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
   }
   if (!freshCards.length) return false;
   for (const { card, signalId } of freshCards) {
-    markTelegramAutoV2SignalProcessed(signalId);
     logTelegramAutoV2Event("new_confirmed_card_detected", {
       trigger: options.trigger || "unknown",
       card_source: readString(readRecord(card.meta), "card_source"),
@@ -10011,6 +10011,7 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
   );
 
   const taskCountsByModule = new Map<ValidatorTelegramModuleKey, number>();
+  const successfulSendsByModule = new Map<ValidatorTelegramModuleKey, number>();
   const entryChannelKeys = new Set<string>();
   const allowedSignalKeys = new Set(freshCards.map(({ card }) => card.signalKey));
   const allowedModules = new Set(freshCards.map(({ card }) => card.moduleKey as ValidatorTelegramModuleKey));
@@ -10024,6 +10025,10 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
       v2OnlyAllowedModules: allowedModules,
       onTaskBuilt: (moduleKey) => {
         taskCountsByModule.set(moduleKey, (taskCountsByModule.get(moduleKey) || 0) + 1);
+      },
+      onTaskResult: (moduleKey, sent) => {
+        if (!sent) return;
+        successfulSendsByModule.set(moduleKey, (successfulSendsByModule.get(moduleKey) || 0) + 1);
       },
     },
     {},
@@ -10041,12 +10046,18 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
 
   const results = await runLimitedValidatorTelegramSends(entrySendTasks);
   const sentCount = results.filter(Boolean).length;
+  for (const { card, signalId } of freshCards) {
+    if ((successfulSendsByModule.get(card.moduleKey as ValidatorTelegramModuleKey) || 0) > 0) {
+      markTelegramAutoV2SignalProcessed(signalId);
+    }
+  }
   if (sentCount > 0) {
     logTelegramAutoV2Event("telegram_sent", {
       trigger: options.trigger || "unknown",
       modules: [...allowedModules],
       sentCount,
       signalKeys: [...allowedSignalKeys],
+      sent_by_module: Object.fromEntries(successfulSendsByModule.entries()),
       roundId: latestRound.id,
     });
   }
@@ -10134,7 +10145,6 @@ function buildValidatorModuleTelegramSendTasks(
   _dispatcherOptions: { suppressInitialOfficialSignals?: boolean } = {},
 ) {
   const allowedModules = options.v2OnlyAllowedModules || null;
-  const allowedSignals = options.v2OnlyAllowedSignals || null;
   const confirmedCards = new Map(
     detectGlobalConfirmedCards(liveDashboardData, latestRound).map((card) => [card.moduleKey, card]),
   );
@@ -10153,7 +10163,6 @@ function buildValidatorModuleTelegramSendTasks(
       if (!confirmedCards.has(moduleKey)) continue;
       const signal = buildValidatorChannelModuleSignal(channel, moduleKey, latestRound);
       if (!signal) continue;
-      if (allowedSignals && !allowedSignals.has(signal.signalKey)) continue;
       if (telegramAutoV2DedupeBlocksSend(signal.notificationKey)) {
         logTelegramAutoV2Event("dedupe bloqueou envio", {
           module_key: moduleKey,
@@ -10168,7 +10177,11 @@ function buildValidatorModuleTelegramSendTasks(
         continue;
       }
       entryChannelKeys.add(validatorChannelKey(channel));
-      tasks.push(() => sendValidatorModuleTelegramNotification(env, signal, options));
+      tasks.push(async () => {
+        const sent = await sendValidatorModuleTelegramNotification(env, signal, options);
+        options.onTaskResult?.(moduleKey, sent);
+        return sent;
+      });
       options.onTaskBuilt?.(moduleKey);
     }
   }
@@ -10418,7 +10431,11 @@ function buildPayingNumbersTelegramSendTasks(
       }),
     );
     entryChannelKeys.add(validatorChannelKey(channel));
-    tasks.push(() => sendValidatorModuleTelegramNotification(env, signal, options));
+    tasks.push(async () => {
+      const sent = await sendValidatorModuleTelegramNotification(env, signal, options);
+      options.onTaskResult?.("paying_numbers", sent);
+      return sent;
+    });
     options.onTaskBuilt?.("paying_numbers");
   }
   return tasks;
