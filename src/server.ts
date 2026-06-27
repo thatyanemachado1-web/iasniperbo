@@ -7430,17 +7430,20 @@ async function loadValidatorChannelsForUser(env: unknown, userId: string) {
   const normalizedUserId = normalizeValidatorUserId(userId);
   if (!normalizedUserId) return [] as ValidatorNotificationChannel[];
 
-  const hydratedChannels = await withTimeout(
-    fetchStoredValidatorChannels(env, normalizedUserId),
-    LIVE_STATE_IO_TIMEOUT_MS,
-    "carregar canais do Validador",
-    [] as ValidatorNotificationChannel[],
-  );
+  const [hydratedChannels, deletedRefs] = await Promise.all([
+    withTimeout(
+      fetchStoredValidatorChannels(env, normalizedUserId),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "carregar canais do Validador",
+      [] as ValidatorNotificationChannel[],
+    ),
+    fetchValidatorChannelDeletedRefs(env, normalizedUserId),
+  ]);
 
   const userChannels = mergeValidatorChannelList(
     hydratedChannels,
     liveValidatorChannels.filter((channel) => channel.userId === normalizedUserId),
-  );
+  ).filter((channel) => !isValidatorChannelDeleted(channel, deletedRefs));
   liveValidatorChannels = [
     ...userChannels,
     ...liveValidatorChannels.filter((channel) => channel.userId !== normalizedUserId),
@@ -8583,21 +8586,23 @@ async function fetchStoredActiveValidatorPatterns(env: unknown) {
 }
 
 async function fetchStoredValidatorChannel(env: unknown, userId: string, channelId: string) {
-  const cloudChannel = (await fetchCloudValidatorChannels(env, userId)).find((channel) => channel.id === channelId);
-  if (cloudChannel) return cloudChannel;
-  if (!getSupabasePersistenceConfig(env)) return null;
   const normalizedUserId = normalizeValidatorUserId(userId);
   const normalizedChannelId = readString(channelId);
   if (!normalizedUserId || !normalizedChannelId) return null;
+  const deletedRefs = await fetchValidatorChannelDeletedRefs(env, normalizedUserId);
+  const cloudChannel = (await fetchCloudValidatorChannels(env, normalizedUserId)).find(
+    (channel) => channel.id === normalizedChannelId,
+  );
+  if (cloudChannel && !isValidatorChannelDeleted(cloudChannel, deletedRefs)) return cloudChannel;
+  if (!getSupabasePersistenceConfig(env)) return null;
 
-  const [rows, stateChannel, deletedRefs] = await Promise.all([
+  const [rows, stateChannel] = await Promise.all([
     fetchSupabaseRows(
       env,
       VALIDATOR_CHANNELS_TABLE,
       `select=*&user_id=eq.${encodeURIComponent(normalizedUserId)}&id=eq.${encodeURIComponent(normalizedChannelId)}&limit=1`,
     ),
     fetchValidatorChannelStateChannel(env, normalizedUserId, normalizedChannelId),
-    fetchValidatorChannelDeletedRefs(env, normalizedUserId),
   ]);
   const dedicatedChannel =
     rows.map(validatorChannelFromRow).find((channel): channel is ValidatorNotificationChannel => Boolean(channel)) ||
@@ -8610,22 +8615,24 @@ async function fetchStoredValidatorChannel(env: unknown, userId: string, channel
 }
 
 async function fetchStoredValidatorChannels(env: unknown, userId: string) {
-  const cloudChannels = await fetchCloudValidatorChannels(env, userId);
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  if (!normalizedUserId) return [];
+  const cloudChannels = await fetchCloudValidatorChannels(env, normalizedUserId);
   if (!getSupabasePersistenceConfig(env)) return cloudChannels;
   const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
       VALIDATOR_CHANNELS_TABLE,
-      `select=*&user_id=eq.${encodeURIComponent(userId)}&order=updated_at.desc&limit=1000`,
+      `select=*&user_id=eq.${encodeURIComponent(normalizedUserId)}&order=updated_at.desc&limit=1000`,
     ),
-    fetchValidatorChannelStateChannels(env, userId),
-    fetchValidatorChannelDeletedIds(env, userId),
+    fetchValidatorChannelStateChannels(env, normalizedUserId),
+    fetchValidatorChannelDeletedRefs(env, normalizedUserId),
   ]);
   const storedChannels = rows
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
   return mergeValidatorChannelList(cloudChannels, storedChannels, stateChannels).filter(
-    (channel) => !isLocallyDeletedValidatorChannel(channel, deletedRefs),
+    (channel) => !isValidatorChannelDeleted(channel, deletedRefs),
   );
 }
 
@@ -8679,7 +8686,7 @@ async function fetchStoredActiveValidatorChannels(env: unknown) {
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
   return mergeValidatorChannelList(cloudChannels, storedChannels, stateChannels, liveValidatorChannels).filter(
-    (channel) => channel.isActive && !isLocallyDeletedValidatorChannel(channel, deletedRefs),
+    (channel) => channel.isActive && !isValidatorChannelDeleted(channel, deletedRefs),
   );
 }
 
