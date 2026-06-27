@@ -6564,10 +6564,112 @@ async function telegramServiceSendValidatorSignal(
 }
 
 async function telegramServicePersistChannel(env: unknown, channel: ValidatorNotificationChannel) {
-  liveValidatorChannels = upsertValidatorChannel(channel);
+  const cloudResult = await persistCloudValidatorChannel(env, channel);
+  if (cloudResult.configured && !cloudResult.ok) {
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_SERVICE] cloud_persist_failed",
+        user: maskTelemetryUserId(channel.userId),
+        channelId: channel.id,
+        error: cloudResult.error,
+      }),
+    );
+  }
+  const persistedChannel = cloudResult.ok && cloudResult.channel ? cloudResult.channel : channel;
+  liveValidatorChannels = upsertValidatorChannel(persistedChannel);
   await persistValidatorChannel(env, channel);
   await saveLiveState(env);
-  return channel;
+  return persistedChannel;
+}
+
+async function persistCloudValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
+  const config = getTelegramEngineConfig(env);
+  if (!config) return { ok: false as const, configured: false as const, status: 503, error: "" };
+  const clientId = normalizeValidatorUserId(channel.userId);
+  if (!clientId || !channel.id) {
+    return { ok: false as const, configured: true as const, status: 400, error: "Canal sem usuario ou ID." };
+  }
+
+  const botToken = decodeServerToken(channel.botTokenEncoded);
+  const payload = cloudValidatorChannelPayload(channel, botToken);
+  const cloudPath = `/validator/channels/${encodeURIComponent(channel.id)}`;
+  const existingCloud = isCloudValidatorTelegramChannel(channel) || !botToken;
+  const response = existingCloud
+    ? await callCloudValidatorChannelEndpoint(env, clientId, cloudPath, payload, "PATCH")
+    : await saveDirectChannelToCloudValidatorEngine(env, clientId, channel, payload, botToken);
+
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      configured: true as const,
+      status: response.status,
+      error: response.error,
+    };
+  }
+
+  const cloudChannel =
+    normalizeCloudValidatorChannel(readRecord(response.data).channel, clientId) ||
+    normalizeCloudValidatorChannel(payload, clientId);
+  return {
+    ok: true as const,
+    configured: true as const,
+    status: response.status,
+    channel: cloudChannel || channel,
+  };
+}
+
+async function saveDirectChannelToCloudValidatorEngine(
+  env: unknown,
+  clientId: string,
+  channel: ValidatorNotificationChannel,
+  payload: Record<string, unknown>,
+  botToken: string,
+) {
+  if (!botToken || !channel.chatId) {
+    return { ok: false as const, status: 400, error: "Bot Token e Chat ID sao obrigatorios." };
+  }
+  const validation = await callCloudValidatorChannelEndpoint(
+    env,
+    clientId,
+    "/validator/channels/validate",
+    {
+      id: channel.id,
+      channelId: channel.id,
+      botToken,
+      chatId: channel.chatId,
+    },
+    "POST",
+  );
+  if (!validation.ok) return validation;
+  return callCloudValidatorChannelEndpoint(
+    env,
+    clientId,
+    "/validator/channels",
+    {
+      channel: payload,
+      validationCode: readString(readRecord(validation.data).validationCode),
+    },
+    "POST",
+  );
+}
+
+function cloudValidatorChannelPayload(channel: ValidatorNotificationChannel, botToken = "") {
+  return {
+    id: channel.id,
+    userId: channel.userId,
+    name: channel.name,
+    ...(botToken ? { botToken } : {}),
+    chatId: channel.chatId,
+    buttonLink: channel.buttonLink,
+    isActive: channel.isActive !== false,
+    analyzingEnabled: Boolean(channel.analyzingEnabled),
+    analyzingCooldownRounds: Math.max(1, Math.floor(Number(channel.analyzingCooldownRounds) || 3)),
+    templates: channel.templates,
+    signalModules: validatorChannelSignalModules(channel),
+    connectionStatus: readString(channel as unknown as Record<string, unknown>, "connectionStatus"),
+    lastTestedAt: readString(channel as unknown as Record<string, unknown>, "lastTestedAt"),
+    lastTestMessageId: readTelegramChannelMessageId(channel),
+  };
 }
 
 async function testDirectValidatorChannel(request: Request, channel: ValidatorNotificationChannel) {
@@ -6610,11 +6712,12 @@ async function callCloudValidatorChannelEndpoint(
   clientId: string,
   path: string,
   payload: Record<string, unknown>,
+  method = "POST",
 ) {
   const config = getTelegramEngineConfig(env);
   if (!config) return { ok: false as const, status: 503, error: "Cloudflare Telegram Engine nao configurado." };
   const response = await fetch(`${config.url}${path}`, {
-    method: "POST",
+    method,
     cache: "no-store",
     headers: telegramEngineHeaders(config.secret, normalizeValidatorUserId(clientId), true),
     body: JSON.stringify(payload),
@@ -6632,6 +6735,7 @@ async function callCloudValidatorChannelEndpoint(
     ok: true as const,
     status: response.status,
     messageId: readTelegramMessageId(data),
+    data,
   };
 }
 
@@ -7258,14 +7362,12 @@ async function loadValidatorChannelsForUser(env: unknown, userId: string) {
   const normalizedUserId = normalizeValidatorUserId(userId);
   if (!normalizedUserId) return [] as ValidatorNotificationChannel[];
 
-  const hydratedChannels = getSupabasePersistenceConfig(env)
-    ? await withTimeout(
-        fetchStoredValidatorChannels(env, normalizedUserId),
-        LIVE_STATE_IO_TIMEOUT_MS,
-        "carregar canais do Validador",
-        [] as ValidatorNotificationChannel[],
-      )
-    : [];
+  const hydratedChannels = await withTimeout(
+    fetchStoredValidatorChannels(env, normalizedUserId),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar canais do Validador",
+    [] as ValidatorNotificationChannel[],
+  );
 
   const userChannels = mergeValidatorChannelList(
     hydratedChannels,
