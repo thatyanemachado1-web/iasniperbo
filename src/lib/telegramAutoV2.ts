@@ -230,8 +230,8 @@ export function detectAiPatternsConfirmedCard(
   const alert =
     entryAlerts.find((item) => {
       const kind = readString(item, "kind").toLowerCase();
-      const title = readString(item, "title").toLowerCase();
-      return kind === "validated" || title.includes("validado") || title.includes("confirmado");
+      const title = readString(item, "title");
+      return kind === "validated" || isConfirmedStatusText(title);
     }) || null;
   const round = latestRoundFromDashboard(dashboard, latestRound);
   const roundId = Number(round?.id) || 0;
@@ -262,7 +262,11 @@ export function detectAiPatternsConfirmedCard(
   if (!sequence.length) {
     return { moduleKey: "ai_patterns", confirmed: false, reason: "missing_pattern_sequence", signalKey, roundId };
   }
-  if (!isConfirmedStatusText(strategy.status || readString(alert, "title"))) {
+  const kind = readString(alert, "kind").toLowerCase();
+  const title = readString(alert, "title");
+  const confirmedByAlert = kind === "validated" || isConfirmedStatusText(title);
+  const confirmedByStrategy = isConfirmedStatusText(strategy.status);
+  if (!confirmedByAlert && !confirmedByStrategy) {
     return { moduleKey: "ai_patterns", confirmed: false, reason: "entry_not_confirmed", signalKey, roundId };
   }
 

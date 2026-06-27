@@ -70,6 +70,33 @@ assert.equal(detectAiPatternsConfirmedCard(aiDashboard, latestRound).confirmed, 
 assert.equal(detectSurfConfirmedCard(surfDashboard, latestRound).confirmed, true);
 assert.equal(detectTiesConfirmedCard(tieDashboard, latestRound).confirmed, true);
 
+assert.equal(
+  detectAiPatternsConfirmedCard(
+    {
+      rounds: [latestRound],
+      patternMinerSnapshot: {
+        entryAlerts: [
+          {
+            id: "alert-hot-confirmed",
+            kind: "hot",
+            title: "Padrão confirmado",
+            strategy: {
+              id: "strategy-hot",
+              status: "quente",
+              expectedResult: "P",
+              sequence: ["B", "P", "B"],
+              assertiveness: 84,
+            },
+            matchedRounds: [{ id: "991" }],
+          },
+        ],
+      },
+    },
+    latestRound,
+  ).confirmed,
+  true,
+);
+
 const globals = detectGlobalConfirmedCards(
   {
     ...activePayingDashboard,
