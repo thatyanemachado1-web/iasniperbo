@@ -3246,7 +3246,11 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       ),
       "persistir rodada e monitorar sinais",
     );
-    if (url.pathname === "/dashboard/publish" || url.pathname === "/dashboard/signal") {
+    const shouldRunImmediateMonitor =
+      url.pathname === "/dashboard/publish" ||
+      url.pathname === "/dashboard/signal" ||
+      (url.pathname === "/dashboard" && telegramV2OnlyEnabled(env));
+    if (shouldRunImmediateMonitor) {
       const saveStatus = await saveStateTask;
       const monitorStatus = await withTimeout(
         processValidatorLiveMonitoring(env, monitorOptions),
