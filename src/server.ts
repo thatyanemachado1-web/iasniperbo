@@ -10226,16 +10226,23 @@ async function sendValidatorModuleTelegramNotification(
     sentAt: signal.detectedAt,
     updatedAt: reservedAt,
   };
-  const reservationResult = cloudChannel
-    ? {
-        ok: true as const,
-        reserved: true,
-        duplicate: false,
-        status: 200,
-        action: "delegated_to_cloudflare",
-        error: "",
-      }
-    : await reserveValidatorNotificationDedupe(env, reservation);
+  const dedupeConfigured = Boolean(getSupabasePersistenceConfig(env));
+  const reservationResult =
+    cloudChannel && !dedupeConfigured
+      ? (() => {
+          const alreadyKnown = liveValidatorNotifications.some(
+            (item) => readString(item, "id") === signal.notificationKey,
+          );
+          return {
+            ok: true as const,
+            reserved: !alreadyKnown,
+            duplicate: alreadyKnown,
+            status: 200,
+            action: "in_memory_dedupe",
+            error: "",
+          };
+        })()
+      : await reserveValidatorNotificationDedupe(env, reservation);
   if (!reservationResult.ok || !reservationResult.reserved) {
     const reason = reservationResult.duplicate ? "persistent_duplicate" : "dedupe_persistence_unavailable";
     console.warn(
@@ -10270,12 +10277,10 @@ async function sendValidatorModuleTelegramNotification(
     }
     return false;
   }
-  if (!cloudChannel) {
-    liveValidatorNotifications = [
-      reservation,
-      ...liveValidatorNotifications.filter((item) => readString(item, "id") !== signal.notificationKey),
-    ].slice(0, 1000);
-  }
+  liveValidatorNotifications = [
+    reservation,
+    ...liveValidatorNotifications.filter((item) => readString(item, "id") !== signal.notificationKey),
+  ].slice(0, 1000);
   console.info(
     JSON.stringify({
       event: "[TELEGRAM_AUTO] enviando",
