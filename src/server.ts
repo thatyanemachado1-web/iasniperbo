@@ -8557,7 +8557,7 @@ async function fetchStoredValidatorChannels(env: unknown, userId: string) {
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
   return mergeValidatorChannelList(cloudChannels, storedChannels, stateChannels).filter(
-    (channel) => !isValidatorChannelDeleted(channel, deletedRefs),
+    (channel) => !isLocallyDeletedValidatorChannel(channel, deletedRefs),
   );
 }
 
@@ -8611,7 +8611,7 @@ async function fetchStoredActiveValidatorChannels(env: unknown) {
     .map(validatorChannelFromRow)
     .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
   return mergeValidatorChannelList(cloudChannels, storedChannels, stateChannels, liveValidatorChannels).filter(
-    (channel) => channel.isActive && !isValidatorChannelDeleted(channel, deletedRefs),
+    (channel) => channel.isActive && !isLocallyDeletedValidatorChannel(channel, deletedRefs),
   );
 }
 
@@ -8884,6 +8884,19 @@ function isValidatorChannelDeleted(
     (idDeletedAt && (!channelTime || channelTime <= idDeletedAt)) ||
     (codeDeletedAt && (!channelTime || channelTime <= codeDeletedAt)),
   );
+}
+
+function isLocallyDeletedValidatorChannel(
+  channel: ValidatorNotificationChannel,
+  deletedRefs: {
+    ids: Set<string>;
+    codes: Set<string>;
+    idTimes?: Map<string, number>;
+    codeTimes?: Map<string, number>;
+  },
+) {
+  if (isCloudValidatorTelegramChannel(channel)) return false;
+  return isValidatorChannelDeleted(channel, deletedRefs);
 }
 
 function validatorChannelStateId(userId: string, channelId: string) {
