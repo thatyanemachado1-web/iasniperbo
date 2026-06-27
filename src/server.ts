@@ -8370,10 +8370,13 @@ function mergeValidatorChannelList(...lists: ValidatorNotificationChannel[][]) {
       continue;
     }
 
+    const channelIsCloud = isCloudValidatorTelegramChannel(channel);
+    const existingIsCloud = isCloudValidatorTelegramChannel(existing);
     const channelIsNewer =
       stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>) >=
       stateEntityUpdatedAtMs(existing as unknown as Record<string, unknown>);
-    const merged = channelIsNewer
+    const preferIncoming = channelIsCloud || (!existingIsCloud && channelIsNewer);
+    const merged = preferIncoming
       ? mergeStateEntityRecord(
           existing as unknown as Record<string, unknown>,
           channel as unknown as Record<string, unknown>,
