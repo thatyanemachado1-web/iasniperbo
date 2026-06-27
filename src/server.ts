@@ -511,6 +511,7 @@ let liveValidatorPatterns: SavedValidatorPattern[] = [];
 let liveValidatorChannels: ValidatorNotificationChannel[] = [];
 let liveValidatorNotifications: Array<Record<string, unknown>> = [];
 let liveValidatorPatternDeletedRefs: Array<Record<string, unknown>> = [];
+let liveValidatorChannelDeletedRefs: Array<Record<string, unknown>> = [];
 let liveNeuralCalendarDailyStats: NeuralCalendarDailyStat[] = [];
 let liveNeuralCalendarHourlyStats: NeuralCalendarHourlyStat[] = [];
 let liveNeuralCalendarCountedRoundKeys: Record<string, true> = {};
@@ -6617,6 +6618,7 @@ async function telegramServicePersistChannel(env: unknown, channel: ValidatorNot
     );
   }
   const persistedChannel = cloudResult.ok && cloudResult.channel ? cloudResult.channel : channel;
+  clearValidatorChannelDeletedLive(persistedChannel);
   liveValidatorChannels = upsertValidatorChannel(persistedChannel);
   await persistValidatorChannel(env, channel);
   await saveLiveState(env);
@@ -8368,6 +8370,110 @@ function clearValidatorPatternDeleted(userId: string, patternId: string) {
   });
 }
 
+function normalizeValidatorChannelDeletedRefs(value: unknown) {
+  const refs = Array.isArray(value) ? value : [];
+  const byKey = new Map<string, Record<string, unknown>>();
+  for (const row of refs.map(readRecord)) {
+    const userId = normalizeValidatorUserId(readString(row, "userId") || readString(row, "user_id"));
+    const channelId = readString(row, "channelId") || readString(row, "channel_id") || readString(row, "id");
+    const chatId = readString(row, "chatId") || readString(row, "chat_id");
+    const code = normalizeValidatorChannelCode(readString(row, "code") || chatId);
+    if (!userId || (!channelId && !code)) continue;
+    const deletedAt = readString(row, "deletedAt") || readString(row, "deleted_at") || new Date().toISOString();
+    const key = `${userId}:${channelId}:${code}`;
+    const current = byKey.get(key);
+    const deletedAtMs = Date.parse(deletedAt);
+    const currentDeletedAtMs = Date.parse(readString(current || {}, "deletedAt"));
+    if (!current || !Number.isFinite(currentDeletedAtMs) || deletedAtMs >= currentDeletedAtMs) {
+      byKey.set(key, {
+        type: "validator_channel_deleted",
+        userId,
+        channelId,
+        chatId,
+        code,
+        deletedAt,
+      });
+    }
+  }
+  return [...byKey.values()].sort(
+    (left, right) => Date.parse(readString(right, "deletedAt")) - Date.parse(readString(left, "deletedAt")),
+  );
+}
+
+function mergeValidatorChannelDeletedRefs(left: unknown, right: unknown) {
+  return normalizeValidatorChannelDeletedRefs([
+    ...normalizeValidatorChannelDeletedRefs(left),
+    ...normalizeValidatorChannelDeletedRefs(right),
+  ]).slice(0, 2000);
+}
+
+function createValidatorChannelDeletedRefLookup(value: unknown, userId?: string) {
+  const ids = new Set<string>();
+  const codes = new Set<string>();
+  const idTimes = new Map<string, number>();
+  const codeTimes = new Map<string, number>();
+  const normalizedUserId = normalizeValidatorUserId(userId || "");
+  for (const row of normalizeValidatorChannelDeletedRefs(value)) {
+    const rowUserId = normalizeValidatorUserId(readString(row, "userId") || readString(row, "user_id"));
+    if (normalizedUserId && rowUserId !== normalizedUserId) continue;
+    const channelId = readString(row, "channelId") || readString(row, "channel_id") || readString(row, "id");
+    const code = normalizeValidatorChannelCode(readString(row, "code") || readString(row, "chatId"));
+    const deletedAt = Date.parse(readString(row, "deletedAt") || readString(row, "deleted_at") || "");
+    const deletedAtMs = Number.isFinite(deletedAt) ? deletedAt : Date.now();
+    if (channelId) {
+      ids.add(channelId);
+      idTimes.set(channelId, Math.max(idTimes.get(channelId) || 0, deletedAtMs));
+    }
+    if (code) {
+      codes.add(code);
+      codeTimes.set(code, Math.max(codeTimes.get(code) || 0, deletedAtMs));
+    }
+  }
+  return { ids, codes, idTimes, codeTimes };
+}
+
+function markValidatorChannelDeletedLive(userId: string, channelIds: string[], chatId: string) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  const ids = [...new Set(channelIds.map(readString).filter(Boolean))];
+  const normalizedCode = normalizeValidatorChannelCode(chatId);
+  if (!normalizedUserId || (!ids.length && !normalizedCode)) return false;
+  const now = new Date().toISOString();
+  const rows = [
+    ...ids.map((channelId) => ({
+      type: "validator_channel_deleted",
+      userId: normalizedUserId,
+      channelId,
+      chatId: readString(chatId),
+      code: normalizedCode,
+      deletedAt: now,
+    })),
+    normalizedCode
+      ? {
+          type: "validator_channel_deleted",
+          userId: normalizedUserId,
+          chatId: readString(chatId),
+          code: normalizedCode,
+          deletedAt: now,
+        }
+      : null,
+  ].filter(Boolean);
+  liveValidatorChannelDeletedRefs = mergeValidatorChannelDeletedRefs(liveValidatorChannelDeletedRefs, rows);
+  return true;
+}
+
+function clearValidatorChannelDeletedLive(channel: ValidatorNotificationChannel) {
+  const userId = normalizeValidatorUserId(channel.userId);
+  const channelId = readString(channel.id);
+  const code = normalizeValidatorChannelCode(channel.chatId);
+  if (!userId || (!channelId && !code)) return;
+  liveValidatorChannelDeletedRefs = liveValidatorChannelDeletedRefs.filter((row) => {
+    const rowUserId = normalizeValidatorUserId(readString(row, "userId") || readString(row, "user_id"));
+    const rowChannelId = readString(row, "channelId") || readString(row, "channel_id") || readString(row, "id");
+    const rowCode = normalizeValidatorChannelCode(readString(row, "code") || readString(row, "chatId"));
+    return !(rowUserId === userId && ((channelId && rowChannelId === channelId) || (code && rowCode === code)));
+  });
+}
+
 async function markValidatorPatternDeletedDurable(env: unknown, userId: string, patternId: string) {
   if (!getSupabasePersistenceConfig(env)) return false;
   const normalizedUserId = normalizeValidatorUserId(userId);
@@ -8618,7 +8724,10 @@ async function fetchStoredValidatorChannels(env: unknown, userId: string) {
   const normalizedUserId = normalizeValidatorUserId(userId);
   if (!normalizedUserId) return [];
   const cloudChannels = await fetchCloudValidatorChannels(env, normalizedUserId);
-  if (!getSupabasePersistenceConfig(env)) return cloudChannels;
+  const liveDeletedRefs = await fetchValidatorChannelDeletedRefs(env, normalizedUserId);
+  if (!getSupabasePersistenceConfig(env)) {
+    return cloudChannels.filter((channel) => !isValidatorChannelDeleted(channel, liveDeletedRefs));
+  }
   const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(
       env,
@@ -8676,7 +8785,10 @@ async function findStoredValidatorChannelRelatedIds(
 
 async function fetchStoredActiveValidatorChannels(env: unknown) {
   const cloudChannels = await fetchCloudValidatorChannels(env);
-  if (!getSupabasePersistenceConfig(env)) return cloudChannels;
+  const liveDeletedRefs = await fetchValidatorChannelDeletedRefs(env);
+  if (!getSupabasePersistenceConfig(env)) {
+    return cloudChannels.filter((channel) => channel.isActive && !isValidatorChannelDeleted(channel, liveDeletedRefs));
+  }
   const [rows, stateChannels, deletedRefs] = await Promise.all([
     fetchSupabaseRows(env, VALIDATOR_CHANNELS_TABLE, "select=*&is_active=eq.true&order=updated_at.desc&limit=1000"),
     fetchValidatorChannelStateChannels(env),
@@ -8824,7 +8936,8 @@ async function deleteValidatorChannelState(env: unknown, userId: string, channel
 }
 
 async function clearValidatorChannelDeletedState(env: unknown, channel: ValidatorNotificationChannel) {
-  if (!getSupabasePersistenceConfig(env)) return false;
+  clearValidatorChannelDeletedLive(channel);
+  if (!getSupabasePersistenceConfig(env)) return true;
   const ids = [
     validatorChannelDeletedStateId(channel.userId, channel.id),
     validatorChannelDeletedCodeStateId(channel.userId, channel.chatId),
@@ -8837,7 +8950,8 @@ async function clearValidatorChannelDeletedState(env: unknown, channel: Validato
 }
 
 async function markValidatorChannelsDeleted(env: unknown, userId: string, channelIds: string[], chatId: string) {
-  if (!getSupabasePersistenceConfig(env)) return false;
+  const liveMarked = markValidatorChannelDeletedLive(userId, channelIds, chatId);
+  if (!getSupabasePersistenceConfig(env)) return liveMarked;
   const normalizedUserId = normalizeValidatorUserId(userId);
   const ids = [...new Set(channelIds.map(readString).filter(Boolean))];
   const normalizedCode = normalizeValidatorChannelCode(chatId);
@@ -8864,7 +8978,7 @@ async function markValidatorChannelsDeleted(env: unknown, userId: string, channe
         })
       : Promise.resolve(false),
   ]);
-  return results.some((result) => result.status === "fulfilled" && result.value);
+  return liveMarked || results.some((result) => result.status === "fulfilled" && result.value);
 }
 
 async function fetchValidatorChannelStateChannels(env: unknown, userId?: string) {
@@ -8901,11 +9015,8 @@ async function fetchValidatorChannelDeletedIds(env: unknown, userId?: string) {
 }
 
 async function fetchValidatorChannelDeletedRefs(env: unknown, userId?: string) {
-  const ids = new Set<string>();
-  const codes = new Set<string>();
-  const idTimes = new Map<string, number>();
-  const codeTimes = new Map<string, number>();
-  if (!getSupabasePersistenceConfig(env)) return { ids, codes, idTimes, codeTimes };
+  const liveRefs = createValidatorChannelDeletedRefLookup(liveValidatorChannelDeletedRefs, userId);
+  if (!getSupabasePersistenceConfig(env)) return liveRefs;
   const normalizedUserId = normalizeValidatorUserId(userId || "");
   const prefix = normalizedUserId
     ? `${VALIDATOR_CHANNEL_DELETED_STATE_PREFIX}${normalizedUserId}:`
@@ -8915,7 +9026,7 @@ async function fetchValidatorChannelDeletedRefs(env: unknown, userId?: string) {
     LIVE_STATE_TABLE,
     `select=id,state&id=like.${encodePostgrestLikeValue(`${prefix}*`)}&order=updated_at.desc&limit=1000`,
   );
-  for (const row of rows) {
+  const durableRefs = rows.map((row) => {
     const state = readRecord(row.state);
     const rowId = readString(row, "id");
     const parts = rowId.split(":");
@@ -8923,20 +9034,20 @@ async function fetchValidatorChannelDeletedRefs(env: unknown, userId?: string) {
     const idFromId = parts.length >= 3 && parts[2] !== "code" ? parts.slice(2).join(":") : "";
     const channelId = readString(state, "channelId") || idFromId;
     const code = normalizeValidatorChannelCode(readString(state, "code") || readString(state, "chatId") || codeFromId);
-    const deletedAt = Date.parse(
-      readString(state, "deletedAt") || readString(state, "deleted_at") || readString(row, "updated_at") || "",
-    );
-    const deletedAtMs = Number.isFinite(deletedAt) ? deletedAt : Date.now();
-    if (channelId) {
-      ids.add(channelId);
-      idTimes.set(channelId, Math.max(idTimes.get(channelId) || 0, deletedAtMs));
-    }
-    if (code) {
-      codes.add(code);
-      codeTimes.set(code, Math.max(codeTimes.get(code) || 0, deletedAtMs));
-    }
-  }
-  return { ids, codes, idTimes, codeTimes };
+    return {
+      type: "validator_channel_deleted",
+      userId: readString(state, "userId") || (parts.length >= 2 ? parts[1] : ""),
+      channelId,
+      chatId: readString(state, "chatId"),
+      code,
+      deletedAt: readString(state, "deletedAt") || readString(state, "deleted_at") || readString(row, "updated_at"),
+    };
+  });
+  liveValidatorChannelDeletedRefs = mergeValidatorChannelDeletedRefs(
+    liveValidatorChannelDeletedRefs,
+    durableRefs,
+  );
+  return createValidatorChannelDeletedRefLookup(liveValidatorChannelDeletedRefs, userId);
 }
 
 function isValidatorChannelDeleted(
@@ -17156,6 +17267,9 @@ function applyLiveState(state: Record<string, unknown>) {
 
   const deletedPatternRefs = normalizeValidatorPatternDeletedRefs(state.validatorPatternDeletedRefs);
   if (deletedPatternRefs.length) liveValidatorPatternDeletedRefs = deletedPatternRefs;
+  const deletedChannelRefs = normalizeValidatorChannelDeletedRefs(state.validatorChannelDeletedRefs);
+  if (deletedChannelRefs.length) liveValidatorChannelDeletedRefs = deletedChannelRefs;
+  const deletedChannelLookup = createValidatorChannelDeletedRefLookup(deletedChannelRefs);
 
   if (Array.isArray(state.validatorPatterns)) {
     liveValidatorPatterns = state.validatorPatterns
@@ -17171,7 +17285,8 @@ function applyLiveState(state: Record<string, unknown>) {
   if (Array.isArray(validatorChannelStore.channels)) {
     liveValidatorChannels = validatorChannelStore.channels
       .map((channel) => normalizeServerNotificationChannel(channel, readString(readRecord(channel), "userId")))
-      .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel));
+      .filter((channel): channel is ValidatorNotificationChannel => Boolean(channel))
+      .filter((channel) => !isValidatorChannelDeleted(channel, deletedChannelLookup));
   }
 
   if (Array.isArray(state.validatorNotifications)) {
@@ -17366,6 +17481,10 @@ function mergeLiveStates(durableState: Record<string, unknown> | null, cacheStat
     durable.validatorPatternDeletedRefs,
     cache.validatorPatternDeletedRefs,
   );
+  const validatorChannelDeletedRefs = mergeValidatorChannelDeletedRefs(
+    durable.validatorChannelDeletedRefs,
+    cache.validatorChannelDeletedRefs,
+  );
   return {
     ...cache,
     ...durable,
@@ -17381,6 +17500,7 @@ function mergeLiveStates(durableState: Record<string, unknown> | null, cacheStat
       cacheSavedAt,
     ).filter((pattern) => !isValidatorPatternDeleted(readRecord(pattern), validatorPatternDeletedRefs)),
     validatorPatternDeletedRefs,
+    validatorChannelDeletedRefs,
     validatorChannels: [],
     validatorChannelStore: pickStateObjectByUpdatedAt(durable.validatorChannelStore, cache.validatorChannelStore),
     validatorNotifications: mergeStateArrays(durable.validatorNotifications, cache.validatorNotifications).slice(
@@ -17726,10 +17846,13 @@ function buildLiveStateSnapshot(env?: unknown) {
     validatorRoundHistory: liveValidatorRoundHistory.slice(-MAX_MONITOR_ROUND_HISTORY),
     validatorPatterns: liveValidatorPatterns.filter((pattern) => !isValidatorPatternDeleted(pattern)),
     validatorPatternDeletedRefs: liveValidatorPatternDeletedRefs.slice(0, 2000),
+    validatorChannelDeletedRefs: liveValidatorChannelDeletedRefs.slice(0, 2000),
     validatorChannels: [],
     validatorChannelStore: {
       version: 1,
-      channels: liveValidatorChannels,
+      channels: liveValidatorChannels.filter(
+        (channel) => !isValidatorChannelDeleted(channel, createValidatorChannelDeletedRefLookup(liveValidatorChannelDeletedRefs)),
+      ),
       updatedAt: new Date().toISOString(),
     },
     validatorNotifications: liveValidatorNotifications.slice(0, 1000),
