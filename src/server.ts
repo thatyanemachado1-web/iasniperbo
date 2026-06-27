@@ -6620,7 +6620,7 @@ async function telegramServicePersistChannel(env: unknown, channel: ValidatorNot
   const persistedChannel = cloudResult.ok && cloudResult.channel ? cloudResult.channel : channel;
   await clearValidatorChannelDeletedState(env, persistedChannel);
   liveValidatorChannels = upsertValidatorChannel(persistedChannel);
-  await persistValidatorChannel(env, channel);
+  await persistValidatorChannel(env, persistedChannel);
   await saveLiveState(env);
   return persistedChannel;
 }
@@ -9060,7 +9060,7 @@ function isValidatorChannelDeleted(
   },
 ) {
   const code = normalizeValidatorChannelCode(channel.chatId);
-  if (deletedRefs.ids.has(channel.id) || (code && deletedRefs.codes.has(code))) return true;
+  if (!deletedRefs.ids.has(channel.id) && !(code && deletedRefs.codes.has(code))) return false;
   const channelTime = stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>);
   const idDeletedAt =
     deletedRefs.idTimes?.get(channel.id) || (deletedRefs.ids.has(channel.id) ? Number.MAX_SAFE_INTEGER : 0);
