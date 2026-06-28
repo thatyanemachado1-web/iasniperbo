@@ -6734,10 +6734,29 @@ async function telegramServicePersistChannel(env: unknown, channel: ValidatorNot
 }
 
 async function persistTelegramServiceChannelConfig(env: unknown, channel: ValidatorNotificationChannel) {
-  liveValidatorChannels = upsertValidatorChannel(channel);
-  await persistValidatorChannel(env, channel);
+  let savedChannel = channel;
+  if (isCloudValidatorTelegramChannel(channel)) {
+    const cloudResult = await persistCloudValidatorChannel(env, channel);
+    if (cloudResult.configured && !cloudResult.ok) {
+      console.warn(
+        JSON.stringify({
+          event: "[TELEGRAM_SERVICE] cloud_config_persist_failed",
+          user: maskTelemetryUserId(channel.userId),
+          channelId: channel.id,
+          error: cloudResult.error,
+        }),
+      );
+      throw new Error(cloudResult.error || "Cloudflare Telegram Engine nao confirmou o canal.");
+    }
+    if (cloudResult.ok && cloudResult.channel) {
+      savedChannel = cloudResult.channel;
+    }
+  }
+  await clearValidatorChannelDeletedState(env, savedChannel);
+  liveValidatorChannels = upsertValidatorChannel(savedChannel);
+  await persistValidatorChannel(env, savedChannel);
   await saveLiveState(env);
-  return channel;
+  return savedChannel;
 }
 
 async function persistCloudValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
