@@ -426,10 +426,23 @@ def admin_login(remote_base_url: str, email: str, password: str, timeout: float)
     return token
 
 
-def read_local_dashboard(args: argparse.Namespace, local_token: str) -> dict[str, Any]:
+def read_local_dashboard(
+    args: argparse.Namespace,
+    local_token: str,
+    admin_email: str = "",
+    admin_password: str = "",
+    publisher_token: str = "",
+) -> dict[str, Any]:
+    headers = {
+        "x-sniper-admin-email": admin_email,
+        "x-sniper-admin-password": admin_password,
+    }
+    if publisher_token:
+        headers["x-sniper-publisher-token"] = publisher_token
     payload = request_json(
         args.local_url,
         token=local_token,
+        extra_headers=headers,
         timeout=args.local_timeout,
     )
     return payload if isinstance(payload, dict) else {}
@@ -446,6 +459,8 @@ def publish_payload(
         "x-sniper-admin-email": admin_email,
         "x-sniper-admin-password": admin_password,
     }
+    if token:
+        publisher_headers["x-sniper-publisher-token"] = token
     body, status_code, upload_ms = request_json_with_meta(
         args.remote_url,
         method="POST",
@@ -520,6 +535,8 @@ def publish_urgent_signal(
         "x-sniper-admin-email": admin_email,
         "x-sniper-admin-password": admin_password,
     }
+    if token:
+        publisher_headers["x-sniper-publisher-token"] = token
     body, status_code, upload_ms = request_json_with_meta(
         args.signal_url,
         method="POST",
@@ -1700,6 +1717,7 @@ def main() -> int:
         env_value(env, "SNIPER_LOCAL_DASHBOARD_TOKEN")
         or env_value(env, "SNIPER_DASHBOARD_TOKEN")
         or env_value(env, "VITE_SNIPER_DASHBOARD_TOKEN")
+        or env_value(env, "SNIPER_PUBLISHER_TOKEN")
         or env_value(env, "SNIPER_ADMIN_TOKEN")
     )
     remote_tokens = unique_tokens(
@@ -1726,6 +1744,7 @@ def main() -> int:
     token_index = 0
     using_admin_session = False
     direct_publisher_endpoint = args.remote_url.rstrip("/").endswith("/dashboard/publish")
+    direct_publisher_token = remote_tokens[0] if remote_tokens else ""
     rate_limit_sleep = 0.0
     last_fingerprint = ""
     last_signal_fingerprint = ""
@@ -1752,7 +1771,7 @@ def main() -> int:
             if rate_limit_sleep > 0:
                 time.sleep(rate_limit_sleep)
             if direct_publisher_endpoint:
-                token = ""
+                token = direct_publisher_token
                 using_admin_session = False
             elif not token:
                 if token_index < len(remote_tokens):
@@ -1775,7 +1794,9 @@ def main() -> int:
             t0_iso = iso_now_ms()
             t0_perf = time.perf_counter()
             try:
-                raw_local_payload = suppress_late_open_entries(read_local_dashboard(args, local_token))
+                raw_local_payload = suppress_late_open_entries(
+                    read_local_dashboard(args, local_token, admin_email, admin_password, direct_publisher_token)
+                )
             except HTTPError as exc:
                 status_code, body = http_error_summary(exc)
                 if status_code == 429:

@@ -14383,6 +14383,11 @@ function isLocalDevelopmentRequest(request: Request) {
 async function isDashboardReadAuthorized(request: Request, url: URL, env: unknown) {
   if (await isDashboardAuthorized(request, url, env)) return true;
 
+  const publisherToken = request.headers.get("x-sniper-publisher-token")?.trim() || "";
+  if (publisherToken && dashboardPublisherTokens(env).includes(publisherToken)) return true;
+
+  if (await isOfficialDashboardPublisherAuthorized(request, env)) return true;
+
   const token = getBearerToken(request);
   if (!token) return false;
 
