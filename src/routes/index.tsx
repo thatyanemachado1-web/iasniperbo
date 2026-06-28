@@ -33,12 +33,15 @@ import { NeuralLines } from "@/components/brand/NeuralLines";
 import { SniperLogoMark } from "@/components/brand/SniperLogoMark";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import {
+  AccessApiError,
+  AccessApiTimeoutError,
   checkClientAccess,
   createPublicBillingCheckout,
   getBillingPlans,
   getSalesSettings,
   registerClient,
   saveAccessSession,
+  validateLoginAccess,
   type BillingPlan,
   type ClientAccess,
 } from "@/lib/accessApi";
@@ -75,6 +78,7 @@ export const Route = createFileRoute("/")({
 
 const WAITLIST_URL = "https://wa.me/5567992308362";
 const LOGIN_BOOTSTRAP_FALLBACK_MS = 3500;
+const LOGIN_REQUEST_TIMEOUT_MS = 20_000;
 
 const landingFallbackPlans: BillingPlan[] = [
   {
@@ -259,8 +263,9 @@ function LoginPage() {
     const password = String(data.get("password") || "");
     setPrefillEmail(email);
     setCheckoutLeadEmail(email);
+
     try {
-      const access = await checkClientAccess(email, password);
+      const access = await checkClientAccess(email, password, LOGIN_REQUEST_TIMEOUT_MS);
       if (!access.registered) {
         if (!salesClosed) setMode("register");
         setNotice(
@@ -270,14 +275,28 @@ function LoginPage() {
         );
         return;
       }
-      if (salesClosed && !canEnterWhenSalesClosed(access)) {
+
+      const validated = validateLoginAccess(access);
+      if (!validated.ok) {
+        setNotice(validated.message);
+        return;
+      }
+
+      if (salesClosed && !canEnterWhenSalesClosed(validated.access)) {
         setNotice("Vagas encerradas. Somente clientes Premium com acesso ativo conseguem entrar na plataforma.");
         return;
       }
-      saveAccessSession(access, email);
-      window.location.href = "/app";
+
+      try {
+        saveAccessSession(validated.access, email);
+      } catch {
+        setNotice("Login feito, mas não foi possível salvar sua sessão local. Tente novamente.");
+        return;
+      }
+
+      window.location.assign("/app");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Não foi possível validar seu acesso.";
+      const message = resolveLoginErrorMessage(err);
       if (!salesClosed && shouldOpenRegisterForPasswordSetup(message)) {
         setMode("register");
       }
@@ -320,20 +339,36 @@ function LoginPage() {
       return;
     }
     try {
-      const access = await registerClient({
-        full_name: fullName,
-        email,
-        password,
-        phone: phoneDigits,
-        phone_full: buildInternationalPhone(selectedCountry.code, phoneDigits),
-        city: String(data.get("city") || "").trim(),
-        country: selectedCountry.country,
-        country_code: selectedCountry.code,
-      });
-      saveAccessSession(access, email);
-      window.location.href = "/app";
+      const access = await registerClient(
+        {
+          full_name: fullName,
+          email,
+          password,
+          phone: phoneDigits,
+          phone_full: buildInternationalPhone(selectedCountry.code, phoneDigits),
+          city: String(data.get("city") || "").trim(),
+          country: selectedCountry.country,
+          country_code: selectedCountry.code,
+        },
+        LOGIN_REQUEST_TIMEOUT_MS,
+      );
+
+      const validated = validateLoginAccess(access);
+      if (!validated.ok) {
+        setNotice(validated.message);
+        return;
+      }
+
+      try {
+        saveAccessSession(validated.access, email);
+      } catch {
+        setNotice("Cadastro concluído, mas não foi possível salvar sua sessão local. Tente entrar novamente.");
+        return;
+      }
+
+      window.location.assign("/app");
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Não foi possível concluir o cadastro.");
+      setNotice(resolveLoginErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -1159,6 +1194,25 @@ function shouldOpenRegisterForPasswordSetup(message: string) {
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
   return normalized.includes("conta encontrada sem senha") || normalized.includes("crie sua senha");
+}
+
+function resolveLoginErrorMessage(error: unknown) {
+  if (error instanceof AccessApiTimeoutError) {
+    return error.message;
+  }
+  if (error instanceof AccessApiError) {
+    if (error.status === 503) {
+      return error.message || "Servidor de login indisponível no momento. Tente novamente em instantes.";
+    }
+    if (error.status === 0) {
+      return error.message;
+    }
+    return error.message || "Não foi possível validar seu acesso.";
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return "Não foi possível validar seu acesso.";
 }
 
 function formatMoney(amount: number, currency: string) {

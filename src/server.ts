@@ -2413,7 +2413,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      await saveLiveState(env);
+      void saveLiveState(env);
       return json({ access: await ownerAccess(env, email, request) });
     }
 
@@ -2424,7 +2424,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      await saveLiveState(env);
+      void saveLiveState(env);
       return json({ access: await approverAccess(env, email, request) });
     }
 
@@ -2517,7 +2517,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     recordAccessEvent(client.enabled ? "client_login" : "client_pending_login", client);
     const access = await clientAccess(env, client, request);
-    await saveLiveState(env);
+    void saveLiveState(env);
     return json({ access });
   }
 
@@ -15765,9 +15765,13 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return [];
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
+
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
       headers: supabasePersistenceHeaders(config.key),
+      signal: controller.signal,
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
@@ -15780,6 +15784,8 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
   } catch (error) {
     console.warn(`Nao foi possivel carregar ${table}.`, error);
     return [];
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -15801,6 +15807,9 @@ async function fetchSupabaseRowsRange(env: unknown, table: string, query: string
   const config = getSupabasePersistenceConfig(env);
   if (!config) return [];
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
+
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
       headers: {
@@ -15808,6 +15817,7 @@ async function fetchSupabaseRowsRange(env: unknown, table: string, query: string
         Range: `${offset}-${offset + pageSize - 1}`,
         "Range-Unit": "items",
       },
+      signal: controller.signal,
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
@@ -15820,6 +15830,8 @@ async function fetchSupabaseRowsRange(env: unknown, table: string, query: string
   } catch (error) {
     console.warn(`Nao foi possivel carregar ${table}.`, error);
     return [];
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
