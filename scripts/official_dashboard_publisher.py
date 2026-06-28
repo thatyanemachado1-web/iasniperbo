@@ -1790,6 +1790,7 @@ def main() -> int:
     direct_telegram_pending: list[dict[str, Any]] = []
     direct_telegram_result_keys: set[str] = set()
     direct_telegram_module_hold_until: dict[str, float] = {}
+    last_direct_payload_mismatch_key = ""
     direct_pattern_bank_file = direct_pattern_bank_path(args, env)
     direct_pattern_round_bank = load_direct_pattern_round_bank(direct_pattern_bank_file)
     direct_pattern_bank_last_save = 0.0
@@ -1919,35 +1920,31 @@ def main() -> int:
                 if isinstance(last_published_payload, dict) and last_published_payload
                 else None
             )
+            telegram_entry_source = "published"
+            if not telegram_entry_payload and local_payload:
+                telegram_entry_payload = local_payload
+                telegram_entry_source = "local"
             telegram_entry_round_id = direct_round_id(telegram_entry_payload) if telegram_entry_payload else 0
             local_round_id = direct_round_id(local_payload)
             if (
                 telegram_entry_payload
                 and local_payload
+                and telegram_entry_source == "published"
                 and telegram_entry_round_id
                 and local_round_id
                 and telegram_entry_round_id != local_round_id
             ):
-                logging.info(
-                    "direct telegram entries using local payload: reason=published_payload_round_mismatch published_round=%s local_round=%s",
-                    telegram_entry_round_id,
-                    local_round_id,
-                )
-                telegram_entry_payload = local_payload
-                telegram_entry_round_id = local_round_id
-            telegram_entry_ready = bool(
-                telegram_entry_payload
-                and (not telegram_entry_round_id or not local_round_id or telegram_entry_round_id == local_round_id)
-            )
-            if telegram_entry_payload and not telegram_entry_ready:
-                logging.info(
-                    "direct telegram entries skipped: reason=published_payload_stale published_round=%s local_round=%s",
-                    telegram_entry_round_id,
-                    local_round_id,
-                )
+                mismatch_key = f"{telegram_entry_round_id}:{local_round_id}"
+                if mismatch_key != last_direct_payload_mismatch_key:
+                    logging.info(
+                        "direct telegram entries using published dashboard payload: reason=published_payload_round_mismatch published_round=%s local_round=%s",
+                        telegram_entry_round_id,
+                        local_round_id,
+                    )
+                    last_direct_payload_mismatch_key = mismatch_key
 
             for direct_signal in direct_telegram_signals(
-                telegram_entry_payload if telegram_entry_ready else {},
+                telegram_entry_payload or {},
                 direct_pattern_round_bank,
             ):
                 direct_key = str(direct_signal.get("signalKey") or "")
