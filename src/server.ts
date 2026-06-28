@@ -6632,7 +6632,10 @@ async function telegramServiceToggleMotor(
     isActive: channel.isActive !== false,
     updatedAt: new Date().toISOString(),
   } as ValidatorNotificationChannel;
-  const saved = await telegramServicePersistChannel(env, next);
+  liveValidatorChannels = upsertValidatorChannel(next);
+  await persistValidatorChannel(env, next);
+  await saveLiveState(env);
+  const saved = next;
   return json({ channel: publicTelegramServiceChannel(saved), motorKey, enabled });
 }
 

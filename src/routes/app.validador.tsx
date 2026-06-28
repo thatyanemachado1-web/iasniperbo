@@ -857,6 +857,42 @@ function NeuralValidatorPage() {
       });
   }
 
+  function applyChannelUpdate(channel: ValidatorNotificationChannel) {
+    setChannels((current) => {
+      const next = replaceValidatorChannel(current, channel);
+      writeNotificationChannels(next);
+      return next;
+    });
+  }
+
+  async function toggleNotificationChannelModule(
+    channel: ValidatorNotificationChannel,
+    motorKey: ValidatorTelegramModuleKey,
+    enabled: boolean,
+  ) {
+    const currentModules = normalizeTelegramModuleConfigs(channel.signalModules);
+    const optimisticChannel = markServerConfirmedChannel({
+      ...channel,
+      signalModules: normalizeTelegramModuleConfigs({
+        ...currentModules,
+        [motorKey]: {
+          ...currentModules[motorKey],
+          enabled,
+        },
+      }),
+      updatedAt: new Date().toISOString(),
+    });
+    applyChannelUpdate(optimisticChannel);
+
+    try {
+      const serverChannel = await toggleServerValidatorMotor(channel.id, motorKey, enabled);
+      applyChannelUpdate(markServerConfirmedChannel(serverChannel));
+    } catch (error) {
+      applyChannelUpdate(channel);
+      showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a ativacao do motor.");
+    }
+  }
+
   async function testChannelFromForm() {
     if (!planLimits.telegram) {
       showNotice("Telegram fica bloqueado para o plano Free.");
@@ -1101,6 +1137,7 @@ function NeuralValidatorPage() {
             onTestForm={testChannelFromForm}
             onTestChannel={testSavedChannel}
             onUpdateChannel={updateNotificationChannel}
+            onToggleModule={toggleNotificationChannelModule}
             isChannelFormValidated={isChannelFormValidated}
             savingChannel={savingChannel}
             telegramEnabled={planLimits.telegram}
@@ -1777,6 +1814,7 @@ function CentralTelegramTab({
   onTestForm,
   onTestChannel,
   onUpdateChannel,
+  onToggleModule,
   isChannelFormValidated,
   savingChannel,
   telegramEnabled,
@@ -1791,6 +1829,11 @@ function CentralTelegramTab({
   onTestForm: () => void;
   onTestChannel: (channel: ValidatorNotificationChannel) => void;
   onUpdateChannel: (channel: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>) => void;
+  onToggleModule: (
+    channel: ValidatorNotificationChannel,
+    motorKey: ValidatorTelegramModuleKey,
+    enabled: boolean,
+  ) => Promise<void>;
   isChannelFormValidated: boolean;
   savingChannel: boolean;
   telegramEnabled: boolean;
@@ -1822,6 +1865,10 @@ function CentralTelegramTab({
 
   function patchChannelModule(key: ValidatorTelegramModuleKey, patch: Partial<ValidatorTelegramModuleConfig>) {
     if (!selectedChannel || !connected) return;
+    if (typeof patch.enabled === "boolean" && Object.keys(patch).length === 1) {
+      void onToggleModule(selectedChannel, key, patch.enabled);
+      return;
+    }
     const nextModules = normalizeTelegramModuleConfigs({
       ...selectedChannelModules,
       [key]: {
@@ -3492,6 +3539,26 @@ async function testServerValidatorChannel(channelId: string) {
   return { messageId: data?.messageId ?? null, channel: data?.channel ?? null };
 }
 
+async function toggleServerValidatorMotor(
+  channelId: string,
+  motorKey: ValidatorTelegramModuleKey,
+  enabled: boolean,
+) {
+  const response = await fetch("/telegram/motors/toggle", {
+    method: "POST",
+    cache: "no-store",
+    headers: validatorApiHeaders(true),
+    body: JSON.stringify({ channelId, motorKey, enabled }),
+  });
+  const data = await response.json().catch(() => null) as {
+    channel?: ValidatorNotificationChannel;
+    error?: string;
+  } | null;
+  if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou a ativacao do motor.");
+  if (!data?.channel) throw new Error("Servidor nao retornou o canal salvo.");
+  return data.channel;
+}
+
 async function previewServerValidatorChannel(
   channelId: string,
   message: string,
@@ -3561,6 +3628,16 @@ function mergeValidatorChannels(primary: ValidatorNotificationChannel[], seconda
     }
   }
   return [...byKey.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+}
+
+function replaceValidatorChannel(
+  channels: ValidatorNotificationChannel[],
+  channel: ValidatorNotificationChannel,
+) {
+  const replaced = channels.some((item) => item.id === channel.id)
+    ? channels.map((item) => (item.id === channel.id ? channel : item))
+    : [channel, ...channels];
+  return mergeValidatorChannels(replaced);
 }
 
 function markServerConfirmedChannel(channel: ValidatorNotificationChannel): ValidatorNotificationChannel {
