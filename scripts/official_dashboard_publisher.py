@@ -1558,6 +1558,17 @@ def direct_telegram_block_handled(reason: str) -> bool:
     return clean in DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS or clean.startswith("blocked_count=")
 
 
+def direct_telegram_payload(
+    published_payload: dict[str, Any] | None,
+    local_payload: dict[str, Any] | None,
+) -> tuple[dict[str, Any], str]:
+    if isinstance(published_payload, dict) and published_payload:
+        return published_payload, "published"
+    if isinstance(local_payload, dict) and local_payload:
+        return local_payload, "local"
+    return {}, "none"
+
+
 def direct_round_side(round_item: Any) -> str:
     if not isinstance(round_item, dict):
         return ""
@@ -1854,9 +1865,10 @@ def main() -> int:
 
             signal_fingerprint = dashboard_signal_fingerprint(local_payload)
             signal_changed = bool(args.urgent_signal and signal_fingerprint and signal_fingerprint != last_signal_fingerprint)
+            telegram_result_payload, _telegram_result_source = direct_telegram_payload(last_published_payload, local_payload)
             next_direct_pending: list[dict[str, Any]] = []
             for pending in direct_telegram_pending:
-                outcome = resolve_direct_telegram_outcome(pending, local_payload)
+                outcome = resolve_direct_telegram_outcome(pending, telegram_result_payload)
                 if not outcome:
                     next_direct_pending.append(pending)
                     continue
@@ -1915,15 +1927,7 @@ def main() -> int:
                     next_direct_pending.append(pending)
             direct_telegram_pending = next_direct_pending[-100:]
 
-            telegram_entry_payload = (
-                last_published_payload
-                if isinstance(last_published_payload, dict) and last_published_payload
-                else None
-            )
-            telegram_entry_source = "published"
-            if not telegram_entry_payload and local_payload:
-                telegram_entry_payload = local_payload
-                telegram_entry_source = "local"
+            telegram_entry_payload, telegram_entry_source = direct_telegram_payload(last_published_payload, local_payload)
             telegram_entry_round_id = direct_round_id(telegram_entry_payload) if telegram_entry_payload else 0
             local_round_id = direct_round_id(local_payload)
             if (

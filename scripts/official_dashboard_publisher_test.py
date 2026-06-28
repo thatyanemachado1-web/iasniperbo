@@ -75,6 +75,67 @@ class DirectTelegramSignalTests(unittest.TestCase):
         self.assertNotIn(("paying_numbers", "TIE"), module_entries)
         self.assertIn(("ties_only", "TIE"), module_entries)
 
+    def test_result_outcome_uses_published_payload_when_local_is_stale(self):
+        pending = {
+            "moduleKey": "paying_numbers",
+            "signalKey": "publisher:paying:2201:BANKER:7",
+            "roundId": 2201,
+            "entry": "BANKER",
+            "maxGale": 1,
+        }
+        published_payload = {
+            "rounds": [
+                {"id": 2201, "result": "P"},
+                {"id": 2202, "result": "B"},
+            ],
+        }
+        local_payload = {
+            "rounds": [
+                {"id": 1201, "result": "P"},
+                {"id": 1202, "result": "P"},
+            ],
+        }
+
+        payload, source = publisher.direct_telegram_payload(published_payload, local_payload)
+        outcome = publisher.resolve_direct_telegram_outcome(pending, payload)
+
+        self.assertEqual(source, "published")
+        self.assertIsNotNone(outcome)
+        self.assertEqual(outcome["status"], "GREEN")
+        self.assertEqual(outcome["label"], "Green")
+
+    def test_result_outcome_confirms_red_and_tie(self):
+        red_pending = {
+            "moduleKey": "paying_numbers",
+            "signalKey": "publisher:paying:2301:BANKER:7",
+            "roundId": 2301,
+            "entry": "BANKER",
+            "maxGale": 1,
+        }
+        red_outcome = publisher.resolve_direct_telegram_outcome(
+            red_pending,
+            {
+                "rounds": [
+                    {"id": 2301, "result": "B"},
+                    {"id": 2302, "result": "P"},
+                    {"id": 2303, "result": "P"},
+                ],
+            },
+        )
+        tie_outcome = publisher.resolve_direct_telegram_outcome(
+            {**red_pending, "signalKey": "publisher:paying:2401:BANKER:7", "roundId": 2401},
+            {
+                "rounds": [
+                    {"id": 2401, "result": "B"},
+                    {"id": 2402, "result": "T", "bankerScore": 6, "playerScore": 6},
+                ],
+            },
+        )
+
+        self.assertEqual(red_outcome["status"], "RED")
+        self.assertEqual(tie_outcome["status"], "TIE")
+        self.assertIn("Empate confirmado", publisher.direct_result_message(red_pending, tie_outcome))
+
 
 if __name__ == "__main__":
     unittest.main()

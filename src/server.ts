@@ -8187,7 +8187,7 @@ function normalizeValidatorModuleTemplateFingerprint(value: string) {
 
 function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
   return {
-    enabled: key === "validator",
+    enabled: true,
     entryType: "AUTO",
     galeLimit: key === "ties_only" ? 0 : 1,
     coverTie: key === "ties_only",
