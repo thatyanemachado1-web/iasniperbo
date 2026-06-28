@@ -858,7 +858,13 @@ function NeuralValidatorPage() {
   }
 
   function applyChannelUpdate(channel: ValidatorNotificationChannel) {
-    setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(channel))));
+    setChannels((current) => {
+      const next = markServerConfirmedChannels(
+        replaceValidatorChannel(current, markServerConfirmedChannel(channel)),
+      );
+      writeNotificationChannels(next);
+      return next;
+    });
   }
 
   async function toggleNotificationChannelModule(
@@ -883,6 +889,7 @@ function NeuralValidatorPage() {
     try {
       const serverChannel = await toggleServerValidatorMotor(channel.id, motorKey, enabled);
       applyChannelUpdate(markServerConfirmedChannel(serverChannel));
+      showNotice(`${moduleDisplayName(motorKey)} ${enabled ? "ativado" : "desativado"} e salvo no servidor.`);
     } catch (error) {
       applyChannelUpdate(channel);
       showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a ativacao do motor.");
@@ -1847,20 +1854,12 @@ function CentralTelegramTab({
     channels[0] ||
     null;
   const selectedChannelModules = selectedChannel ? channelSignalModules(selectedChannel) : defaultTelegramModuleConfigs();
-  const selectedChannelServerConfirmed = isServerConfirmedChannel(selectedChannel);
-  const selectedConnectionStatus = telegramChannelConnectionStatus(selectedChannel);
-  const connected = Boolean(
-    selectedChannelServerConfirmed &&
-      selectedConnectionStatus === "connected" &&
-      selectedChannel?.isActive &&
-      selectedChannel.chatId &&
-      (selectedChannel.botTokenMasked || (selectedChannel as ValidatorChannelWithModules).botTokenEncoded),
-  );
+  const connected = telegramChannelCanUpdateModules(selectedChannel);
   const engineActive = connected && TELEGRAM_MODULE_OPTIONS.some((option) => selectedChannelModules[option.key]?.enabled);
   const activeConfigModuleKey = configuringModuleKey || selectedModuleKey;
 
   function patchChannelModule(key: ValidatorTelegramModuleKey, patch: Partial<ValidatorTelegramModuleConfig>) {
-    if (!selectedChannel || !connected) return;
+    if (!selectedChannel) return;
     if (typeof patch.enabled === "boolean" && Object.keys(patch).length === 1) {
       void onToggleModule(selectedChannel, key, patch.enabled);
       return;
@@ -1906,7 +1905,7 @@ function CentralTelegramTab({
                   name={option.label}
                   description={telegramModuleDescription(option.key)}
                   active={Boolean(moduleConfig.enabled)}
-                  disabled={!telegramEnabled || !connected}
+                  disabled={!telegramEnabled || !selectedChannel}
                   selected={selectedModuleKey === option.key}
                   onToggle={() => patchChannelModule(option.key, { enabled: !moduleConfig.enabled })}
                   onConfigure={() => {
@@ -2975,7 +2974,7 @@ function normalizeTelegramModuleTemplateFingerprint(value: string) {
 
 function defaultTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
   return {
-    enabled: key === "validator",
+    enabled: true,
     entryType: "AUTO",
     galeLimit: key === "ties_only" ? 0 : 1,
     coverTie: key === "ties_only",
@@ -3626,6 +3625,16 @@ function mergeValidatorChannels(primary: ValidatorNotificationChannel[], seconda
   return [...byKey.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
+function replaceValidatorChannel(
+  channels: ValidatorNotificationChannel[],
+  channel: ValidatorNotificationChannel,
+) {
+  const replaced = channels.some((item) => item.id === channel.id)
+    ? channels.map((item) => (item.id === channel.id ? channel : item))
+    : [channel, ...channels];
+  return mergeValidatorChannels(replaced);
+}
+
 function markServerConfirmedChannel(channel: ValidatorNotificationChannel): ValidatorNotificationChannel {
   return { ...channel, serverConfirmed: true } as ValidatorChannelRuntimeState;
 }
@@ -3656,7 +3665,8 @@ function telegramChannelCanUpdateModules(channel: ValidatorNotificationChannel |
       telegramChannelConnectionStatus(channel) === "connected" &&
       channel.id &&
       channel.isActive &&
-      channel.chatId,
+      channel.chatId &&
+      (channel.botTokenMasked || (channel as ValidatorChannelWithModules).botTokenEncoded),
   );
 }
 
