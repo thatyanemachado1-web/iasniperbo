@@ -837,7 +837,7 @@ function NeuralValidatorPage() {
       updatedAt: new Date().toISOString(),
     };
     const savePromise =
-      channel.botTokenEncoded === "__cloudflare__" && patch.signalModules
+      patch.signalModules && telegramChannelCanUpdateModules(channel)
         ? fetch(`/telegram/channels/${encodeURIComponent(channel.id)}`, {
             method: "PATCH",
             cache: "no-store",
@@ -858,11 +858,7 @@ function NeuralValidatorPage() {
   }
 
   function applyChannelUpdate(channel: ValidatorNotificationChannel) {
-    setChannels((current) => {
-      const next = replaceValidatorChannel(current, channel);
-      writeNotificationChannels(next);
-      return next;
-    });
+    setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(channel))));
   }
 
   async function toggleNotificationChannelModule(
@@ -2979,7 +2975,7 @@ function normalizeTelegramModuleTemplateFingerprint(value: string) {
 
 function defaultTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
   return {
-    enabled: true,
+    enabled: key === "validator",
     entryType: "AUTO",
     galeLimit: key === "ties_only" ? 0 : 1,
     coverTie: key === "ties_only",
@@ -3630,16 +3626,6 @@ function mergeValidatorChannels(primary: ValidatorNotificationChannel[], seconda
   return [...byKey.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
-function replaceValidatorChannel(
-  channels: ValidatorNotificationChannel[],
-  channel: ValidatorNotificationChannel,
-) {
-  const replaced = channels.some((item) => item.id === channel.id)
-    ? channels.map((item) => (item.id === channel.id ? channel : item))
-    : [channel, ...channels];
-  return mergeValidatorChannels(replaced);
-}
-
 function markServerConfirmedChannel(channel: ValidatorNotificationChannel): ValidatorNotificationChannel {
   return { ...channel, serverConfirmed: true } as ValidatorChannelRuntimeState;
 }
@@ -3661,6 +3647,17 @@ function telegramChannelConnectionStatus(channel: ValidatorNotificationChannel |
   if (status === "connected" || status === "invalid" || status === "pending") return status;
   if (channel?.isActive && channel.chatId && (channel.botTokenMasked || channel.botTokenEncoded)) return "connected";
   return "pending";
+}
+
+function telegramChannelCanUpdateModules(channel: ValidatorNotificationChannel | null | undefined) {
+  return Boolean(
+    channel &&
+      isServerConfirmedChannel(channel) &&
+      telegramChannelConnectionStatus(channel) === "connected" &&
+      channel.id &&
+      channel.isActive &&
+      channel.chatId,
+  );
 }
 
 function validatorChannelDedupeKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
