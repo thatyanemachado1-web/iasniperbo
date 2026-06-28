@@ -11581,7 +11581,7 @@ function validatorModuleAllowsSignalEntry(
   side: CurrentSignalSide | NonNullable<NeuralEntryState["expectedSide"]>,
 ) {
   if (moduleConfig.entryType === "AUTO") return true;
-  return moduleConfig.entryType === side;
+  return normalizeSignalSide(moduleConfig.entryType) === normalizeSignalSide(side);
 }
 
 function validatorModuleTelegramButtons(
