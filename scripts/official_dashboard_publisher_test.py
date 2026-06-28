@@ -11,6 +11,74 @@ SPEC.loader.exec_module(publisher)
 
 
 class DirectTelegramSignalTests(unittest.TestCase):
+    def test_urgent_signal_publish_uses_worker_timeout(self):
+        calls = []
+
+        def fake_request_json_with_meta(*args, **kwargs):
+            calls.append({"args": args, "kwargs": kwargs})
+            return {"ok": True}, 200, 1700.0
+
+        args = type(
+            "Args",
+            (),
+            {
+                "signal_url": "https://sniperbo.example/dashboard/signal",
+                "remote_timeout": 12.0,
+            },
+        )()
+        original = publisher.request_json_with_meta
+        publisher.request_json_with_meta = fake_request_json_with_meta
+        try:
+            body, status_code, upload_ms = publisher.publish_urgent_signal(
+                args,
+                "token",
+                {
+                    "rounds": [{"id": 5001, "result": "B"}],
+                    "currentSignal": {"status": "pending", "side": "BANKER"},
+                },
+                "admin@example.com",
+                "password",
+            )
+        finally:
+            publisher.request_json_with_meta = original
+
+        self.assertEqual(body, {"ok": True})
+        self.assertEqual(status_code, 200)
+        self.assertEqual(upload_ms, 1700.0)
+        self.assertEqual(calls[0]["kwargs"]["timeout"], publisher.URGENT_SIGNAL_TIMEOUT)
+        self.assertGreaterEqual(publisher.URGENT_SIGNAL_TIMEOUT, 8.0)
+
+    def test_direct_telegram_publish_uses_worker_timeout(self):
+        calls = []
+
+        def fake_request_json_with_meta(*args, **kwargs):
+            calls.append({"args": args, "kwargs": kwargs})
+            return {"sent": [{"channelId": "canal-1"}], "blocked": []}, 200, 1600.0
+
+        original = publisher.request_json_with_meta
+        publisher.request_json_with_meta = fake_request_json_with_meta
+        try:
+            ok, status_code, upload_ms, reason = publisher.publish_direct_telegram_signal(
+                {"url": "https://engine.example", "secret": "secret"},
+                {
+                    "moduleKey": "paying_numbers",
+                    "signalKey": "publisher:paying:1:BANKER:test",
+                    "roundId": 1,
+                    "entry": "BANKER",
+                    "message": "Entrada confirmada",
+                    "variables": {"number": 7},
+                },
+            )
+        finally:
+            publisher.request_json_with_meta = original
+
+        self.assertTrue(ok)
+        self.assertEqual(status_code, 200)
+        self.assertEqual(upload_ms, 1600.0)
+        self.assertIn("sent_count=1", reason)
+        self.assertEqual(calls[0]["kwargs"]["timeout"], publisher.DIRECT_TELEGRAM_TIMEOUT)
+        self.assertGreaterEqual(publisher.DIRECT_TELEGRAM_TIMEOUT[1], 8.0)
+
     def test_visual_player_card_beats_stale_banker_signal(self):
         payload = {
             "rounds": [{"id": 1201, "result": "B"}],

@@ -35,8 +35,10 @@ else:
 
 USER_AGENT = "Mozilla/5.0 SNIPERBO-Official-Publisher/1.0"
 POST_TIMEOUT = (3.0, 5.0)
+URGENT_SIGNAL_TIMEOUT = 8.0
 UPLOAD_WARNING_MS = 2000.0
 DIRECT_TELEGRAM_TARGET_MS = 300.0
+DIRECT_TELEGRAM_TIMEOUT = (1.0, 8.0)
 DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 1.2
 DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS = {
     "duplicate_signal",
@@ -543,7 +545,7 @@ def publish_urgent_signal(
         token=token,
         extra_headers=publisher_headers,
         payload=build_urgent_signal_payload(local_payload),
-        timeout=min(args.remote_timeout, 1.2),
+        timeout=min(float(args.remote_timeout), URGENT_SIGNAL_TIMEOUT),
     )
     return (body if isinstance(body, dict) else {}, status_code, upload_ms)
 
@@ -1524,7 +1526,7 @@ def publish_direct_telegram_signal(
             **({"protection": signal["protection"]} if signal.get("protection") else {}),
             "buttonLabel": "Abrir Sniper Bo IA",
         },
-        timeout=(0.25, 1.0),
+        timeout=DIRECT_TELEGRAM_TIMEOUT,
     )
     sent = body.get("sent") if isinstance(body, dict) else []
     blocked = body.get("blocked") if isinstance(body, dict) else []
