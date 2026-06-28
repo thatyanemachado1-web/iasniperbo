@@ -858,11 +858,7 @@ function NeuralValidatorPage() {
   }
 
   function applyChannelUpdate(channel: ValidatorNotificationChannel) {
-    setChannels((current) => {
-      const next = replaceValidatorChannel(current, channel);
-      writeNotificationChannels(next);
-      return next;
-    });
+    setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(channel))));
   }
 
   async function toggleNotificationChannelModule(
