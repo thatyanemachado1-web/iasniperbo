@@ -6392,7 +6392,9 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
       signalModules: nextModules,
       updatedAt: new Date().toISOString(),
     } as ValidatorNotificationChannel;
-    const saved = await telegramServicePersistChannel(env, next);
+    const saved = hasRecordFields(readRecord(patch.signalModules))
+      ? await persistTelegramServiceChannelConfig(env, next)
+      : await telegramServicePersistChannel(env, next);
     return json({ channel: publicTelegramServiceChannel(saved) });
   }
 
@@ -6517,6 +6519,20 @@ async function telegramServiceCreateChannel(env: unknown, request: Request, clie
   const channel = normalizeServerNotificationChannel(incoming, clientId, existing);
   if (!channel) return json({ error: "Canal invalido." }, 400);
 
+  if (existing && !incomingToken && hasRecordFields(readRecord(incoming.signalModules))) {
+    const saved = await persistTelegramServiceChannelConfig(env, {
+      ...existing,
+      ...channel,
+      id: existing.id,
+      userId: clientId,
+      botTokenEncoded: existing.botTokenEncoded,
+      botTokenMasked: existing.botTokenMasked || channel.botTokenMasked,
+      signalModules: validatorChannelSignalModules(channel),
+      updatedAt: new Date().toISOString(),
+    } as ValidatorNotificationChannel);
+    return json({ channel: publicTelegramServiceChannel(saved), messageId: readTelegramChannelMessageId(saved) }, 200);
+  }
+
   const cloudChannel = isCloudValidatorTelegramChannel(channel) || isCloudValidatorTelegramChannel(existing);
   if (cloudChannel) {
     if (!channel.chatId && !existing?.chatId) {
@@ -6632,10 +6648,7 @@ async function telegramServiceToggleMotor(
     isActive: channel.isActive !== false,
     updatedAt: new Date().toISOString(),
   } as ValidatorNotificationChannel;
-  liveValidatorChannels = upsertValidatorChannel(next);
-  await persistValidatorChannel(env, next);
-  await saveLiveState(env);
-  const saved = next;
+  const saved = await persistTelegramServiceChannelConfig(env, next);
   return json({ channel: publicTelegramServiceChannel(saved), motorKey, enabled });
 }
 
@@ -6718,6 +6731,13 @@ async function telegramServicePersistChannel(env: unknown, channel: ValidatorNot
   await persistValidatorChannel(env, persistedChannel);
   await saveLiveState(env);
   return persistedChannel;
+}
+
+async function persistTelegramServiceChannelConfig(env: unknown, channel: ValidatorNotificationChannel) {
+  liveValidatorChannels = upsertValidatorChannel(channel);
+  await persistValidatorChannel(env, channel);
+  await saveLiveState(env);
+  return channel;
 }
 
 async function persistCloudValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
@@ -6957,6 +6977,7 @@ function publicTelegramServiceChannel(channel: ValidatorNotificationChannel) {
   const publicChannel = publicValidatorChannel(channel);
   return {
     ...publicChannel,
+    botTokenEncoded: isCloudValidatorTelegramChannel(channel) ? "__cloudflare__" : "",
     connectionStatus: telegramServiceConnectionStatus(channel),
     lastTestedAt: readString(channel as unknown as Record<string, unknown>, "lastTestedAt"),
     lastTestMessageId: readTelegramChannelMessageId(channel),
