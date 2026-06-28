@@ -426,10 +426,23 @@ def admin_login(remote_base_url: str, email: str, password: str, timeout: float)
     return token
 
 
-def read_local_dashboard(args: argparse.Namespace, local_token: str) -> dict[str, Any]:
+def read_local_dashboard(
+    args: argparse.Namespace,
+    local_token: str,
+    admin_email: str = "",
+    admin_password: str = "",
+    publisher_token: str = "",
+) -> dict[str, Any]:
+    headers = {
+        "x-sniper-admin-email": admin_email,
+        "x-sniper-admin-password": admin_password,
+    }
+    if publisher_token:
+        headers["x-sniper-publisher-token"] = publisher_token
     payload = request_json(
         args.local_url,
         token=local_token,
+        extra_headers=headers,
         timeout=args.local_timeout,
     )
     return payload if isinstance(payload, dict) else {}
@@ -446,6 +459,8 @@ def publish_payload(
         "x-sniper-admin-email": admin_email,
         "x-sniper-admin-password": admin_password,
     }
+    if token:
+        publisher_headers["x-sniper-publisher-token"] = token
     body, status_code, upload_ms = request_json_with_meta(
         args.remote_url,
         method="POST",
@@ -520,6 +535,8 @@ def publish_urgent_signal(
         "x-sniper-admin-email": admin_email,
         "x-sniper-admin-password": admin_password,
     }
+    if token:
+        publisher_headers["x-sniper-publisher-token"] = token
     body, status_code, upload_ms = request_json_with_meta(
         args.signal_url,
         method="POST",
@@ -539,6 +556,41 @@ def direct_telegram_entry(value: Any) -> str:
         return "PLAYER"
     if text in {"T", "TIE", "EMPATE"} or "TIE" in text or "EMPATE" in text:
         return "TIE"
+    return ""
+
+
+def direct_confirmed_entry_status(value: Any) -> bool:
+    text = str(value or "").strip().casefold().replace("_", " ")
+    return (
+        "entrada confirmada" in text
+        or "confirmad" in text
+        or "active" in text
+        or "ativo" in text
+        or "validado" in text
+    )
+
+
+def direct_visual_paying_entry(reading: dict[str, Any]) -> str:
+    if not isinstance(reading, dict):
+        return ""
+    entry = direct_telegram_entry(reading.get("direcao") or reading.get("origem"))
+    if not entry:
+        return ""
+    mode = str(reading.get("mode") or "").strip().upper()
+    status = reading.get("paganteStatus") or reading.get("paganteAlert") or ""
+    if mode == "ACTIVE" or direct_confirmed_entry_status(status):
+        return entry
+    return ""
+
+
+def direct_visual_paying_status(reading: dict[str, Any]) -> str:
+    if not isinstance(reading, dict):
+        return ""
+    status = str(reading.get("paganteStatus") or reading.get("paganteAlert") or "").strip().casefold()
+    if status:
+        return status
+    if str(reading.get("mode") or "").strip().upper() == "ACTIVE":
+        return "active"
     return ""
 
 
@@ -618,6 +670,8 @@ def direct_engine_state(value: Any) -> str:
 
 
 def direct_status_is_open(status: str) -> bool:
+    if direct_confirmed_entry_status(status):
+        return True
     return status in PENDING_ENTRY_STATUSES or status in {
         "active",
         "confirmado",
@@ -1338,18 +1392,29 @@ def direct_telegram_signals(payload: dict[str, Any], pattern_round_bank: list[di
     signal = payload.get("currentSignal") if isinstance(payload.get("currentSignal"), dict) else {}
     neural_state = payload.get("neuralEntryState") if isinstance(payload.get("neuralEntryState"), dict) else {}
     neural_reading = payload.get("neuralReading") if isinstance(payload.get("neuralReading"), dict) else {}
-    status = direct_signal_status(neural_state, signal, neural_reading)
-    entry = direct_telegram_entry(
+    visual_entry = direct_visual_paying_entry(neural_reading)
+    status = direct_visual_paying_status(neural_reading) or direct_signal_status(neural_state, signal, neural_reading)
+    entry = visual_entry or direct_telegram_entry(
         neural_state.get("expectedSide")
         or signal.get("side")
         or signal.get("entry")
         or neural_reading.get("direcao")
         or neural_reading.get("origem")
     )
-    if entry and direct_status_is_open(status):
+    if entry in {"BANKER", "PLAYER"} and (visual_entry or direct_status_is_open(status)):
         key = (
             str(neural_state.get("key") or "")
             or str(neural_state.get("triggerRoundKey") or "")
+            or ":".join(
+                str(value or "")
+                for value in (
+                    neural_reading.get("numero"),
+                    neural_reading.get("direcao"),
+                    neural_reading.get("origem"),
+                    neural_reading.get("paganteStatus"),
+                )
+                if value
+            )
             or entry_identity(signal)
             or str(round_id)
         )
@@ -1464,11 +1529,44 @@ def publish_direct_telegram_signal(
     sent = body.get("sent") if isinstance(body, dict) else []
     blocked = body.get("blocked") if isinstance(body, dict) else []
     if isinstance(sent, list) and sent:
-        return True, status_code, upload_ms, "sent"
+        blocked_reasons = sorted({
+            str((item or {}).get("reason") or "blocked")
+            for item in blocked
+            if isinstance(item, dict)
+        }) if isinstance(blocked, list) else []
+        reason = f"sent_count={len(sent)}"
+        if blocked_reasons:
+            reason += f";blocked={','.join(blocked_reasons)}"
+        return True, status_code, upload_ms, reason
     if isinstance(blocked, list) and blocked:
-        reason = str((blocked[0] or {}).get("reason") or "blocked")
+        counts: dict[str, int] = {}
+        for item in blocked:
+            if not isinstance(item, dict):
+                continue
+            block_reason = str(item.get("reason") or "blocked")
+            counts[block_reason] = counts.get(block_reason, 0) + 1
+        detail = ",".join(f"{key}={value}" for key, value in sorted(counts.items()))
+        reason = f"blocked_count={len(blocked)}"
+        if detail:
+            reason += f";{detail}"
         return False, status_code, upload_ms, reason
     return False, status_code, upload_ms, "not_sent"
+
+
+def direct_telegram_block_handled(reason: str) -> bool:
+    clean = str(reason or "")
+    return clean in DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS or clean.startswith("blocked_count=")
+
+
+def direct_telegram_payload(
+    published_payload: dict[str, Any] | None,
+    local_payload: dict[str, Any] | None,
+) -> tuple[dict[str, Any], str]:
+    if isinstance(published_payload, dict) and published_payload:
+        return published_payload, "published"
+    if isinstance(local_payload, dict) and local_payload:
+        return local_payload, "local"
+    return {}, "none"
 
 
 def direct_round_side(round_item: Any) -> str:
@@ -1652,6 +1750,7 @@ def main() -> int:
         env_value(env, "SNIPER_LOCAL_DASHBOARD_TOKEN")
         or env_value(env, "SNIPER_DASHBOARD_TOKEN")
         or env_value(env, "VITE_SNIPER_DASHBOARD_TOKEN")
+        or env_value(env, "SNIPER_PUBLISHER_TOKEN")
         or env_value(env, "SNIPER_ADMIN_TOKEN")
     )
     remote_tokens = unique_tokens(
@@ -1664,11 +1763,14 @@ def main() -> int:
         str(args.remote_base_url).rstrip("/").lower() == "https://sniperbo.com" or
         str(args.remote_url).lower().startswith("https://sniperbo.com/")
     )
+    direct_telegram_single_target = (
+        env_value(env, "TELEGRAM_ENGINE_TARGET_SINGLE").strip().lower() in {"1", "true", "yes", "on"}
+    )
     direct_telegram_config = {
         "url": (env_value(env, "TELEGRAM_ENGINE_URL") or env_value(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL")) if direct_telegram_enabled else "",
         "secret": (env_value(env, "TELEGRAM_ENGINE_SECRET") or env_value(env, "CLOUDFLARE_TELEGRAM_ENGINE_SECRET")) if direct_telegram_enabled else "",
-        "user_id": env_value(env, "TELEGRAM_ENGINE_USER_ID") if direct_telegram_enabled else "",
-        "channel_id": env_value(env, "TELEGRAM_ENGINE_CHANNEL_ID") if direct_telegram_enabled else "",
+        "user_id": env_value(env, "TELEGRAM_ENGINE_USER_ID") if direct_telegram_enabled and direct_telegram_single_target else "",
+        "channel_id": env_value(env, "TELEGRAM_ENGINE_CHANNEL_ID") if direct_telegram_enabled and direct_telegram_single_target else "",
     }
     if not local_token:
         logging.error("Missing local dashboard token in env file.")
@@ -1678,6 +1780,11 @@ def main() -> int:
     token_index = 0
     using_admin_session = False
     direct_publisher_endpoint = args.remote_url.rstrip("/").endswith("/dashboard/publish")
+    direct_publisher_token = (
+        env.get("SNIPER_PUBLISHER_TOKEN", "").strip()
+        or os.getenv("SNIPER_PUBLISHER_TOKEN", "").strip()
+        or (remote_tokens[0] if remote_tokens else "")
+    )
     rate_limit_sleep = 0.0
     last_fingerprint = ""
     last_signal_fingerprint = ""
@@ -1694,6 +1801,7 @@ def main() -> int:
     direct_telegram_pending: list[dict[str, Any]] = []
     direct_telegram_result_keys: set[str] = set()
     direct_telegram_module_hold_until: dict[str, float] = {}
+    last_direct_payload_mismatch_key = ""
     direct_pattern_bank_file = direct_pattern_bank_path(args, env)
     direct_pattern_round_bank = load_direct_pattern_round_bank(direct_pattern_bank_file)
     direct_pattern_bank_last_save = 0.0
@@ -1704,7 +1812,7 @@ def main() -> int:
             if rate_limit_sleep > 0:
                 time.sleep(rate_limit_sleep)
             if direct_publisher_endpoint:
-                token = ""
+                token = direct_publisher_token
                 using_admin_session = False
             elif not token:
                 if token_index < len(remote_tokens):
@@ -1727,7 +1835,9 @@ def main() -> int:
             t0_iso = iso_now_ms()
             t0_perf = time.perf_counter()
             try:
-                raw_local_payload = suppress_late_open_entries(read_local_dashboard(args, local_token))
+                raw_local_payload = suppress_late_open_entries(
+                    read_local_dashboard(args, local_token, admin_email, admin_password, direct_publisher_token)
+                )
             except HTTPError as exc:
                 status_code, body = http_error_summary(exc)
                 if status_code == 429:
@@ -1755,9 +1865,10 @@ def main() -> int:
 
             signal_fingerprint = dashboard_signal_fingerprint(local_payload)
             signal_changed = bool(args.urgent_signal and signal_fingerprint and signal_fingerprint != last_signal_fingerprint)
+            telegram_result_payload, _telegram_result_source = direct_telegram_payload(last_published_payload, local_payload)
             next_direct_pending: list[dict[str, Any]] = []
             for pending in direct_telegram_pending:
-                outcome = resolve_direct_telegram_outcome(pending, local_payload)
+                outcome = resolve_direct_telegram_outcome(pending, telegram_result_payload)
                 if not outcome:
                     next_direct_pending.append(pending)
                     continue
@@ -1816,26 +1927,28 @@ def main() -> int:
                     next_direct_pending.append(pending)
             direct_telegram_pending = next_direct_pending[-100:]
 
-            telegram_entry_payload = (
-                last_published_payload
-                if isinstance(last_published_payload, dict) and last_published_payload
-                else None
-            )
+            telegram_entry_payload, telegram_entry_source = direct_telegram_payload(last_published_payload, local_payload)
             telegram_entry_round_id = direct_round_id(telegram_entry_payload) if telegram_entry_payload else 0
             local_round_id = direct_round_id(local_payload)
-            telegram_entry_ready = bool(
+            if (
                 telegram_entry_payload
-                and (not telegram_entry_round_id or not local_round_id or telegram_entry_round_id == local_round_id)
-            )
-            if telegram_entry_payload and not telegram_entry_ready:
-                logging.info(
-                    "direct telegram entries skipped: reason=published_payload_stale published_round=%s local_round=%s",
-                    telegram_entry_round_id,
-                    local_round_id,
-                )
+                and local_payload
+                and telegram_entry_source == "published"
+                and telegram_entry_round_id
+                and local_round_id
+                and telegram_entry_round_id != local_round_id
+            ):
+                mismatch_key = f"{telegram_entry_round_id}:{local_round_id}"
+                if mismatch_key != last_direct_payload_mismatch_key:
+                    logging.info(
+                        "direct telegram entries using published dashboard payload: reason=published_payload_round_mismatch published_round=%s local_round=%s",
+                        telegram_entry_round_id,
+                        local_round_id,
+                    )
+                    last_direct_payload_mismatch_key = mismatch_key
 
             for direct_signal in direct_telegram_signals(
-                telegram_entry_payload if telegram_entry_ready else {},
+                telegram_entry_payload or {},
                 direct_pattern_round_bank,
             ):
                 direct_key = str(direct_signal.get("signalKey") or "")
@@ -1873,7 +1986,7 @@ def main() -> int:
                         direct_status,
                         direct_reason,
                     )
-                    if direct_ok or direct_reason in DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS:
+                    if direct_ok or direct_telegram_block_handled(direct_reason):
                         direct_telegram_sent_keys.add(direct_key)
                         if direct_ok:
                             direct_telegram_pending = [

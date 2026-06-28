@@ -377,6 +377,7 @@ const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
 const CLIENT_REGISTRY_PROTECTION_INTERVAL_MS = 60_000;
 const CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS = 5 * 60_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
+const TELEGRAM_ENGINE_TIMEOUT_MS = 8_000;
 const VALIDATOR_TELEGRAM_TARGET_MS = 200;
 const VALIDATOR_TELEGRAM_DEDUPE_RESERVATION_TTL_MS = 30_000;
 const LIVE_FEED_STALE_MS = 150_000;
@@ -6332,8 +6333,8 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
 
   if (request.method === "POST" && url.pathname === "/telegram/channels/validate") {
     const body = readRecord(await request.json().catch(() => ({})));
-    const botToken = normalizeSecretValue(readString(body, "botToken"));
-    const chatId = readString(body, "chatId");
+    const botToken = normalizeSecretValue(readFirstString(body, ["botToken", "bot_token", "telegram_bot_token"]));
+    const chatId = readFirstString(body, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]);
     if (!botToken) return json({ error: "Token invalido ou revogado." }, 400);
     if (!chatId) return json({ error: "Chat ID invalido." }, 400);
 
@@ -6505,7 +6506,7 @@ async function telegramServiceListPublicChannels(env: unknown, clientId: string)
 
 async function telegramServiceCreateChannel(env: unknown, request: Request, clientId: string, body: Record<string, unknown>) {
   const incoming = readRecord(body.channel || body);
-  const incomingToken = normalizeSecretValue(readString(incoming, "botToken"));
+  const incomingToken = normalizeSecretValue(readFirstString(incoming, ["botToken", "bot_token", "telegram_bot_token"]));
   const validationCode = readString(body, "validationCode") || readString(incoming, "validationCode");
   const channels = await telegramServiceListChannelsRaw(env, clientId);
   const incomingId = readString(incoming, "id");
@@ -6638,12 +6639,37 @@ async function telegramServiceToggleMotor(
     return json({ error: "Motor Telegram invalido." }, 400);
   }
   const channel = await findValidatorChannelForUser(env, clientId, channelId);
-  if (!channel) return json({ error: "Canal nao encontrado." }, 404);
+  if (!channel) {
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_MODULE_TOGGLE] bloqueado",
+        client_id: maskTelemetryUserId(clientId),
+        module: motorKey,
+        active: enabled,
+        group_found: false,
+        chat_id: "",
+        reason: "missing_validated_group",
+      }),
+    );
+    return json({ error: "Nenhum grupo Telegram validado para este cliente." }, 404);
+  }
   const cloudChannel = isCloudValidatorTelegramChannel(channel)
     ? channel
     : await findCloudValidatorChannelForIncoming(env, clientId, channel);
   const targetChannel = cloudChannel || channel;
   if (enabled && !telegramServiceChannelIsConnected(targetChannel)) {
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_MODULE_TOGGLE] bloqueado",
+        client_id: maskTelemetryUserId(clientId),
+        module: motorKey,
+        active: enabled,
+        group_found: Boolean(targetChannel?.chatId),
+        chat_id: targetChannel?.chatId || "",
+        reason: "group_not_connected",
+        connectionStatus: telegramServiceConnectionStatus(targetChannel),
+      }),
+    );
     return json({ error: "Teste o canal no Telegram antes de ativar o motor." }, 400);
   }
   const modules = validatorChannelSignalModules(targetChannel);
@@ -6661,6 +6687,18 @@ async function telegramServiceToggleMotor(
     updatedAt: new Date().toISOString(),
   } as ValidatorNotificationChannel;
   const saved = await persistTelegramServiceChannelConfig(env, next);
+  console.info(
+    JSON.stringify({
+      event: "[TELEGRAM_MODULE_TOGGLE] salvo",
+      client_id: maskTelemetryUserId(clientId),
+      module: motorKey,
+      active: enabled,
+      group_found: Boolean(saved.chatId),
+      chat_id: saved.chatId || "",
+      channelId: saved.id,
+      cloud: isCloudValidatorTelegramChannel(saved),
+    }),
+  );
   return json({ channel: publicTelegramServiceChannel(saved), motorKey, enabled });
 }
 
@@ -6746,10 +6784,44 @@ async function telegramServicePersistChannel(env: unknown, channel: ValidatorNot
 }
 
 async function persistTelegramServiceChannelConfig(env: unknown, channel: ValidatorNotificationChannel) {
-  liveValidatorChannels = upsertValidatorChannel(channel);
-  await persistValidatorChannel(env, channel);
-  await saveLiveState(env);
-  return channel;
+  let savedChannel = channel;
+  if (isCloudValidatorTelegramChannel(channel)) {
+    const cloudResult = await persistCloudValidatorChannel(env, channel);
+    if (cloudResult.configured && !cloudResult.ok) {
+      console.warn(
+        JSON.stringify({
+          event: "[TELEGRAM_SERVICE] cloud_config_persist_failed",
+          user: maskTelemetryUserId(channel.userId),
+          channelId: channel.id,
+          error: cloudResult.error,
+        }),
+      );
+      throw new Error(cloudResult.error || "Cloudflare Telegram Engine nao confirmou o canal.");
+    }
+    if (cloudResult.ok && cloudResult.channel) {
+      savedChannel = cloudResult.channel;
+    }
+  }
+  await withTimeout(
+    clearValidatorChannelDeletedState(env, savedChannel),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "limpar bloqueio legado do canal Telegram",
+    true,
+  );
+  liveValidatorChannels = upsertValidatorChannel(savedChannel);
+  await withTimeout(
+    persistValidatorChannel(env, savedChannel),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "salvar canal Telegram legado",
+    false,
+  );
+  await withTimeout(
+    saveLiveState(env),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "salvar estado Telegram legado",
+    liveStateSaveStatus,
+  );
+  return savedChannel;
 }
 
 async function persistCloudValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
@@ -6935,12 +7007,47 @@ async function callCloudValidatorChannelEndpoint(
 ) {
   const config = getTelegramEngineConfig(env);
   if (!config) return { ok: false as const, status: 503, error: "Cloudflare Telegram Engine nao configurado." };
-  const response = await fetch(`${config.url}${path}`, {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<null>((resolve) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      console.warn(
+        JSON.stringify({
+          event: "[TELEGRAM_V2] telegram_call indisponivel",
+          path,
+          status: 504,
+          telegram_response: "timeout",
+          error: `Cloudflare Telegram Engine excedeu ${TELEGRAM_ENGINE_TIMEOUT_MS}ms.`,
+        }),
+      );
+      resolve(null);
+    }, TELEGRAM_ENGINE_TIMEOUT_MS);
+  });
+  const fetchPromise = fetch(`${config.url}${path}`, {
     method,
     cache: "no-store",
     headers: telegramEngineHeaders(config.secret, normalizeValidatorUserId(clientId), true),
     body: JSON.stringify(payload),
-  }).catch(() => null);
+    signal: controller.signal,
+  }).catch((error) => {
+    if (timedOut || controller.signal.aborted) return null;
+    console.warn(
+      JSON.stringify({
+        event: "[TELEGRAM_V2] telegram_call indisponivel",
+        path,
+        status: 504,
+        telegram_response: "timeout_or_network_error",
+        error: errorMessage(error),
+      }),
+    );
+    return null;
+  });
+  const response = await Promise.race([fetchPromise, timeoutPromise]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
   if (!response) return { ok: false as const, status: 502, error: "Cloudflare Telegram Engine indisponivel." };
   const data = readRecord(await response.json().catch(() => ({})));
   if (!response.ok || data.ok === false) {
@@ -7352,7 +7459,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     if (request.method === "POST") {
       const body = readRecord(await request.json().catch(() => ({})));
       const incoming = readRecord(body.channel || body);
-      const incomingToken = normalizeSecretValue(readString(incoming, "botToken"));
+      const incomingToken = normalizeSecretValue(readFirstString(incoming, ["botToken", "bot_token", "telegram_bot_token"]));
       const validationCode = readString(body, "validationCode") || readString(incoming, "validationCode");
       const existingById = liveValidatorChannels.find(
         (channel) => channel.userId === userId && channel.id === readString(incoming, "id"),
@@ -7423,8 +7530,8 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   if (request.method === "POST" && url.pathname === "/validator/channels/validate") {
     const body = readRecord(await request.json().catch(() => ({})));
-    const botToken = normalizeSecretValue(readString(body, "botToken"));
-    const chatId = readString(body, "chatId");
+    const botToken = normalizeSecretValue(readFirstString(body, ["botToken", "bot_token", "telegram_bot_token"]));
+    const chatId = readFirstString(body, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]);
     if (!botToken) return json({ error: "Bot Token obrigatorio." }, 400);
     if (!chatId) return json({ error: "Chat ID obrigatorio." }, 400);
 
@@ -8107,7 +8214,7 @@ function normalizeServerNotificationChannel(
   const normalizedUserId = normalizeValidatorUserId(userId || readString(record, "userId"));
   if (!normalizedUserId) return null;
   const now = new Date().toISOString();
-  const incomingToken = normalizeSecretValue(readString(record, "botToken"));
+  const incomingToken = normalizeSecretValue(readFirstString(record, ["botToken", "bot_token", "telegram_bot_token"]));
   const tokenEncoded = incomingToken
     ? encodeServerToken(incomingToken)
     : readString(record, "botTokenEncoded") || existing?.botTokenEncoded || "";
@@ -8129,8 +8236,11 @@ function normalizeServerNotificationChannel(
     name: readString(record, "name") || "Canal Telegram",
     botTokenMasked: readString(record, "botTokenMasked") || maskServerBotToken(decodedToken),
     botTokenEncoded: tokenEncoded,
-    chatId: readString(record, "chatId"),
-    buttonLink: readString(record, "buttonLink"),
+    chatId:
+      readFirstString(record, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]) ||
+      existing?.chatId ||
+      "",
+    buttonLink: readFirstString(record, ["buttonLink", "button_link", "buttonUrl", "button_url"]) || existing?.buttonLink || "",
     isActive: record.isActive !== false,
     analyzingEnabled: readBooleanField(record, "analyzingEnabled"),
     analyzingCooldownRounds: Math.max(1, Math.floor(Number(record.analyzingCooldownRounds) || 3)),
@@ -8139,6 +8249,25 @@ function normalizeServerNotificationChannel(
       ...templatesRecord,
     },
     signalModules,
+    connectionStatus:
+      readString(record, "connectionStatus") ||
+      readString(record, "connection_status") ||
+      readString(existing as unknown as Record<string, unknown>, "connectionStatus") ||
+      undefined,
+    lastTestedAt:
+      readString(record, "lastTestedAt") ||
+      readString(record, "last_tested_at") ||
+      readString(existing as unknown as Record<string, unknown>, "lastTestedAt") ||
+      undefined,
+    lastTestMessageId:
+      readTelegramMessageId(record) ||
+      (existing ? readTelegramMessageId(existing as unknown as Record<string, unknown>) : null) ||
+      undefined,
+    lastConnectionError:
+      readString(record, "lastConnectionError") ||
+      readString(record, "last_connection_error") ||
+      readString(existing as unknown as Record<string, unknown>, "lastConnectionError") ||
+      "",
     createdAt: readString(record, "createdAt") || now,
     updatedAt: readString(record, "updatedAt") || now,
   } as ValidatorNotificationChannel;
@@ -8199,7 +8328,7 @@ function normalizeValidatorModuleTemplateFingerprint(value: string) {
 
 function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
   return {
-    enabled: key === "validator",
+    enabled: true,
     entryType: "AUTO",
     galeLimit: key === "ties_only" ? 0 : 1,
     coverTie: key === "ties_only",
@@ -8827,7 +8956,9 @@ function findValidatorChannelByIncomingCode(
   incoming: Record<string, unknown>,
 ) {
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const incomingCode = normalizeValidatorChannelCode(readString(incoming, "chatId"));
+  const incomingCode = normalizeValidatorChannelCode(
+    readFirstString(incoming, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]),
+  );
   if (!normalizedUserId || !incomingCode) return null;
   return (
     channels.find(
@@ -10970,9 +11101,14 @@ async function sendValidatorModuleTelegramNotification(
     console.warn(
       JSON.stringify({
         event: "[TELEGRAM_AUTO] envio bloqueado por dedupe persistente",
+        client_id: maskTelemetryUserId(signal.channel.userId),
         user: maskTelemetryUserId(signal.channel.userId),
         channelId: signal.channel.id,
+        chat_id: signal.channel.chatId || "",
         moduleKey: signal.moduleKey,
+        module: signal.moduleKey,
+        active: validatorChannelModuleEnabled(signal.channel, signal.moduleKey, signal.moduleKey === "validator"),
+        group_found: Boolean(signal.channel.chatId),
         roundId: signal.roundId,
         signalKey: signal.signalKey,
         dedupeKey: signal.notificationKey,
@@ -11006,14 +11142,20 @@ async function sendValidatorModuleTelegramNotification(
   console.info(
     JSON.stringify({
       event: "[TELEGRAM_AUTO] enviando",
+      client_id: maskTelemetryUserId(signal.channel.userId),
       user: maskTelemetryUserId(signal.channel.userId),
       channelId: signal.channel.id,
+      chat_id: signal.channel.chatId || "",
       moduleKey: signal.moduleKey,
+      module: signal.moduleKey,
+      active: validatorChannelModuleEnabled(signal.channel, signal.moduleKey, signal.moduleKey === "validator"),
+      group_found: Boolean(signal.channel.chatId),
       roundId: signal.roundId,
       signalId: signal.signalKey,
       dedupeKey: signal.notificationKey,
       dedupe_action: reservationResult.action || "reserved",
       telegram_send_called: true,
+      message_sent: signal.message.slice(0, 240),
     }),
   );
   let result: Awaited<ReturnType<typeof sendCloudValidatorChannelPreview>>;
@@ -11050,9 +11192,14 @@ async function sendValidatorModuleTelegramNotification(
   console[result.ok ? "info" : "warn"](
     JSON.stringify({
       event: result.ok ? "[TELEGRAM_AUTO] enviado com sucesso" : "[TELEGRAM_AUTO] erro: motivo completo",
+      client_id: maskTelemetryUserId(signal.channel.userId),
       user: maskTelemetryUserId(signal.channel.userId),
       channelId: signal.channel.id,
+      chat_id: signal.channel.chatId || "",
       moduleKey: signal.moduleKey,
+      module: signal.moduleKey,
+      active: validatorChannelModuleEnabled(signal.channel, signal.moduleKey, signal.moduleKey === "validator"),
+      group_found: Boolean(signal.channel.chatId),
       roundId: signal.roundId,
       signalId: signal.signalKey,
       dedupeKey: signal.notificationKey,
@@ -11061,6 +11208,7 @@ async function sendValidatorModuleTelegramNotification(
       telegram_result: result.ok ? "success" : "error",
       status: result.status,
       telegramMessageId: result.ok ? result.messageId : null,
+      message_sent: signal.message.slice(0, 240),
       error: result.ok ? "" : result.error,
     }),
   );
@@ -15839,6 +15987,8 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
   const config = getSupabasePersistenceConfig(env);
   if (!config || Object.keys(row).length === 0) return false;
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
       method: "POST",
@@ -15848,6 +15998,7 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
         Prefer: "resolution=merge-duplicates,return=minimal",
       },
       body: JSON.stringify(row),
+      signal: controller.signal,
     });
     if (!response.ok && response.status !== 404) {
       console.warn(`Nao foi possivel salvar ${table} (${response.status}).`);
@@ -15857,6 +16008,8 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
   } catch (error) {
     console.warn(`Nao foi possivel salvar ${table}.`, error);
     return false;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -15865,6 +16018,8 @@ async function persistSupabaseRows(env: unknown, table: string, rows: Record<str
   const payload = rows.filter((row) => Object.keys(row).length > 0);
   if (!config || !payload.length) return false;
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
       method: "POST",
@@ -15874,6 +16029,7 @@ async function persistSupabaseRows(env: unknown, table: string, rows: Record<str
         Prefer: "resolution=merge-duplicates,return=minimal",
       },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     });
     if (!response.ok && response.status !== 404) {
       console.warn(`Nao foi possivel salvar lote em ${table} (${response.status}).`);
@@ -15883,6 +16039,8 @@ async function persistSupabaseRows(env: unknown, table: string, rows: Record<str
   } catch (error) {
     console.warn(`Nao foi possivel salvar lote em ${table}.`, error);
     return false;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -15890,6 +16048,8 @@ async function deleteSupabaseRows(env: unknown, table: string, query: string) {
   const config = getSupabasePersistenceConfig(env);
   if (!config || !query) return;
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
       method: "DELETE",
@@ -15897,12 +16057,15 @@ async function deleteSupabaseRows(env: unknown, table: string, query: string) {
         ...supabasePersistenceHeaders(config.key),
         Prefer: "return=minimal",
       },
+      signal: controller.signal,
     });
     if (!response.ok && response.status !== 404) {
       console.warn(`Nao foi possivel apagar ${table} (${response.status}).`);
     }
   } catch (error) {
     console.warn(`Nao foi possivel apagar ${table}.`, error);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
