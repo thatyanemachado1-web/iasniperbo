@@ -123,6 +123,10 @@ npm run signals:start      # sobe signals-api (Windows PowerShell)
 npm run watchdog:start     # watchdog completo (Windows PowerShell)
 ```
 
+## VPS 24/7
+
+Para manter o publisher sempre ligado na VPS (Task Scheduler, NSSM, alertas): [PUBLISHER_VPS_CHECKLIST.md](./PUBLISHER_VPS_CHECKLIST.md)
+
 ## Segurança
 
 - Nunca commite `official_publisher.local.env` nem `.env` com tokens reais
