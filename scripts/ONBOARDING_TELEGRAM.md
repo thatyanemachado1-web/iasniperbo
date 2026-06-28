@@ -23,7 +23,7 @@ Guia operacional para ativar a sala de sinais de novos clientes no Sniper Bo IA.
   ```
   → `updatedAt` do dashboard com **menos de 2 minutos**
 
-Mais detalhes do publisher: [PUBLISHER_WINDOWS.md](./PUBLISHER_WINDOWS.md)
+Mais detalhes do publisher: [PUBLISHER_WINDOWS.md](./PUBLISHER_WINDOWS.md) · VPS 24/7: [PUBLISHER_VPS_CHECKLIST.md](./PUBLISHER_VPS_CHECKLIST.md)
 
 ---
 
