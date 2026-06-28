@@ -8732,39 +8732,37 @@ function mergeValidatorChannelSignalModulesPreferNewer(
 
 function mergeValidatorChannelList(...lists: ValidatorNotificationChannel[][]) {
   const byKey = new Map<string, ValidatorNotificationChannel>();
+  const aliasToPrimaryKey = new Map<string, string>();
   for (const channel of lists.flat()) {
     if (!channel.id) continue;
-    const key = validatorChannelUniqueKey(channel);
+    const aliases = validatorChannelMergeKeys(channel);
+    const matchingKeys = [
+      ...new Set(
+        aliases
+          .map((alias) => aliasToPrimaryKey.get(alias))
+          .filter((alias): alias is string => Boolean(alias)),
+      ),
+    ];
+    const key = matchingKeys[0] || validatorChannelUniqueKey(channel);
     const existing = byKey.get(key);
     if (!existing) {
       byKey.set(key, channel);
+      for (const alias of aliases) aliasToPrimaryKey.set(alias, key);
       continue;
     }
 
-    const channelIsCloud = isCloudValidatorTelegramChannel(channel);
-    const existingIsCloud = isCloudValidatorTelegramChannel(existing);
-    const channelIsNewer =
-      stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>) >=
-      stateEntityUpdatedAtMs(existing as unknown as Record<string, unknown>);
-    const preferIncoming = channelIsCloud || (!existingIsCloud && channelIsNewer);
-    const mergedRecord = preferIncoming
-      ? mergeStateEntityRecord(
-          existing as unknown as Record<string, unknown>,
-          channel as unknown as Record<string, unknown>,
-        )
-      : mergeStateEntityRecord(
-          channel as unknown as Record<string, unknown>,
-          existing as unknown as Record<string, unknown>,
-        );
-    const mergedChannel = {
-      ...(mergedRecord as unknown as ValidatorNotificationChannel),
-      signalModules: mergeValidatorChannelSignalModulesPreferNewer(
-        validatorChannelSignalModules(existing),
-        validatorChannelSignalModules(channel),
-        channelIsNewer || preferIncoming,
-      ),
-    } as ValidatorNotificationChannel;
+    let mergedChannel = mergeValidatorChannelRecords(existing, channel);
+    for (const duplicateKey of matchingKeys.slice(1)) {
+      const duplicate = byKey.get(duplicateKey);
+      if (!duplicate) continue;
+      mergedChannel = mergeValidatorChannelRecords(mergedChannel, duplicate);
+      byKey.delete(duplicateKey);
+      for (const [alias, primaryKey] of aliasToPrimaryKey.entries()) {
+        if (primaryKey === duplicateKey) aliasToPrimaryKey.set(alias, key);
+      }
+    }
     byKey.set(key, mergedChannel);
+    for (const alias of validatorChannelMergeKeys(mergedChannel)) aliasToPrimaryKey.set(alias, key);
   }
 
   return [...byKey.values()].sort(
@@ -8772,6 +8770,47 @@ function mergeValidatorChannelList(...lists: ValidatorNotificationChannel[][]) {
       stateEntityUpdatedAtMs(right as unknown as Record<string, unknown>) -
       stateEntityUpdatedAtMs(left as unknown as Record<string, unknown>),
   );
+}
+
+function mergeValidatorChannelRecords(
+  existing: ValidatorNotificationChannel,
+  channel: ValidatorNotificationChannel,
+) {
+  const channelIsCloud = isCloudValidatorTelegramChannel(channel);
+  const existingIsCloud = isCloudValidatorTelegramChannel(existing);
+  const channelIsNewer =
+    stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>) >=
+    stateEntityUpdatedAtMs(existing as unknown as Record<string, unknown>);
+  const preferIncoming = channelIsCloud || (!existingIsCloud && channelIsNewer);
+  const mergedRecord = preferIncoming
+    ? mergeStateEntityRecord(
+        existing as unknown as Record<string, unknown>,
+        channel as unknown as Record<string, unknown>,
+      )
+    : mergeStateEntityRecord(
+        channel as unknown as Record<string, unknown>,
+        existing as unknown as Record<string, unknown>,
+      );
+  return {
+    ...(mergedRecord as unknown as ValidatorNotificationChannel),
+    signalModules: mergeValidatorChannelSignalModulesPreferNewer(
+      validatorChannelSignalModules(existing),
+      validatorChannelSignalModules(channel),
+      channelIsNewer || preferIncoming,
+    ),
+  } as ValidatorNotificationChannel;
+}
+
+function validatorChannelMergeKeys(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
+  const userId = normalizeValidatorUserId(channel.userId);
+  const id = readString(channel.id);
+  const chatId = normalizeValidatorChannelCode(channel.chatId);
+  const name = readString(channel.name).trim().toLowerCase();
+  return [
+    id ? `${userId}:id:${id}` : "",
+    chatId ? `${userId}:chat:${chatId}` : "",
+    name ? `${userId}:name:${name}` : "",
+  ].filter(Boolean);
 }
 
 function validatorChannelUniqueKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
