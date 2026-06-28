@@ -1529,11 +1529,33 @@ def publish_direct_telegram_signal(
     sent = body.get("sent") if isinstance(body, dict) else []
     blocked = body.get("blocked") if isinstance(body, dict) else []
     if isinstance(sent, list) and sent:
-        return True, status_code, upload_ms, "sent"
+        blocked_reasons = sorted({
+            str((item or {}).get("reason") or "blocked")
+            for item in blocked
+            if isinstance(item, dict)
+        }) if isinstance(blocked, list) else []
+        reason = f"sent_count={len(sent)}"
+        if blocked_reasons:
+            reason += f";blocked={','.join(blocked_reasons)}"
+        return True, status_code, upload_ms, reason
     if isinstance(blocked, list) and blocked:
-        reason = str((blocked[0] or {}).get("reason") or "blocked")
+        counts: dict[str, int] = {}
+        for item in blocked:
+            if not isinstance(item, dict):
+                continue
+            block_reason = str(item.get("reason") or "blocked")
+            counts[block_reason] = counts.get(block_reason, 0) + 1
+        detail = ",".join(f"{key}={value}" for key, value in sorted(counts.items()))
+        reason = f"blocked_count={len(blocked)}"
+        if detail:
+            reason += f";{detail}"
         return False, status_code, upload_ms, reason
     return False, status_code, upload_ms, "not_sent"
+
+
+def direct_telegram_block_handled(reason: str) -> bool:
+    clean = str(reason or "")
+    return clean in DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS or clean.startswith("blocked_count=")
 
 
 def direct_round_side(round_item: Any) -> str:
@@ -1730,11 +1752,14 @@ def main() -> int:
         str(args.remote_base_url).rstrip("/").lower() == "https://sniperbo.com" or
         str(args.remote_url).lower().startswith("https://sniperbo.com/")
     )
+    direct_telegram_single_target = (
+        env_value(env, "TELEGRAM_ENGINE_TARGET_SINGLE").strip().lower() in {"1", "true", "yes", "on"}
+    )
     direct_telegram_config = {
         "url": (env_value(env, "TELEGRAM_ENGINE_URL") or env_value(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL")) if direct_telegram_enabled else "",
         "secret": (env_value(env, "TELEGRAM_ENGINE_SECRET") or env_value(env, "CLOUDFLARE_TELEGRAM_ENGINE_SECRET")) if direct_telegram_enabled else "",
-        "user_id": env_value(env, "TELEGRAM_ENGINE_USER_ID") if direct_telegram_enabled else "",
-        "channel_id": env_value(env, "TELEGRAM_ENGINE_CHANNEL_ID") if direct_telegram_enabled else "",
+        "user_id": env_value(env, "TELEGRAM_ENGINE_USER_ID") if direct_telegram_enabled and direct_telegram_single_target else "",
+        "channel_id": env_value(env, "TELEGRAM_ENGINE_CHANNEL_ID") if direct_telegram_enabled and direct_telegram_single_target else "",
     }
     if not local_token:
         logging.error("Missing local dashboard token in env file.")
@@ -1960,7 +1985,7 @@ def main() -> int:
                         direct_status,
                         direct_reason,
                     )
-                    if direct_ok or direct_reason in DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS:
+                    if direct_ok or direct_telegram_block_handled(direct_reason):
                         direct_telegram_sent_keys.add(direct_key)
                         if direct_ok:
                             direct_telegram_pending = [
