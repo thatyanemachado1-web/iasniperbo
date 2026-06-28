@@ -2,6 +2,8 @@
 
 Guia operacional para ativar a sala de sinais de novos clientes no Sniper Bo IA.
 
+**Guia completo para o cliente:** [COMO_CRIAR_SALA_SINAL_TELEGRAM.md](./COMO_CRIAR_SALA_SINAL_TELEGRAM.md)
+
 ## Para você (operador)
 
 - [ ] Cliente com plano **Premium ou VIP ativo** (não expirado)
