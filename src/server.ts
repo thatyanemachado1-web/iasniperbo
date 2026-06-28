@@ -6441,6 +6441,7 @@ async function telegramServiceCreateChannel(env: unknown, request: Request, clie
   const incoming = readRecord(body.channel || body);
   const incomingToken = normalizeSecretValue(readString(incoming, "botToken"));
   const validationCode = readString(body, "validationCode") || readString(incoming, "validationCode");
+  const hasSignalModulesPatch = hasRecordFields(readRecord(incoming.signalModules));
   const channels = await telegramServiceListChannelsRaw(env, clientId);
   const incomingId = readString(incoming, "id");
   const existingById = channels.find((channel) => channel.id === incomingId);
@@ -6452,6 +6453,28 @@ async function telegramServiceCreateChannel(env: unknown, request: Request, clie
   const existing = existingById || existingByCode || undefined;
   const channel = normalizeServerNotificationChannel(incoming, clientId, existing);
   if (!channel) return json({ error: "Canal invalido." }, 400);
+
+  const modulePatchTarget =
+    hasSignalModulesPatch && !incomingToken
+      ? (await findCloudValidatorChannelForIncoming(env, clientId, channel, channels)) || existing
+      : null;
+  if (modulePatchTarget && telegramServiceChannelIsConnected(modulePatchTarget)) {
+    const saved = await telegramServicePersistChannel(env, {
+      ...modulePatchTarget,
+      ...channel,
+      id: modulePatchTarget.id,
+      userId: clientId,
+      chatId: modulePatchTarget.chatId || channel.chatId,
+      botTokenEncoded: isCloudValidatorTelegramChannel(modulePatchTarget)
+        ? "__cloudflare__"
+        : modulePatchTarget.botTokenEncoded,
+      botTokenMasked: modulePatchTarget.botTokenMasked || channel.botTokenMasked,
+      signalModules: validatorChannelSignalModules(channel),
+      isActive: channel.isActive !== false,
+      updatedAt: new Date().toISOString(),
+    } as ValidatorNotificationChannel);
+    return json({ channel: publicTelegramServiceChannel(saved), messageId: readTelegramChannelMessageId(saved) }, 200);
+  }
 
   const botToken = decodeServerToken(channel.botTokenEncoded);
   if (!botToken || !channel.chatId) {
@@ -8585,6 +8608,32 @@ function findValidatorChannelByIncomingCode(
       (channel) =>
         channel.userId === normalizedUserId && normalizeValidatorChannelCode(channel.chatId) === incomingCode,
     ) || null
+  );
+}
+
+async function findCloudValidatorChannelForIncoming(
+  env: unknown,
+  userId: string,
+  incoming: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">,
+  knownChannels: ValidatorNotificationChannel[] = [],
+) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  if (!normalizedUserId) return null;
+  const incomingId = readString(incoming.id);
+  const incomingCode = normalizeValidatorChannelCode(incoming.chatId);
+  const incomingName = readString(incoming.name).trim().toLowerCase();
+  const incomingKey = validatorChannelUniqueKey({ ...incoming, userId: normalizedUserId });
+  const cloudChannels = await fetchCloudValidatorChannels(env, normalizedUserId).catch(
+    () => [] as ValidatorNotificationChannel[],
+  );
+  return (
+    mergeValidatorChannelList(cloudChannels, knownChannels).find((channel) => {
+      if (channel.userId !== normalizedUserId || !isCloudValidatorTelegramChannel(channel)) return false;
+      if (incomingId && channel.id === incomingId) return true;
+      if (incomingCode && normalizeValidatorChannelCode(channel.chatId) === incomingCode) return true;
+      if (validatorChannelUniqueKey(channel) === incomingKey) return true;
+      return Boolean(incomingName && readString(channel.name).trim().toLowerCase() === incomingName);
+    }) || null
   );
 }
 

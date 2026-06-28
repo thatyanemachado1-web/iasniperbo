@@ -836,11 +836,61 @@ function NeuralValidatorPage() {
       },
       updatedAt: new Date().toISOString(),
     };
-    void saveServerValidatorChannel(updated)
+    const savePromise =
+      patch.signalModules && telegramChannelCanUpdateModules(channel)
+        ? fetch(`/telegram/channels/${encodeURIComponent(channel.id)}`, {
+            method: "PATCH",
+            cache: "no-store",
+            headers: validatorApiHeaders(true),
+            body: JSON.stringify({ channel: { signalModules: updated.signalModules, isActive: updated.isActive } }),
+          }).then(async (response) => {
+            const data = (await response.json().catch(() => null)) as { channel?: ValidatorNotificationChannel; error?: string } | null;
+            if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou a atualizacao.");
+            if (!data?.channel) throw new Error("Servidor nao retornou o canal salvo.");
+            return data.channel;
+          })
+        : saveServerValidatorChannel(updated);
+    void savePromise
       .then((serverChannel) => setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(serverChannel)))))
       .catch((error) => {
         showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a atualizacao.");
       });
+  }
+
+  function applyChannelUpdate(channel: ValidatorNotificationChannel) {
+    setChannels((current) => {
+      const next = replaceValidatorChannel(current, channel);
+      writeNotificationChannels(next);
+      return next;
+    });
+  }
+
+  async function toggleNotificationChannelModule(
+    channel: ValidatorNotificationChannel,
+    motorKey: ValidatorTelegramModuleKey,
+    enabled: boolean,
+  ) {
+    const currentModules = normalizeTelegramModuleConfigs(channel.signalModules);
+    const optimisticChannel = markServerConfirmedChannel({
+      ...channel,
+      signalModules: normalizeTelegramModuleConfigs({
+        ...currentModules,
+        [motorKey]: {
+          ...currentModules[motorKey],
+          enabled,
+        },
+      }),
+      updatedAt: new Date().toISOString(),
+    });
+    applyChannelUpdate(optimisticChannel);
+
+    try {
+      const serverChannel = await toggleServerValidatorMotor(channel.id, motorKey, enabled);
+      applyChannelUpdate(markServerConfirmedChannel(serverChannel));
+    } catch (error) {
+      applyChannelUpdate(channel);
+      showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a ativacao do motor.");
+    }
   }
 
   async function testChannelFromForm() {
@@ -1087,6 +1137,7 @@ function NeuralValidatorPage() {
             onTestForm={testChannelFromForm}
             onTestChannel={testSavedChannel}
             onUpdateChannel={updateNotificationChannel}
+            onToggleModule={toggleNotificationChannelModule}
             isChannelFormValidated={isChannelFormValidated}
             savingChannel={savingChannel}
             telegramEnabled={planLimits.telegram}
@@ -1763,6 +1814,7 @@ function CentralTelegramTab({
   onTestForm,
   onTestChannel,
   onUpdateChannel,
+  onToggleModule,
   isChannelFormValidated,
   savingChannel,
   telegramEnabled,
@@ -1777,6 +1829,11 @@ function CentralTelegramTab({
   onTestForm: () => void;
   onTestChannel: (channel: ValidatorNotificationChannel) => void;
   onUpdateChannel: (channel: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>) => void;
+  onToggleModule: (
+    channel: ValidatorNotificationChannel,
+    motorKey: ValidatorTelegramModuleKey,
+    enabled: boolean,
+  ) => Promise<void>;
   isChannelFormValidated: boolean;
   savingChannel: boolean;
   telegramEnabled: boolean;
@@ -1808,6 +1865,10 @@ function CentralTelegramTab({
 
   function patchChannelModule(key: ValidatorTelegramModuleKey, patch: Partial<ValidatorTelegramModuleConfig>) {
     if (!selectedChannel || !connected) return;
+    if (typeof patch.enabled === "boolean" && Object.keys(patch).length === 1) {
+      void onToggleModule(selectedChannel, key, patch.enabled);
+      return;
+    }
     const nextModules = normalizeTelegramModuleConfigs({
       ...selectedChannelModules,
       [key]: {
@@ -3478,6 +3539,26 @@ async function testServerValidatorChannel(channelId: string) {
   return { messageId: data?.messageId ?? null, channel: data?.channel ?? null };
 }
 
+async function toggleServerValidatorMotor(
+  channelId: string,
+  motorKey: ValidatorTelegramModuleKey,
+  enabled: boolean,
+) {
+  const response = await fetch("/telegram/motors/toggle", {
+    method: "POST",
+    cache: "no-store",
+    headers: validatorApiHeaders(true),
+    body: JSON.stringify({ channelId, motorKey, enabled }),
+  });
+  const data = await response.json().catch(() => null) as {
+    channel?: ValidatorNotificationChannel;
+    error?: string;
+  } | null;
+  if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou a ativacao do motor.");
+  if (!data?.channel) throw new Error("Servidor nao retornou o canal salvo.");
+  return data.channel;
+}
+
 async function previewServerValidatorChannel(
   channelId: string,
   message: string,
@@ -3570,6 +3651,17 @@ function telegramChannelConnectionStatus(channel: ValidatorNotificationChannel |
   if (status === "connected" || status === "invalid" || status === "pending") return status;
   if (channel?.isActive && channel.chatId && (channel.botTokenMasked || channel.botTokenEncoded)) return "connected";
   return "pending";
+}
+
+function telegramChannelCanUpdateModules(channel: ValidatorNotificationChannel | null | undefined) {
+  return Boolean(
+    channel &&
+      isServerConfirmedChannel(channel) &&
+      telegramChannelConnectionStatus(channel) === "connected" &&
+      channel.id &&
+      channel.isActive &&
+      channel.chatId,
+  );
 }
 
 function validatorChannelDedupeKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
