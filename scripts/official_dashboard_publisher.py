@@ -40,6 +40,8 @@ UPLOAD_WARNING_MS = 2000.0
 DIRECT_TELEGRAM_TARGET_MS = 300.0
 DIRECT_TELEGRAM_TIMEOUT = (1.0, 8.0)
 DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 1.2
+DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_ROUNDS = 4
+DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_SECONDS = 120.0
 DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS = {
     "duplicate_signal",
     "entry_not_allowed",
@@ -1432,6 +1434,112 @@ def direct_validator_from_ai_candidate(candidate: dict[str, Any] | None) -> dict
     }
 
 
+def direct_compact_family_value(value: Any) -> str:
+    text = direct_normalized_text(value)
+    text = re.sub(r"\s*>\s*", ">", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def direct_signal_family_key(signal: dict[str, Any]) -> str:
+    if not isinstance(signal, dict):
+        return ""
+    module_key = str(signal.get("moduleKey") or "")
+    variables = signal.get("variables") if isinstance(signal.get("variables"), dict) else {}
+    entry = direct_telegram_entry(signal.get("entry") or variables.get("entry"))
+    if module_key in {"ai_patterns", "validator"}:
+        raw_pattern = variables.get("pattern") or signal.get("pattern")
+        sequence = variables.get("sequence")
+        if not raw_pattern and isinstance(sequence, list):
+            raw_pattern = " > ".join(str(item) for item in sequence if item)
+        pattern = direct_compact_family_value(raw_pattern)
+        if not entry or not pattern:
+            return ""
+        return f"pattern:{entry}:{pattern}"
+    if module_key == "surf_alert":
+        marker = direct_compact_family_value(variables.get("risk") or variables.get("status") or signal.get("signalKey"))
+        if not entry or not marker:
+            return ""
+        return f"surf:{entry}:{marker}"
+    if module_key == "ties_only":
+        level = direct_compact_family_value(variables.get("level") or "tie")
+        return f"ties:TIE:{level or 'tie'}"
+    return ""
+
+
+def direct_signal_family_cooldown(
+    signal: dict[str, Any],
+    cooldowns: dict[str, dict[str, Any]],
+    now: float,
+) -> tuple[str, dict[str, Any] | None]:
+    family_key = direct_signal_family_key(signal)
+    if not family_key:
+        return "", None
+    cooldown = cooldowns.get(family_key)
+    if not cooldown:
+        return family_key, None
+    try:
+        current_round_id = int(float(str(signal.get("roundId") or "0")))
+    except (TypeError, ValueError):
+        current_round_id = 0
+    try:
+        until_round_id = int(float(str(cooldown.get("untilRoundId") or "0")))
+    except (TypeError, ValueError):
+        until_round_id = 0
+    try:
+        until_time = float(cooldown.get("untilTime") or 0.0)
+    except (TypeError, ValueError):
+        until_time = 0.0
+    round_blocked = bool(current_round_id and until_round_id and current_round_id <= until_round_id)
+    time_blocked = bool(until_time and now < until_time)
+    return family_key, cooldown if round_blocked or time_blocked else None
+
+
+def direct_register_signal_family_cooldown(
+    cooldowns: dict[str, dict[str, Any]],
+    signal: dict[str, Any],
+    outcome_round_id: Any,
+    now: float,
+) -> str:
+    family_key = direct_signal_family_key(signal)
+    if not family_key:
+        return ""
+    try:
+        resolved_round_id = int(float(str(outcome_round_id or "0")))
+    except (TypeError, ValueError):
+        resolved_round_id = 0
+    cooldowns[family_key] = {
+        "untilRoundId": resolved_round_id + DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_ROUNDS if resolved_round_id else 0,
+        "untilTime": now + DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_SECONDS,
+        "moduleKey": signal.get("moduleKey"),
+        "entry": signal.get("entry"),
+    }
+    return family_key
+
+
+def direct_prune_signal_family_cooldowns(
+    cooldowns: dict[str, dict[str, Any]],
+    current_round_id: int,
+    now: float,
+) -> None:
+    for family_key, cooldown in list(cooldowns.items()):
+        try:
+            until_round_id = int(float(str(cooldown.get("untilRoundId") or "0")))
+        except (TypeError, ValueError):
+            until_round_id = 0
+        try:
+            until_time = float(cooldown.get("untilTime") or 0.0)
+        except (TypeError, ValueError):
+            until_time = 0.0
+        round_active = bool(current_round_id and until_round_id and current_round_id <= until_round_id)
+        time_active = bool(until_time and now < until_time)
+        if not round_active and not time_active:
+            cooldowns.pop(family_key, None)
+    if len(cooldowns) > 500:
+        for family_key in list(cooldowns)[: len(cooldowns) - 250]:
+            cooldowns.pop(family_key, None)
+
+
 def direct_ai_patterns_from_alerts(payload: dict[str, Any], round_id: int) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for alert in pattern_entry_alerts(payload):
@@ -1907,6 +2015,7 @@ def main() -> int:
     direct_telegram_pending: list[dict[str, Any]] = []
     direct_telegram_result_keys: set[str] = set()
     direct_telegram_module_hold_until: dict[str, float] = {}
+    direct_telegram_family_cooldowns: dict[str, dict[str, Any]] = {}
     last_direct_payload_mismatch_key = ""
     direct_pattern_bank_file = direct_pattern_bank_path(args, env)
     direct_pattern_round_bank = load_direct_pattern_round_bank(direct_pattern_bank_file)
@@ -1991,6 +2100,26 @@ def main() -> int:
                 result_key = f"{pending.get('signalKey')}:result:{outcome.get('status')}:{outcome.get('roundId')}"
                 aggregate_result_key = direct_result_dedupe_key(pending, outcome)
                 if result_key in direct_telegram_result_keys or aggregate_result_key in direct_telegram_result_keys:
+                    result_now = time.monotonic()
+                    module_key = str(pending.get("moduleKey") or "")
+                    if module_key:
+                        direct_telegram_module_hold_until[module_key] = (
+                            result_now + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
+                        )
+                    family_key = direct_register_signal_family_cooldown(
+                        direct_telegram_family_cooldowns,
+                        pending,
+                        outcome.get("roundId"),
+                        result_now,
+                    )
+                    if family_key:
+                        logging.info(
+                            "direct telegram family cooldown armed: family=%s module=%s entry=%s until_round=%s reason=duplicate_result",
+                            family_key,
+                            pending.get("moduleKey"),
+                            pending.get("entry"),
+                            direct_telegram_family_cooldowns[family_key].get("untilRoundId"),
+                        )
                     continue
                 result_signal = {
                     "moduleKey": pending.get("moduleKey"),
@@ -2032,9 +2161,24 @@ def main() -> int:
                         direct_telegram_result_keys.add(result_key)
                         direct_telegram_result_keys.add(aggregate_result_key)
                         module_key = str(pending.get("moduleKey") or "")
+                        result_now = time.monotonic()
                         if module_key:
                             direct_telegram_module_hold_until[module_key] = (
-                                time.monotonic() + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
+                                result_now + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
+                            )
+                        family_key = direct_register_signal_family_cooldown(
+                            direct_telegram_family_cooldowns,
+                            pending,
+                            outcome.get("roundId"),
+                            result_now,
+                        )
+                        if family_key:
+                            logging.info(
+                                "direct telegram family cooldown armed: family=%s module=%s entry=%s until_round=%s",
+                                family_key,
+                                pending.get("moduleKey"),
+                                pending.get("entry"),
+                                direct_telegram_family_cooldowns[family_key].get("untilRoundId"),
                             )
                     else:
                         next_direct_pending.append(pending)
@@ -2071,8 +2215,32 @@ def main() -> int:
                 if not direct_key or direct_key in direct_telegram_sent_keys:
                     continue
                 direct_module_key = str(direct_signal.get("moduleKey") or "")
+                direct_now = time.monotonic()
+                direct_prune_signal_family_cooldowns(
+                    direct_telegram_family_cooldowns,
+                    telegram_entry_round_id,
+                    direct_now,
+                )
                 module_hold_until = direct_telegram_module_hold_until.get(direct_module_key, 0.0)
-                if module_hold_until and time.monotonic() < module_hold_until:
+                if module_hold_until and direct_now < module_hold_until:
+                    continue
+                family_key, family_cooldown = direct_signal_family_cooldown(
+                    direct_signal,
+                    direct_telegram_family_cooldowns,
+                    direct_now,
+                )
+                if family_cooldown:
+                    logging.info(
+                        "direct telegram skipped: module=%s entry=%s round=%s reason=resolved_family_cooldown family=%s until_round=%s",
+                        direct_signal.get("moduleKey"),
+                        direct_signal.get("entry"),
+                        direct_signal.get("roundId"),
+                        family_key,
+                        family_cooldown.get("untilRoundId"),
+                    )
+                    direct_telegram_sent_keys.add(direct_key)
+                    if len(direct_telegram_sent_keys) > 500:
+                        direct_telegram_sent_keys = set(list(direct_telegram_sent_keys)[-250:])
                     continue
                 if direct_module_has_pending(direct_telegram_pending, direct_module_key, telegram_entry_round_id):
                     logging.info(

@@ -120,6 +120,64 @@ class DirectTelegramSignalTests(unittest.TestCase):
         self.assertTrue(publisher.direct_module_has_pending(pending, "ai_patterns", 102))
         self.assertFalse(publisher.direct_module_has_pending(pending, "ai_patterns", 104))
 
+    def test_pattern_family_cooldown_blocks_repeated_ai_and_validator(self):
+        cooldowns = {}
+        pending = {
+            "moduleKey": "ai_patterns",
+            "signalKey": "publisher:ai:1103868:BANKER:abc",
+            "roundId": 1103868,
+            "entry": "BANKER",
+            "variables": {"pattern": "B > P > B", "confidence": "100.00%"},
+        }
+        repeated_ai = {
+            **pending,
+            "signalKey": "publisher:ai:1103869:BANKER:def",
+            "roundId": 1103869,
+        }
+        repeated_validator = {
+            **pending,
+            "moduleKey": "validator",
+            "signalKey": "publisher:validator:1103869:BANKER:def",
+            "roundId": 1103869,
+        }
+        different_pattern = {
+            **pending,
+            "signalKey": "publisher:ai:1103869:BANKER:other",
+            "roundId": 1103869,
+            "variables": {"pattern": "B > B > P", "confidence": "100.00%"},
+        }
+        paying_number = {
+            "moduleKey": "paying_numbers",
+            "signalKey": "publisher:paying:1103869:BANKER:7",
+            "roundId": 1103869,
+            "entry": "BANKER",
+            "variables": {"number": 7},
+        }
+
+        family_key = publisher.direct_register_signal_family_cooldown(cooldowns, pending, 1103869, 100.0)
+        ai_family, ai_cooldown = publisher.direct_signal_family_cooldown(repeated_ai, cooldowns, 101.0)
+        validator_family, validator_cooldown = publisher.direct_signal_family_cooldown(
+            repeated_validator,
+            cooldowns,
+            101.0,
+        )
+        different_family, different_cooldown = publisher.direct_signal_family_cooldown(
+            different_pattern,
+            cooldowns,
+            101.0,
+        )
+        paying_family, paying_cooldown = publisher.direct_signal_family_cooldown(paying_number, cooldowns, 101.0)
+
+        self.assertEqual(family_key, "pattern:BANKER:b>p>b")
+        self.assertEqual(ai_family, family_key)
+        self.assertIsNotNone(ai_cooldown)
+        self.assertEqual(validator_family, family_key)
+        self.assertIsNotNone(validator_cooldown)
+        self.assertEqual(different_family, "pattern:BANKER:b>b>p")
+        self.assertIsNone(different_cooldown)
+        self.assertEqual(paying_family, "")
+        self.assertIsNone(paying_cooldown)
+
     def test_visual_player_card_beats_stale_banker_signal(self):
         payload = {
             "rounds": [{"id": 1201, "result": "B"}],
