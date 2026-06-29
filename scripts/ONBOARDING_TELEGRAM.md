@@ -101,6 +101,25 @@ Ligar só o que o cliente quiser receber:
 | Sinais não chegam | Publisher parado **ou** motor desligado |
 | "Chat ID já existe" | Grupo já usado por outro cliente |
 | Login travado | Limpar cache / tentar de novo |
+| **Motores ligados, mas só chega Números Pagantes** | Comportamento normal — veja seção abaixo |
+
+---
+
+## Por que só chegam Números Pagantes se todos os motores estão ON?
+
+**Ativar o motor não significa receber sinal o tempo todo.** Cada motor só envia quando **aquele tipo específico de entrada** está confirmado no dashboard ao vivo.
+
+| Motor | Quando envia sinal |
+|-------|-------------------|
+| **Números Pagantes** | Leitura Neural com entrada confirmada (B ou P) — é o mais frequente |
+| **Padrões IA** | Quando um padrão aparece como **validado/confirmado** no card de IA |
+| **Surf Alert** | Quando o Surf Analyzer está **ativo** ou com risco alto (≥ 70%) |
+| **Empates** | Quando o radar de empate está com status **active** |
+| **Validador** | Somente padrões que **o próprio cliente salvou** no Validador |
+
+Ou seja: se a mesa está confirmando entrada neural mas **não** tem padrão IA validado, surf ativo ou empate ativo naquele momento, **só Números Pagantes vai enviar** — mesmo com os outros motores ligados.
+
+Isso **não é bug**. É o filtro de qualidade: cada motor manda só a entrada do seu card, não um sinal genérico a cada rodada.
 
 ---
 
@@ -115,3 +134,17 @@ Ligar só o que o cliente quiser receber:
 > 5. Ative os motores que deseja receber (Números Pagantes, IA, Surf, etc.)
 >
 > Pronto — os sinais chegam direto no seu grupo, sem precisar deixar o site aberto.
+
+---
+
+## Mensagem pronta — "Por que só chegam Números Pagantes?"
+
+> Os motores **ligados** no painel definem **quais tipos de sinal** você quer receber — não significa que todos vão sair ao mesmo tempo.
+>
+> Cada motor só manda mensagem quando **aquela entrada específica** confirma no dashboard:
+> - **Números Pagantes** → entrada neural confirmada (sai com mais frequência)
+> - **Padrões IA** → quando um padrão valida no card de IA
+> - **Surf** → quando o alerta de surf está ativo ou risco alto
+> - **Empates** → quando o radar de empate está ativo
+>
+> Se no momento só a Leitura Neural confirmou, **só Números Pagantes vai enviar** — os outros motores aguardam a condição deles. Isso é normal e garante que cada sinal seja do tipo certo.

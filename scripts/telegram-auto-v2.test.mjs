@@ -262,6 +262,23 @@ assert.match(bankerFromCurrentSignal.signalKey, /:B:round:991$/);
 assert.equal(detectSurfConfirmedCard(surfDashboard, latestRound).signalKey, "surf:surf-1:B:round:991");
 assert.equal(detectTiesConfirmedCard(tieDashboard, latestRound).signalKey, "tie:tie-1:alto:round:991");
 
+assert.equal(
+  detectSurfConfirmedCard(
+    {
+      rounds: [latestRound],
+      currentSurfAlert: {
+        surf_alert: false,
+        surf_status: "MONITORANDO",
+        surf_prediction_side: "P",
+        surf_break_risk: 78,
+        id: "surf-risk",
+      },
+    },
+    latestRound,
+  ).confirmed,
+  true,
+);
+
 const dedupeKey = buildTelegramAutoV2NotificationKey("channel-1", "paying_numbers", "paying:991", 991);
 assert.match(dedupeKey, /^v2:channel-1:paying_numbers:/);
 assert.equal(telegramAutoV2SentBlocksRetry("sent"), true);
