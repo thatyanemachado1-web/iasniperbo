@@ -63,7 +63,7 @@ try {
       name: "Grupo validado",
       bot_token: botToken,
       group_id: chatId,
-      button_url: "https://sniperbo.com/app/validador",
+      button_url: "",
       signalModules: {
         ai_patterns: { enabled: true, cooldownSeconds: 0 },
         paying_numbers: { enabled: true, cooldownSeconds: 0 },
@@ -105,12 +105,13 @@ try {
 
   const cases = [
     { moduleKey: "ai_patterns", signalKey: "ai:entry:1", roundId: 101, result: "Aguardando resultado", entry: "BANKER" },
-    { moduleKey: "paying_numbers", signalKey: "paying:result:2", roundId: 102, result: "Green", entry: "PLAYER" },
-    { moduleKey: "surf_alert", signalKey: "surf:result:3", roundId: 103, result: "Red", entry: "BANKER" },
+    { moduleKey: "paying_numbers", signalKey: "paying:entry:2", roundId: 102, result: "Aguardando resultado", entry: "PLAYER" },
+    { moduleKey: "paying_numbers", signalKey: "paying:result:3", roundId: 103, result: "Green", entry: "PLAYER" },
+    { moduleKey: "surf_alert", signalKey: "surf:result:4", roundId: 104, result: "Red", entry: "BANKER" },
     {
       moduleKey: "ties_only",
-      signalKey: "ties:result:4",
-      roundId: 104,
+      signalKey: "ties:result:5",
+      roundId: 105,
       result: "Empate 8x",
       entry: "TIE",
       variables: { tieMultiplier: "8x" },
@@ -147,8 +148,8 @@ try {
     userId,
     channelId: "canal-1",
     moduleKey: "validator",
-    signalKey: "validator:entry:5",
-    roundId: 105,
+    signalKey: "validator:entry:6",
+    roundId: 106,
     entry: "PLAYER",
     result: "Aguardando resultado",
     variables: {
@@ -162,11 +163,17 @@ try {
   assert.equal(validatorBody.sent.length, 0, "validator direct engine signal must stay silent");
   assert.equal(validatorBody.blocked[0].reason, "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS");
 
-  assert.equal(sentMessages.length, 5);
+  assert.equal(sentMessages.length, 6);
   assert.match(sentMessages[1].payload.text, /PADRAO|PADR/);
-  assert.match(sentMessages[2].payload.text, /Green/i);
-  assert.match(sentMessages[3].payload.text, /RED/i);
-  assert.match(sentMessages[4].payload.text, /Empate 8x/i);
+  assert.match(sentMessages[2].payload.text, /N.MERO PAGANTE CONFIRMADO|NÚMERO PAGANTE CONFIRMADO/i);
+  assert.match(sentMessages[2].payload.text, /Entrada:<\/b>\s*🔵 PLAYER/u);
+  assert.match(sentMessages[3].payload.text, /Green/i);
+  assert.match(sentMessages[4].payload.text, /RED/i);
+  assert.match(sentMessages[5].payload.text, /Empate 8x/i);
+  for (const message of sentMessages.slice(1)) {
+    assert.equal(message.payload.reply_markup.inline_keyboard[0][0].text, "Abrir Sniper Bo IA");
+    assert.equal(message.payload.reply_markup.inline_keyboard[0][0].url, "https://sniperbo.com/app");
+  }
 
   console.log("telegram-engine-cloud tests passed");
 } finally {

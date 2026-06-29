@@ -78,6 +78,7 @@ class DirectTelegramSignalTests(unittest.TestCase):
         self.assertIn("sent_count=1", reason)
         self.assertEqual(calls[0]["kwargs"]["timeout"], publisher.DIRECT_TELEGRAM_TIMEOUT)
         self.assertGreaterEqual(publisher.DIRECT_TELEGRAM_TIMEOUT[1], 8.0)
+        self.assertEqual(calls[0]["kwargs"]["payload"]["buttonUrl"], publisher.DIRECT_TELEGRAM_BUTTON_URL)
 
     def test_engine_entry_creates_only_ai_signal_without_saved_validator_pattern(self):
         payload = {
@@ -301,7 +302,9 @@ class DirectTelegramSignalTests(unittest.TestCase):
 
         self.assertEqual(red_outcome["status"], "RED")
         self.assertEqual(tie_outcome["status"], "TIE")
-        self.assertIn("Empate confirmado", publisher.direct_result_message(red_pending, tie_outcome))
+        tie_message = publisher.direct_result_message(red_pending, tie_outcome)
+        self.assertIn("Empate 4x", tie_message)
+        self.assertIn("Empate 4x confirmado", tie_message)
 
 
 if __name__ == "__main__":

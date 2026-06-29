@@ -39,6 +39,7 @@ URGENT_SIGNAL_TIMEOUT = 8.0
 UPLOAD_WARNING_MS = 2000.0
 DIRECT_TELEGRAM_TARGET_MS = 300.0
 DIRECT_TELEGRAM_TIMEOUT = (1.0, 8.0)
+DIRECT_TELEGRAM_BUTTON_URL = "https://sniperbo.com/app"
 DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 1.2
 DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_ROUNDS = 4
 DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_SECONDS = 120.0
@@ -602,11 +603,11 @@ def direct_visual_paying_status(reading: dict[str, Any]) -> str:
 
 def direct_telegram_entry_label(entry: str) -> str:
     if entry == "BANKER":
-        return "🔴 BANKER"
+        return "\U0001F534 BANKER"
     if entry == "PLAYER":
-        return "🔵 PLAYER"
+        return "\U0001F535 PLAYER"
     if entry == "TIE":
-        return "🟡 TIE"
+        return "\U0001F7E1 TIE"
     return "Automatico"
 
 
@@ -618,11 +619,11 @@ def direct_telegram_score_label(entry: str, number: Any) -> str:
     if not digits:
         return decorate_direct_telegram_message(text)
     if entry == "BANKER":
-        return f"🔴 B{digits}"
+        return f"\U0001F534 B{digits}"
     if entry == "PLAYER":
-        return f"🔵 P{digits}"
+        return f"\U0001F535 P{digits}"
     if entry == "TIE":
-        return f"🟡 T{digits}"
+        return f"\U0001F7E1 T{digits}"
     return decorate_direct_telegram_message(text)
 
 
@@ -639,11 +640,11 @@ def decorate_direct_telegram_message(message: str) -> str:
         if any(icon in prefix for icon in ("🔴", "🔵", "🟡")):
             return match.group(0)
         if side == "B":
-            return f"{prefix}🔴 B{number}"
+            return f"{prefix}\U0001F534 B{number}"
         if side == "P":
-            return f"{prefix}🔵 P{number}"
+            return f"{prefix}\U0001F535 P{number}"
         if side == "T":
-            return f"{prefix}🟡 T{number}"
+            return f"{prefix}\U0001F7E1 T{number}"
         return match.group(0)
 
     return re.sub(r"(^|[^\w🔴🔵🟡])([BPT])\s*([2-9]|1[0-2])\b", replace_score, text, flags=re.IGNORECASE)
@@ -1705,6 +1706,7 @@ def publish_direct_telegram_signal(
             **({"result": signal["result"]} if signal.get("result") else {}),
             **({"protection": signal["protection"]} if signal.get("protection") else {}),
             "buttonLabel": "Abrir Sniper Bo IA",
+            "buttonUrl": DIRECT_TELEGRAM_BUTTON_URL,
         },
         timeout=DIRECT_TELEGRAM_TIMEOUT,
     )
@@ -1763,8 +1765,8 @@ def direct_tie_multiplier(round_item: dict[str, Any]) -> str:
         return f"{int(explicit)}x"
     if direct_round_side(round_item) != "TIE":
         return ""
-    banker = direct_float(round_item.get("bankerScore") or round_item.get("banker_score"))
-    player = direct_float(round_item.get("playerScore") or round_item.get("player_score"))
+    banker = direct_float(round_item.get("bankerScore") or round_item.get("banker_score") or round_item.get("banker"))
+    player = direct_float(round_item.get("playerScore") or round_item.get("player_score") or round_item.get("player"))
     if banker != player:
         return ""
     score = int(round(banker))
@@ -1799,13 +1801,15 @@ def direct_result_message(pending: dict[str, Any], outcome: dict[str, Any]) -> s
             f"🛡️ <b>Proteção:</b> {gale}",
         ])
     if status == "TIE":
-        tie_text = f"EMPATE {tie_multiplier}".strip()
+        tie_text = f"Empate {tie_multiplier}".strip() if tie_multiplier else "Empate"
+        confirmed_text = f"Empate {tie_multiplier} confirmado" if tie_multiplier else "Empate confirmado"
         return "\n".join([
-            f"🟡 <b>{tie_text}</b>",
+            f"✅ <b>{tie_text}</b>",
             "",
             *pattern_line,
             f"🎯 <b>Entrada:</b> {entry}",
-            "✅ <b>Empate confirmado</b>",
+            f"🟡 <b>{confirmed_text}</b>",
+            f"🛡️ <b>Proteção:</b> {gale}",
         ])
     return "\n".join([
         f"✅ <b>{label}</b>",
