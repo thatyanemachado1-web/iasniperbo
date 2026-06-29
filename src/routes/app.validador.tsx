@@ -3197,6 +3197,26 @@ function validateTelegramModuleConfig(key: ValidatorTelegramModuleKey, config: V
     const error = validateTelegramTemplate(key, option.key, getTelegramModuleTemplate(config, option.key));
     if (error) return `${option.label}: ${error}`;
   }
+  const buttonError = validateTelegramModuleButtons(config.buttons);
+  if (buttonError) return buttonError;
+  return "";
+}
+
+function validateTelegramModuleButtons(buttons: ValidatorTelegramButtonConfig[]) {
+  const normalized = normalizeTelegramModuleButtons(buttons);
+  for (const [index, button] of normalized.entries()) {
+    if (!button.enabled) continue;
+    const url = button.url.trim();
+    if (!url) continue;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return `Botao ${index + 1}: link invalido. Use http ou https.`;
+      }
+    } catch {
+      return `Botao ${index + 1}: link invalido. Use http ou https.`;
+    }
+  }
   return "";
 }
 

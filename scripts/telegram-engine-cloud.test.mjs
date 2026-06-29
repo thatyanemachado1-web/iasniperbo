@@ -118,9 +118,19 @@ try {
         ...modulesAfterSurf.ties_only,
         template: customTiesEntryTemplate,
         tieCoverage: 2,
+        buttons: [
+          {
+            enabled: true,
+            label: "Entrar no Telegram VIP",
+            url: "https://t.me/sniperbo_vip",
+          },
+        ],
       },
     },
   });
+  const modulesAfterButtonSave = (await engine.publicChannelsForUser(userId))[0].signalModules;
+  assert.equal(modulesAfterButtonSave.ties_only.buttons[0].label, "Entrar no Telegram VIP");
+  assert.equal(modulesAfterButtonSave.ties_only.buttons[0].url, "https://t.me/sniperbo_vip");
 
   const cases = [
     { moduleKey: "ai_patterns", signalKey: "ai:entry:1", roundId: 101, result: "Aguardando resultado", entry: "BANKER" },
@@ -194,9 +204,13 @@ try {
   assert.match(sentMessages[5].payload.text, /Cobertura:\s*G2/i);
   assert.doesNotMatch(sentMessages[5].payload.text, /POSS.VEL EMPATE/i);
   assert.match(sentMessages[6].payload.text, /Empate 8x/i);
-  for (const message of sentMessages.slice(1)) {
+  for (const message of sentMessages.slice(1, 5)) {
     assert.equal(message.payload.reply_markup.inline_keyboard[0][0].text, "Abrir Sniper Bo IA");
     assert.equal(message.payload.reply_markup.inline_keyboard[0][0].url, "https://sniperbo.com/app");
+  }
+  for (const message of sentMessages.slice(5, 7)) {
+    assert.equal(message.payload.reply_markup.inline_keyboard[0][0].text, "Entrar no Telegram VIP");
+    assert.equal(message.payload.reply_markup.inline_keyboard[0][0].url, "https://t.me/sniperbo_vip");
   }
 
   console.log("telegram-engine-cloud tests passed");
