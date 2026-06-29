@@ -862,7 +862,7 @@ function NeuralValidatorPage() {
     channel: ValidatorNotificationChannel,
     patch: Partial<ValidatorNotificationChannel>,
   ) {
-    const updated = {
+    const updated: ValidatorNotificationChannel = {
       ...channel,
       ...patch,
       templates: {
@@ -872,13 +872,23 @@ function NeuralValidatorPage() {
       },
       updatedAt: new Date().toISOString(),
     };
+    const optimisticChannel = markServerConfirmedChannel(updated);
+    applyChannelUpdate(optimisticChannel);
+    const modulePatchPayload = {
+      signalModules: updated.signalModules,
+      templates: {
+        ...(updated.templates as unknown as Record<string, unknown>),
+        signalModules: updated.signalModules,
+      },
+      isActive: updated.isActive,
+    };
     const savePromise =
       patch.signalModules && telegramChannelCanUpdateModules(channel)
         ? fetch(`/telegram/channels/${encodeURIComponent(channel.id)}`, {
             method: "PATCH",
             cache: "no-store",
             headers: validatorApiHeaders(true),
-            body: JSON.stringify({ channel: { signalModules: updated.signalModules, isActive: updated.isActive } }),
+            body: JSON.stringify({ channel: modulePatchPayload }),
           }).then(async (response) => {
             const data = (await response.json().catch(() => null)) as { channel?: ValidatorNotificationChannel; error?: string } | null;
             if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou a atualizacao.");
@@ -889,6 +899,7 @@ function NeuralValidatorPage() {
     void savePromise
       .then((serverChannel) => setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(serverChannel)))))
       .catch((error) => {
+        applyChannelUpdate(channel);
         showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a atualizacao.");
       });
   }

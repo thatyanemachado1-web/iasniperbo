@@ -607,16 +607,20 @@ export class TelegramEngine {
         (signalKind === "entry" ? DEFAULT_MODULE_TEMPLATES[moduleKey] || "" : "");
       const templateVariables = {
         ...variables,
+        channel: String(variables.channel ?? channel.name ?? ""),
+        round: String(variables.round ?? variables.roundNumber ?? roundId ?? ""),
+        roundId: String(variables.roundId ?? roundId ?? ""),
         entry: formatEntry(entry),
         entryLabel: formatEntryLabel(entry),
         entryCompact: formatEntryCompact(entry),
         module: moduleName(moduleKey),
         gale: finalNotificationProtection,
         protection: finalNotificationProtection,
+        tieCoverage: String(variables.tieCoverage ?? variables.tie_coverage ?? config.tieCoverage ?? ""),
         status: String(variables.status || notificationResult || "CONFIRMADO"),
         result: notificationResult,
       };
-      const renderedMessage = !forceMessage && shouldRenderSignalTemplate(template, templateVariables)
+      const renderedMessage = !forceMessage && template
         ? renderTemplate(template, templateVariables)
         : String(body.message || "");
       const message = formatTelegramMessageText(String(renderedMessage || body.message || renderTemplate("{{entry}}", templateVariables))).slice(0, 4096);
