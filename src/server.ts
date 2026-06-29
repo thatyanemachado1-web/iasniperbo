@@ -3335,8 +3335,13 @@ async function handleNeuralCalendarRequest(request: Request, url: URL, env: unkn
     return json({ error: "Calendario Neural disponivel apenas para usuarios premium." }, 403);
   }
 
-  await hydrateNeuralCalendarStatsFromTables(env);
-  await ensureEngineCalendarAggregatesAvailable(env);
+  await withTimeout(
+    hydrateNeuralCalendarStatsFromTables(env),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar agregados do Calendario Neural",
+    undefined,
+  );
+  kickOffEngineCalendarAggregatesBackfill(env);
 
   const now = saoPauloDateParts();
   const requestedYear = clampCalendarYear(url.searchParams.get("year"), now.year);
@@ -4420,6 +4425,14 @@ async function ensureEngineCalendarAggregatesAvailable(env: unknown) {
       engineCalendarAutoBackfillPromise = null;
     });
   await engineCalendarAutoBackfillPromise;
+}
+
+function kickOffEngineCalendarAggregatesBackfill(env: unknown) {
+  if (!getSupabasePersistenceConfig(env)) return;
+
+  void ensureEngineCalendarAggregatesAvailable(env).catch((error) => {
+    console.warn("Backfill automatico do Calendario Neural falhou em segundo plano.", error);
+  });
 }
 
 function hasEngineCalendarAggregateRows() {
