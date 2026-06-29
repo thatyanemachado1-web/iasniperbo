@@ -79,7 +79,7 @@ class DirectTelegramSignalTests(unittest.TestCase):
         self.assertEqual(calls[0]["kwargs"]["timeout"], publisher.DIRECT_TELEGRAM_TIMEOUT)
         self.assertGreaterEqual(publisher.DIRECT_TELEGRAM_TIMEOUT[1], 8.0)
 
-    def test_engine_entry_creates_ai_and_validator_signals(self):
+    def test_engine_entry_creates_only_ai_signal_without_saved_validator_pattern(self):
         payload = {
             "rounds": [{"id": 1301, "result": "B"}],
             "currentSignal": {"id": "engine-1301", "side": "PLAYER", "status": "pending"},
@@ -94,7 +94,7 @@ class DirectTelegramSignalTests(unittest.TestCase):
         module_entries = {(item["moduleKey"], item["entry"]) for item in signals}
 
         self.assertIn(("ai_patterns", "PLAYER"), module_entries)
-        self.assertIn(("validator", "PLAYER"), module_entries)
+        self.assertNotIn(("validator", "PLAYER"), module_entries)
 
     def test_surf_prediction_status_creates_signal(self):
         payload = {

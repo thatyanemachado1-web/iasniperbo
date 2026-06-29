@@ -115,7 +115,6 @@ try {
       entry: "TIE",
       variables: { tieMultiplier: "8x" },
     },
-    { moduleKey: "validator", signalKey: "validator:entry:5", roundId: 105, result: "Aguardando resultado", entry: "PLAYER" },
   ];
 
   for (const item of cases) {
@@ -144,12 +143,30 @@ try {
     assert.equal(body.blocked.length, 0, `${item.moduleKey} should not block`);
   }
 
-  assert.equal(sentMessages.length, 6);
+  const validatorResponse = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "validator",
+    signalKey: "validator:entry:5",
+    roundId: 105,
+    entry: "PLAYER",
+    result: "Aguardando resultado",
+    variables: {
+      table: "Bac Bo",
+      pattern: "B P B",
+      percentage: "91%",
+    },
+  });
+  assert.equal(validatorResponse.status, 200);
+  const validatorBody = await validatorResponse.json();
+  assert.equal(validatorBody.sent.length, 0, "validator direct engine signal must stay silent");
+  assert.equal(validatorBody.blocked[0].reason, "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS");
+
+  assert.equal(sentMessages.length, 5);
   assert.match(sentMessages[1].payload.text, /PADRAO|PADR/);
   assert.match(sentMessages[2].payload.text, /Green/i);
   assert.match(sentMessages[3].payload.text, /RED/i);
   assert.match(sentMessages[4].payload.text, /Empate 8x/i);
-  assert.match(sentMessages[5].payload.text, /VALIDADOR|PLAYER/i);
 
   console.log("telegram-engine-cloud tests passed");
 } finally {

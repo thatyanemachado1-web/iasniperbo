@@ -540,6 +540,23 @@ export class TelegramEngine {
     const sent = [];
     const blocked = [];
 
+    if (moduleKey === "validator") {
+      console.warn(JSON.stringify({
+        event: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS",
+        reason: "validator_requires_backend_saved_pattern",
+        user: maskUserId(targetUserId),
+        channelId: targetChannelId,
+        signalKey,
+        roundId,
+        activeChannels: channels.length,
+      }));
+      for (const channel of channels) {
+        console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, false, "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS", "")));
+        blocked.push({ channelId: channel.id, reason: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS" });
+      }
+      return json({ ok: true, sent, blocked }, 200, this.env);
+    }
+
     const sentChatCodes = new Set();
     for (const channel of channels) {
       const chatCode = normalizeChannelCode(channel.chatId);
@@ -2305,6 +2322,14 @@ async function handleTelegramEngineDoFallback(request, env, url, error = null) {
 
   if (degraded && request.method === "POST" && url.pathname === "/engine/signal") {
     const body = await readJson(request);
+    if (normalizeModuleKey(body.moduleKey || body.type) === "validator") {
+      console.warn(JSON.stringify({
+        event: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS",
+        reason: "validator_requires_backend_saved_pattern",
+        degraded: true,
+      }));
+      return json({ ok: true, sent: [], blocked: [{ channelId: emergencyChannel.id, reason: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS" }], degraded }, 200, env);
+    }
     const botToken =
       normalizeSecret(env.TELEGRAM_EMERGENCY_BOT_TOKEN) ||
       normalizeSecret(env.TELEGRAM_SMOKE_BOT_TOKEN) ||

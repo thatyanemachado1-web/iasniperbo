@@ -243,6 +243,25 @@ const DEFAULT_TELEGRAM_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string>
   ties_only: DEFAULT_TELEGRAM_GREEN_TEMPLATES.ties_only,
   validator: DEFAULT_TELEGRAM_GREEN_TEMPLATES.validator,
 };
+const VALIDATOR_PAGE_TABS = ["dashboard", "channels", "validator", "ai", "saved"] as const;
+type ValidatorPageTab = (typeof VALIDATOR_PAGE_TABS)[number];
+
+function normalizeValidatorPageTab(value: unknown): ValidatorPageTab {
+  const clean = String(value || "").replace(/^#/, "");
+  if (clean === "telegram") return "channels";
+  return VALIDATOR_PAGE_TABS.includes(clean as ValidatorPageTab) ? (clean as ValidatorPageTab) : "dashboard";
+}
+
+function readValidatorTabFromHash(): ValidatorPageTab {
+  if (typeof window === "undefined") return "dashboard";
+  return normalizeValidatorPageTab(window.location.hash);
+}
+
+function writeValidatorTabHash(tab: ValidatorPageTab) {
+  if (typeof window === "undefined") return;
+  const nextHash = tab === "channels" ? "#telegram" : tab === "dashboard" ? "" : `#${tab}`;
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
+}
 
 function NeuralValidatorPage() {
   const { data, mode } = useDashboardData();
@@ -251,7 +270,7 @@ function NeuralValidatorPage() {
   const hasClientSession = Boolean(session.clientToken);
   const adminAccess = Boolean(adminSession?.token && !hasClientSession);
   const fullAccess = adminAccess || hasFullAccess(session);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState<ValidatorPageTab>(() => readValidatorTabFromHash());
   const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
   const planLimits = adminAccess ? planLimitForSession("vip", true) : planLimitForSession(session.plan, fullAccess);
   const [serverHistory, setServerHistory] = useState<Round[]>([]);
@@ -346,6 +365,24 @@ function NeuralValidatorPage() {
         .join("|"),
     [channels],
   );
+
+  useEffect(() => {
+    const syncTabFromHash = () => {
+      setActiveTab((current) => {
+        const next = readValidatorTabFromHash();
+        return next === current ? current : next;
+      });
+    };
+    syncTabFromHash();
+    window.addEventListener("hashchange", syncTabFromHash);
+    return () => window.removeEventListener("hashchange", syncTabFromHash);
+  }, []);
+
+  function changeActiveTab(value: string) {
+    const next = normalizeValidatorPageTab(value);
+    setActiveTab(next);
+    writeValidatorTabHash(next);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -674,21 +711,21 @@ function NeuralValidatorPage() {
 
   async function sendLiveHitToTelegram(hit: LiveValidatorHit) {
     const patternItem = hit.pattern;
-    if (patternItem.destination === "disabled" || patternItem.destination === "monitor") {
-      showNotice("Padrao detectado no site. Telegram nao enviado porque o destino esta monitorar/desativado.");
+    const shouldForwardToTelegram = patternItem.destination === "telegram" || patternItem.destination === "site_telegram";
+    if (!shouldForwardToTelegram) {
+      showNotice("Padrao detectado no site. Telegram nao enviado porque o destino nao e Telegram.");
       return;
     }
-    const channel = channels.find((item) => item.id === patternItem.telegramChannelId) ||
-      channels.find((item) => item.isActive && item.chatId) ||
-      channels[0];
+    const channel = channels.find((item) => item.id === patternItem.telegramChannelId);
     if (!channel || !channel.isActive) {
       console.info("[VALIDATOR_LIVE_HIT] blocked", {
-        reason: "no_active_channel",
+        reason: patternItem.telegramChannelId ? "pattern_channel_inactive" : "pattern_without_telegram_channel",
         patternId: patternItem.id,
+        channelId: patternItem.telegramChannelId,
         detectedRoundId: hit.detectedRoundId,
         channels: channels.length,
       });
-      showNotice("Padrao detectado no site. Telegram nao enviado: nenhum canal ativo.");
+      showNotice("Padrao detectado no site. Telegram nao enviado: padrao sem canal ativo vinculado.");
       return;
     }
 
@@ -728,7 +765,6 @@ function NeuralValidatorPage() {
       await postValidatorLiveHitTelegram({
         patternId: patternItem.id,
         detectedRoundId: hit.detectedRoundId,
-        pattern: patternItem,
       });
       markTelegramNotificationSent(sendKey);
       console.info("[VALIDATOR_LIVE_HIT] sent", {
@@ -1056,7 +1092,7 @@ function NeuralValidatorPage() {
         </GlassCard>
       )}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={changeActiveTab} className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-5">
           <TabsTrigger value="dashboard" className="gap-1.5"><Activity className="size-3.5" /> Dashboard</TabsTrigger>
           <TabsTrigger value="channels" className="gap-1.5"><Send className="size-3.5" /> Central Telegram</TabsTrigger>
@@ -3576,7 +3612,6 @@ async function previewServerValidatorChannel(
 async function postValidatorLiveHitTelegram(payload: {
   patternId: string;
   detectedRoundId: number;
-  pattern?: SavedValidatorPattern;
 }) {
   const response = await fetch("/validator/live-hit/send", {
     method: "POST",

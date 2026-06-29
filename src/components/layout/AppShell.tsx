@@ -12,6 +12,7 @@ import {
   Network,
   CalendarDays,
   WalletCards,
+  Send,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -35,11 +36,21 @@ const navItems = [
   { to: "/app/conta", label: "Conta", icon: User },
 ] as const;
 
-const adminNavItem = { to: "/app/admin/users", label: "ADM", icon: ShieldCheck } as const;
 const hiddenOnMobileNav = new Set(["/app/ia"]);
+const telegramMobileNavItem = { to: "/app/validador", hash: "telegram", label: "Telegram", icon: Send } as const;
+const mobilePrimaryPaths = new Set([
+  "/app",
+  "/app/agentes",
+  "/app/voz",
+  "/app/padroes",
+  "/app/validador",
+  "/app/calendario",
+]);
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const location = useRouterState({ select: (s) => s.location });
+  const pathname = location.pathname;
+  const currentHash = String((location as { hash?: string }).hash || "").replace(/^#/, "");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
   const userSession = readUserSession();
@@ -48,8 +59,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const visibleNavItems = fullAccess
     ? navItems.filter((item) => item.to !== "/app/planos")
     : navItems;
-  const visibleMobileNavItems = visibleNavItems.filter((item) => !hiddenOnMobileNav.has(item.to));
-  const mobileNavItems = canSeeAdmin ? [...visibleMobileNavItems, adminNavItem] : visibleMobileNavItems;
+  const visibleMobileNavItems = visibleNavItems.filter(
+    (item) => !hiddenOnMobileNav.has(item.to) && mobilePrimaryPaths.has(item.to),
+  );
+  const mobileNavItems = [
+    ...visibleMobileNavItems.slice(0, 5),
+    telegramMobileNavItem,
+    ...visibleMobileNavItems.filter((item) => item.to === "/app/calendario"),
+  ];
 
   useEffect(() => {
     const savedPreference = window.localStorage.getItem("sniper_sidebar_collapsed");
@@ -180,14 +197,19 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* Bottom nav mobile */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 glass-strong lg:hidden">
-        <div className="flex overflow-x-auto px-1 pb-[calc(env(safe-area-inset-bottom)+0.35rem)] pt-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="grid grid-cols-7 gap-0 px-1 pb-[calc(env(safe-area-inset-bottom)+0.35rem)] pt-1">
           {mobileNavItems.map((it) => {
-            const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
+            const itemHash = "hash" in it ? it.hash : "";
+            const active = itemHash
+              ? pathname === it.to && currentHash === itemHash
+              : (pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to))) &&
+                !(it.to === "/app/validador" && currentHash === "telegram");
             return (
               <Link
-                key={it.to}
+                key={`${it.to}:${itemHash}`}
                 to={it.to}
-                className={`flex min-w-[68px] flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[9px] sm:min-w-[78px] sm:text-[10px] ${
+                hash={itemHash || undefined}
+                className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-[8.5px] sm:text-[10px] ${
                   active ? "text-neon-cyan" : "text-muted-foreground"
                 }`}
               >

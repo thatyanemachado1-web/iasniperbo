@@ -7237,13 +7237,14 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     const body = readRecord(await request.json().catch(() => ({})));
     const patternId = readString(body, "patternId");
     const detectedRoundId = Math.floor(Number(body.detectedRoundId) || 0);
-    const incomingPattern = normalizeServerSavedPattern(body.pattern, userId);
-    let pattern = liveValidatorPatterns.find((item) => item.userId === userId && item.id === patternId);
-    if (!pattern && incomingPattern && incomingPattern.id === patternId) {
-      pattern = incomingPattern;
-      liveValidatorPatterns = upsertValidatorPattern(incomingPattern);
-      await persistValidatorPattern(env, incomingPattern);
+    if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
+      liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
     }
+    const savedUserPatterns = liveValidatorPatterns.filter(
+      (item) => item.userId === userId && !isValidatorPatternDeleted(item),
+    );
+    const activeUserPatterns = validatorDispatchableSavedPatternsForUser(userId);
+    let pattern = activeUserPatterns.find((item) => item.id === patternId) || null;
     console.info(
       JSON.stringify({
         event: "[VALIDATOR_DISPATCH] live_hit_received",
@@ -7251,10 +7252,20 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
         patternId,
         detectedRoundId,
         patternFound: Boolean(pattern),
-        incomingPattern: Boolean(incomingPattern),
+        savedPatterns: savedUserPatterns.length,
+        activeSavedPatterns: activeUserPatterns.length,
         channelsForUser: liveValidatorChannels.filter((channel) => channel.userId === userId).length,
       }),
     );
+    if (!activeUserPatterns.length) {
+      logValidatorSkippedNoSavedPatterns("live_hit", {
+        user: maskTelemetryUserId(userId),
+        patternId,
+        detectedRoundId,
+        savedPatterns: savedUserPatterns.length,
+      });
+      return json({ error: "Nenhum padrao salvo ativo para enviar no Validador." }, 400);
+    }
     if (!pattern) {
       console.warn(
         JSON.stringify({
@@ -7262,14 +7273,22 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
           user: maskTelemetryUserId(userId),
           patternId,
           detectedRoundId,
-          reason: "pattern_not_found",
+          reason: "saved_pattern_not_found_or_inactive",
         }),
       );
-      return json({ error: "Padrao nao encontrado no servidor. Salve a estrategia novamente." }, 404);
+      return json({ error: "Padrao salvo ativo nao encontrado para este usuario." }, 404);
     }
-    if (!pattern.isActive) return json({ error: "Padrao inativo." }, 400);
-    if (!validatorPatternAllowsTelegramForward(pattern)) {
-      return json({ error: "Padrao esta em monitorar/desativado." }, 400);
+    if (!validatorSavedPatternMatchesRoundHistory(pattern, detectedRoundId)) {
+      console.warn(
+        JSON.stringify({
+          event: "[VALIDATOR_DISPATCH] blocked",
+          user: maskTelemetryUserId(userId),
+          patternId: pattern.id,
+          detectedRoundId,
+          reason: "pattern_match_not_real",
+        }),
+      );
+      return json({ error: "Padrao salvo nao bate com o historico real atual." }, 409);
     }
 
     const channel = findValidatorTelegramChannelForPattern(pattern);
@@ -10122,6 +10141,15 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     surfAlert: Boolean(readRecord(liveDashboardData.currentSurfAlert).surf_alert),
     dashboardUpdatedAt: liveDashboardData.updatedAt || "",
   });
+  const dispatchableValidatorPatterns = validatorDispatchableSavedPatterns();
+  if (!dispatchableValidatorPatterns.length) {
+    logValidatorSkippedNoSavedPatterns("monitor", {
+      trigger: options.trigger || "unknown",
+      savedPatterns: liveValidatorPatterns.filter((pattern) => !isValidatorPatternDeleted(pattern)).length,
+      activeSavedPatterns: 0,
+      roundId: latestRound?.id ?? null,
+    });
+  }
 
   for (const probe of cardProbes) {
     logTelegramAutoV2Event(probe.confirmed ? "card detectado" : "card nao confirmado", {
@@ -10304,6 +10332,16 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
     "carregar canais para telegram v2",
     undefined,
   );
+  const dispatchableValidatorPatterns = validatorDispatchableSavedPatterns();
+  if (!dispatchableValidatorPatterns.length) {
+    logValidatorSkippedNoSavedPatterns("v2_only", {
+      trigger: options.trigger || "unknown",
+      savedPatterns: liveValidatorPatterns.filter((pattern) => !isValidatorPatternDeleted(pattern)).length,
+      activeSavedPatterns: 0,
+      confirmedModules: freshCards.map(({ card }) => card.moduleKey),
+      roundId: latestRound.id,
+    });
+  }
 
   const taskCountsByModule = new Map<ValidatorTelegramModuleKey, number>();
   const successfulSendsByModule = new Map<ValidatorTelegramModuleKey, number>();
@@ -10369,6 +10407,47 @@ async function sendValidatorEntryTelegramNotification(
   matchedAtMs: number,
   options: ValidatorMonitorOptions,
 ) {
+  const savedPattern = liveValidatorPatterns.find((item) => item.userId === pattern.userId && item.id === pattern.id);
+  if (!savedPattern || !validatorPatternCanDispatchTelegram(savedPattern)) {
+    logValidatorSkippedNoSavedPatterns("send_entry", {
+      user: maskTelemetryUserId(pattern.userId),
+      patternId: pattern.id,
+      channelId: channel.id,
+      roundId,
+      savedPatterns: liveValidatorPatterns.filter((item) => item.userId === pattern.userId && !isValidatorPatternDeleted(item)).length,
+    });
+    return false;
+  }
+  pattern = savedPattern;
+  const linkedChannel = findValidatorTelegramChannelForPattern(pattern);
+  if (!linkedChannel || linkedChannel.id !== channel.id) {
+    console.warn(
+      JSON.stringify({
+        event: "[VALIDATOR_DISPATCH] blocked",
+        user: maskTelemetryUserId(pattern.userId),
+        patternId: pattern.id,
+        channelId: channel.id,
+        expectedChannelId: pattern.telegramChannelId,
+        roundId,
+        reason: "channel_not_bound_to_saved_pattern",
+      }),
+    );
+    return false;
+  }
+  channel = linkedChannel;
+  if (!validatorSavedPatternMatchesRoundHistory(pattern, roundId)) {
+    console.warn(
+      JSON.stringify({
+        event: "[VALIDATOR_DISPATCH] blocked",
+        user: maskTelemetryUserId(pattern.userId),
+        patternId: pattern.id,
+        channelId: channel.id,
+        roundId,
+        reason: "pattern_match_not_real",
+      }),
+    );
+    return false;
+  }
   const roundReceivedAtMs = options.roundReceivedAtMs || matchedAtMs;
   const telegramSendStartedAtMs = Date.now();
   const message = buildServerValidatorTelegramMessage(pattern, channel);
@@ -11950,14 +12029,58 @@ function validatorNotificationAlreadySent(key: string) {
 }
 
 function validatorPatternAllowsTelegramForward(pattern: SavedValidatorPattern) {
-  return pattern.destination !== "disabled" && pattern.destination !== "monitor";
+  return pattern.destination === "telegram" || pattern.destination === "site_telegram";
+}
+
+function validatorPatternCanDispatchTelegram(pattern: SavedValidatorPattern) {
+  return (
+    !isValidatorPatternDeleted(pattern) &&
+    pattern.isActive &&
+    validatorPatternAllowsTelegramForward(pattern) &&
+    pattern.pattern.length > 0
+  );
+}
+
+function validatorDispatchableSavedPatternsForUser(userId: string) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  return liveValidatorPatterns.filter(
+    (pattern) => pattern.userId === normalizedUserId && validatorPatternCanDispatchTelegram(pattern),
+  );
+}
+
+function validatorDispatchableSavedPatterns() {
+  return liveValidatorPatterns.filter(validatorPatternCanDispatchTelegram);
+}
+
+function logValidatorSkippedNoSavedPatterns(context: string, payload: Record<string, unknown> = {}) {
+  console.info(
+    JSON.stringify({
+      event: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS",
+      context,
+      ...payload,
+    }),
+  );
+}
+
+function validatorSavedPatternMatchesRoundHistory(pattern: SavedValidatorPattern, detectedRoundId = 0) {
+  if (!pattern.pattern.length || liveValidatorRoundHistory.length < pattern.pattern.length) return false;
+  let endIndex = liveValidatorRoundHistory.length;
+  const targetRoundId = Math.floor(Number(detectedRoundId) || 0);
+  if (targetRoundId) {
+    const targetIndex = liveValidatorRoundHistory.findIndex((round) => Math.floor(Number(round.id) || 0) === targetRoundId);
+    if (targetIndex < 0) return false;
+    endIndex = targetIndex + 1;
+  }
+  const matchedRounds = liveValidatorRoundHistory.slice(Math.max(0, endIndex - pattern.pattern.length), endIndex);
+  return matchesServerValidatorPattern(matchedRounds, pattern.pattern);
 }
 
 function findValidatorTelegramChannelForPattern(pattern: SavedValidatorPattern) {
   const userChannels = liveValidatorChannels.filter((channel) => channel.userId === pattern.userId);
+  if (!pattern.telegramChannelId) return null;
   const preferred = userChannels.find((channel) => channel.id === pattern.telegramChannelId);
   if (isUsableValidatorTelegramChannel(preferred)) return preferred;
-  return userChannels.find(isUsableValidatorTelegramChannel) || null;
+  return null;
 }
 
 function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel) {

@@ -1405,35 +1405,6 @@ def direct_ai_pattern_from_engine(payload: dict[str, Any], round_id: int) -> dic
     }
 
 
-def direct_validator_from_ai_candidate(candidate: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(candidate, dict):
-        return None
-    if str(candidate.get("moduleKey") or "") != "ai_patterns":
-        return None
-    entry = str(candidate.get("entry") or "")
-    if not direct_ai_pattern_entry_allowed(entry):
-        return None
-    variables = candidate.get("variables") if isinstance(candidate.get("variables"), dict) else {}
-    round_id = int(candidate.get("roundId") or 0)
-    pattern = str(variables.get("pattern") or "Padrao validado").strip()
-    confidence = str(variables.get("confidence") or variables.get("percentage") or "--").strip()
-    next_variables = {
-        **variables,
-        "pattern": pattern,
-        "percentage": confidence,
-        "confidence": confidence,
-        "table": variables.get("table") or "Bac Bo",
-    }
-    return {
-        "moduleKey": "validator",
-        "signalKey": f"publisher:validator:{round_id}:{entry}:{candidate.get('signalKey')}",
-        "roundId": round_id,
-        "entry": entry,
-        "variables": next_variables,
-        "message": build_direct_telegram_message("validator", entry, next_variables),
-    }
-
-
 def direct_compact_family_value(value: Any) -> str:
     text = direct_normalized_text(value)
     text = re.sub(r"\s*>\s*", ">", text)
@@ -1630,9 +1601,6 @@ def direct_telegram_signals(payload: dict[str, Any], pattern_round_bank: list[di
     )
     if ai_candidate:
         candidates.append(ai_candidate)
-        validator_candidate = direct_validator_from_ai_candidate(ai_candidate)
-        if validator_candidate:
-            candidates.append(validator_candidate)
 
     surf = payload.get("currentSurfAlert") if isinstance(payload.get("currentSurfAlert"), dict) else {}
     surf_side = direct_telegram_entry(
