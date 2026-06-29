@@ -79,6 +79,47 @@ class DirectTelegramSignalTests(unittest.TestCase):
         self.assertEqual(calls[0]["kwargs"]["timeout"], publisher.DIRECT_TELEGRAM_TIMEOUT)
         self.assertGreaterEqual(publisher.DIRECT_TELEGRAM_TIMEOUT[1], 8.0)
 
+    def test_engine_entry_creates_ai_and_validator_signals(self):
+        payload = {
+            "rounds": [{"id": 1301, "result": "B"}],
+            "currentSignal": {"id": "engine-1301", "side": "PLAYER", "status": "pending"},
+            "engineDecision": {
+                "state": "ENTRADA",
+                "reason": "Padrao confirmado",
+                "confidence": 88,
+            },
+        }
+
+        signals = publisher.direct_telegram_signals(payload)
+        module_entries = {(item["moduleKey"], item["entry"]) for item in signals}
+
+        self.assertIn(("ai_patterns", "PLAYER"), module_entries)
+        self.assertIn(("validator", "PLAYER"), module_entries)
+
+    def test_surf_prediction_status_creates_signal(self):
+        payload = {
+            "rounds": [{"id": 1302, "result": "P"}],
+            "currentSurfAlert": {
+                "id": "surf-1302",
+                "surf_alert": True,
+                "surf_prediction_side": "BANKER",
+                "surf_prediction_status": "ACTIVE",
+                "surf_prediction_confidence": 74,
+            },
+        }
+
+        signals = publisher.direct_telegram_signals(payload)
+        surf = [item for item in signals if item["moduleKey"] == "surf_alert"]
+
+        self.assertEqual(len(surf), 1)
+        self.assertEqual(surf[0]["entry"], "BANKER")
+
+    def test_stale_pending_module_does_not_block_new_round(self):
+        pending = [{"moduleKey": "ai_patterns", "roundId": 100, "maxGale": 1}]
+
+        self.assertTrue(publisher.direct_module_has_pending(pending, "ai_patterns", 102))
+        self.assertFalse(publisher.direct_module_has_pending(pending, "ai_patterns", 104))
+
     def test_visual_player_card_beats_stale_banker_signal(self):
         payload = {
             "rounds": [{"id": 1201, "result": "B"}],
