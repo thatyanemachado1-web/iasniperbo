@@ -7952,19 +7952,20 @@ async function sendTelegramMessage({
     disable_web_page_preview: true,
   };
 
+  const fallbackButtonUrl = normalizeTelegramButtonUrl(buttonUrl);
   const inlineButtons = Array.isArray(buttons)
     ? buttons
         .map((button) => ({
           text: String(button.label || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
-          url: normalizeTelegramButtonUrl(button.url),
+          url: normalizeTelegramButtonUrl(button.url) || fallbackButtonUrl,
         }))
         .filter((button) => button.text && button.url)
         .slice(0, MAX_VALIDATOR_TELEGRAM_BUTTONS)
     : [];
-  if (!inlineButtons.length && buttonUrl) {
+  if (!inlineButtons.length && fallbackButtonUrl) {
     inlineButtons.push({
       text: buttonLabel.slice(0, 64) || "Abrir",
-      url: buttonUrl,
+      url: fallbackButtonUrl,
     });
   }
 

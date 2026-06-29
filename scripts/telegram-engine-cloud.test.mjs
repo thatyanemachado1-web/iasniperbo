@@ -122,7 +122,7 @@ try {
           {
             enabled: true,
             label: "Entrar no Telegram VIP",
-            url: "https://t.me/sniperbo_vip",
+            url: "",
           },
         ],
       },
@@ -130,7 +130,7 @@ try {
   });
   const modulesAfterButtonSave = (await engine.publicChannelsForUser(userId))[0].signalModules;
   assert.equal(modulesAfterButtonSave.ties_only.buttons[0].label, "Entrar no Telegram VIP");
-  assert.equal(modulesAfterButtonSave.ties_only.buttons[0].url, "https://t.me/sniperbo_vip");
+  assert.equal(modulesAfterButtonSave.ties_only.buttons[0].url, "");
 
   const cases = [
     { moduleKey: "ai_patterns", signalKey: "ai:entry:1", roundId: 101, result: "Aguardando resultado", entry: "BANKER" },
@@ -210,7 +210,7 @@ try {
   }
   for (const message of sentMessages.slice(5, 7)) {
     assert.equal(message.payload.reply_markup.inline_keyboard[0][0].text, "Entrar no Telegram VIP");
-    assert.equal(message.payload.reply_markup.inline_keyboard[0][0].url, "https://t.me/sniperbo_vip");
+    assert.equal(message.payload.reply_markup.inline_keyboard[0][0].url, "https://sniperbo.com/app");
   }
 
   console.log("telegram-engine-cloud tests passed");
