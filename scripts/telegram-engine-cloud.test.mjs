@@ -117,12 +117,13 @@ try {
       ties_only: {
         ...modulesAfterSurf.ties_only,
         template: customTiesEntryTemplate,
+        tieTemplate: "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
         tieCoverage: 2,
         buttons: [
           {
             enabled: true,
             label: "Entrar no Telegram VIP",
-            url: "",
+            url: "t.me/vip-sniper",
           },
         ],
       },
@@ -130,7 +131,7 @@ try {
   });
   const modulesAfterButtonSave = (await engine.publicChannelsForUser(userId))[0].signalModules;
   assert.equal(modulesAfterButtonSave.ties_only.buttons[0].label, "Entrar no Telegram VIP");
-  assert.equal(modulesAfterButtonSave.ties_only.buttons[0].url, "");
+  assert.equal(modulesAfterButtonSave.ties_only.buttons[0].url, "https://t.me/vip-sniper");
 
   const cases = [
     { moduleKey: "ai_patterns", signalKey: "ai:entry:1", roundId: 101, result: "Aguardando resultado", entry: "BANKER" },
@@ -142,9 +143,9 @@ try {
       moduleKey: "ties_only",
       signalKey: "ties:result:6",
       roundId: 106,
-      result: "Empate 8x",
+      result: "Empate",
       entry: "TIE",
-      variables: { tieMultiplier: "8x" },
+      variables: { tieMultiplier: "25x" },
     },
   ];
 
@@ -203,14 +204,15 @@ try {
   assert.match(sentMessages[5].payload.text, /Canal:\s*Grupo validado/i);
   assert.match(sentMessages[5].payload.text, /Cobertura:\s*G2/i);
   assert.doesNotMatch(sentMessages[5].payload.text, /POSS.VEL EMPATE/i);
-  assert.match(sentMessages[6].payload.text, /Empate 8x/i);
+  assert.match(sentMessages[6].payload.text, /Empate 25x/i);
+  assert.match(sentMessages[6].payload.text, /Empate 25x confirmado/i);
   for (const message of sentMessages.slice(1, 5)) {
     assert.equal(message.payload.reply_markup.inline_keyboard[0][0].text, "Abrir Sniper Bo IA");
     assert.equal(message.payload.reply_markup.inline_keyboard[0][0].url, "https://sniperbo.com/app");
   }
   for (const message of sentMessages.slice(5, 7)) {
     assert.equal(message.payload.reply_markup.inline_keyboard[0][0].text, "Entrar no Telegram VIP");
-    assert.equal(message.payload.reply_markup.inline_keyboard[0][0].url, "https://sniperbo.com/app");
+    assert.equal(message.payload.reply_markup.inline_keyboard[0][0].url, "https://t.me/vip-sniper");
   }
 
   console.log("telegram-engine-cloud tests passed");

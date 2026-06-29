@@ -469,7 +469,7 @@ const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES: Record<ValidatorTelegra
   ai_patterns: `\u2705 <b>{{result}}</b>\n\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   paying_numbers: `\u2705 <b>{{result}}</b>\n\n\u{1F48E} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   surf_alert: `\u2705 <b>{{result}}</b>\n\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
-  ties_only: `\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>Empate confirmado</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
+  ties_only: `\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>{{tieResult}}</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   validator: `\u2705 <b>{{result}}</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_ANALYZING_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
@@ -8133,8 +8133,13 @@ function normalizeTelegramMessage(value: string) {
 function normalizeTelegramButtonUrl(value: string) {
   const clean = value.trim();
   if (!clean) return "";
+  const normalized = clean.startsWith("@")
+    ? `https://t.me/${clean.slice(1)}`
+    : /^(t\.me|telegram\.me)\//i.test(clean)
+      ? `https://${clean}`
+      : clean;
   try {
-    const url = new URL(clean);
+    const url = new URL(normalized);
     if (url.protocol !== "http:" && url.protocol !== "https:") return "";
     return url.toString();
   } catch {
@@ -8398,7 +8403,7 @@ function normalizeValidatorTelegramButtons(
     return {
       enabled: Object.prototype.hasOwnProperty.call(record, "enabled") ? readBooleanField(record, "enabled") : true,
       label: (readString(record, "label") || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
-      url: readString(record, "url"),
+      url: normalizeTelegramButtonUrl(readString(record, "url")),
     };
   });
 
@@ -8413,7 +8418,7 @@ function normalizeValidatorTelegramButtons(
           ? readBooleanField(legacyRecord, "buttonEnabled")
           : true,
         label: (readString(legacyRecord, "buttonLabel") || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
-        url: readString(legacyRecord, "buttonUrl"),
+        url: normalizeTelegramButtonUrl(readString(legacyRecord, "buttonUrl")),
       });
     } else {
       normalized.push(...fallback.map((button) => ({ ...button })));
@@ -11485,7 +11490,11 @@ async function sendValidatorTelegramResultNotification(
         ? moduleConfig.tieTemplate
         : moduleConfig.greenTemplate;
   const sentAt = new Date().toISOString();
-  const message = renderValidatorTelegramTemplate(template, variables);
+  const message = decorateValidatorTieResultMessage(
+    moduleKey,
+    renderValidatorTelegramTemplate(template, variables),
+    variables.tieMultiplier,
+  );
   const result = isCloudValidatorTelegramChannel(channel)
     ? await sendCloudValidatorChannelPreview(
         env,
@@ -11579,7 +11588,22 @@ function validatorTelegramResultVariables(
     percentage: readString(payloadJson, "percentage"),
     confidence: readString(payloadJson, "confidence"),
     tieMultiplier: outcome.tieMultiplier,
+    tieResult: formatValidatorTieConfirmedLabel(outcome.label, outcome.tieMultiplier),
   };
+}
+
+function formatValidatorTieConfirmedLabel(result: string, tieMultiplier: string) {
+  const label = tieMultiplier ? `Empate ${tieMultiplier}` : result || "Empate";
+  return /confirmado/i.test(label) ? label : `${label} confirmado`;
+}
+
+function decorateValidatorTieResultMessage(
+  moduleKey: ValidatorTelegramModuleKey,
+  message: string,
+  tieMultiplier: string,
+) {
+  if (moduleKey !== "ties_only" || !tieMultiplier) return message;
+  return message.replace(/\bEmpate confirmado\b/gi, `Empate ${tieMultiplier} confirmado`);
 }
 
 function validatorTelegramPayloadVariables(

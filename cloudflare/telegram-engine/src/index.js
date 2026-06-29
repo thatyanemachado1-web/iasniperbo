@@ -49,7 +49,7 @@ const DEFAULT_MODULE_GREEN_TEMPLATES = {
   surf_alert:
     "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🟡 <b>{{tieResult}}</b>\n🛡️ <b>Proteção:</b> {{gale}}",
   validator:
     "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
@@ -97,7 +97,7 @@ const DEFAULT_MODULE_TIE_TEMPLATES = {
   surf_alert:
     "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🟡 <b>{{tieResult}}</b>\n🛡️ <b>Proteção:</b> {{gale}}",
   validator:
     "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
@@ -537,6 +537,12 @@ export class TelegramEngine {
     );
     const signalKind = classifySignalKind(body, signalKey);
     const notificationResult = String(body.result || variables.result || "Aguardando resultado").trim() || "Aguardando resultado";
+    const notificationTieMultiplier = signalKind === "result"
+      ? tieMultiplierFromSignal(body, variables, notificationResult)
+      : "";
+    const displayNotificationResult = signalKind === "result"
+      ? formatTieNotificationResult(moduleKey, entry, notificationResult, notificationTieMultiplier)
+      : notificationResult;
     const notificationProtection = String(body.protection || variables.gale || "").trim();
     const channels = (targetUserId ? await this.channelsForUser(targetUserId) : await this.activeChannels())
       .filter((channel) => !targetChannelId || channel.id === targetChannelId);
@@ -603,7 +609,7 @@ export class TelegramEngine {
 
       const finalNotificationProtection = notificationProtection || formatGale(config.galeLimit);
       const template =
-        selectSignalTemplate(config, signalKind, notificationResult) ||
+        selectSignalTemplate(config, signalKind, displayNotificationResult) ||
         (signalKind === "entry" ? DEFAULT_MODULE_TEMPLATES[moduleKey] || "" : "");
       const templateVariables = {
         ...variables,
@@ -617,17 +623,19 @@ export class TelegramEngine {
         gale: finalNotificationProtection,
         protection: finalNotificationProtection,
         tieCoverage: String(variables.tieCoverage ?? variables.tie_coverage ?? config.tieCoverage ?? ""),
-        status: String(variables.status || notificationResult || "CONFIRMADO"),
-        result: notificationResult,
+        tieMultiplier: notificationTieMultiplier || String(variables.tieMultiplier ?? variables.tie_multiplier ?? ""),
+        tieResult: formatTieConfirmedLabel(displayNotificationResult, notificationTieMultiplier),
+        status: String(variables.status || displayNotificationResult || "CONFIRMADO"),
+        result: displayNotificationResult,
       };
       const renderedMessage = !forceMessage && template
-        ? renderTemplate(template, templateVariables)
+        ? decorateTieResultMessage(renderTemplate(template, templateVariables), moduleKey, notificationTieMultiplier)
         : String(body.message || "");
       const message = formatTelegramMessageText(String(renderedMessage || body.message || renderTemplate("{{entry}}", templateVariables))).slice(0, 4096);
       const dedupeKeys = [`sent:${channel.userId}:${channel.id}:${moduleKey}:${signalKey}`];
       const entryDedupeKey = entrySignalDedupeKey(channel, moduleKey, roundId, entry, signalKind);
       if (entryDedupeKey) dedupeKeys.push(entryDedupeKey);
-      const resultDedupeKey = resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, notificationResult);
+      const resultDedupeKey = resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, displayNotificationResult);
       if (resultDedupeKey) dedupeKeys.push(resultDedupeKey);
       const recentDedupeKey = await recentMessageDedupeKey(channel, signalKind, message);
       if (recentDedupeKey) dedupeKeys.push(recentDedupeKey);
@@ -674,7 +682,7 @@ export class TelegramEngine {
           galeLimit: config.galeLimit,
           coverTie: config.coverTie,
           tieCoverage: config.tieCoverage,
-          result: notificationResult,
+          result: displayNotificationResult,
           telegramMessageId: result.messageId || null,
           buttonCount: buttons.length,
           cloudflare: true,
@@ -2473,8 +2481,13 @@ function normalizeChannelCode(value) {
 function normalizeUrl(value) {
   const text = String(value || "").trim();
   if (!text) return "";
+  const normalized = text.startsWith("@")
+    ? `https://t.me/${text.slice(1)}`
+    : /^(t\.me|telegram\.me)\//i.test(text)
+      ? `https://${text}`
+      : text;
   try {
-    const url = new URL(text);
+    const url = new URL(normalized);
     return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
   } catch {
     return "";
@@ -2531,6 +2544,63 @@ function classifySignalKind(body, signalKey) {
   if (key.includes(":result:")) return "result";
   if (result && result !== "aguardando resultado" && result !== "aguardando") return "result";
   return "entry";
+}
+
+function tieMultiplierFromSignal(body, variables, result) {
+  const bodyRecord = readRecord(body);
+  const variableRecord = readRecord(variables);
+  const candidates = [
+    variableRecord.tieMultiplier,
+    variableRecord.tie_multiplier,
+    variableRecord.multiplier,
+    variableRecord.tiePayout,
+    variableRecord.tie_payout,
+    bodyRecord.tieMultiplier,
+    bodyRecord.tie_multiplier,
+    bodyRecord.multiplier,
+    bodyRecord.tiePayout,
+    result,
+    variableRecord.result,
+    bodyRecord.message,
+  ];
+  for (const candidate of candidates) {
+    const multiplier = normalizeTieMultiplierText(candidate);
+    if (multiplier) return multiplier;
+  }
+  return "";
+}
+
+function normalizeTieMultiplierText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const withSuffix = text.match(/\b(88|25|10|6|4)\s*x\b/i);
+  if (withSuffix) return `${withSuffix[1]}x`;
+  const plainNumber = text.match(/^(88|25|10|6|4)$/);
+  return plainNumber ? `${plainNumber[1]}x` : "";
+}
+
+function formatTieNotificationResult(moduleKey, entry, result, tieMultiplier) {
+  const text = String(result || "").trim() || "Empate";
+  if (!tieMultiplier) return text;
+  if (/\b(?:88|25|10|6|4)\s*x\b/i.test(text)) return text.replace(/\b(88|25|10|6|4)\s*x\b/i, "$1x");
+  const normalized = normalizeDedupeText(text);
+  const isTieResult = moduleKey === "ties_only" || entry === "TIE" || normalized.includes("empate") || normalized.includes("tie");
+  if (!isTieResult) return text;
+  if (normalized === "green" || normalized === "green_sg" || normalized === "empate" || normalized === "tie") {
+    return `Empate ${tieMultiplier}`;
+  }
+  if (normalized.includes("empate")) return text.replace(/empate/i, `Empate ${tieMultiplier}`);
+  return `Empate ${tieMultiplier}`;
+}
+
+function formatTieConfirmedLabel(result, tieMultiplier) {
+  const label = formatTieNotificationResult("ties_only", "TIE", result || "Empate", tieMultiplier);
+  return /confirmado/i.test(label) ? label : `${label} confirmado`;
+}
+
+function decorateTieResultMessage(message, moduleKey, tieMultiplier) {
+  if (moduleKey !== "ties_only" || !tieMultiplier) return message;
+  return String(message || "").replace(/\bEmpate confirmado\b/gi, `Empate ${tieMultiplier} confirmado`);
 }
 
 function selectSignalTemplate(config, signalKind, result) {

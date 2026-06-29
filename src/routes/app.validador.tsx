@@ -198,7 +198,7 @@ const DEFAULT_TELEGRAM_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, strin
   ai_patterns: `\u2705 <b>{{result}}</b>\n\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   paying_numbers: `\u2705 <b>{{result}}</b>\n\n\u{1F48E} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   surf_alert: `\u2705 <b>{{result}}</b>\n\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
-  ties_only: `\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>Empate confirmado</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
+  ties_only: `\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>{{tieResult}}</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   validator: `\u2705 <b>{{result}}</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
 };
 const DEFAULT_TELEGRAM_ANALYZING_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
@@ -2184,7 +2184,9 @@ function TelegramModuleConfigPanel({
     setValidationError(error);
     setPreviewStatus("");
     if (error) return;
-    onSave(draft);
+    const sanitizedDraft = sanitizeTelegramModuleConfigForSave(draft);
+    setDraft(sanitizedDraft);
+    onSave(sanitizedDraft);
   }
 
   async function sendPreview() {
@@ -2192,11 +2194,17 @@ function TelegramModuleConfigPanel({
     setValidationError(error);
     setPreviewStatus("");
     if (error) return;
+    const buttonError = validateTelegramModuleButtons(draft.buttons);
+    if (buttonError) {
+      setValidationError(buttonError);
+      return;
+    }
     setPreviewing(true);
     try {
+      const previewDraft = sanitizeTelegramModuleConfigForSave(draft);
       await onPreview(
         `[PRÉVIA DE TESTE]\n${telegramModulePreview(moduleKey, { ...draft, template: activeTemplate })}`,
-        normalizeTelegramModuleButtons(draft.buttons),
+        normalizeTelegramModuleButtons(previewDraft.buttons),
       );
       setPreviewStatus("Previa enviada no Telegram.");
     } catch (error) {
@@ -3119,6 +3127,36 @@ function patchTelegramModuleButton(
   ));
 }
 
+function sanitizeTelegramModuleConfigForSave(
+  config: ValidatorTelegramModuleConfig,
+): ValidatorTelegramModuleConfig {
+  return {
+    ...config,
+    buttons: normalizeTelegramModuleButtons(config.buttons).map((button) => ({
+      enabled: Boolean(button.enabled),
+      label: (button.label.trim() || DEFAULT_TELEGRAM_BUTTON_LABEL).slice(0, 64),
+      url: normalizeTelegramButtonUrlForSave(button.url),
+    })),
+  };
+}
+
+function normalizeTelegramButtonUrlForSave(value: string) {
+  const clean = value.trim();
+  if (!clean) return "";
+  const withProtocol = clean.startsWith("@")
+    ? `https://t.me/${clean.slice(1)}`
+    : /^(t\.me|telegram\.me)\//i.test(clean)
+      ? `https://${clean}`
+      : clean;
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
 function telegramTemplateOptionsForModule(config: ValidatorTelegramModuleConfig) {
   const options: Array<{ key: ValidatorTelegramTemplateKey; label: string }> = [
     { key: "entry", label: "Entrada" },
@@ -3180,7 +3218,7 @@ function telegramTemplateVariablesForModule(
   key: ValidatorTelegramModuleKey,
   templateKey: ValidatorTelegramTemplateKey,
 ) {
-  const common = ["module", "table", "entry", "entryLabel", "entryCompact", "gale", "protection", "result", "time", "round", "confidence", "percentage", "channel", "tieCoverage", "tieProtection"];
+  const common = ["module", "table", "entry", "entryLabel", "entryCompact", "gale", "protection", "result", "time", "round", "confidence", "percentage", "channel", "tieCoverage", "tieProtection", "tieResult"];
   const byModule: Record<ValidatorTelegramModuleKey, string[]> = {
     ai_patterns: ["pattern", "score", "side", "status", "risk"],
     paying_numbers: ["numbers", "number", "side", "score", "status", "risk", "level"],
@@ -3207,14 +3245,18 @@ function validateTelegramModuleButtons(buttons: ValidatorTelegramButtonConfig[])
   for (const [index, button] of normalized.entries()) {
     if (!button.enabled) continue;
     const url = button.url.trim();
-    if (!url) continue;
+    if (!url) return `Botao ${index + 1}: informe o link do botao.`;
+    const normalizedUrl = normalizeTelegramButtonUrlForSave(url);
+    if (!normalizedUrl) {
+      return `Botao ${index + 1}: link invalido. Use http, https, t.me ou @canal.`;
+    }
     try {
-      const parsed = new URL(url);
+      const parsed = new URL(normalizedUrl);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        return `Botao ${index + 1}: link invalido. Use http ou https.`;
+        return `Botao ${index + 1}: link invalido. Use http, https, t.me ou @canal.`;
       }
     } catch {
-      return `Botao ${index + 1}: link invalido. Use http ou https.`;
+      return `Botao ${index + 1}: link invalido. Use http, https, t.me ou @canal.`;
     }
   }
   return "";
@@ -3323,8 +3365,9 @@ function telegramModulePreview(key: ValidatorTelegramModuleKey, config: Validato
     time: "14:32",
     round: "123456",
     module: moduleDisplayName(key),
-    result: "Green G1",
+    result: key === "ties_only" ? "Empate 4x" : "Green G1",
     tieMultiplier: "4x",
+    tieResult: "Empate 4x confirmado",
   };
   const message = config.template.replace(/{{\s*([a-zA-Z_]+)\s*}}/g, (_, variable: string) => variables[variable] ?? "");
   const activeButtons = normalizeTelegramModuleButtons(config.buttons).filter((button) => button.enabled);
