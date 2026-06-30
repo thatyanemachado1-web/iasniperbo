@@ -32,6 +32,9 @@ const DEFAULT_PATTERN_MINER_RULES = {
   allowTieEntry: false,
 } as const;
 
+const MIN_PATTERN_SCORE = 0;
+const MAX_PATTERN_SCORE = 12;
+
 export interface PatternMinerRuntimeContext {
   feedStatus?: string | null;
   dashboardUpdatedAt?: string | null;
@@ -475,8 +478,8 @@ function buildSequenceVariants(rounds: Round[], start: number, length: number) {
 function tokenOptionsForRound(round: Round) {
   const score = scoreForResult(round, round.result);
   const options = [round.result];
-  if (Number.isFinite(score) && score >= 2 && score <= 12) {
-    options.unshift(`${round.result}${Math.round(score)}`);
+  if (score !== null) {
+    options.unshift(`${round.result}${score}`);
   }
   return options;
 }
@@ -495,10 +498,15 @@ function matchesToken(round: Round, token: string) {
 }
 
 function scoreForResult(round: Round, side: RoundResult) {
-  if (side === "B") return round.bankerScore;
-  if (side === "P") return round.playerScore;
-  if (round.bankerScore === round.playerScore) return round.bankerScore;
-  return Math.max(round.bankerScore, round.playerScore);
+  if (side === "B") return normalizePatternScore(round.bankerScore);
+  if (side === "P") return normalizePatternScore(round.playerScore);
+  return normalizePatternScore(round.bankerScore);
+}
+
+function normalizePatternScore(score: unknown) {
+  const parsedScore = Number(score);
+  if (!Number.isFinite(parsedScore)) return null;
+  return Math.floor(Math.max(MIN_PATTERN_SCORE, Math.min(MAX_PATTERN_SCORE, parsedScore)));
 }
 
 export function parsePatternToken(token: string): { side: RoundResult; number?: number; normalized: string } | null {
@@ -511,7 +519,7 @@ export function parsePatternToken(token: string): { side: RoundResult; number?: 
   const rawNumber = match[2];
   if (!rawNumber) return { side, normalized: side };
   const number = Number(rawNumber);
-  if (!Number.isFinite(number) || number < 2 || number > 12) return null;
+  if (!Number.isFinite(number) || number < 0 || number > 12) return null;
   return { side, number, normalized: `${side}${number}` };
 }
 
