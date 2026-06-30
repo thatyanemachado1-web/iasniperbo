@@ -13700,23 +13700,58 @@ async function loadBillingClientByEmail(env: unknown, email: string) {
 
   const encodedEmail = encodeURIComponent(cleanEmail);
   const [users, subscriptions, payments] = await Promise.all([
-    fetchSupabaseRows(env, "users", `select=*&email=ilike.${encodedEmail}&limit=1`),
+    fetchSupabaseRows(env, "users", `select=*&email=ilike.${encodedEmail}&limit=1`, AUTH_IO_TIMEOUT_MS),
     fetchSupabaseRows(
       env,
       "subscriptions",
       `select=*&email=ilike.${encodedEmail}&order=updated_at.desc.nullslast&limit=20`,
+      AUTH_IO_TIMEOUT_MS,
     ),
-    fetchSupabaseRows(env, "payments", `select=*&email=ilike.${encodedEmail}&order=updated_at.desc.nullslast&limit=20`),
+    fetchSupabaseRows(
+      env,
+      "payments",
+      `select=*&email=ilike.${encodedEmail}&order=updated_at.desc.nullslast&limit=20`,
+      AUTH_IO_TIMEOUT_MS,
+    ),
   ]);
 
-  const user = users[0] || {};
-  const subscription = pickBillingSubscription(subscriptions);
-  const payment = pickBillingPayment(payments);
+  let hydratedUsers = users;
+  let hydratedSubscriptions = subscriptions;
+  let hydratedPayments = payments;
+  if (!users.length && !subscriptions.length && !payments.length) {
+    const wildcardEmail = encodeURIComponent(`*${cleanEmail}*`);
+    const [looseUsers, looseSubscriptions, loosePayments] = await Promise.all([
+      fetchSupabaseRows(env, "users", `select=*&email=ilike.${wildcardEmail}&limit=5`, AUTH_IO_TIMEOUT_MS),
+      fetchSupabaseRows(
+        env,
+        "subscriptions",
+        `select=*&email=ilike.${wildcardEmail}&order=updated_at.desc.nullslast&limit=40`,
+        AUTH_IO_TIMEOUT_MS,
+      ),
+      fetchSupabaseRows(
+        env,
+        "payments",
+        `select=*&email=ilike.${wildcardEmail}&order=updated_at.desc.nullslast&limit=40`,
+        AUTH_IO_TIMEOUT_MS,
+      ),
+    ]);
+    hydratedUsers = looseUsers;
+    hydratedSubscriptions = looseSubscriptions;
+    hydratedPayments = loosePayments;
+  }
+
+  const user = pickBillingRecordByEmail(hydratedUsers, cleanEmail) || hydratedUsers[0] || {};
+  const subscription = pickBillingSubscription(hydratedSubscriptions, cleanEmail);
+  const payment = pickBillingPayment(hydratedPayments, cleanEmail);
   if (!hasRecordFields(user) && !hasRecordFields(subscription) && !hasRecordFields(payment)) {
     return null;
   }
 
   return billingClientFromPersistedRows(env, cleanEmail, user, subscription, payment);
+}
+
+function pickBillingRecordByEmail(rows: Record<string, unknown>[], cleanEmail: string) {
+  return rows.find((row) => readString(row, "email").trim().toLowerCase() === cleanEmail) || null;
 }
 
 async function hydrateClientsFromBillingUsers(env: unknown) {
@@ -13869,18 +13904,26 @@ function billingClientFromPersistedRows(
   };
 }
 
-function pickBillingSubscription(rows: Record<string, unknown>[]) {
-  const sorted = sortBillingRows(rows).sort(
+function pickBillingSubscription(rows: Record<string, unknown>[], cleanEmail = "") {
+  const scopedRows = filterBillingRowsByEmail(rows, cleanEmail);
+  const sorted = sortBillingRows(scopedRows).sort(
     (a, b) => Number(billingSubscriptionIsActive(b)) - Number(billingSubscriptionIsActive(a)),
   );
   return sorted[0] || {};
 }
 
-function pickBillingPayment(rows: Record<string, unknown>[]) {
-  const sorted = sortBillingRows(rows).sort(
+function pickBillingPayment(rows: Record<string, unknown>[], cleanEmail = "") {
+  const scopedRows = filterBillingRowsByEmail(rows, cleanEmail);
+  const sorted = sortBillingRows(scopedRows).sort(
     (a, b) => Number(billingPaymentIsPaid(b)) - Number(billingPaymentIsPaid(a)),
   );
   return sorted[0] || {};
+}
+
+function filterBillingRowsByEmail(rows: Record<string, unknown>[], cleanEmail: string) {
+  if (!cleanEmail) return rows;
+  const exact = rows.filter((row) => readString(row, "email").trim().toLowerCase() === cleanEmail);
+  return exact.length ? exact : rows;
 }
 
 function sortBillingRows(rows: Record<string, unknown>[]) {
