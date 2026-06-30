@@ -12276,19 +12276,69 @@ function formatServerPercent(value?: number) {
 }
 
 function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
-  const safeDashboard = liveFeedLooksStale(dashboard) ? pausedDashboardSnapshot(dashboard) : dashboard;
-  const signal = safeDashboard.currentSignal;
-  const { lateSignalHold: _lateSignalHold, ...publicDashboard } = safeDashboard;
+  const stale = liveFeedLooksStale(dashboard);
+  const signal = stale ? preferredStaleSignal(dashboard.currentSignal, dashboard.lateSignalHold) : dashboard.currentSignal;
+  const feedStatus = stale ? resolveDashboardFeedStatus(dashboard) : "live";
+  const { lateSignalHold: _lateSignalHold, ...publicDashboard } = dashboard;
   return {
     ...publicDashboard,
     currentSignal: signal,
+    feedStatus,
   } as LiveDashboardData;
 }
 
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
   const updatedAt = Date.parse(readString(dashboard, "updatedAt"));
-  if (!Number.isFinite(updatedAt)) return !Array.isArray(dashboard.rounds) || dashboard.rounds.length === 0;
-  return Date.now() - updatedAt > LIVE_FEED_STALE_MS;
+  const signalActivityAt = dashboardSignalActivityAtMs(readRecord(dashboard.currentSignal));
+  const freshnessReference = Math.max(Number.isFinite(updatedAt) ? updatedAt : 0, signalActivityAt);
+  if (!Number.isFinite(freshnessReference) || freshnessReference <= 0) {
+    return !Array.isArray(dashboard.rounds) || dashboard.rounds.length === 0;
+  }
+  return Date.now() - freshnessReference > LIVE_FEED_STALE_MS;
+}
+
+function preferredStaleSignal(
+  currentSignal: DashboardData["currentSignal"],
+  lateSignalHold?: DashboardData["currentSignal"] | null,
+): DashboardData["currentSignal"] {
+  if (dashboardSignalIsDisplayable(currentSignal)) return currentSignal;
+  if (lateSignalHold && dashboardSignalIsDisplayable(lateSignalHold)) return lateSignalHold;
+  return currentSignal;
+}
+
+function resolveDashboardFeedStatus(dashboard: LiveDashboardData): NonNullable<DashboardData["feedStatus"]> {
+  const hasLiveRounds = Array.isArray(dashboard.rounds) && dashboard.rounds.length > 0;
+  return hasLiveRounds ? "stale" : "paused";
+}
+
+function dashboardSignalActivityAtMs(signal: Record<string, unknown>) {
+  const generatedAt = readDashboardTimestampMs(
+    readString(signal, "generatedAt") ||
+      readString(signal, "generated_at") ||
+      readString(signal, "publishedAt") ||
+      readString(signal, "published_at") ||
+      readString(signal, "detectedAt") ||
+      readString(signal, "detected_at") ||
+      readString(signal, "updatedAt") ||
+      readString(signal, "updated_at"),
+  );
+  const lastResult = readRecord(signal.lastResult);
+  const lastResultFinishedAt = readDashboardTimestampMs(readString(lastResult, "finishedAt"));
+  return Math.max(generatedAt, lastResultFinishedAt);
+}
+
+function dashboardSignalIsDisplayable(signal: DashboardData["currentSignal"]) {
+  if (!signal) return false;
+  if (isServerEntrySide(signal.side) && (signal.status === "pending" || signal.status === "g1" || signal.status === "tie_watch")) {
+    return true;
+  }
+  if (terminalSignalStatus(signal.status)) return true;
+  if (signal.lastResult && terminalSignalStatus(signal.lastResult.status)) return true;
+  const signalId = String(signal.id || "")
+    .trim()
+    .toLowerCase();
+  if (!signalId || signalId === "waiting" || signalId === "feed-paused") return false;
+  return signal.side !== "NONE";
 }
 
 function pausedDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
@@ -12570,7 +12620,18 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   const incoming = readRecord(readRecord(body).dashboard || body);
   const cycleDate = currentDashboardCycleDate();
   const incomingCycleDate = readDashboardCycleDate(incoming);
-  const acceptsCurrentCycle = !incomingCycleDate || incomingCycleDate === cycleDate;
+  const incomingSignalSource = readMainSignal(incoming);
+  const incomingSignalId = readDashboardSignalId(incomingSignalSource);
+  const currentSignalId = readDashboardSignalId(readRecord(currentDashboard.currentSignal));
+  const incomingSignalRoundId = readDashboardSignalRoundId(incoming, incomingSignalSource);
+  const currentSignalRoundId = readDashboardSignalRoundId(
+    currentDashboard as unknown as Record<string, unknown>,
+    readRecord(currentDashboard.currentSignal),
+  );
+  const signalAdvanced =
+    (incomingSignalId && incomingSignalId !== currentSignalId) || incomingSignalRoundId > currentSignalRoundId;
+  const hasFreshSignalOverride = signalAdvanced && dashboardSignalLooksDisplayable(incomingSignalSource);
+  const acceptsCurrentCycle = !incomingCycleDate || incomingCycleDate === cycleDate || hasFreshSignalOverride;
   const acceptsDailyCounters =
     acceptsCurrentCycle && (!currentDashboard.strictDailyCounters || incomingCycleDate === cycleDate);
   const pickedSections = acceptsCurrentCycle ? pickDashboardSections(incoming) : {};
@@ -12616,13 +12677,22 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   const incomingLatestKey = incomingLatestRound ? roundHistoryKey(incomingLatestRound) : "";
   const receivedNewRound = Boolean(incomingLatestKey && incomingLatestKey !== currentLatestKey);
   const incomingUpdatedAt = readString(incoming, "updatedAt") || readString(incoming, "updated_at");
+  const incomingGeneratedAt = readString(incoming, "generatedAt") || readString(incoming, "generated_at");
+  const incomingSignalGeneratedAt =
+    readString(incomingSignalSource, "generatedAt") ||
+    readString(incomingSignalSource, "generated_at") ||
+    readString(incomingSignalSource, "publishedAt") ||
+    readString(incomingSignalSource, "published_at") ||
+    readString(incomingSignalSource, "detectedAt") ||
+    readString(incomingSignalSource, "detected_at");
   const nextUpdatedAt =
-    incomingUpdatedAt ||
-    (incomingRounds.length
-      ? receivedNewRound
-        ? new Date().toISOString()
-        : currentDashboard.updatedAt || new Date().toISOString()
-      : new Date().toISOString());
+    latestDashboardTimestamp(
+      currentDashboard.updatedAt,
+      incomingUpdatedAt,
+      incomingGeneratedAt,
+      incomingSignalGeneratedAt,
+      receivedNewRound || signalAdvanced ? new Date().toISOString() : "",
+    ) || new Date().toISOString();
   const normalizedSignal = acceptsCurrentCycle
     ? normalizeSignal(readMainSignal(incoming), currentDashboard.currentSignal)
     : currentDashboard.currentSignal;
@@ -13685,6 +13755,7 @@ function resolveLateSignalGuard(
 ): DashboardData["currentSignal"] {
   if (!isLateEntryWindow(bettingTiming)) return signal;
   if (signal.status !== "pending" && signal.status !== "g1" && signal.status !== "tie_watch") return signal;
+  if (shouldKeepPublishedSignalVisible(signal, previousSignal)) return signal;
 
   const sameVisibleSignal = Boolean(
     previousSignal &&
@@ -13702,6 +13773,26 @@ function resolveLateSignalGuard(
     strength: 0,
     lastResult: signal.lastResult ?? null,
   };
+}
+
+function shouldKeepPublishedSignalVisible(
+  signal: DashboardData["currentSignal"],
+  previousSignal?: DashboardData["currentSignal"],
+) {
+  if (!isServerEntrySide(signal.side)) return false;
+  const signalId = String(signal.id || "")
+    .trim()
+    .toLowerCase();
+  if (!signalId || signalId === "waiting" || signalId === "feed-paused") return false;
+  if (signalId.startsWith("neural-entry:")) return false;
+  if (signal.lastResult && terminalSignalStatus(signal.lastResult.status)) return true;
+
+  const previousId = String(previousSignal?.id || "")
+    .trim()
+    .toLowerCase();
+  if (!previousId || previousId === "waiting" || previousId === "feed-paused") return true;
+
+  return signalId !== previousId;
 }
 
 function isLateEntryWindow(timing: DashboardData["bettingTiming"]) {
@@ -18829,10 +18920,99 @@ function dashboardStateFreshnessScore(state: Record<string, unknown>) {
   const rounds = Array.isArray(state.rounds) ? state.rounds.map(readRecord) : [];
   const lastRound = rounds[rounds.length - 1] ?? {};
   const lastRoundId = Number(readString(lastRound, "id") || lastRound.id || 0) || 0;
-  const updatedAtMs = Date.parse(readString(state, "updatedAt") || "");
+  const signal = readMainSignal(state);
+  const signalGeneratedAtMs = readDashboardSignalGeneratedAtMs(state, signal);
+  const signalRoundId = readDashboardSignalRoundId(state, signal);
+  const updatedAtMs = readDashboardTimestampMs(readString(state, "updatedAt"));
   const hasCurrentCycle = readDashboardCycleDate(state) === cycleDate ? 1 : 0;
   const hasLiveRounds = rounds.length > 0 ? 1 : 0;
-  return [hasCurrentCycle, hasLiveRounds, lastRoundId, Number.isFinite(updatedAtMs) ? updatedAtMs : 0, rounds.length];
+  const hasDisplayableSignal = dashboardSignalLooksDisplayable(signal) ? 1 : 0;
+  return [
+    hasCurrentCycle,
+    hasDisplayableSignal,
+    hasLiveRounds,
+    signalRoundId,
+    signalGeneratedAtMs,
+    lastRoundId,
+    Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
+    rounds.length,
+  ];
+}
+
+function readDashboardSignalGeneratedAtMs(state: Record<string, unknown>, signal = readMainSignal(state)) {
+  const signalTimestamp =
+    readDashboardTimestampMs(
+      readString(signal, "generatedAt") ||
+        readString(signal, "generated_at") ||
+        readString(signal, "publishedAt") ||
+        readString(signal, "published_at") ||
+        readString(signal, "detectedAt") ||
+        readString(signal, "detected_at") ||
+        readString(signal, "updatedAt") ||
+        readString(signal, "updated_at"),
+    ) || 0;
+  const stateTimestamp =
+    readDashboardTimestampMs(
+      readString(state, "generatedAt") ||
+        readString(state, "generated_at") ||
+        readString(state, "publishedAt") ||
+        readString(state, "published_at") ||
+        readString(state, "updatedAt"),
+    ) || 0;
+  return Math.max(signalTimestamp, stateTimestamp);
+}
+
+function readDashboardSignalId(signal: Record<string, unknown>) {
+  return readString(signal, "id") || readString(signal, "signalId") || readString(signal, "signal_id");
+}
+
+function readDashboardSignalRoundId(state: Record<string, unknown>, signal = readMainSignal(state)) {
+  const explicitRoundId =
+    Math.floor(
+      Number(
+        signal.roundId ??
+          signal.round_id ??
+          signal.triggerRoundId ??
+          signal.trigger_round_id ??
+          signal.entryRoundId ??
+          signal.entry_round_id ??
+          state.roundId ??
+          state.round_id,
+      ) || 0,
+    ) || 0;
+  if (explicitRoundId > 0) return explicitRoundId;
+  const signalId = readDashboardSignalId(signal);
+  return signalId ? parseMonitorRoundId(signalId) : 0;
+}
+
+function dashboardSignalLooksDisplayable(signal: Record<string, unknown>) {
+  const side = normalizeSignalSide(signal.side || signal.direcao || signal.entry || signal.entrada);
+  const status = normalizeSignalStatus(signal.status || signal.resultado || signal.state, side);
+  if ((side === "BANKER" || side === "PLAYER") && (status === "pending" || status === "g1" || status === "tie_watch")) {
+    return true;
+  }
+  if (terminalSignalStatus(status)) return true;
+  const lastResult = readServerLastResult(signal.lastResult);
+  if (lastResult && terminalSignalStatus(lastResult.status)) return true;
+  const signalId = readDashboardSignalId(signal);
+  if (!signalId) return false;
+  const normalizedId = signalId.trim().toLowerCase();
+  if (!normalizedId || normalizedId === "waiting" || normalizedId === "feed-paused") return false;
+  return side !== "NONE";
+}
+
+function readDashboardTimestampMs(value: unknown) {
+  const timestamp = Date.parse(String(value || ""));
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function latestDashboardTimestamp(...values: Array<string | undefined>) {
+  let latestMs = 0;
+  for (const value of values) {
+    const time = readDashboardTimestampMs(value);
+    if (time > latestMs) latestMs = time;
+  }
+  return latestMs > 0 ? new Date(latestMs).toISOString() : "";
 }
 
 function pickStateArray(primary: unknown, secondary: unknown) {
