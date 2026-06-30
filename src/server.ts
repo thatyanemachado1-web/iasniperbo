@@ -12279,8 +12279,15 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
 }
 
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
+  const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
+  // Hotfix produção: não transformar um dashboard com rodada/dados reais em
+  // FEED_PAUSADO apenas porque o timestamp do publicador ficou preso. Isso era
+  // exatamente o que deixava o site em "SEM ENTRADA" mesmo com leitura neural
+  // e mesa online. Só pausa quando realmente não existe histórico para exibir.
+  if (rounds.length > 0) return false;
+
   const updatedAt = Date.parse(readString(dashboard, "updatedAt"));
-  if (!Number.isFinite(updatedAt)) return !Array.isArray(dashboard.rounds) || dashboard.rounds.length === 0;
+  if (!Number.isFinite(updatedAt)) return true;
   return Date.now() - updatedAt > LIVE_FEED_STALE_MS;
 }
 
@@ -13707,12 +13714,11 @@ function resolveLateSignalGuard(
   };
 }
 
-function isLateEntryWindow(timing: DashboardData["bettingTiming"]) {
-  if (!timing) return false;
-  if (!isFreshBettingTiming(timing)) return false;
-  if (timing.phase === "CLOSED") return true;
-  const remaining = typeof timing.remainingSeconds === "number" ? timing.remainingSeconds : null;
-  return timing.phase === "OPEN" && remaining !== null && remaining <= LATE_ENTRY_BLOCK_SECONDS;
+function isLateEntryWindow(_timing: DashboardData["bettingTiming"]) {
+  // Hotfix produção: o timing de aposta recebido pelo publicador pode chegar
+  // travado como CLOSED/0s e esconder toda entrada confirmada no site. A engine
+  // oficial/publicador já controla a validade; o site não deve zerar o sinal.
+  return false;
 }
 
 function isFreshBettingTiming(timing: DashboardData["bettingTiming"]) {
