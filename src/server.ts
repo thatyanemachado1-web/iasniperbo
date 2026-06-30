@@ -13595,6 +13595,10 @@ function readMainSignal(payload: Record<string, unknown>) {
   return readRecord(
     payload.currentSignal ||
       payload.current_signal ||
+      payload.entradaAtual ||
+      payload.entrada_atual ||
+      payload.currentEntry ||
+      payload.current_entry ||
       payload.mainSignal ||
       payload.main_signal ||
       payload.primarySignal ||
@@ -13765,9 +13769,23 @@ function normalizeSignal(
   signal: Record<string, unknown>,
   fallback: DashboardData["currentSignal"],
 ): DashboardData["currentSignal"] {
-  const side = normalizeSignalSide(signal.side || signal.direcao || signal.entry || signal.entrada);
-  const status = normalizeSignalStatus(signal.status || signal.resultado || signal.state, side);
-  const protection = String(signal.protection || signal.validade || signal.gale || fallback.protection || "G1");
+  const side = normalizeSignalSide(
+    signal.side ||
+      signal.lado ||
+      signal.direcao ||
+      signal.direcao_entrada ||
+      signal.entry ||
+      signal.entrada ||
+      signal.force ||
+      signal.forca,
+  );
+  const status = normalizeSignalStatus(
+    signal.status || signal.resultado || signal.state || signal.estado || signal.situacao || signal.label,
+    side,
+  );
+  const protection = String(
+    signal.protection || signal.protecao || signal.validade || signal.gale || fallback.protection || "G1",
+  );
   const terminalStatus = terminalSignalStatus(status);
   const incomingLastResult = readServerLastResult(signal.lastResult);
   const previousVisibleEntry =
@@ -13893,14 +13911,16 @@ function normalizeBettingTiming(value: unknown): DashboardData["bettingTiming"] 
 function readServerLastResult(value: unknown): DashboardData["currentSignal"]["lastResult"] {
   const record = readRecord(value);
   if (!Object.keys(record).length) return null;
-  const side = normalizeSignalSide(record.side || record.direcao || record.entry || record.entrada);
-  const status = terminalSignalStatus(normalizeSignalStatus(record.status || record.resultado || record.state, side));
+  const side = normalizeSignalSide(record.side || record.lado || record.direcao || record.entry || record.entrada);
+  const status = terminalSignalStatus(
+    normalizeSignalStatus(record.status || record.resultado || record.state || record.estado || record.situacao, side),
+  );
   if (!status || (side !== "BANKER" && side !== "PLAYER")) return null;
   return {
     id: String(record.id || record.signalId || `result-${Date.now()}`),
     side,
     status,
-    protection: String(record.protection || record.validade || record.gale || "G1"),
+    protection: String(record.protection || record.protecao || record.validade || record.gale || "G1"),
     finishedAt: readString(record, "finishedAt") || new Date().toISOString(),
   };
 }
@@ -14507,9 +14527,9 @@ function normalizeSignalSide(value: unknown): CurrentSignalSide {
   const text = String(value || "")
     .trim()
     .toUpperCase();
-  if (["B", "BANKER", "BANCA"].includes(text)) return "BANKER";
-  if (["P", "PLAYER", "JOGADOR"].includes(text)) return "PLAYER";
-  if (["T", "TIE", "EMPATE"].includes(text)) return "TIE";
+  if (["B", "BANKER", "BANCA"].includes(text) || text.includes("BANKER") || text.includes("BANCA")) return "BANKER";
+  if (["P", "PLAYER", "JOGADOR"].includes(text) || text.includes("PLAYER") || text.includes("JOGADOR")) return "PLAYER";
+  if (["T", "TIE", "EMPATE"].includes(text) || text.includes("TIE") || text.includes("EMPATE")) return "TIE";
   return "NONE";
 }
 
@@ -14517,7 +14537,13 @@ function normalizeSignalStatus(value: unknown, side: DashboardData["currentSigna
   const text = String(value || "")
     .trim()
     .toLowerCase();
-  if (["pending", "entrada", "active", "ativo"].includes(text)) return "pending";
+  if (
+    ["pending", "entrada", "active", "ativo", "confirmed", "confirmado", "confirmada"].includes(text) ||
+    text.includes("entrada confirmada") ||
+    text.includes("confirmad")
+  ) {
+    return "pending";
+  }
   if (["g1", "gale1"].includes(text)) return "g1";
   if (["green", "win", "sg"].includes(text)) return "green";
   if (["green_g1", "greeng1"].includes(text)) return "green_g1";
