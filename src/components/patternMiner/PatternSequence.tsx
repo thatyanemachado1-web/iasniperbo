@@ -20,23 +20,37 @@ export function PatternSequence({
     <div className="flex flex-wrap items-center gap-1.5">
       {sequence.map((token, index) => {
         const side = token[0] as RoundResult;
-        const value = patternTokenValue(token);
+        const chipLabel = patternTokenChipLabel(token);
+        const caption = patternTokenCaption(token, compact);
 
         return (
           <div key={`${token}-${index}`} className="inline-flex items-center gap-1.5">
-            <span className="inline-flex flex-col items-center gap-0.5" title={patternTokenTitle(token)}>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1",
+                !compact && "flex-col gap-0.5",
+              )}
+              title={patternTokenTitle(token)}
+              aria-label={patternTokenTitle(token)}
+            >
               <span
                 className={cn(
                   "grid place-items-center rounded-full border font-black leading-none",
-                  compact ? "size-6 text-[10px]" : "size-8 text-xs",
+                  compact ? "h-6 min-w-6 px-1 text-[9px]" : "h-8 min-w-8 px-1.5 text-xs",
                   SIDE_DOT_CLASS[side],
                 )}
               >
-                {value}
+                {chipLabel}
               </span>
-              {!compact && (
-                <span className={cn("text-[8px] font-black uppercase leading-none", sideTextClass[side])}>
-                  {side}
+              {caption && (
+                <span
+                  className={cn(
+                    "text-[8px] font-black uppercase leading-none",
+                    compact && "normal-case tracking-normal",
+                    sideTextClass[side],
+                  )}
+                >
+                  {caption}
                 </span>
               )}
             </span>
@@ -82,13 +96,20 @@ export function StrategyConclusion({
 function pulledSideLabel(side: RoundResult) {
   if (side === "B") return "🔴 BANKER";
   if (side === "P") return "🔵 PLAYER";
-  return "🟡 TIE";
+  return "🟡 TIE/EMPATE";
 }
 
-function patternTokenValue(token: string) {
+function patternTokenChipLabel(token: string) {
   const side = token[0];
   const value = token.slice(1);
-  return value || side;
+  return value ? `${side}${value}` : side;
+}
+
+function patternTokenCaption(token: string, compact: boolean) {
+  const side = token[0];
+  const value = token.slice(1);
+  if (side === "T") return value ? `Empate ${value}` : "Empate";
+  return compact ? "" : side;
 }
 
 function patternTokenTitle(token: string) {
@@ -96,6 +117,6 @@ function patternTokenTitle(token: string) {
   const value = token.slice(1);
   if (side === "B") return value ? `Banker ${value}` : "Banker";
   if (side === "P") return value ? `Player ${value}` : "Player";
-  if (side === "T") return value ? `Tie ${value}` : "Tie";
+  if (side === "T") return value ? `Empate ${value}` : "Empate";
   return token;
 }

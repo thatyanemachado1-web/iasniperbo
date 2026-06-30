@@ -4,7 +4,7 @@ import type { PatternMinerOperationalStatus, PatternMinerStrategy } from "@/type
 const SIDE_LABEL: Record<RoundResult, string> = {
   B: "BANKER",
   P: "PLAYER",
-  T: "TIE",
+  T: "TIE/EMPATE",
 };
 
 const SIDE_ICON: Record<RoundResult, string> = {
@@ -27,6 +27,8 @@ export const sideBgClass: Record<RoundResult, string> = {
 
 export function formatPatternToken(token: string) {
   const side = token[0] as RoundResult;
+  const value = token.slice(1);
+  if (side === "T") return `${SIDE_ICON[side]} ${value ? `Empate ${value}` : "Empate"}`;
   return `${SIDE_ICON[side]} ${token}`;
 }
 

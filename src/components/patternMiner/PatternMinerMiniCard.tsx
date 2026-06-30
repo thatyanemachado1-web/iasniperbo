@@ -106,12 +106,33 @@ export function PatternMinerMiniCard({
 function LivePatternStatusBlock({ alert }: { alert: PatternMinerAlert }) {
   const strategy = alert.strategy;
   const nextSide = strategy.next_side ? formatPulledSide(strategy.next_side) : "Sem tendência";
+  const isBlocked = strategy.status.startsWith("BLOQUEADO");
+  const isConfirmed = alert.kind === "validated" && !isBlocked;
+  const statusHeadline = isBlocked
+    ? "ENTRADA BLOQUEADA"
+    : isConfirmed
+      ? "ENTRADA CONFIRMADA"
+      : strategy.status === "ALERTA DE EMPATE"
+        ? "ALERTA DE EMPATE"
+        : "PADRÃO IA FORMADO";
 
   return (
-    <div className="mt-1 rounded-xl border border-success/20 bg-success/10 px-2.5 py-2">
+    <div
+      className={cn(
+        "mt-1 rounded-xl border px-2.5 py-2",
+        isBlocked
+          ? "border-destructive/25 bg-destructive/10"
+          : "border-success/20 bg-success/10",
+      )}
+    >
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[9px] font-black uppercase tracking-[0.12em] text-success">
-          PADRÃO IA FORMADO
+        <span
+          className={cn(
+            "text-[9px] font-black uppercase tracking-[0.12em]",
+            isBlocked ? "text-destructive" : "text-success",
+          )}
+        >
+          {statusHeadline}
         </span>
         <AppBadge tone={statusTone(strategy.status)} className="px-2 text-[8px]">
           {statusLabel(strategy.status)}
@@ -261,13 +282,15 @@ function TinyPatternSequence({
 function TinyToken({ token, tiny = false }: { token: string; tiny?: boolean }) {
   const side = token[0];
   const value = token.slice(1);
-  const label = value || side;
+  const label = value ? `${side}${value}` : side;
 
   return (
     <span
+      title={tinyTokenTitle(token)}
+      aria-label={tinyTokenTitle(token)}
       className={cn(
-        "grid shrink-0 place-items-center rounded-full border font-black leading-none text-white",
-        tiny ? "size-4 text-[7px]" : "size-5 text-[8px]",
+        "grid shrink-0 place-items-center rounded-full border px-1 font-black leading-none text-white",
+        tiny ? "h-4 min-w-4 text-[7px]" : "h-5 min-w-5 text-[8px]",
         side === "B" && "border-banker/60 bg-banker",
         side === "P" && "border-player/60 bg-player",
         side === "T" && "border-warning/70 bg-warning text-background",
@@ -276,6 +299,15 @@ function TinyToken({ token, tiny = false }: { token: string; tiny?: boolean }) {
       {label}
     </span>
   );
+}
+
+function tinyTokenTitle(token: string) {
+  const side = token[0];
+  const value = token.slice(1);
+  if (side === "B") return value ? `Banker ${value}` : "Banker";
+  if (side === "P") return value ? `Player ${value}` : "Player";
+  if (side === "T") return value ? `Empate ${value}` : "Empate";
+  return token;
 }
 
 function PatternScoreLine({
