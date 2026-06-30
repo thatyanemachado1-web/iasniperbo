@@ -13109,9 +13109,15 @@ function readServerNeuralSide(value: unknown): NeuralEntryState["expectedSide"] 
   const text = String(value || "")
     .trim()
     .toUpperCase();
-  if (text === "BANKER" || text === "B") return "BANKER";
-  if (text === "PLAYER" || text === "P") return "PLAYER";
-  if (text === "TIE" || text === "T") return "TIE";
+  if (text === "BANKER" || text === "BANCA" || text === "B" || text.includes("BANKER") || text.includes("BANCA")) {
+    return "BANKER";
+  }
+  if (text === "PLAYER" || text === "JOGADOR" || text === "P" || text.includes("PLAYER") || text.includes("JOGADOR")) {
+    return "PLAYER";
+  }
+  if (text === "TIE" || text === "EMPATE" || text === "T" || text.includes("TIE") || text.includes("EMPATE")) {
+    return "TIE";
+  }
   return null;
 }
 
