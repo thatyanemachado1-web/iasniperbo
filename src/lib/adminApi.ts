@@ -581,6 +581,12 @@ function isLocalFrontend() {
   return ["127.0.0.1", "localhost"].includes(window.location.hostname);
 }
 
+function isHostedAppOrigin() {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname.toLowerCase();
+  return hostname === "sniperbo.com" || hostname === "www.sniperbo.com" || hostname.endsWith(".lovable.app");
+}
+
 function isLocalApiUrl(apiUrl: string) {
   try {
     const parsed = new URL(apiUrl);
