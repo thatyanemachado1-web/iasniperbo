@@ -50,7 +50,8 @@ export function formatStrategyConclusion(strategy: PatternMinerStrategy) {
 
 export function formatPercent(value: number | undefined) {
   if (value === undefined || Number.isNaN(value)) return "Sem amostra";
-  return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+  const normalized = value <= 1 && value >= 0 ? value * 100 : value;
+  return `${normalized.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 }
 
 export function statusLabel(status: PatternMinerOperationalStatus) {

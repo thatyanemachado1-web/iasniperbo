@@ -387,7 +387,8 @@ function formatScoreValue(value: number | null) {
 
 function compactPercent(value: number | undefined) {
   if (value === undefined || Number.isNaN(value)) return "--";
-  return `${Math.round(value)}%`;
+  const normalized = value <= 1 && value >= 0 ? value * 100 : value;
+  return `${Math.round(normalized)}%`;
 }
 
 function compactIsoTime(value: string | undefined) {
