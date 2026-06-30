@@ -363,7 +363,7 @@ const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
-const AUTH_IO_TIMEOUT_MS = 900;
+const AUTH_IO_TIMEOUT_MS = 500;
 const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
 const DASHBOARD_READ_SYNC_MIN_INTERVAL_MS = 1_000;
 const DASHBOARD_READ_SYNC_TIMEOUT_MS = 700;
@@ -2429,7 +2429,6 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       );
       client =
         findClientByEmail(email) ||
-        (await withAuthIoTimeout(hydrateClientFromBilling(env, email), "hidratar cliente no auth/check", null)) ||
         syncClientFromRecipientEmail(email) ||
         syncClientFromAdminUserEmail(env, email);
     }
@@ -2535,7 +2534,6 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         "recuperar cadastro de clientes no auth/register",
         false,
       );
-      await withAuthIoTimeout(hydrateClientFromBilling(env, email), "hidratar cliente no auth/register", null);
       syncClientFromRecipientEmail(email) || syncClientFromAdminUserEmail(env, email);
       existingIndex = liveClients.findIndex((item) => readString(item, "email").toLowerCase() === email);
     }
@@ -2647,11 +2645,6 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       );
       client =
         findClientByEmail(session.email) ||
-        (await withAuthIoTimeout(
-          hydrateClientFromBilling(env, session.email),
-          "hidratar cliente no auth/verify",
-          null,
-        )) ||
         syncClientFromRecipientEmail(session.email) ||
         syncClientFromAdminUserEmail(env, session.email);
     }
