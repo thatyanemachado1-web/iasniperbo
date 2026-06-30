@@ -13714,16 +13714,11 @@ function resolveLateSignalGuard(
   };
 }
 
-function isLateEntryWindow(timing: DashboardData["bettingTiming"]) {
-  if (!timing) return false;
+function isLateEntryWindow(_timing: DashboardData["bettingTiming"]) {
   // Hotfix produção: o timing de aposta recebido pelo publicador pode chegar
   // travado como CLOSED/0s e esconder toda entrada confirmada no site. A engine
   // oficial/publicador já controla a validade; o site não deve zerar o sinal.
   return false;
-  if (!isFreshBettingTiming(timing)) return false;
-  if (timing.phase === "CLOSED") return true;
-  const remaining = typeof timing.remainingSeconds === "number" ? timing.remainingSeconds : null;
-  return timing.phase === "OPEN" && remaining !== null && remaining <= LATE_ENTRY_BLOCK_SECONDS;
 }
 
 function isFreshBettingTiming(timing: DashboardData["bettingTiming"]) {
