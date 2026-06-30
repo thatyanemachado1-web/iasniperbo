@@ -3228,10 +3228,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     const body = await request.json().catch(() => ({}));
     const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
     const incomingState = readRecord(body);
-    if (
-      incomingRounds.length &&
-      compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, incomingState) > 0
-    ) {
+    if (incomingRounds.length && shouldIgnoreStaleDashboardPost(liveDashboardData, incomingState)) {
       return json({
         ok: true,
         ignored: "stale",
@@ -13112,9 +13109,15 @@ function readServerNeuralSide(value: unknown): NeuralEntryState["expectedSide"] 
   const text = String(value || "")
     .trim()
     .toUpperCase();
-  if (text === "BANKER" || text === "B") return "BANKER";
-  if (text === "PLAYER" || text === "P") return "PLAYER";
-  if (text === "TIE" || text === "T") return "TIE";
+  if (text === "BANKER" || text === "BANCA" || text === "B" || text.includes("BANKER") || text.includes("BANCA")) {
+    return "BANKER";
+  }
+  if (text === "PLAYER" || text === "JOGADOR" || text === "P" || text.includes("PLAYER") || text.includes("JOGADOR")) {
+    return "PLAYER";
+  }
+  if (text === "TIE" || text === "EMPATE" || text === "T" || text.includes("TIE") || text.includes("EMPATE")) {
+    return "TIE";
+  }
   return null;
 }
 
@@ -18844,6 +18847,36 @@ function compareDashboardStateFreshness(left: Record<string, unknown>, right: Re
     if (diff !== 0) return diff;
   }
   return 0;
+}
+
+function shouldIgnoreStaleDashboardPost(current: LiveDashboardData, incoming: Record<string, unknown>) {
+  const currentState = current as unknown as Record<string, unknown>;
+  if (compareDashboardStateFreshness(currentState, incoming) <= 0) return false;
+
+  // Hotfix: after rollback/restart the upstream round id can go backwards even
+  // while the signal/update is newer. Do not keep production frozen on the old
+  // state when a fresh confirmed entry or fresh timestamp arrives.
+  const currentUpdatedAtMs = Date.parse(readString(currentState, "updatedAt") || "");
+  const incomingUpdatedAtMs = Date.parse(readString(incoming, "updatedAt") || readString(incoming, "updated_at") || "");
+  if (Number.isFinite(incomingUpdatedAtMs) && Number.isFinite(currentUpdatedAtMs)) {
+    if (incomingUpdatedAtMs > currentUpdatedAtMs + 1_000) return false;
+  }
+
+  const incomingSignal = normalizeSignal(readMainSignal(incoming), current.currentSignal);
+  if (isServerEntrySide(incomingSignal.side) && (incomingSignal.status === "pending" || incomingSignal.status === "g1")) {
+    return false;
+  }
+
+  const incomingNeural = readRecord(
+    incoming.neuralReading || incoming.neural_reading || incoming.numeroPagante || incoming.numero_pagante,
+  );
+  const neuralMode = String(incomingNeural.mode || incomingNeural.status || "").trim().toUpperCase();
+  const neuralSide = readServerNeuralSide(
+    incomingNeural.direcao || incomingNeural.direction || incomingNeural.puxando || incomingNeural.side,
+  );
+  if (["ACTIVE", "ATIVO", "VALIDO", "VALID"].includes(neuralMode) && neuralSide) return false;
+
+  return true;
 }
 
 function dashboardStateFreshnessScore(state: Record<string, unknown>) {
