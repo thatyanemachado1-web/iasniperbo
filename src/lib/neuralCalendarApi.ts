@@ -20,15 +20,12 @@ export async function fetchNeuralCalendar(params: {
   if (params.engines?.length) search.set("engines", params.engines.join(","));
 
   const token = readUserSession().clientToken || "";
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25_000);
   try {
     const response = await fetch(`${publicApiBaseUrl()}/calendar/neural?${search.toString()}`, {
       headers: {
         Accept: "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      signal: controller.signal,
     });
     if (!response.ok) {
       const text = await response.text();
@@ -37,12 +34,7 @@ export async function fetchNeuralCalendar(params: {
     const data = (await response.json()) as { calendar: NeuralCalendarPayload };
     return data.calendar;
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("Calendario Neural demorou para responder. Tente novamente em alguns segundos.");
-    }
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

@@ -512,8 +512,6 @@ def build_urgent_signal_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "engineDecision",
         "currentSurfAlert",
         "currentTieAlert",
-        "patternMinerSnapshot",
-        "patternMiner",
         "mainScoreboard",
         "surfAnalyzerScoreboard",
         "tieAlertScoreboard",

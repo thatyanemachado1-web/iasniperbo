@@ -307,8 +307,6 @@ export function detectSurfConfirmedCard(
   const statusText = normalizeText(
     alert.surf_prediction_status || alert.surf_status || alert.status || alert.phase || alert.surf_phase,
   );
-  const riskValue = Number(alert.surf_break_risk ?? alert.surf_risk ?? alert.risk ?? 0);
-  const highRisk = Number.isFinite(riskValue) && riskValue >= 70;
   const signalKey = side && roundId ? `surf:${readString(alert, "id") || roundId}:${side}:round:${roundId}` : "";
 
   if (!Object.keys(alert).length) {
@@ -321,14 +319,12 @@ export function detectSurfConfirmedCard(
     alert.surf_alert === true ||
       statusText.includes("ACTIVE") ||
       statusText.includes("ATIVO") ||
-      statusText.includes("CONFIRM") ||
-      statusText.includes("ALERTA") ||
-      highRisk,
+      statusText.includes("CONFIRM"),
   );
   if (!active) {
     return { moduleKey: "surf_alert", confirmed: false, reason: "card_not_active", signalKey, roundId };
   }
-  if (!highRisk && !isConfirmedStatusText(statusText) && !statusText.includes("ALERTA")) {
+  if (!isConfirmedStatusText(statusText) && !statusText.includes("ALERTA")) {
     return { moduleKey: "surf_alert", confirmed: false, reason: "entry_not_confirmed", signalKey, roundId };
   }
   return {

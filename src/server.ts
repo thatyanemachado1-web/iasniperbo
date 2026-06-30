@@ -3332,20 +3332,11 @@ async function handleNeuralCalendarRequest(request: Request, url: URL, env: unkn
   if (request.method !== "GET") return json({ error: "Metodo nao permitido." }, 405);
 
   if (!(await isNeuralCalendarAuthorized(request, url, env))) {
-    const token = getBearerToken(request);
-    if (!token) {
-      return json({ error: "Faca login para acessar o Calendario Neural." }, 401);
-    }
-    return json({ error: "Calendario Neural disponivel apenas para usuarios premium ativos." }, 403);
+    return json({ error: "Calendario Neural disponivel apenas para usuarios premium." }, 403);
   }
 
-  await withTimeout(
-    hydrateNeuralCalendarStatsFromTables(env),
-    LIVE_STATE_IO_TIMEOUT_MS,
-    "carregar agregados do Calendario Neural",
-    undefined,
-  );
-  scheduleEngineCalendarAutoBackfill(env);
+  await hydrateNeuralCalendarStatsFromTables(env);
+  await ensureEngineCalendarAggregatesAvailable(env);
 
   const now = saoPauloDateParts();
   const requestedYear = clampCalendarYear(url.searchParams.get("year"), now.year);
@@ -3941,20 +3932,8 @@ async function isNeuralCalendarAuthorized(request: Request, url: URL, env: unkno
 
   const session = await verifySessionToken(env, token);
   if (!session) return false;
-
-  if (session.scope === "owner" || session.scope === "admin_approver") {
-    const sessionCheck = await validateClientSessionBinding(env, request, session, {});
-    return sessionCheck.ok;
-  }
-
-  if (session.scope !== "client") return false;
-
-  const client = findClientByEmail(session.email);
-  if (!client) return false;
-  if (!clientHasLiveAccess(client)) return false;
-
-  const sessionCheck = await validateClientSessionBinding(env, request, session, client);
-  return sessionCheck.ok;
+  if (!sessionMatchesRequestBinding(env, request, session)) return false;
+  return session.scope === "owner" || session.scope === "admin_approver" || session.scope === "client";
 }
 
 function trackNeuralCalendarRounds(rounds: Round[]): NeuralCalendarChangeSet {
@@ -4412,19 +4391,15 @@ async function hydrateNeuralCalendarStatsFromTables(env: unknown) {
 }
 
 async function ensureEngineCalendarAggregatesAvailable(env: unknown) {
-  scheduleEngineCalendarAutoBackfill(env);
-  if (engineCalendarAutoBackfillPromise) {
-    await engineCalendarAutoBackfillPromise;
-  }
-}
-
-function scheduleEngineCalendarAutoBackfill(env: unknown) {
   if (!getSupabasePersistenceConfig(env)) return;
 
   const now = Date.now();
   const hasRows = hasEngineCalendarAggregateRows();
   if (hasRows && engineCalendarAutoBackfillCompleted) return;
-  if (engineCalendarAutoBackfillPromise) return;
+  if (engineCalendarAutoBackfillPromise) {
+    await engineCalendarAutoBackfillPromise;
+    return;
+  }
   if (engineCalendarAutoBackfillAttemptedAt && now - engineCalendarAutoBackfillAttemptedAt < 5 * 60 * 1000) {
     return;
   }
@@ -4444,6 +4419,7 @@ function scheduleEngineCalendarAutoBackfill(env: unknown) {
     .finally(() => {
       engineCalendarAutoBackfillPromise = null;
     });
+  await engineCalendarAutoBackfillPromise;
 }
 
 function hasEngineCalendarAggregateRows() {
