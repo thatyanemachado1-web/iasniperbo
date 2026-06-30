@@ -42,6 +42,10 @@ function configuredDashboardUrl() {
     }
 
     const savedAdminApi = window.localStorage.getItem(DASHBOARD_SOURCE_STORAGE_KEY);
+    if (!isLocalFrontend() && isHostedAppOrigin()) {
+      if (savedAdminApi) window.localStorage.removeItem(DASHBOARD_SOURCE_STORAGE_KEY);
+      return defaultDashboardUrl();
+    }
     if (savedAdminApi && isSameOriginApiBaseUrl(savedAdminApi)) {
       window.localStorage.removeItem(DASHBOARD_SOURCE_STORAGE_KEY);
       return defaultDashboardUrl();
@@ -100,6 +104,12 @@ function isLocalFrontend() {
   );
 }
 
+function isHostedAppOrigin() {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname.toLowerCase();
+  return hostname === "sniperbo.com" || hostname === "www.sniperbo.com" || hostname.endsWith(".lovable.app");
+}
+
 function ensureDashboardPath(url: string) {
   const trimmed = url.trim().replace(/\/+$/, "");
   return trimmed.endsWith("/dashboard") ? trimmed : `${trimmed}/dashboard`;
@@ -113,6 +123,9 @@ function defaultDashboardUrl() {
   if (typeof window === "undefined") return "";
   if (isLocalFrontend()) {
     return ensureDashboardPath(LOCAL_SIGNALS_API_BASE_URL);
+  }
+  if (isHostedAppOrigin()) {
+    return ensureDashboardPath(window.location.origin);
   }
   return ensureDashboardPath(PUBLIC_LIVE_API_BASE_URL);
 }
