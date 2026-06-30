@@ -458,7 +458,7 @@ function bestTiePattern(snapshot?: PatternMinerSnapshot) {
 
 function tiePatternScore(strategy: PatternMinerStrategy) {
   const tieWeight = strategy.expectedResult === "T" ? 50 : 0;
-  const hotWeight = strategy.status === "VERY_HOT" ? 30 : strategy.status === "HOT" ? 20 : 0;
+  const hotWeight = strategy.heatStatus === "VERY_HOT" ? 30 : strategy.heatStatus === "HOT" ? 20 : 0;
   return (
     tieWeight +
     hotWeight +

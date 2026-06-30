@@ -25,14 +25,15 @@ export function PatternMinerMiniCard({
   isUsingRealData: boolean;
 }) {
   const confirmedAlert = snapshot.entryAlerts[0];
-  const confirmedPattern = confirmedAlert?.strategy;
-  const fallbackPattern = snapshot.hotStrategies[0] ?? snapshot.ranking[0];
-  const currentPattern = confirmedPattern ?? fallbackPattern;
+  const formedAlert = confirmedAlert ?? snapshot.formingAlerts.find((alert) => alert.progress >= 1);
+  const fallbackPattern = formedAlert?.strategy ?? snapshot.hotStrategies[0] ?? snapshot.ranking[0];
+  const currentPattern = fallbackPattern;
   const hasGeneralData = isUsingRealData && snapshot.scoreboard.totalValidated > 0;
   const hasPatternData =
     isUsingRealData && Boolean(currentPattern) && (currentPattern?.totalValidated ?? 0) > 0;
-  const formingAlerts = snapshot.formingAlerts.slice(0, 2);
+  const formingAlerts = snapshot.formingAlerts.filter((alert) => alert.progress < 1).slice(0, 2);
   const leadingFormingAlert = formingAlerts[0];
+  const runtimeStatus = formedAlert?.strategy.status ?? snapshot.runtimeStatus ?? "AGUARDANDO PADRAO";
 
   return (
     <GlassCard className="h-full rounded-xl border-neon-cyan/35 p-3">
@@ -47,14 +48,15 @@ export function PatternMinerMiniCard({
               <div className="mt-1 text-[10px] leading-snug text-warning">
                 Aguardando histórico real da plataforma.
               </div>
-            ) : confirmedPattern ? (
-              <ConfirmedPatternBlock alert={confirmedAlert} />
+            ) : formedAlert ? (
+              <LivePatternStatusBlock alert={formedAlert} />
             ) : leadingFormingAlert ? (
               <FormingPreviewBlock alert={leadingFormingAlert} />
             ) : (
               <div className="mt-1 rounded-xl border border-neon-cyan/12 bg-background/25 px-2.5 py-2 text-[10px] leading-snug text-muted-foreground">
-                Aguardando padrão confirmado. Em formação aparece abaixo quando a sequência estiver
-                perto.
+                {runtimeStatus === "BLOQUEADO POR FEED STALE"
+                  ? "BLOQUEADO POR FEED STALE. Aguardando atualização de rodada para validar entrada."
+                  : "AGUARDANDO PADRÃO. O card mostra PADRÃO EM FORMAÇÃO assim que detectar sequência real."}
               </div>
             )}
           </div>
@@ -101,14 +103,15 @@ export function PatternMinerMiniCard({
   );
 }
 
-function ConfirmedPatternBlock({ alert }: { alert: PatternMinerAlert }) {
+function LivePatternStatusBlock({ alert }: { alert: PatternMinerAlert }) {
   const strategy = alert.strategy;
+  const nextSide = strategy.next_side ? formatPulledSide(strategy.next_side) : "Sem tendência";
 
   return (
     <div className="mt-1 rounded-xl border border-success/20 bg-success/10 px-2.5 py-2">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-[9px] font-black uppercase tracking-[0.12em] text-success">
-          Padrão confirmado
+          PADRÃO IA FORMADO
         </span>
         <AppBadge tone={statusTone(strategy.status)} className="px-2 text-[8px]">
           {statusLabel(strategy.status)}
@@ -117,14 +120,26 @@ function ConfirmedPatternBlock({ alert }: { alert: PatternMinerAlert }) {
       <div className="min-w-0">
         <PatternSequence sequence={strategy.sequence} compact />
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
-        <span className="text-muted-foreground">Entrada confirmada:</span>
-        {strategy.expectedResult ? (
-          <span className="font-black">{formatPulledSide(strategy.expectedResult)}</span>
-        ) : (
-          <span className="text-warning">amostra insuficiente</span>
-        )}
-        <span className="text-neon-cyan">{formatPercent(strategy.assertiveness)}</span>
+      <div className="mt-1 rounded-lg border border-neon-cyan/12 bg-background/20 px-2 py-1 text-[9px]">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-muted-foreground">Assinatura:</span>
+          <span className="font-black text-foreground">{strategy.pattern_signature}</span>
+          <span className="text-muted-foreground">Próxima tendência:</span>
+          <span className="font-black">{nextSide}</span>
+          <span className="text-neon-cyan">
+            {formatPercent(strategy.next_side_probability ?? strategy.assertiveness)}
+          </span>
+        </div>
+        <div className="mt-1 grid grid-cols-4 gap-1 text-[8px]">
+          <MiniMeta label="OC" value={strategy.occurrences} />
+          <MiniMeta label="SG" value={strategy.sg_count} />
+          <MiniMeta label="G1" value={strategy.g1_count} />
+          <MiniMeta label="RD" value={strategy.red_count} />
+          <MiniMeta label="TIE+" value={strategy.tie_after_count} />
+          <MiniMeta label="RID" value={strategy.round_id ?? "-"} />
+          <MiniMeta label="SIG" value={strategy.signal_id || "-"} />
+          <MiniMeta label="GER" value={compactIsoTime(strategy.generated_at)} />
+        </div>
       </div>
     </div>
   );
@@ -246,7 +261,7 @@ function TinyPatternSequence({
 function TinyToken({ token, tiny = false }: { token: string; tiny?: boolean }) {
   const side = token[0];
   const value = token.slice(1);
-  const label = side === "T" && value ? `${value}x` : value || side;
+  const label = value || side;
 
   return (
     <span
@@ -318,6 +333,15 @@ function TinyStat({
   );
 }
 
+function MiniMeta({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-md border border-neon-cyan/10 bg-background/30 px-1 py-0.5">
+      <span className="text-[7px] font-bold uppercase text-muted-foreground">{label} </span>
+      <span className="text-[8px] font-black text-foreground">{value}</span>
+    </div>
+  );
+}
+
 function currentSequenceLabel(data: PatternMinerScoreboard | PatternMinerStrategy | null) {
   if (!data) return "coletando";
   if (data.sequencePositive > 0) return `${data.sequencePositive}G`;
@@ -332,6 +356,12 @@ function formatScoreValue(value: number | null) {
 function compactPercent(value: number | undefined) {
   if (value === undefined || Number.isNaN(value)) return "--";
   return `${Math.round(value)}%`;
+}
+
+function compactIsoTime(value: string | undefined) {
+  const parsed = Date.parse(String(value || ""));
+  if (!Number.isFinite(parsed)) return "--";
+  return new Date(parsed).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function scoreToneClass(tone: "green" | "cyan" | "red" | "amber" | "neutral") {

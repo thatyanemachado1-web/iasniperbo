@@ -1,5 +1,5 @@
 import type { RoundResult } from "@/types/dashboard";
-import type { PatternMinerStrategy, PatternMinerStrategyStatus } from "@/types/patternMiner";
+import type { PatternMinerOperationalStatus, PatternMinerStrategy } from "@/types/patternMiner";
 
 const SIDE_LABEL: Record<RoundResult, string> = {
   B: "BANKER",
@@ -51,22 +51,27 @@ export function formatPercent(value: number | undefined) {
   return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 }
 
-export function statusLabel(status: PatternMinerStrategyStatus) {
-  const labels: Record<PatternMinerStrategyStatus, string> = {
-    VERY_HOT: "🔥 MUITO QUENTE",
-    HOT: "🔥 QUENTE",
-    STABLE: "🟡 ESTAVEL",
-    OBSERVATION: "🟠 EM OBSERVACAO",
-    WEAK: "🔴 FRACA",
-    INACTIVE: "⚫ INATIVA",
+export function statusLabel(status: PatternMinerOperationalStatus) {
+  const labels: Record<PatternMinerOperationalStatus, string> = {
+    "AGUARDANDO PADRAO": "AGUARDANDO PADRÃO",
+    "PADRAO EM FORMACAO": "PADRÃO EM FORMAÇÃO",
+    "PADRAO QUENTE": "PADRÃO QUENTE",
+    "PADRAO 100%": "PADRÃO 100%",
+    "ENTRADA CONFIRMADA": "ENTRADA CONFIRMADA",
+    "ALERTA DE EMPATE": "ALERTA DE EMPATE",
+    "BLOQUEADO POR 2 REDS": "BLOQUEADO POR 2 REDS",
+    "BLOQUEADO POR AMOSTRA BAIXA": "BLOQUEADO POR AMOSTRA BAIXA",
+    "BLOQUEADO POR FEED STALE": "BLOQUEADO POR FEED STALE",
+    "BLOQUEADO POR SNAPSHOT ANTIGO": "BLOQUEADO POR SNAPSHOT ANTIGO",
   };
   return labels[status];
 }
 
-export function statusTone(status: PatternMinerStrategyStatus) {
-  if (status === "VERY_HOT" || status === "HOT") return "green";
-  if (status === "STABLE") return "amber";
-  if (status === "OBSERVATION") return "gold";
-  if (status === "WEAK") return "red";
+export function statusTone(status: PatternMinerOperationalStatus) {
+  if (status === "ENTRADA CONFIRMADA" || status === "PADRAO 100%" || status === "PADRAO QUENTE")
+    return "green";
+  if (status === "PADRAO EM FORMACAO" || status === "AGUARDANDO PADRAO") return "amber";
+  if (status === "ALERTA DE EMPATE") return "gold";
+  if (status.startsWith("BLOQUEADO")) return "red";
   return "muted";
 }

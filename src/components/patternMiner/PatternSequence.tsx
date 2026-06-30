@@ -88,7 +88,6 @@ function pulledSideLabel(side: RoundResult) {
 function patternTokenValue(token: string) {
   const side = token[0];
   const value = token.slice(1);
-  if (side === "T" && value) return `${value}x`;
   return value || side;
 }
 
@@ -97,6 +96,6 @@ function patternTokenTitle(token: string) {
   const value = token.slice(1);
   if (side === "B") return value ? `Banker ${value}` : "Banker";
   if (side === "P") return value ? `Player ${value}` : "Player";
-  if (side === "T") return value ? `Tie ${value}x` : "Tie";
+  if (side === "T") return value ? `Tie ${value}` : "Tie";
   return token;
 }

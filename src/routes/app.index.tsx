@@ -50,6 +50,8 @@ function DashboardPage() {
     historyLimit: 15000,
     enabled: mode === "live" && !d.mockMode,
     serverSnapshot: d.patternMinerSnapshot,
+    feedStatus: d.feedStatus,
+    dashboardUpdatedAt: d.updatedAt,
   });
   const { history: roundHistory, resetHistory } = useRoundHistory(
     d,

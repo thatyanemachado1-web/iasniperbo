@@ -23,7 +23,11 @@ export function PatternAlertCard({ alert }: { alert: PatternMinerAlert }) {
           </div>
           <div>
             <div className="text-sm font-black">
-              {alert.kind === "validated" ? "🧠 PADRÃO VALIDADO" : "🔥 PADRÃO EM FORMAÇÃO"}
+              {alert.kind === "validated"
+                ? "🧠 ENTRADA CONFIRMADA"
+                : alert.progress >= 1
+                  ? "🔥 PADRÃO IA FORMADO"
+                  : "🔥 PADRÃO EM FORMAÇÃO"}
             </div>
             <div className="text-[11px] text-muted-foreground">
               Progresso {(alert.progress * 100).toFixed(0)}% · Validade SG + G1

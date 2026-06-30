@@ -9,6 +9,17 @@ export type PatternMinerStrategyStatus =
   | "WEAK"
   | "INACTIVE";
 export type PatternMinerAlertKind = "forming" | "validated";
+export type PatternMinerOperationalStatus =
+  | "AGUARDANDO PADRAO"
+  | "PADRAO EM FORMACAO"
+  | "PADRAO QUENTE"
+  | "PADRAO 100%"
+  | "ENTRADA CONFIRMADA"
+  | "ALERTA DE EMPATE"
+  | "BLOQUEADO POR 2 REDS"
+  | "BLOQUEADO POR AMOSTRA BAIXA"
+  | "BLOQUEADO POR FEED STALE"
+  | "BLOQUEADO POR SNAPSHOT ANTIGO";
 
 export interface PatternMinerConfig {
   historyLimit: PatternMinerHistoryLimit;
@@ -20,8 +31,25 @@ export interface PatternMinerConfig {
 export interface PatternMinerStrategy {
   id: string;
   sequence: string[];
+  module: "PADROES_IA";
+  pattern_signature: string;
+  pattern_signature_normalized: string;
+  includes_tie: boolean;
+  tie_count_in_pattern: number;
+  next_side?: RoundResult;
+  next_side_probability?: number;
+  signal_id?: string;
+  round_id?: number;
+  generated_at: string;
   occurrences: number;
+  accuracy?: number;
+  sg_count: number;
+  g1_count: number;
+  red_count: number;
+  tie_after_count: number;
+  blocked_reason?: string;
   expectedResult?: RoundResult;
+  heatStatus: PatternMinerStrategyStatus;
   sg: number;
   g1: number;
   red: number;
@@ -36,7 +64,7 @@ export interface PatternMinerStrategy {
   lastHit?: string;
   lastRed?: string;
   createdAt: string;
-  status: PatternMinerStrategyStatus;
+  status: PatternMinerOperationalStatus;
   insufficientSample: boolean;
   updatedAt: string;
   rank: number;
@@ -83,6 +111,8 @@ export interface PatternMinerSnapshot {
   agent: PatternMinerAgentReport;
   analyzedRounds: number;
   historyLimit: PatternMinerHistoryLimit;
+  runtimeStatus?: PatternMinerOperationalStatus;
+  runtimeBlockedReason?: string;
   updatedAt: string;
 }
 
