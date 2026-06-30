@@ -68,8 +68,8 @@ function isStoredRound(value: unknown): value is Round {
   return (
     typeof round.id === "number" &&
     (round.result === "B" || round.result === "P" || round.result === "T") &&
-    typeof round.bankerScore === "number" &&
-    typeof round.playerScore === "number" &&
+    Number.isFinite(round.bankerScore) &&
+    Number.isFinite(round.playerScore) &&
     typeof round.time === "string"
   );
 }

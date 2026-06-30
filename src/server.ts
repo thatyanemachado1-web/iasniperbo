@@ -12379,6 +12379,15 @@ function serverReadOptionalNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function serverReadRoundScore(value: unknown) {
+  if (value === undefined || value === null || value === "") return Number.NaN;
+  const text = String(value).trim();
+  const match = text.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return Number.NaN;
+  const numeric = Number(match[0].replace(",", "."));
+  return Number.isFinite(numeric) ? numeric : Number.NaN;
+}
+
 function serverSafeCounter(value: unknown) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
@@ -12424,8 +12433,8 @@ function normalizeRounds(rounds: unknown[], limit = 30) {
       return {
         id: Number(item.id || item.round || item.roundId || 1000 + index),
         result,
-        bankerScore: Number(item.bankerScore ?? item.banker_score ?? item.banker ?? 0),
-        playerScore: Number(item.playerScore ?? item.player_score ?? item.player ?? 0),
+        bankerScore: serverReadRoundScore(item.bankerScore ?? item.banker_score ?? item.banker),
+        playerScore: serverReadRoundScore(item.playerScore ?? item.player_score ?? item.player),
         tieMultiplier: readNullableNumber(item.tieMultiplier ?? item.tie_multiplier ?? item.multiplier),
         time: String(item.time || item.createdAt || "--:--"),
         recordedAt: normalizeRoundRecordedAt(item),
@@ -12596,8 +12605,8 @@ function storedValidatorRoundFromRow(row: Record<string, unknown>): Round | null
   return {
     id,
     result,
-    bankerScore: Number(row.banker_score ?? row.bankerScore ?? 0),
-    playerScore: Number(row.player_score ?? row.playerScore ?? 0),
+    bankerScore: serverReadRoundScore(row.banker_score ?? row.bankerScore ?? row.banker),
+    playerScore: serverReadRoundScore(row.player_score ?? row.playerScore ?? row.player),
     tieMultiplier: readNullableNumber(row.tie_multiplier ?? row.tieMultiplier ?? row.multiplier),
     time: readString(row, "round_time") || readString(row, "time") || readString(row, "created_at") || "--:--",
     recordedAt: readString(row, "created_at") || readString(row, "recordedAt") || readString(row, "recorded_at"),

@@ -478,7 +478,7 @@ function buildSequenceVariants(rounds: Round[], start: number, length: number) {
 function tokenOptionsForRound(round: Round) {
   const score = scoreForResult(round, round.result);
   const options = [round.result];
-  if (score !== null) {
+  if (score !== null && score >= MIN_PATTERN_SCORE) {
     options.unshift(`${round.result}${score}`);
   }
   return options;
@@ -504,7 +504,11 @@ function scoreForResult(round: Round, side: RoundResult) {
 }
 
 function normalizePatternScore(score: unknown) {
-  const parsedScore = Number(score);
+  const text = String(score ?? "").trim();
+  if (!text) return null;
+  const matched = text.match(/-?\d+(?:\.\d+)?/);
+  if (!matched) return null;
+  const parsedScore = Number(matched[0].replace(",", "."));
   if (!Number.isFinite(parsedScore)) return null;
   return Math.floor(Math.max(MIN_PATTERN_SCORE, Math.min(MAX_PATTERN_SCORE, parsedScore)));
 }
@@ -519,7 +523,7 @@ export function parsePatternToken(token: string): { side: RoundResult; number?: 
   const rawNumber = match[2];
   if (!rawNumber) return { side, normalized: side };
   const number = Number(rawNumber);
-  if (!Number.isFinite(number) || number < 0 || number > 12) return null;
+  if (!Number.isFinite(number) || number < MIN_PATTERN_SCORE || number > MAX_PATTERN_SCORE) return null;
   return { side, number, normalized: `${side}${number}` };
 }
 
