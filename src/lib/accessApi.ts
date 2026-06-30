@@ -265,9 +265,8 @@ async function apiRequest<T>(
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
-  let response: Response;
   try {
-    response = await fetch(`${publicApiBaseUrl()}${path}`, {
+    const response = await fetch(`${publicApiBaseUrl()}${path}`, {
       method: init.method || "GET",
       headers: {
         "Content-Type": "application/json",
@@ -277,7 +276,26 @@ async function apiRequest<T>(
       ...(init.body ? { body: JSON.stringify(init.body) } : {}),
       signal: controller.signal,
     });
+
+    const text = await response.text();
+    if (!response.ok) {
+      let message = "";
+      try {
+        const parsed = JSON.parse(text) as { error?: string };
+        message = parsed.error || "";
+      } catch {
+        message = text;
+      }
+      throw new AccessApiError(message || "Não foi possível validar o acesso.", response.status);
+    }
+
+    try {
+      return (text ? JSON.parse(text) : {}) as T;
+    } catch {
+      throw new AccessApiError("O servidor respondeu, mas não foi possível ler a resposta do login.", 0);
+    }
   } catch (error) {
+    if (error instanceof AccessApiError) throw error;
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new AccessApiTimeoutError();
     }
@@ -288,19 +306,6 @@ async function apiRequest<T>(
   } finally {
     window.clearTimeout(timeoutId);
   }
-
-  if (!response.ok) {
-    const text = await response.text();
-    let message = "";
-    try {
-      const parsed = JSON.parse(text) as { error?: string };
-      message = parsed.error || "";
-    } catch {
-      message = text;
-    }
-    throw new AccessApiError(message || "Não foi possível validar o acesso.", response.status);
-  }
-  return (await response.json()) as T;
 }
 
 function publicApiBaseUrl() {
@@ -310,6 +315,13 @@ function publicApiBaseUrl() {
 
   // TanStack Start serves /auth/* on the same origin as the SPA.
   if (isLocalFrontend()) {
+    return window.location.origin;
+  }
+
+  // In production, preview and custom-domain deployments expose the auth routes
+  // on the current origin. Forcing an old saved API URL here can make the
+  // browser perform a cross-origin login request and leave the UI waiting.
+  if (isHostedAppOrigin()) {
     return window.location.origin;
   }
 
@@ -335,6 +347,12 @@ function isLocalFrontend() {
     typeof window !== "undefined" &&
     ["127.0.0.1", "localhost"].includes(window.location.hostname)
   );
+}
+
+function isHostedAppOrigin() {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname.toLowerCase();
+  return hostname === "sniperbo.com" || hostname === "www.sniperbo.com" || hostname.endsWith(".lovable.app");
 }
 
 function normalizeBaseUrl(apiUrl: string) {
