@@ -30,11 +30,27 @@ export function useDailySurfMax({
     DailySurfMaxEngine.load(tableId, storageScope),
   );
 
-  const todayKey = DailySurfMaxEngine.todayKey();
+  const [todayKey, setTodayKey] = useState(() => DailySurfMaxEngine.todayKey());
   const signature = useMemo(
     () => roundsSignature(rounds, sourceUpdatedAt, tableId),
     [rounds, sourceUpdatedAt, tableId],
   );
+
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return;
+
+    let timeoutId: number | undefined;
+    const scheduleNextDay = () => {
+      setTodayKey(DailySurfMaxEngine.todayKey());
+      timeoutId = window.setTimeout(scheduleNextDay, DailySurfMaxEngine.msUntilNextDay());
+    };
+
+    scheduleNextDay();
+
+    return () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -177,6 +193,13 @@ function isSameDailySurfMemory(
     left.confidence === right.confidence &&
     left.reason === right.reason &&
     left.playerMaxDeficit === right.playerMaxDeficit &&
-    left.bankerMaxDeficit === right.bankerMaxDeficit
+    left.bankerMaxDeficit === right.bankerMaxDeficit &&
+    left.recentTieCount === right.recentTieCount &&
+    left.recentAlternationRate === right.recentAlternationRate &&
+    left.recentPressureSide === right.recentPressureSide &&
+    left.recentPressurePercent === right.recentPressurePercent &&
+    left.lastBreakSide === right.lastBreakSide &&
+    left.lastBreakDepth === right.lastBreakDepth &&
+    left.recentResults.join("|") === right.recentResults.join("|")
   );
 }

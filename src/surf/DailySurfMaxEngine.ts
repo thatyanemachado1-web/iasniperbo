@@ -12,7 +12,8 @@ export type DailySurfMemoryStatus =
   | "SURF_DOMINANTE"
   | "RECUPERACAO_SURF"
   | "SURF_ESTICADO"
-  | "RISCO_QUEBRA";
+  | "RISCO_QUEBRA"
+  | "VIRADA_SURF";
 
 export interface DailySurfRound {
   round_id: string;
@@ -42,6 +43,13 @@ export interface DailySurfMemory {
   reason: string;
   playerMaxDeficit: number;
   bankerMaxDeficit: number;
+  recentResults: DailySurfSide[];
+  recentTieCount: number;
+  recentAlternationRate: number;
+  recentPressureSide: DailySurfMemorySide | null;
+  recentPressurePercent: number;
+  lastBreakSide: DailySurfMemorySide | null;
+  lastBreakDepth: number;
 }
 
 export interface DailySurfMaxSnapshot {
@@ -138,7 +146,7 @@ export class DailySurfMaxEngine {
       next.dailyMaxSurf.tie = Math.max(next.dailyMaxSurf.tie, nextStreak.count);
     }
 
-    next.dailySurfMemory = calculateDailySurfMemory(base.dailySurfMemory, nextStreak);
+    next.dailySurfMemory = calculateDailySurfMemory(base.dailySurfMemory, round);
 
     return next;
   }
@@ -164,6 +172,10 @@ export class DailySurfMaxEngine {
 
   static todayKey(timestamp?: string | Date) {
     return brasiliaDateKey(timestamp);
+  }
+
+  static msUntilNextDay(timestamp?: string | Date) {
+    return msUntilNextBrasiliaDay(timestamp);
   }
 
   static applyDailySurfMemoryToAlert(alert: SurfAlert, memory: DailySurfMemory): SurfAlert {
@@ -194,7 +206,7 @@ function normalizeRound(
     validIsoDate(options.fallbackTimestamp) ? options.fallbackTimestamp :
     new Date().toISOString();
 
-  const date = round.day && round.day.length >= 10 ? round.day : brasiliaDateKey(timestamp);
+  const date = normalizeDayKey(round.day) ?? brasiliaDateKey(timestamp);
 
   return {
     round_id: `${round.id}:${round.time}:${round.result}:${round.bankerScore}:${round.playerScore}`,
@@ -252,6 +264,13 @@ function emptyDailySurfMemory(dateKey: string): DailySurfMemory {
     reason: "Sem memoria diaria suficiente para Surf.",
     playerMaxDeficit: 0,
     bankerMaxDeficit: 0,
+    recentResults: [],
+    recentTieCount: 0,
+    recentAlternationRate: 0,
+    recentPressureSide: null,
+    recentPressurePercent: 0,
+    lastBreakSide: null,
+    lastBreakDepth: 0,
   };
 }
 
@@ -265,25 +284,49 @@ function normalizeDailySurfMemory(memory: DailySurfMemory | undefined, dateKey: 
 
 export function calculateDailySurfMemory(
   previous: DailySurfMemory | undefined,
-  currentStreak: DailySurfMaxSnapshot["currentStreak"],
+  round: DailySurfRound | DailySurfMaxSnapshot["currentStreak"],
 ): DailySurfMemory {
-  const base = normalizeDailySurfMemory(previous, previous?.dateKey ?? brasiliaDateKey());
+  const memoryDateKey = "date_br" in round ? round.date_br : previous?.dateKey ?? brasiliaDateKey();
+  const base = normalizeDailySurfMemory(previous, memoryDateKey);
   const next: DailySurfMemory = { ...base, recoverySide: null, stretchedSide: null };
-  const currentSide = currentStreak.side === "BANKER" || currentStreak.side === "PLAYER"
-    ? currentStreak.side
-    : null;
+  const result = "result" in round ? round.result : round.side;
+  const recent = buildRecentSurfContext([...base.recentResults, result].slice(-12));
+
+  next.recentResults = recent.results;
+  next.recentTieCount = recent.tieCount;
+  next.recentAlternationRate = recent.alternationRate;
+  next.recentPressureSide = recent.pressureSide;
+  next.recentPressurePercent = recent.pressurePercent;
+
+  if (result === "TIE" || result === null) {
+    const decision = decideDailySurfMemory(next);
+    return {
+      ...next,
+      ...decision,
+    };
+  }
+
+  const currentSide = result;
+  const previousSide = base.currentDropSide;
+  const previousDepth = base.currentDropDepth;
+  const currentDropDepth = previousSide === currentSide ? previousDepth + 1 : 1;
 
   next.currentDropSide = currentSide;
-  next.currentDropDepth = currentSide ? currentStreak.count : 0;
+  next.currentDropDepth = currentDropDepth;
+
+  if (previousSide && previousSide !== currentSide && previousDepth >= 3) {
+    next.lastBreakSide = previousSide;
+    next.lastBreakDepth = previousDepth;
+  }
 
   if (currentSide === "PLAYER") {
-    if (currentStreak.count === 3) next.playerDrops3Plus += 1;
-    next.playerMaxDepth = Math.max(next.playerMaxDepth, currentStreak.count);
+    if (currentDropDepth === 3) next.playerDrops3Plus += 1;
+    next.playerMaxDepth = Math.max(next.playerMaxDepth, currentDropDepth);
   }
 
   if (currentSide === "BANKER") {
-    if (currentStreak.count === 3) next.bankerDrops3Plus += 1;
-    next.bankerMaxDepth = Math.max(next.bankerMaxDepth, currentStreak.count);
+    if (currentDropDepth === 3) next.bankerDrops3Plus += 1;
+    next.bankerMaxDepth = Math.max(next.bankerMaxDepth, currentDropDepth);
   }
 
   next.totalDrops3Plus = next.playerDrops3Plus + next.bankerDrops3Plus;
@@ -303,7 +346,7 @@ export function calculateDailySurfMemory(
     next.recoverySide = "BANKER";
   }
 
-  if (currentSide && currentStreak.count >= 5) {
+  if (currentSide && currentDropDepth >= 5) {
     next.stretchedSide = currentSide;
   }
 
@@ -326,6 +369,37 @@ function leadingDropSide(memory: DailySurfMemory) {
   return { side, percent: clampPercent((count / total) * 100) };
 }
 
+function buildRecentSurfContext(results: DailySurfSide[]) {
+  const sideResults = results.filter((result): result is DailySurfMemorySide =>
+    result === "BANKER" || result === "PLAYER",
+  );
+  const tieCount = results.filter((result) => result === "TIE").length;
+  const playerCount = sideResults.filter((result) => result === "PLAYER").length;
+  const bankerCount = sideResults.filter((result) => result === "BANKER").length;
+  const totalSides = playerCount + bankerCount;
+  const pressureSide =
+    totalSides === 0 || playerCount === bankerCount
+      ? null
+      : playerCount > bankerCount
+        ? "PLAYER"
+        : "BANKER";
+  const pressureCount =
+    pressureSide === "PLAYER" ? playerCount : pressureSide === "BANKER" ? bankerCount : 0;
+  const alternations = sideResults.reduce((count, result, index) => {
+    if (index === 0) return count;
+    return sideResults[index - 1] !== result ? count + 1 : count;
+  }, 0);
+
+  return {
+    results,
+    tieCount,
+    alternationRate:
+      sideResults.length <= 1 ? 0 : clampPercent((alternations / (sideResults.length - 1)) * 100),
+    pressureSide: pressureSide as DailySurfMemorySide | null,
+    pressurePercent: totalSides ? clampPercent((pressureCount / totalSides) * 100) : 0,
+  };
+}
+
 function decideDailySurfMemory(memory: DailySurfMemory): Pick<
   DailySurfMemory,
   "surfStatus" | "surfBias" | "confidence" | "reason"
@@ -335,9 +409,19 @@ function decideDailySurfMemory(memory: DailySurfMemory): Pick<
     : memory.dominantSide === "BANKER"
       ? memory.bankerDrops3Plus
       : 0;
+  const tiePressure = memory.recentTieCount >= 2 || memory.recentResults.at(-1) === "TIE";
+  const noisyRoad = memory.recentAlternationRate >= 55;
+  const recentAgainstCurrent =
+    Boolean(memory.recentPressureSide) &&
+    Boolean(memory.currentDropSide) &&
+    memory.recentPressureSide !== memory.currentDropSide &&
+    memory.recentPressurePercent >= 60;
   const riskBreak =
     Boolean(memory.stretchedSide) &&
     (memory.currentDropDepth >= 6 ||
+      tiePressure ||
+      noisyRoad ||
+      recentAgainstCurrent ||
       Boolean(memory.dominantSide && memory.currentDropSide && memory.dominantSide !== memory.currentDropSide) ||
       Boolean(memory.recoverySide && memory.currentDropSide && memory.recoverySide !== memory.currentDropSide));
 
@@ -356,6 +440,36 @@ function decideDailySurfMemory(memory: DailySurfMemory): Pick<
       surfBias: null,
       confidence: 45,
       reason: `${memory.stretchedSide} esta esticado em ${memory.currentDropDepth} casas. Nao fortalecer entrada atrasada.`,
+    };
+  }
+
+  if (
+    memory.lastBreakSide &&
+    memory.currentDropSide &&
+    memory.currentDropSide !== memory.lastBreakSide &&
+    memory.currentDropDepth >= 2
+  ) {
+    return {
+      surfStatus: "VIRADA_SURF",
+      surfBias: memory.currentDropSide,
+      confidence: clampPercent(62 + Math.min(18, memory.currentDropDepth * 5)),
+      reason: `${memory.currentDropSide} virou apos quebra de coluna ${memory.lastBreakSide} com ${memory.lastBreakDepth} casas.`,
+    };
+  }
+
+  if (
+    memory.dominantSide &&
+    memory.recentPressureSide &&
+    memory.recentPressureSide !== memory.dominantSide &&
+    memory.recentPressurePercent >= 65 &&
+    memory.currentDropSide === memory.recentPressureSide &&
+    memory.currentDropDepth >= 2
+  ) {
+    return {
+      surfStatus: "VIRADA_SURF",
+      surfBias: memory.recentPressureSide,
+      confidence: clampPercent(58 + Math.min(18, memory.recentPressurePercent - 55)),
+      reason: `${memory.recentPressureSide} virou a pressao recente contra o dominante do dia.`,
     };
   }
 
@@ -422,10 +536,23 @@ function applyDailySurfMemoryToAlert(alert: SurfAlert, memory: DailySurfMemory):
     : sideDiverged
       ? clampPercent(memory.confidence - 12)
       : memory.confidence;
-  const riskFloor = memory.surfStatus === "RISCO_QUEBRA" ? 78 : memory.surfStatus === "SURF_ESTICADO" ? 62 : 0;
+  const panels = evaluateSurfPanels(alert);
+  const panelConfidenceDelta =
+    panels.state === "CONFIRMADO" ? 6 : panels.state === "DIVERGENTE" ? -10 : panels.state === "SUJO" ? -14 : 0;
+  const contextRiskFloor = Math.max(
+    memory.recentTieCount >= 2 ? 48 : 0,
+    memory.recentAlternationRate >= 55 ? 52 : 0,
+    panels.riskFloor,
+  );
+  const riskFloor = Math.max(
+    memory.surfStatus === "RISCO_QUEBRA" ? 78 : memory.surfStatus === "SURF_ESTICADO" ? 62 : 0,
+    memory.surfStatus === "VIRADA_SURF" ? 42 : 0,
+    contextRiskFloor,
+  );
+  const adjustedMemoryConfidence = clampPercent(memoryConfidence + panelConfidenceDelta);
   const confidence = actionable
-    ? Math.max(clampPercent(alert.surf_confidence), memoryConfidence)
-    : Math.min(clampPercent(alert.surf_confidence), memoryConfidence);
+    ? Math.max(clampPercent(alert.surf_confidence), adjustedMemoryConfidence)
+    : Math.min(clampPercent(alert.surf_confidence), adjustedMemoryConfidence);
   const breakRisk = Math.max(clampPercent(alert.surf_break_risk ?? alert.surf_risk), riskFloor);
 
   return {
@@ -438,7 +565,7 @@ function applyDailySurfMemoryToAlert(alert: SurfAlert, memory: DailySurfMemory):
     surf_break_risk: breakRisk,
     surf_confidence: confidence,
     stretched_count: memory.currentDropDepth || alert.stretched_count,
-    reason: `${memory.reason} ${alert.reason ?? ""}`.trim(),
+    reason: `${memory.reason} ${panels.reason} ${alert.reason ?? ""}`.trim(),
     surf_prediction_side: actionable ? memorySide : "NONE",
     surf_prediction_status: actionable ? "ACTIVE" : alert.surf_prediction_status,
     surf_prediction_confidence: confidence,
@@ -449,7 +576,7 @@ function applyDailySurfMemoryToAlert(alert: SurfAlert, memory: DailySurfMemory):
 function isActionableMemory(memory: DailySurfMemory) {
   return Boolean(
     memory.surfBias &&
-      ["PRE_SURF", "SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF"].includes(
+      ["PRE_SURF", "SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF", "VIRADA_SURF"].includes(
         memory.surfStatus,
       ),
   );
@@ -462,7 +589,53 @@ function memoryStatusToSurfPhase(status: DailySurfMemoryStatus): SurfPhase {
   if (status === "RECUPERACAO_SURF") return "RETOMADA_MESMA_COR";
   if (status === "SURF_ESTICADO") return "EXAUSTAO";
   if (status === "RISCO_QUEBRA") return "RISCO_QUEBRA";
+  if (status === "VIRADA_SURF") return "VIRADA_OUTRO_LADO";
   return "SEM_RISCO";
+}
+
+function evaluateSurfPanels(alert: SurfAlert) {
+  const text = [
+    alert.panels?.big_road,
+    alert.panels?.big_eye_boy,
+    alert.panels?.small_road,
+    alert.panels?.cockroach_pig,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+  const hasNoDivergence = text.includes("sem divergencia");
+  const hasNoReversal = text.includes("sem reversao");
+  const positive =
+    text.includes("continuidade") ||
+    text.includes("sustentada") ||
+    text.includes("saudavel") ||
+    text.includes("favoravel") ||
+    text.includes("controlada") ||
+    hasNoDivergence ||
+    hasNoReversal;
+  const divergent =
+    (!hasNoDivergence && text.includes("divergencia forte")) ||
+    (!hasNoReversal && text.includes("reversao tardia")) ||
+    text.includes("virada") ||
+    text.includes("quebra");
+  const dirty =
+    (!text.includes("alternancia controlada") && text.includes("alternancia")) ||
+    text.includes("sem continuidade") ||
+    text.includes("sujeira") ||
+    text.includes("instavel");
+
+  if (divergent) {
+    return { state: "DIVERGENTE" as const, riskFloor: 62, reason: "Paineis derivados divergentes." };
+  }
+  if (dirty) {
+    return { state: "SUJO" as const, riskFloor: 55, reason: "Paineis derivados indicam mesa suja." };
+  }
+  if (positive) {
+    return { state: "CONFIRMADO" as const, riskFloor: 0, reason: "Paineis derivados confirmam estabilidade." };
+  }
+  return { state: "NEUTRO" as const, riskFloor: 0, reason: "" };
 }
 
 function clampPercent(value: number) {
@@ -509,6 +682,13 @@ function storageKey(tableId: string, scope: string) {
   return `${DAILY_SURF_STORAGE_KEY}:${scope}:${tableId}`;
 }
 
+function normalizeDayKey(value: unknown) {
+  if (typeof value !== "string") return null;
+  const isoDateOnly = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoDateOnly) return isoDateOnly[1];
+  return validIsoDate(value) ? brasiliaDateKey(value) : null;
+}
+
 function brasiliaDateKey(value: string | Date = new Date()) {
   const date = value instanceof Date ? value : new Date(value);
   const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
@@ -521,6 +701,26 @@ function brasiliaDateKey(value: string | Date = new Date()) {
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((item) => item.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function msUntilNextBrasiliaDay(value: string | Date = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(safeDate);
+  const numberPart = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((item) => item.type === type)?.value ?? 0);
+  const hour = numberPart("hour");
+  const minute = numberPart("minute");
+  const second = numberPart("second");
+  const remainingSeconds = (23 - hour) * 60 * 60 + (59 - minute) * 60 + (60 - second);
+  const remainingMs = remainingSeconds * 1000 - safeDate.getMilliseconds() + 500;
+  return Math.max(1000, Math.min(86_401_000, remainingMs));
 }
 
 function validIsoDate(value: unknown): value is string {
