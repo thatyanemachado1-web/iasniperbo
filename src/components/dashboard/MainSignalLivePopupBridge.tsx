@@ -16,20 +16,46 @@ interface MainSignalPopup {
 
 const RESULT_VISIBLE_MS = 45_000;
 const POPUP_TTL_MS = 12_000;
+const SEEN_POPUP_STORAGE_KEY = "sniperbo:main-signal-popup-seen:v1";
+const SEEN_POPUP_TTL_MS = 12 * 60 * 60 * 1000;
+const SEEN_POPUP_LIMIT = 80;
 
 export function MainSignalLivePopupBridge() {
   const { data, mode } = useDashboardData();
   const [popup, setPopup] = useState<MainSignalPopup | null>(null);
   const previousKeyRef = useRef("");
+  const hasObservedLiveDataRef = useRef(false);
   const signal = data.currentSignal;
-  const key = useMemo(() => signalPopupKey(signal), [signal]);
+  const entryPopupBlocked = Boolean(data.entryModeFilter?.blocked);
+  const key = useMemo(() => signalPopupKey(signal, entryPopupBlocked), [entryPopupBlocked, signal]);
 
   useEffect(() => {
-    if (mode !== "live" || data.mockMode || !key || key === previousKeyRef.current) return;
+    if (mode !== "live" || data.mockMode) return;
+
+    if (!hasObservedLiveDataRef.current) {
+      hasObservedLiveDataRef.current = true;
+      previousKeyRef.current = key;
+      if (key) rememberSignalPopupKey(key);
+      return;
+    }
+
+    if (!key) {
+      previousKeyRef.current = "";
+      return;
+    }
+
+    if (key === previousKeyRef.current || hasSeenSignalPopupKey(key)) {
+      previousKeyRef.current = key;
+      return;
+    }
+
     previousKeyRef.current = key;
-    const nextPopup = buildSignalPopup(signal);
-    if (nextPopup) setPopup(nextPopup);
-  }, [data.mockMode, key, mode, signal]);
+    const nextPopup = buildSignalPopup(signal, entryPopupBlocked);
+    if (nextPopup) {
+      rememberSignalPopupKey(key);
+      setPopup(nextPopup);
+    }
+  }, [data.mockMode, entryPopupBlocked, key, mode, signal]);
 
   useEffect(() => {
     if (!popup) return;
@@ -70,18 +96,18 @@ export function MainSignalLivePopupBridge() {
   );
 }
 
-function signalPopupKey(signal: MainSignal) {
+function signalPopupKey(signal: MainSignal, entryPopupBlocked = false) {
   const result = signal.lastResult;
   if (result && isFreshResult(result.finishedAt)) {
     return `result:${result.id}:${result.status}:${result.side}:${result.finishedAt ?? ""}`;
   }
-  if ((signal.status === "pending" || signal.status === "g1") && isEntrySide(signal.side)) {
+  if (!entryPopupBlocked && (signal.status === "pending" || signal.status === "g1") && isEntrySide(signal.side)) {
     return `entry:${signal.id}:${signal.status}:${signal.side}`;
   }
   return "";
 }
 
-function buildSignalPopup(signal: MainSignal): MainSignalPopup | null {
+function buildSignalPopup(signal: MainSignal, entryPopupBlocked = false): MainSignalPopup | null {
   const result = signal.lastResult;
   const now = Date.now();
 
@@ -98,7 +124,7 @@ function buildSignalPopup(signal: MainSignal): MainSignalPopup | null {
     };
   }
 
-  if ((signal.status === "pending" || signal.status === "g1") && isEntrySide(signal.side)) {
+  if (!entryPopupBlocked && (signal.status === "pending" || signal.status === "g1") && isEntrySide(signal.side)) {
     return {
       id: `main-entry-${signal.id}-${signal.status}`,
       kind: signal.status === "g1" ? "g1" : "entry",
@@ -110,6 +136,42 @@ function buildSignalPopup(signal: MainSignal): MainSignalPopup | null {
   }
 
   return null;
+}
+
+function hasSeenSignalPopupKey(key: string) {
+  return Boolean(readSeenSignalPopupKeys()[key]);
+}
+
+function rememberSignalPopupKey(key: string) {
+  if (!key || typeof window === "undefined") return;
+  const seen = readSeenSignalPopupKeys();
+  seen[key] = Date.now();
+  writeSeenSignalPopupKeys(seen);
+}
+
+function readSeenSignalPopupKeys() {
+  if (typeof window === "undefined") return {} as Record<string, number>;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SEEN_POPUP_STORAGE_KEY) || "{}") as Record<string, number>;
+    const now = Date.now();
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .filter(([, timestamp]) => typeof timestamp === "number" && now - timestamp <= SEEN_POPUP_TTL_MS)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, SEEN_POPUP_LIMIT),
+    ) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+function writeSeenSignalPopupKeys(seen: Record<string, number>) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SEEN_POPUP_STORAGE_KEY, JSON.stringify(seen));
+  } catch {
+    // Local storage can be disabled; the in-memory key still prevents repeats during this session.
+  }
 }
 
 function isFreshResult(finishedAt?: string) {
