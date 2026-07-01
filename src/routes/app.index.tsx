@@ -1,18 +1,12 @@
 // @ts-nocheck
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { ChevronRight, Clock, Crown } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { SignalCard } from "@/components/dashboard/SignalCard";
-import { ModuleMiniScoreboard } from "@/components/dashboard/ModuleMiniScoreboard";
-import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
-import { AIReadingCard } from "@/components/dashboard/AIReadingCard";
-import { RoadmapDots } from "@/components/dashboard/RoadmapDots";
-import { PressureChart } from "@/components/dashboard/PressureChart";
 import { DashboardMainCardsGrid } from "@/components/dashboard/DashboardMainCardsGrid";
-import { RoundHistoryAuditCard } from "@/components/dashboard/RoundHistoryAuditCard";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { AppBadge } from "@/components/ui-app/AppBadge";
@@ -41,6 +35,37 @@ import { DailySurfMaxEngine } from "@/surf/DailySurfMaxEngine";
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
 });
+
+const ModuleMiniScoreboard = lazy(() =>
+  import("@/components/dashboard/ModuleMiniScoreboard").then((module) => ({
+    default: module.ModuleMiniScoreboard,
+  })),
+);
+const EngineDecisionCard = lazy(() =>
+  import("@/components/dashboard/EngineDecisionCard").then((module) => ({
+    default: module.EngineDecisionCard,
+  })),
+);
+const AIReadingCard = lazy(() =>
+  import("@/components/dashboard/AIReadingCard").then((module) => ({
+    default: module.AIReadingCard,
+  })),
+);
+const RoadmapDots = lazy(() =>
+  import("@/components/dashboard/RoadmapDots").then((module) => ({
+    default: module.RoadmapDots,
+  })),
+);
+const PressureChart = lazy(() =>
+  import("@/components/dashboard/PressureChart").then((module) => ({
+    default: module.PressureChart,
+  })),
+);
+const RoundHistoryAuditCard = lazy(() =>
+  import("@/components/dashboard/RoundHistoryAuditCard").then((module) => ({
+    default: module.RoundHistoryAuditCard,
+  })),
+);
 
 function DashboardPage() {
   const { data: d, dashboardUrl, mode, setModuleToggles } = useDashboardData();
@@ -184,7 +209,9 @@ function DashboardPage() {
             />
           </PremiumFeature>
 
-          <RoundHistoryAuditCard history={roundHistory} onReset={resetHistory} />
+          <DeferredBlock>
+            <RoundHistoryAuditCard history={roundHistory} onReset={resetHistory} />
+          </DeferredBlock>
 
           <PremiumFeature
             title="Análise estatística VIP"
@@ -200,7 +227,9 @@ function DashboardPage() {
                   </AppBadge>
                 }
               />
-              <PressureChart data={d.pressureSeries} />
+              <Suspense fallback={<InlineLoading height="h-40" />}>
+                <PressureChart data={d.pressureSeries} />
+              </Suspense>
               <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
                 <span className="inline-flex items-center gap-1">
                   <span className="size-2 rounded-full bg-banker" /> Banker Pressure
@@ -236,7 +265,9 @@ function DashboardPage() {
               title="Bolinhas Bac Bo"
               right={<AppBadge tone="blue">Últimas 30 rodadas</AppBadge>}
             />
-            <RoadmapDots rounds={d.rounds} compact showScore />
+            <Suspense fallback={<InlineLoading height="h-16" />}>
+              <RoadmapDots rounds={d.rounds} compact showScore />
+            </Suspense>
             <Link
               to="/app"
               className="mt-3 inline-flex items-center gap-1 text-xs text-neon-cyan hover:text-neon-blue"
@@ -251,14 +282,18 @@ function DashboardPage() {
             title="Decisão da engine VIP"
             description="A decisão técnica fica completa apenas no acesso liberado."
           >
-            <EngineDecisionCard decision={d.engineDecision} data={d} />
+            <DeferredBlock>
+              <EngineDecisionCard decision={d.engineDecision} data={d} />
+            </DeferredBlock>
           </PremiumFeature>
 
           <PremiumFeature
             title="Leitura IA das entradas"
             description="Análise automática das entradas liberada no acesso Premium."
           >
-            <AIReadingCard data={d} mode={mode} />
+            <DeferredBlock>
+              <AIReadingCard data={d} mode={mode} />
+            </DeferredBlock>
           </PremiumFeature>
 
           <PremiumFeature
@@ -266,81 +301,89 @@ function DashboardPage() {
             description="Os resultados completos ficam liberados após aprovação do ADM."
             className="digital-score-rail space-y-3"
           >
-            <ModuleMiniScoreboard
-              moduleType="MAIN"
-              title="Resultado Principal"
-              assertiveness={mainResult.assertiveness}
-              chips={[
-                { label: "SG", value: mainResult.greenSemGale, variant: "green" },
-                { label: "G1", value: mainResult.greenG1, variant: "green" },
-                { label: "RED", value: mainResult.reds, variant: "red" },
-                { label: "EMP", value: tableTieLabel, variant: "purple" },
-                { label: "Total", value: mainResult.total, variant: "neutral" },
-              ]}
-              sequencePositive={mainResult.sequencePositive}
-              sequenceNegative={mainResult.sequenceNegative}
-              breakdown={`${mainResult.breakdown} / EMP ${tableTieLabel}`}
-            />
-            <ModuleMiniScoreboard
-              moduleType="NEURAL"
-              title="Resultado Pagante"
-              assertiveness={neuralResult.assertiveness}
-              chips={[
-                { label: "Alertas", value: neuralResult.totalAlerts, variant: "neutral" },
-                { label: "Green", value: neuralResult.greens, variant: "green" },
-                { label: "SG", value: neuralResult.greenSemGale, variant: "green" },
-                { label: "G1", value: neuralResult.greenG1, variant: "cyan" },
-                { label: "RED", value: neuralResult.reds, variant: "red" },
-                {
-                  label: "SQ max green",
-                  value: neuralMaxSequenceLabel(neuralResult.maxSequencePositive),
-                  variant: "green",
-                },
-                {
-                  label: "SQ max red",
-                  value: neuralMaxSequenceLabel(neuralResult.maxSequenceNegative),
-                  variant: "red",
-                },
-                { label: "EMP", value: tableTieLabel, variant: "purple" },
-                { label: "Total", value: neuralResult.total, variant: "neutral" },
-              ]}
-              sequencePositive={neuralResult.sequencePositive}
-              sequenceNegative={neuralResult.sequenceNegative}
-              breakdown={`${neuralResult.breakdown} / EMP ${tableTieLabel}`}
-            />
-            <ModuleMiniScoreboard
-              moduleType="TIE"
-              title="Resultado Tie"
-              assertiveness={tieResult.assertiveness}
-              chips={[
-                { label: "EMP", value: tieHitLabel, variant: "green" },
-                { label: "Mesa", value: tableTieLabel, variant: "purple" },
-                { label: "Exp.", value: tieResult.expired, variant: "purple" },
-                { label: "Total", value: tieResult.total, variant: "neutral" },
-              ]}
-              sequencePositive={tieResult.sequencePositive}
-              sequenceExpired={tieResult.sequenceExpired}
-              breakdown={`EMP ${tieHitLabel} / Mesa ${tableTieLabel} / Exp. ${tieResult.expired}`}
-            />
-            {surfAlert && (
+            <DeferredBlock>
               <ModuleMiniScoreboard
-                moduleType="SURF"
-                title="Resultado Surf"
-                assertiveness={surfResult.assertiveness}
+                moduleType="MAIN"
+                title="Resultado Principal"
+                assertiveness={mainResult.assertiveness}
                 chips={[
-                  { label: "Green", value: surfResult.greens, variant: "green" },
-                  { label: "SG", value: surfResult.greenSemGale, variant: "green" },
-                  { label: "G1", value: surfResult.greenG1, variant: "cyan" },
-                  { label: "RED", value: surfResult.reds, variant: "red" },
+                  { label: "SG", value: mainResult.greenSemGale, variant: "green" },
+                  { label: "G1", value: mainResult.greenG1, variant: "green" },
+                  { label: "RED", value: mainResult.reds, variant: "red" },
                   { label: "EMP", value: tableTieLabel, variant: "purple" },
-                  { label: "Total", value: surfResult.total, variant: "neutral" },
-                  { label: "Bloq.", value: surfResult.blocked, variant: "yellow" },
-                  { label: "Sem risco", value: surfResult.noRisk, variant: "neutral" },
+                  { label: "Total", value: mainResult.total, variant: "neutral" },
                 ]}
-                sequencePositive={surfResult.sequencePositive}
-                sequenceNegative={surfResult.sequenceNegative}
-                breakdown={`${surfResult.breakdown} / EMP ${tableTieLabel}`}
+                sequencePositive={mainResult.sequencePositive}
+                sequenceNegative={mainResult.sequenceNegative}
+                breakdown={`${mainResult.breakdown} / EMP ${tableTieLabel}`}
               />
+            </DeferredBlock>
+            <DeferredBlock>
+              <ModuleMiniScoreboard
+                moduleType="NEURAL"
+                title="Resultado Pagante"
+                assertiveness={neuralResult.assertiveness}
+                chips={[
+                  { label: "Alertas", value: neuralResult.totalAlerts, variant: "neutral" },
+                  { label: "Green", value: neuralResult.greens, variant: "green" },
+                  { label: "SG", value: neuralResult.greenSemGale, variant: "green" },
+                  { label: "G1", value: neuralResult.greenG1, variant: "cyan" },
+                  { label: "RED", value: neuralResult.reds, variant: "red" },
+                  {
+                    label: "SQ max green",
+                    value: neuralMaxSequenceLabel(neuralResult.maxSequencePositive),
+                    variant: "green",
+                  },
+                  {
+                    label: "SQ max red",
+                    value: neuralMaxSequenceLabel(neuralResult.maxSequenceNegative),
+                    variant: "red",
+                  },
+                  { label: "EMP", value: tableTieLabel, variant: "purple" },
+                  { label: "Total", value: neuralResult.total, variant: "neutral" },
+                ]}
+                sequencePositive={neuralResult.sequencePositive}
+                sequenceNegative={neuralResult.sequenceNegative}
+                breakdown={`${neuralResult.breakdown} / EMP ${tableTieLabel}`}
+              />
+            </DeferredBlock>
+            <DeferredBlock>
+              <ModuleMiniScoreboard
+                moduleType="TIE"
+                title="Resultado Tie"
+                assertiveness={tieResult.assertiveness}
+                chips={[
+                  { label: "EMP", value: tieHitLabel, variant: "green" },
+                  { label: "Mesa", value: tableTieLabel, variant: "purple" },
+                  { label: "Exp.", value: tieResult.expired, variant: "purple" },
+                  { label: "Total", value: tieResult.total, variant: "neutral" },
+                ]}
+                sequencePositive={tieResult.sequencePositive}
+                sequenceExpired={tieResult.sequenceExpired}
+                breakdown={`EMP ${tieHitLabel} / Mesa ${tableTieLabel} / Exp. ${tieResult.expired}`}
+              />
+            </DeferredBlock>
+            {surfAlert && (
+              <DeferredBlock>
+                <ModuleMiniScoreboard
+                  moduleType="SURF"
+                  title="Resultado Surf"
+                  assertiveness={surfResult.assertiveness}
+                  chips={[
+                    { label: "Green", value: surfResult.greens, variant: "green" },
+                    { label: "SG", value: surfResult.greenSemGale, variant: "green" },
+                    { label: "G1", value: surfResult.greenG1, variant: "cyan" },
+                    { label: "RED", value: surfResult.reds, variant: "red" },
+                    { label: "EMP", value: tableTieLabel, variant: "purple" },
+                    { label: "Total", value: surfResult.total, variant: "neutral" },
+                    { label: "Bloq.", value: surfResult.blocked, variant: "yellow" },
+                    { label: "Sem risco", value: surfResult.noRisk, variant: "neutral" },
+                  ]}
+                  sequencePositive={surfResult.sequencePositive}
+                  sequenceNegative={surfResult.sequenceNegative}
+                  breakdown={`${surfResult.breakdown} / EMP ${tableTieLabel}`}
+                />
+              </DeferredBlock>
             )}
           </PremiumFeature>
 
@@ -377,6 +420,18 @@ function formatCompactCount(value: number) {
 
 function neuralMaxSequenceLabel(value: number) {
   return value > 0 ? value : "coletando";
+}
+
+function DeferredBlock({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<InlineLoading />}>{children}</Suspense>;
+}
+
+function InlineLoading({ height = "h-24" }: { height?: string }) {
+  return (
+    <div
+      className={`${height} rounded-xl border border-neon-cyan/10 bg-secondary/20 shadow-[inset_0_0_24px_rgba(0,229,255,0.035)]`}
+    />
+  );
 }
 
 function formatDashboardSource(url: string) {
