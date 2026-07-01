@@ -690,7 +690,7 @@ export default {
       const billingResponse = await handleBillingRequest(request, env);
       if (billingResponse) return withSecurityHeaders(billingResponse);
 
-      const adminApiResponse = await handleAdminApiRequest(request, env);
+      const adminApiResponse = await handleAdminApiRequest(request, env, ctx);
       if (adminApiResponse) return withSecurityHeaders(adminApiResponse);
 
       const dashboardResponse = await handleDashboardRequest(request, env, ctx);
@@ -2287,7 +2287,7 @@ async function applyMercadoPagoPayment(env: unknown, payment: Record<string, unk
   return { activated, status };
 }
 
-async function handleAdminApiRequest(request: Request, env: unknown) {
+async function handleAdminApiRequest(request: Request, env: unknown, ctx?: unknown) {
   const url = new URL(request.url);
 
   if (request.method === "GET" && url.pathname === "/__sniperbo/version") {
@@ -2471,18 +2471,18 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       ok = await verifyPassword(password, storedHash);
       if (ok && passwordHashNeedsUpgrade(storedHash)) {
         client.password_hash = await hashPassword(password);
-        await saveLiveState(env);
+        runBackgroundTask(ctx, deferBackgroundTask(() => saveLiveState(env)), "salvar upgrade de senha do cliente");
       }
       if (ok && "password" in client) {
         delete (client as Record<string, unknown>).password;
-        await saveLiveState(env);
+        runBackgroundTask(ctx, deferBackgroundTask(() => saveLiveState(env)), "salvar limpeza de senha legada do cliente");
       }
     } else if (legacyPassword) {
       ok = constantTimeStringEqual(password, legacyPassword);
       if (ok) {
         client.password_hash = await hashPassword(password);
         delete (client as Record<string, unknown>).password;
-        await saveLiveState(env);
+        runBackgroundTask(ctx, deferBackgroundTask(() => saveLiveState(env)), "salvar migracao de senha legada do cliente");
       }
     } else if (clientCanBindPasswordDuringMigration(client)) {
       client.password_hash = await hashPassword(password);
@@ -2512,7 +2512,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     recordAccessEvent(client.enabled ? "client_login" : "client_pending_login", client);
     const access = await clientAccess(env, client, request);
-    await saveLiveState(env);
+    runBackgroundTask(ctx, deferBackgroundTask(() => saveLiveState(env)), "salvar login do cliente");
     return json({ access });
   }
 
@@ -2973,7 +2973,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       }
       upsertRecipientFromClient(liveClients[clientIndex]);
       await saveLiveState(env);
-      return handleAdminApiRequest(request, env);
+      return handleAdminApiRequest(request, env, ctx);
     }
 
     if (request.method === "PATCH") {
