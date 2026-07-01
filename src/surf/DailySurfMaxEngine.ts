@@ -443,6 +443,15 @@ function decideDailySurfMemory(memory: DailySurfMemory): Pick<
     };
   }
 
+  if (memory.recoverySide) {
+    return {
+      surfStatus: "RECUPERACAO_SURF",
+      surfBias: memory.recoverySide,
+      confidence: clampPercent(70 + Math.min(12, memory.totalDrops3Plus * 2)),
+      reason: `${memory.recoverySide} estava atras e encostou na memoria diaria de descidas 3+.`,
+    };
+  }
+
   if (
     memory.lastBreakSide &&
     memory.currentDropSide &&
@@ -470,15 +479,6 @@ function decideDailySurfMemory(memory: DailySurfMemory): Pick<
       surfBias: memory.recentPressureSide,
       confidence: clampPercent(58 + Math.min(18, memory.recentPressurePercent - 55)),
       reason: `${memory.recentPressureSide} virou a pressao recente contra o dominante do dia.`,
-    };
-  }
-
-  if (memory.recoverySide) {
-    return {
-      surfStatus: "RECUPERACAO_SURF",
-      surfBias: memory.recoverySide,
-      confidence: clampPercent(70 + Math.min(12, memory.totalDrops3Plus * 2)),
-      reason: `${memory.recoverySide} estava atras e encostou na memoria diaria de descidas 3+.`,
     };
   }
 

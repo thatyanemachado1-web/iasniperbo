@@ -46,13 +46,27 @@ export function SurfAlertCard({
   const memory = dailySurfMax.dailySurfMemory;
   const memoryActionable = Boolean(
     memory.surfBias &&
-      ["PRE_SURF", "SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF"].includes(
+      ["PRE_SURF", "SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF", "VIRADA_SURF"].includes(
         memory.surfStatus,
       ),
   );
-  const probableSurfEntry = memoryActionable && memory.surfBias ? memory.surfBias : "AGUARDAR";
-  const compactConfidence = memory.totalDrops3Plus ? memory.confidence : 0;
-  const compactStatus = memory.totalDrops3Plus ? memory.surfStatus : "SEM_SURF";
+  const liveSurfEntry = surfEntryFromAlert(alert);
+  const hasLiveSurfSignal = alert.surf_alert && liveSurfEntry !== "AGUARDAR";
+  const probableSurfEntry = hasLiveSurfSignal
+    ? liveSurfEntry
+    : memoryActionable && memory.surfBias
+      ? memory.surfBias
+      : "AGUARDAR";
+  const compactConfidence = hasLiveSurfSignal
+    ? clampPercent(alert.surf_prediction_confidence ?? alert.surf_confidence)
+    : memory.totalDrops3Plus
+      ? memory.confidence
+      : 0;
+  const compactStatus = hasLiveSurfSignal
+    ? alert.surf_prediction_status || alert.surf_status || alert.surf_phase
+    : memory.totalDrops3Plus
+      ? memory.surfStatus
+      : "SEM_SURF";
 
   return (
     <GlassCard
@@ -279,6 +293,14 @@ export function SurfAlertCard({
       )}
     </GlassCard>
   );
+}
+
+function surfEntryFromAlert(alert: SurfAlert): "BANKER" | "PLAYER" | "AGUARDAR" {
+  const side =
+    alert.surf_prediction_side && alert.surf_prediction_side !== "NONE"
+      ? alert.surf_prediction_side
+      : alert.surf_side;
+  return side === "BANKER" || side === "PLAYER" ? side : "AGUARDAR";
 }
 
 function buildSurfDecision(confidence: number, breakRisk: number, side: string) {
