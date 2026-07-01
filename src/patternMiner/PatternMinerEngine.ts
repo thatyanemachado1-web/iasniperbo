@@ -27,9 +27,9 @@ const DEFAULT_PATTERN_MINER_RULES = {
   minAccuracy: 70,
   hotAccuracy: 90,
   perfectAccuracy: 100,
-  maxRecentRedsAllowed: 1,
+  maxRecentRedsAllowed: 2,
   maxSignalAgeMs: 120_000,
-  allowTieEntry: false,
+  allowTieEntry: true,
 } as const;
 
 const MIN_PATTERN_SCORE = 0;
@@ -588,7 +588,9 @@ export function resolvePatternStatusFromMetrics({
   if (occurrences < DEFAULT_PATTERN_MINER_RULES.minOccurrences || accuracy === undefined) {
     return { status: "BLOQUEADO POR AMOSTRA BAIXA", blocked_reason: "amostra_baixa" };
   }
-  if (redCount >= 2) return { status: "BLOQUEADO POR 2 REDS", blocked_reason: "two_reds" };
+  if (redCount > DEFAULT_PATTERN_MINER_RULES.maxRecentRedsAllowed) {
+    return { status: "BLOQUEADO POR MAIS DE 2 REDS", blocked_reason: "more_than_two_reds" };
+  }
   if (accuracy >= DEFAULT_PATTERN_MINER_RULES.perfectAccuracy) {
     return { status: "PADRAO 100%", blocked_reason: "" };
   }
@@ -621,10 +623,10 @@ function evaluateLivePattern(
     };
   }
 
-  if (strategy.red_count >= 2) {
+  if (strategy.red_count > DEFAULT_PATTERN_MINER_RULES.maxRecentRedsAllowed) {
     return {
-      status: "BLOQUEADO POR 2 REDS",
-      blocked_reason: "two_reds",
+      status: "BLOQUEADO POR MAIS DE 2 REDS",
+      blocked_reason: "more_than_two_reds",
       confirmed: false,
       title: "PADRAO IA FORMADO",
     };
@@ -665,17 +667,15 @@ function evaluateLivePattern(
     return {
       status: "PADRAO QUENTE",
       blocked_reason: "",
-      confirmed: true,
-      signal_id: signalId,
-      title: "ENTRADA CONFIRMADA",
+      confirmed: false,
+      title: "PADRAO IA FORMADO",
     };
   }
   return {
-    status: "ENTRADA CONFIRMADA",
+    status: "PADRAO EM FORMACAO",
     blocked_reason: "",
-    confirmed: true,
-    signal_id: signalId,
-    title: "ENTRADA CONFIRMADA",
+    confirmed: false,
+    title: "PADRAO IA FORMADO",
   };
 }
 
