@@ -151,7 +151,7 @@ function MonitoringPatternBlock({
       </div>
 
       <div className="min-w-0">
-        <PatternSequence sequence={strategy.sequence} compact />
+        <PatternSequence sequence={strategy.sequence} compact showSideLetters={false} />
       </div>
 
       <div className="mt-1 rounded-lg border border-neon-cyan/12 bg-background/20 px-2 py-1 text-[9px]">
@@ -194,7 +194,7 @@ function LivePatternStatusBlock({ alert }: { alert: PatternMinerAlert }) {
       </div>
 
       <div className="min-w-0">
-        <PatternSequence sequence={strategy.sequence} compact />
+        <PatternSequence sequence={strategy.sequence} compact showSideLetters={false} />
       </div>
 
       <div className="mt-1 rounded-lg border border-neon-cyan/12 bg-background/20 px-2 py-1 text-[9px]">
@@ -282,7 +282,7 @@ function MiniFormationList({ strategies }: { strategies: PatternMinerStrategy[] 
                 </span>
               </div>
               <div className="mt-1 min-w-0">
-                <PatternSequence sequence={strategy.sequence} compact />
+                <PatternSequence sequence={strategy.sequence} compact showSideLetters={false} />
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[8px] text-muted-foreground">
                 <span>Entrada {side ? formatPulledSide(side) : "-"}</span>

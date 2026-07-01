@@ -12,15 +12,17 @@ const SIDE_DOT_CLASS: Record<RoundResult, string> = {
 export function PatternSequence({
   sequence,
   compact = false,
+  showSideLetters = true,
 }: {
   sequence: string[];
   compact?: boolean;
+  showSideLetters?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {sequence.map((token, index) => {
         const side = token[0] as RoundResult;
-        const chipLabel = patternTokenChipLabel(token);
+        const chipLabel = patternTokenChipLabel(token, showSideLetters);
         const caption = patternTokenCaption(token, compact);
 
         return (
@@ -99,9 +101,10 @@ function pulledSideLabel(side: RoundResult) {
   return "🟡 TIE/EMPATE";
 }
 
-function patternTokenChipLabel(token: string) {
+function patternTokenChipLabel(token: string, showSideLetters: boolean) {
   const side = token[0];
   const value = token.slice(1);
+  if (!showSideLetters) return value || "";
   return value ? `${side}${value}` : side;
 }
 
