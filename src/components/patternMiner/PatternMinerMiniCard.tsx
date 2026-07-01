@@ -39,12 +39,18 @@ export function PatternMinerMiniCard({
 
           <div className="min-w-0 flex-1">
             <div className="text-sm font-black">Padroes IA</div>
+            {!confirmedAlert && monitoringStrategy && (
+              <PatternLiveStatusHeader
+                strategy={monitoringStrategy}
+                progress={monitoringAlert?.progress}
+                isUsingRealData={isUsingRealData}
+              />
+            )}
             {confirmedAlert ? (
               <LivePatternStatusBlock alert={confirmedAlert} />
             ) : monitoringStrategy ? (
               <MonitoringPatternBlock
                 strategy={monitoringStrategy}
-                progress={monitoringAlert?.progress}
                 isUsingRealData={isUsingRealData}
               />
             ) : (
@@ -121,13 +127,35 @@ function uniqueStrategies(strategies: Array<PatternMinerStrategy | undefined>) {
   });
 }
 
-function MonitoringPatternBlock({
+function PatternLiveStatusHeader({
   strategy,
   progress,
   isUsingRealData,
 }: {
   strategy: PatternMinerStrategy;
   progress?: number;
+  isUsingRealData: boolean;
+}) {
+  const redOk = strategy.red_count <= 2;
+  const liveLabel = isUsingRealData ? "monitorando ao vivo" : "aguardando feed real";
+
+  return (
+    <div className="mt-1 flex items-center justify-between gap-2 px-0.5">
+      <span className="text-[9px] font-black uppercase leading-tight tracking-[0.12em] text-neon-cyan">
+        {liveLabel}
+      </span>
+      <AppBadge tone={redOk ? "blue" : "red"} className="px-2 text-[8px]">
+        {progressLabel(progress)}
+      </AppBadge>
+    </div>
+  );
+}
+
+function MonitoringPatternBlock({
+  strategy,
+  isUsingRealData,
+}: {
+  strategy: PatternMinerStrategy;
   isUsingRealData: boolean;
 }) {
   const side = strategy.next_side ?? strategy.expectedResult;
@@ -137,19 +165,9 @@ function MonitoringPatternBlock({
   );
   const redOk = strategy.red_count <= 2;
   const sampleOk = !strategy.insufficientSample && strategy.occurrences >= 3 && strategy.totalValidated >= 2;
-  const liveLabel = isUsingRealData ? "monitorando ao vivo" : "aguardando feed real";
 
   return (
     <div className="mt-1 rounded-xl border border-neon-cyan/18 bg-background/25 px-2.5 py-2">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
-          {liveLabel}
-        </span>
-        <AppBadge tone={redOk ? "blue" : "red"} className="px-2 text-[8px]">
-          {progressLabel(progress)}
-        </AppBadge>
-      </div>
-
       <div className="min-w-0">
         <PatternSequence sequence={strategy.sequence} compact showSideLetters={false} />
       </div>
