@@ -43,6 +43,8 @@ export function SurfAlertCard({
         : "border-neon-cyan/30";
   const surfDecision = buildSurfDecision(confidence, breakRisk, dominantSide);
   const enabled = toggles?.surfAnalyzer !== false;
+  const probableSurfEntry =
+    dominantSide === "BANKER" || dominantSide === "PLAYER" ? dominantSide : "AGUARDAR";
 
   return (
     <GlassCard
@@ -56,7 +58,8 @@ export function SurfAlertCard({
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/35 to-transparent" />
       <div className="absolute -right-10 -top-10 size-32 rounded-full bg-neon-cyan/5 blur-2xl" />
       {compact ? (
-        <div className="mb-2 flex min-h-[58px] min-w-0 items-start justify-between gap-2">
+        <div className="mb-2 min-h-[58px] min-w-0">
+          <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0 pt-0.5">
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
               Surf Analyzer
@@ -79,6 +82,29 @@ export function SurfAlertCard({
               onChange={onModuleTogglesChange}
               compact
             />
+          </div>
+          </div>
+          <div className="mt-2 rounded-xl border border-neon-cyan/15 bg-background/30 px-2.5 py-2 shadow-[inset_0_0_18px_rgba(0,229,255,0.035)]">
+            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-neon-cyan">
+              Entrada provável Surf
+            </div>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <span
+                className={cn(
+                  "truncate text-[13px] font-black uppercase leading-none",
+                  probableSurfEntry === "BANKER"
+                    ? "text-banker"
+                    : probableSurfEntry === "PLAYER"
+                      ? "text-player"
+                      : "text-muted-foreground",
+                )}
+              >
+                {probableSurfEntry}
+              </span>
+              <span className="shrink-0 text-[10px] font-black leading-none text-neon-cyan">
+                {confidence}%
+              </span>
+            </div>
           </div>
         </div>
       ) : (
