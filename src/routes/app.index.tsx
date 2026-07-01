@@ -30,6 +30,7 @@ import { buildSignalCopy } from "@/lib/operationalCopy";
 import { usePatternMiner } from "@/hooks/usePatternMiner";
 import { useRoundHistory } from "@/hooks/useRoundHistory";
 import { useDailySurfMax } from "@/hooks/useDailySurfMax";
+import { useDashboardRoundHistory } from "@/hooks/useDashboardRoundHistory";
 import { DailySurfMaxEngine } from "@/surf/DailySurfMaxEngine";
 
 export const Route = createFileRoute("/app/")({
@@ -83,15 +84,25 @@ function DashboardPage() {
     d,
     mode === "live" && !d.mockMode,
   );
+  const sharedRoundHistory = useDashboardRoundHistory({
+    enabled: mode === "live" && !d.mockMode,
+    limit: 20_000,
+    tableId: "bac-bo",
+  });
   const dailySurfSourceRounds = useMemo(
-    () => [...roundHistory.todayRounds, ...d.rounds],
-    [roundHistory.todayRounds, d.rounds],
+    () => {
+      const sharedRounds = sharedRoundHistory.rounds.length ? sharedRoundHistory.rounds : [];
+      return [...sharedRounds, ...d.rounds];
+    },
+    [sharedRoundHistory.rounds, d.rounds],
   );
   const dailySurfMax = useDailySurfMax({
     rounds: dailySurfSourceRounds,
     tableId: "bac-bo",
-    sourceUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
+    sourceUpdatedAt: sharedRoundHistory.updatedAt ?? d.updatedAt,
     enabled: mode === "live" && !d.mockMode,
+    persistLocal: false,
+    preservePreviousMax: false,
   });
   const baseSurfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const surfAlert = useMemo(

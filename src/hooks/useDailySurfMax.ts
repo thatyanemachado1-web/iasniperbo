@@ -13,6 +13,8 @@ interface UseDailySurfMaxParams {
   tableId?: string;
   sourceUpdatedAt?: string | null;
   enabled?: boolean;
+  persistLocal?: boolean;
+  preservePreviousMax?: boolean;
 }
 
 export function useDailySurfMax({
@@ -20,6 +22,8 @@ export function useDailySurfMax({
   tableId = "bac-bo",
   sourceUpdatedAt,
   enabled = true,
+  persistLocal = true,
+  preservePreviousMax = true,
 }: UseDailySurfMaxParams): DailySurfMaxSnapshot {
   const storageScope = useMemo(() => {
     const email = readUserSession().email.trim().toLowerCase();
@@ -27,7 +31,7 @@ export function useDailySurfMax({
   }, []);
 
   const [snapshot, setSnapshot] = useState<DailySurfMaxSnapshot>(() =>
-    DailySurfMaxEngine.load(tableId, storageScope),
+    persistLocal ? DailySurfMaxEngine.load(tableId, storageScope) : DailySurfMaxEngine.empty(tableId),
   );
 
   const [todayKey, setTodayKey] = useState(() => DailySurfMaxEngine.todayKey());
@@ -65,22 +69,26 @@ export function useDailySurfMax({
 
     setSnapshot((current) => {
       const base =
-        current.dailyMaxSurf.date === todayKey && current.dailyMaxSurf.table_id === tableId
+        preservePreviousMax &&
+        current.dailyMaxSurf.date === todayKey &&
+        current.dailyMaxSurf.table_id === tableId
           ? current
           : DailySurfMaxEngine.empty(tableId, todayKey);
 
       if (!todayRounds.length) {
         if (base === current) return current;
-        DailySurfMaxEngine.save(base, storageScope);
+        if (persistLocal) DailySurfMaxEngine.save(base, storageScope);
         return base;
       }
 
-      const next = applyTodayRounds(base, todayRounds, tableId, todayKey);
+      const next = preservePreviousMax
+        ? applyTodayRounds(base, todayRounds, tableId, todayKey)
+        : DailySurfMaxEngine.recalculate(todayRounds, tableId, todayKey);
       if (isSameSnapshot(current, next)) return current;
-      DailySurfMaxEngine.save(next, storageScope);
+      if (persistLocal) DailySurfMaxEngine.save(next, storageScope);
       return next;
     });
-  }, [enabled, signature, storageScope, tableId, todayKey]);
+  }, [enabled, persistLocal, preservePreviousMax, signature, storageScope, tableId, todayKey]);
 
   return snapshot;
 }
