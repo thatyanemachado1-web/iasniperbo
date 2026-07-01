@@ -1,5 +1,5 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessApiError, getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
 import {
@@ -26,12 +26,13 @@ const EMPTY_ROUTE_SESSION: UserSession = {
   approved: false,
   clientToken: "",
 };
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function ProtectedAppRoute() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [mounted, setMounted] = useState(false);
-  const session = mounted ? readUserSession() : EMPTY_ROUTE_SESSION;
+  const [session, setSession] = useState<UserSession>(EMPTY_ROUTE_SESSION);
   const [salesClosed, setSalesClosed] = useState(false);
   const isAdminRoute = pathname.startsWith("/app/admin");
   const isAccountRoute = pathname.startsWith("/app/conta");
@@ -51,7 +52,8 @@ function ProtectedAppRoute() {
       (session.accessMode === "demo" && !demoExpired) ||
       (session.registered && session.accessMode === "pending"));
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
+    setSession(readUserSession());
     setMounted(true);
   }, []);
 
@@ -129,13 +131,11 @@ function ProtectedAppRoute() {
           before.plan !== access.plan ||
           before.expiresAt !== access.expires_at;
 
-        if (changed) {
-          window.location.reload();
-        }
+        if (changed) setSession(readUserSession());
       } catch (error) {
         if (shouldClearSessionAfterRefreshError(error)) {
           clearUserSession();
-          if (!stopped) window.location.reload();
+          if (!stopped) setSession(EMPTY_ROUTE_SESSION);
         }
       } finally {
         refreshing = false;
@@ -172,7 +172,6 @@ function AppRouteLoading() {
         <div className="text-xs font-black uppercase tracking-[0.24em] text-neon-cyan">
           Carregando painel
         </div>
-        <div className="mt-2 text-xs text-muted-foreground">Sincronizando sua sessao...</div>
       </div>
     </div>
   );
