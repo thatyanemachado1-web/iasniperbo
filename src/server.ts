@@ -11541,26 +11541,36 @@ function normalizeServerNeuralEntryLastResult(value: unknown): NeuralEntryLastRe
   if (!id || !key || !resultRoundKey || !finishedAt || !["sg", "g1", "red", "tie_sg", "tie_g1"].includes(kind)) {
     return null;
   }
+  const normalizedKind = kind as NeuralEntryLastResult["kind"];
+  const origemTipo = readServerNeuralOriginKind(record.origemTipo);
+  const expectedSide = readServerNeuralSide(record.expectedSide);
+  const currentGale =
+    readServerGaleIndex(record.current_gale ?? record.currentGale) ??
+    (normalizedKind === "sg" || normalizedKind === "tie_sg" ? 0 : 1);
 
   return {
     id,
     key,
     numero: readNullableNumber(record.numero),
     origem: readServerNeuralSide(record.origem),
-    origemTipo: readServerNeuralOriginKind(record.origemTipo),
-    expectedSide: readServerNeuralSide(record.expectedSide),
-    kind: kind as NeuralEntryLastResult["kind"],
-    outcome: readServerNeuralOutcome(record.outcome, kind),
-    signal_id: readString(record, "signal_id") || readString(record, "signalId") || null,
-    round_id: readString(record, "round_id") || readString(record, "roundId") || null,
-    module: readString(record, "module") || null,
-    source: readString(record, "source") || null,
-    entry_side: readServerNeuralSide(record.entry_side ?? record.entrySide),
-    current_gale: readServerGaleIndex(record.current_gale ?? record.currentGale),
+    origemTipo,
+    expectedSide,
+    kind: normalizedKind,
+    outcome: readServerNeuralOutcome(record.outcome, normalizedKind),
+    signal_id: readString(record, "signal_id") || readString(record, "signalId") || id,
+    round_id: readString(record, "round_id") || readString(record, "roundId") || resultRoundKey,
+    module: readString(record, "module") || "paying_numbers",
+    source: readString(record, "source") || serverNeuralEntrySource(origemTipo),
+    entry_side: readServerNeuralSide(record.entry_side ?? record.entrySide) ?? expectedSide,
+    current_gale: currentGale,
     max_gale: 1,
-    gale_status: readServerGaleStatus(record.gale_status ?? record.galeStatus),
-    result: readServerNeuralOutcome(record.result, kind),
-    result_stage: readServerResultStage(record.result_stage ?? record.resultStage),
+    gale_status:
+      readServerGaleStatus(record.gale_status ?? record.galeStatus) ??
+      serverNeuralResultGaleStatus(normalizedKind),
+    result: readServerNeuralOutcome(record.result, normalizedKind),
+    result_stage:
+      readServerResultStage(record.result_stage ?? record.resultStage) ??
+      serverNeuralResultStage(normalizedKind),
     resultRoundKey,
     finishedAt,
     tieMultiplier: readNullableNumber(record.tieMultiplier),

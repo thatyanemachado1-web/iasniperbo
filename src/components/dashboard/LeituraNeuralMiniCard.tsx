@@ -191,7 +191,7 @@ export function LeituraNeuralMiniCard({
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
     entryResultTimeoutRef.current = window.setTimeout(
       () => setEntryResult(null),
-      result.kind === "red" ? 1600 : 3200,
+      1000,
     );
   }, [neuralEntryLastResult, rounds]);
 
