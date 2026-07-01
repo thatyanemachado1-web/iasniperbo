@@ -2,16 +2,36 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessApiError, getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
-import { clearUserSession, hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
+import {
+  clearUserSession,
+  hasFullAccess,
+  isAdminOwnerEmail,
+  readUserSession,
+  type UserSession,
+} from "@/lib/userSession";
 
 export const Route = createFileRoute("/app")({
   component: ProtectedAppRoute,
 });
 
+const EMPTY_ROUTE_SESSION: UserSession = {
+  email: "",
+  name: "Usuario",
+  role: "user",
+  accessMode: "none",
+  accessStatus: "none",
+  plan: "free",
+  expiresAt: "",
+  registered: false,
+  approved: false,
+  clientToken: "",
+};
+
 function ProtectedAppRoute() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const session = readUserSession();
+  const [mounted, setMounted] = useState(false);
+  const session = mounted ? readUserSession() : EMPTY_ROUTE_SESSION;
   const [salesClosed, setSalesClosed] = useState(false);
   const isAdminRoute = pathname.startsWith("/app/admin");
   const isAccountRoute = pathname.startsWith("/app/conta");
@@ -32,6 +52,11 @@ function ProtectedAppRoute() {
       (session.registered && session.accessMode === "pending"));
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
     let active = true;
     getSalesSettings()
       .then((settings) => {
@@ -43,9 +68,10 @@ function ProtectedAppRoute() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [mounted]);
 
   useEffect(() => {
+    if (!mounted) return;
     if (isAdminRoute) return;
     if (salesClosed && !fullAccess && !isAdminUser) {
       navigate({ to: "/" });
@@ -70,9 +96,11 @@ function ProtectedAppRoute() {
     navigate,
     salesClosed,
     session.email,
+    mounted,
   ]);
 
   useEffect(() => {
+    if (!mounted) return;
     if (isAdminRoute || isOwner) return;
 
     let stopped = false;
@@ -123,8 +151,9 @@ function ProtectedAppRoute() {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshSession);
     };
-  }, [isAdminRoute, isOwner]);
+  }, [isAdminRoute, isOwner, mounted]);
 
+  if (!mounted) return <AppRouteLoading />;
   if (!isAdminRoute && salesClosed && !fullAccess && !isAdminUser) return null;
   if (!isAdminRoute && (!session.email || !canOpenApp)) return null;
   if (!isAdminRoute && !canOpenDashboard && !isCheckoutRoute && !isAccountRoute) return null;
@@ -133,6 +162,19 @@ function ProtectedAppRoute() {
     <AppShell>
       <Outlet />
     </AppShell>
+  );
+}
+
+function AppRouteLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-app px-5 text-center text-foreground">
+      <div className="rounded-2xl border border-neon-cyan/25 bg-background/70 px-5 py-4 shadow-[0_0_28px_rgba(0,229,255,0.12)]">
+        <div className="text-xs font-black uppercase tracking-[0.24em] text-neon-cyan">
+          Carregando painel
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">Sincronizando sua sessao...</div>
+      </div>
+    </div>
   );
 }
 
