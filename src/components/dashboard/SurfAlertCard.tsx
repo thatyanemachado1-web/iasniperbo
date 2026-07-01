@@ -44,14 +44,16 @@ export function SurfAlertCard({
   const surfDecision = buildSurfDecision(confidence, breakRisk, dominantSide);
   const enabled = toggles?.surfAnalyzer !== false;
   const memory = dailySurfMax.dailySurfMemory;
+  const memoryRiskBlocked = memory.surfStatus === "SURF_ESTICADO" || memory.surfStatus === "RISCO_QUEBRA";
   const memoryActionable = Boolean(
+    !memoryRiskBlocked &&
     memory.surfBias &&
       ["PRE_SURF", "SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF", "VIRADA_SURF"].includes(
         memory.surfStatus,
       ),
   );
   const liveSurfEntry = surfEntryFromAlert(alert);
-  const hasLiveSurfSignal = alert.surf_alert && liveSurfEntry !== "AGUARDAR";
+  const hasLiveSurfSignal = !memoryRiskBlocked && alert.surf_alert && liveSurfEntry !== "AGUARDAR";
   const probableSurfEntry = hasLiveSurfSignal
     ? liveSurfEntry
     : memoryActionable && memory.surfBias
@@ -99,7 +101,7 @@ export function SurfAlertCard({
               pulse={enabled && alert.surf_alert}
               className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
             >
-              {compactStatus}
+              {formatSurfStatusLabel(compactStatus)}
             </AppBadge>
             <ModuleToggleStrip
               toggles={toggles}
@@ -152,6 +154,9 @@ export function SurfAlertCard({
             </div>
           </div>
           <div className="mt-2">
+            <SurfMemoryPanel snapshot={dailySurfMax} />
+          </div>
+          <div className="mt-2">
             <SurfMaximaPanel snapshot={dailySurfMax} />
           </div>
         </div>
@@ -162,7 +167,7 @@ export function SurfAlertCard({
           right={
             <div className="flex shrink-0 items-center gap-1.5">
               <AppBadge tone={strengthBand.tone} pulse={enabled && alert.surf_alert}>
-                {alert.surf_status ?? alert.surf_phase}
+                {formatSurfStatusLabel(alert.surf_status ?? alert.surf_phase)}
               </AppBadge>
               <ModuleToggleStrip
                 toggles={toggles}
@@ -224,6 +229,7 @@ export function SurfAlertCard({
               />
             </div>
 
+            <SurfMemoryPanel snapshot={dailySurfMax} />
             <SurfMaximaPanel snapshot={dailySurfMax} />
           </div>
         </div>
@@ -372,6 +378,125 @@ function buildSurfDecision(confidence: number, breakRisk: number, side: string) 
     textClass: "text-foreground",
   };
 }
+
+function SurfMemoryPanel({ snapshot }: { snapshot: DailySurfMaxSnapshot }) {
+  const memory = snapshot.dailySurfMemory;
+  const statusTone = surfMemoryStatusTone(memory.surfStatus);
+  const dominantLabel = memory.dominantSide
+    ? `${memory.dominantSide} ${memory.dominantPercent}%`
+    : memory.totalDrops3Plus
+      ? "Equilibrado"
+      : "Aguardando";
+  const statusLabel = memory.surfBias
+    ? `${formatSurfStatusLabel(memory.surfStatus)} ${memory.surfBias}`
+    : formatSurfStatusLabel(memory.surfStatus);
+
+  return (
+    <div className="rounded-xl border border-neon-cyan/12 bg-background/24 p-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[9px] font-black uppercase tracking-[0.16em] text-neon-cyan">
+            Memoria 3+ do Dia
+          </div>
+          <div className="mt-1 text-[10px] font-semibold leading-snug text-muted-foreground">
+            Eventos de colunas que chegaram em 3+ casas. Maxima fica separada abaixo.
+          </div>
+        </div>
+        <span
+          className={cn(
+            "shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.08em]",
+            statusTone.badge,
+          )}
+        >
+          {statusLabel}
+        </span>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-1.5">
+        <SurfMemoryMiniCard
+          label="Player 3+"
+          value={`${memory.playerDrops3Plus}x`}
+          tone="player"
+        />
+        <SurfMemoryMiniCard
+          label="Banker 3+"
+          value={`${memory.bankerDrops3Plus}x`}
+          tone="banker"
+        />
+        <SurfMemoryMiniCard
+          label="Dominancia"
+          value={dominantLabel}
+          tone={memory.dominantSide === "PLAYER" ? "player" : memory.dominantSide === "BANKER" ? "banker" : "muted"}
+        />
+      </div>
+      <div className={cn("mt-2 rounded-lg border px-2 py-1.5 text-[9px] font-semibold leading-snug", statusTone.panel)}>
+        {memory.surfStatus === "SURF_ESTICADO" || memory.surfStatus === "RISCO_QUEBRA"
+          ? `${memory.currentDropSide ?? "Mesa"} em ${memory.currentDropDepth} casas. Nao mostrar entrada limpa.`
+          : memory.reason}
+      </div>
+    </div>
+  );
+}
+
+function SurfMemoryMiniCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "banker" | "player" | "muted";
+}) {
+  const toneClass = {
+    banker: "border-banker/30 bg-banker/8 text-banker",
+    player: "border-player/30 bg-player/8 text-player",
+    muted: "border-neon-cyan/15 bg-secondary/30 text-neon-cyan",
+  }[tone];
+
+  return (
+    <div className={`min-w-0 rounded-lg border px-1.5 py-1.5 text-center ${toneClass}`}>
+      <div className="truncate text-[8px] font-black uppercase tracking-[0.08em] opacity-80">
+        {label}
+      </div>
+      <div className="mt-0.5 truncate text-[12px] font-black leading-none">{value}</div>
+    </div>
+  );
+}
+
+function surfMemoryStatusTone(status: DailySurfMaxSnapshot["dailySurfMemory"]["surfStatus"]) {
+  if (status === "RISCO_QUEBRA") {
+    return {
+      badge: "border-destructive/40 bg-destructive/10 text-destructive",
+      panel: "border-destructive/25 bg-destructive/8 text-destructive",
+    };
+  }
+  if (status === "SURF_ESTICADO") {
+    return {
+      badge: "border-warning/40 bg-warning/10 text-warning",
+      panel: "border-warning/25 bg-warning/8 text-warning",
+    };
+  }
+  if (status === "SURF_DOMINANTE" || status === "SURF_AGRESSIVO" || status === "RECUPERACAO_SURF") {
+    return {
+      badge: "border-success/35 bg-success/10 text-success",
+      panel: "border-success/18 bg-success/8 text-muted-foreground",
+    };
+  }
+  if (status === "PRE_SURF") {
+    return {
+      badge: "border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan",
+      panel: "border-neon-cyan/18 bg-neon-cyan/8 text-muted-foreground",
+    };
+  }
+  return {
+    badge: "border-neon-cyan/20 bg-secondary/30 text-muted-foreground",
+    panel: "border-neon-cyan/12 bg-secondary/20 text-muted-foreground",
+  };
+}
+
+function formatSurfStatusLabel(status: string | null | undefined) {
+  return (status ?? "SEM_SURF").replaceAll("_", " ");
+}
+
 function SurfMaximaPanel({ snapshot }: { snapshot: DailySurfMaxSnapshot }) {
   const maxima = snapshot.dailyMaxSurf;
   const best = bestDailySurf(maxima);

@@ -299,6 +299,9 @@ export function calculateDailySurfMemory(
   next.recentPressurePercent = recent.pressurePercent;
 
   if (result === "TIE" || result === null) {
+    if (base.currentDropSide && base.currentDropDepth >= 5) {
+      next.stretchedSide = base.currentDropSide;
+    }
     const decision = decideDailySurfMemory(next);
     return {
       ...next,
@@ -452,6 +455,33 @@ function decideDailySurfMemory(memory: DailySurfMemory): Pick<
     };
   }
 
+  if (memory.dominantSide && dominantCount >= 4 && memory.dominantPercent >= 70) {
+    return {
+      surfStatus: "SURF_DOMINANTE",
+      surfBias: memory.dominantSide,
+      confidence: clampPercent(82 + Math.min(12, dominantCount * 2)),
+      reason: `${memory.dominantSide} domina ${memory.dominantPercent}% das descidas longas do dia.`,
+    };
+  }
+
+  if (memory.dominantSide && dominantCount >= 3 && memory.dominantPercent >= 60) {
+    return {
+      surfStatus: "SURF_AGRESSIVO",
+      surfBias: memory.dominantSide,
+      confidence: clampPercent(74 + Math.min(10, dominantCount * 2)),
+      reason: `${memory.dominantSide} tem ${dominantCount} descidas 3+ e ${memory.dominantPercent}% do dia.`,
+    };
+  }
+
+  if (memory.dominantSide && dominantCount >= 2) {
+    return {
+      surfStatus: "PRE_SURF",
+      surfBias: memory.dominantSide,
+      confidence: clampPercent(58 + Math.min(12, dominantCount * 4)),
+      reason: `${memory.dominantSide} ja tem ${dominantCount} descidas 3+ no dia.`,
+    };
+  }
+
   if (
     memory.lastBreakSide &&
     memory.currentDropSide &&
@@ -479,33 +509,6 @@ function decideDailySurfMemory(memory: DailySurfMemory): Pick<
       surfBias: memory.recentPressureSide,
       confidence: clampPercent(58 + Math.min(18, memory.recentPressurePercent - 55)),
       reason: `${memory.recentPressureSide} virou a pressao recente contra o dominante do dia.`,
-    };
-  }
-
-  if (memory.dominantSide && dominantCount >= 4 && memory.dominantPercent >= 70) {
-    return {
-      surfStatus: "SURF_DOMINANTE",
-      surfBias: memory.dominantSide,
-      confidence: clampPercent(82 + Math.min(12, dominantCount * 2)),
-      reason: `${memory.dominantSide} domina ${memory.dominantPercent}% das descidas longas do dia.`,
-    };
-  }
-
-  if (memory.dominantSide && dominantCount >= 3 && memory.dominantPercent >= 60) {
-    return {
-      surfStatus: "SURF_AGRESSIVO",
-      surfBias: memory.dominantSide,
-      confidence: clampPercent(74 + Math.min(10, dominantCount * 2)),
-      reason: `${memory.dominantSide} tem ${dominantCount} descidas 3+ e ${memory.dominantPercent}% do dia.`,
-    };
-  }
-
-  if (memory.dominantSide && dominantCount >= 2) {
-    return {
-      surfStatus: "PRE_SURF",
-      surfBias: memory.dominantSide,
-      confidence: clampPercent(58 + Math.min(12, dominantCount * 4)),
-      reason: `${memory.dominantSide} ja tem ${dominantCount} descidas 3+ no dia.`,
     };
   }
 
