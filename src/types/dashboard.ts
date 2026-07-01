@@ -42,6 +42,14 @@ export interface MainSignal {
   status: SignalStatus;
   protection: string;
   strength: number; // 0-100
+  signal_id?: string;
+  round_id?: string | number | null;
+  module?: string | null;
+  source?: string | null;
+  entry_side?: CurrentSignalSide;
+  current_gale?: 0 | 1;
+  max_gale?: 1;
+  gale_status?: NeuralEntryGaleStatus;
   lastResult?: LastSignalResult | null;
 }
 
@@ -61,6 +69,17 @@ export interface NeuralReading {
   origem?: SignalSide | "TIE" | null;
   origemTipo?: NeuralOriginKind | null;
   direcao?: SignalSide | "TIE" | null;
+  lastRoundReal?: {
+    roundId?: string | number | null;
+    roundKey?: string | null;
+    winnerSide?: SignalSide | "TIE" | null;
+    bankerTotal?: number | null;
+    playerTotal?: number | null;
+  } | null;
+  losingSide?: SignalSide | null;
+  losingNumber?: number | null;
+  oppositeKey?: string | null;
+  pullingSide?: SignalSide | "TIE" | null;
   validade?: string | null;
   alertas?: number | null;
   acertos?: number | null;
@@ -100,6 +119,16 @@ export interface NeuralScoreboard {
 
 export type NeuralEntryStatus = "awaiting_sg" | "awaiting_g1";
 export type NeuralEntryResultKind = "sg" | "g1" | "red" | "tie_sg" | "tie_g1";
+export type NeuralEntryGaleStatus =
+  | "ENTRY_CONFIRMED"
+  | "WAITING_SG_RESULT"
+  | "GALE_1_REQUIRED"
+  | "WAITING_G1_RESULT"
+  | "RESULT_GREEN_SG"
+  | "RESULT_GREEN_G1"
+  | "RESULT_RED_FINAL"
+  | "RESULT_TIE";
+export type NeuralEntryResultStage = "SG" | "G1" | "FINAL";
 
 export interface NeuralEntryState {
   key: string;
@@ -107,6 +136,14 @@ export interface NeuralEntryState {
   origem?: SignalSide | "TIE" | null;
   origemTipo?: NeuralOriginKind | null;
   expectedSide?: SignalSide | "TIE" | null;
+  signal_id?: string | null;
+  round_id?: string | number | null;
+  module?: string | null;
+  source?: string | null;
+  entry_side?: SignalSide | "TIE" | null;
+  current_gale?: 0 | 1;
+  max_gale?: 1;
+  gale_status?: NeuralEntryGaleStatus;
   status: NeuralEntryStatus;
   triggerRoundKey: string;
   sgRoundKey?: string | null;
@@ -123,6 +160,16 @@ export interface NeuralEntryLastResult {
   expectedSide?: SignalSide | "TIE" | null;
   kind: NeuralEntryResultKind;
   outcome: "GREEN" | "RED" | "TIE";
+  signal_id?: string | null;
+  round_id?: string | number | null;
+  module?: string | null;
+  source?: string | null;
+  entry_side?: SignalSide | "TIE" | null;
+  current_gale?: 0 | 1;
+  max_gale?: 1;
+  gale_status?: NeuralEntryGaleStatus;
+  result?: "GREEN" | "RED" | "TIE" | null;
+  result_stage?: NeuralEntryResultStage;
   resultRoundKey: string;
   finishedAt: string;
   tieMultiplier?: number | null;

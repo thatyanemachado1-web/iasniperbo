@@ -515,6 +515,26 @@ function normalizeNeuralReading(value: unknown, fallback?: NeuralReading): Neura
       ) ??
       fallback?.direcao ??
       null,
+    lastRoundReal:
+      normalizeNeuralLastRoundReal(firstDefined(record.lastRoundReal, record.last_round_real)) ??
+      fallback?.lastRoundReal ??
+      null,
+    losingSide:
+      normalizeNeuralSignalSide(firstDefined(record.losingSide, record.losing_side)) ??
+      fallback?.losingSide ??
+      null,
+    losingNumber:
+      readOptionalNumber(firstDefined(record.losingNumber, record.losing_number)) ??
+      fallback?.losingNumber ??
+      null,
+    oppositeKey:
+      readOptionalString(firstDefined(record.oppositeKey, record.opposite_key)) ??
+      fallback?.oppositeKey ??
+      null,
+    pullingSide:
+      normalizeNeuralSide(firstDefined(record.pullingSide, record.pulling_side, record.direcao)) ??
+      fallback?.pullingSide ??
+      null,
     validade: String(
       firstDefined(record.validade, record.validity, record.gale, fallback?.validade) ?? "G1",
     ),
@@ -658,6 +678,26 @@ function normalizeNeuralSide(value: unknown): NeuralReading["origem"] {
   if (["P", "PLAYER", "JOGADOR"].includes(text)) return "PLAYER";
   if (["T", "TIE", "EMPATE"].includes(text)) return "TIE";
   return null;
+}
+
+function normalizeNeuralSignalSide(value: unknown): NeuralReading["losingSide"] {
+  const side = normalizeNeuralSide(value);
+  return side === "BANKER" || side === "PLAYER" ? side : null;
+}
+
+function normalizeNeuralLastRoundReal(value: unknown): NeuralReading["lastRoundReal"] {
+  const record = readRecord(value);
+  if (!Object.keys(record).length) return null;
+  return {
+    roundId:
+      readOptionalString(firstDefined(record.roundId, record.round_id, record.id)) ??
+      readOptionalNumber(firstDefined(record.roundId, record.round_id, record.id)) ??
+      null,
+    roundKey: readOptionalString(firstDefined(record.roundKey, record.round_key)) ?? null,
+    winnerSide: normalizeNeuralSide(firstDefined(record.winnerSide, record.winner_side, record.result)) ?? null,
+    bankerTotal: readOptionalNumber(firstDefined(record.bankerTotal, record.banker_total, record.bankerScore)) ?? null,
+    playerTotal: readOptionalNumber(firstDefined(record.playerTotal, record.player_total, record.playerScore)) ?? null,
+  };
 }
 
 function normalizeNeuralOriginKind(value: unknown): NeuralReading["origemTipo"] {

@@ -10926,6 +10926,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   if (generatedNeural) {
     pickedSections.neuralReading = generatedNeural.reading;
     pickedSections.neuralScoreboard = generatedNeural.scoreboard;
+    logOppositePayingNumberState(generatedNeural.reading);
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;
@@ -11123,6 +11124,7 @@ function trackServerNeuralEntryLifecycle(
       neuralEntryLastResult: previousResult,
     };
   }
+  logServerSignalGaleState(nextState, null);
 
   return {
     ...dashboard,
@@ -11155,11 +11157,19 @@ function exposeServerNeuralEntryAsCurrentSignal(dashboard: LiveDashboardData): L
   return {
     ...dashboard,
     currentSignal: {
-      id: `neural-entry:${state.key}:${state.triggerRoundKey}`,
+      id: serverNeuralEntrySignalId(state),
+      signal_id: serverNeuralEntrySignalId(state),
+      round_id: state.round_id ?? state.triggerRoundKey,
+      module: state.module ?? "paying_numbers",
+      source: state.source ?? serverNeuralEntrySource(state.origemTipo),
+      entry_side: expectedSide,
       side: expectedSide,
       status: state.status === "awaiting_g1" ? "g1" : "pending",
       protection,
       strength,
+      current_gale: state.status === "awaiting_g1" ? 1 : 0,
+      max_gale: 1,
+      gale_status: state.gale_status ?? (state.status === "awaiting_g1" ? "GALE_1_REQUIRED" : "WAITING_SG_RESULT"),
       lastResult: null,
     },
   };
@@ -11170,10 +11180,16 @@ function buildServerNeuralEntryState(
   triggerRoundKey: string,
 ): NeuralEntryState | null {
   if (!reading || reading.mode !== "ACTIVE") return null;
+  if (serverSafeCounter(reading.reds ?? reading.erros) > 2) return null;
   const expectedSide = readServerNeuralSide(reading.direcao ?? reading.origem);
   if (!expectedSide) return null;
   const key = serverNeuralEntryKey(reading);
   if (!key) return null;
+  const baseState = {
+    key,
+    triggerRoundKey,
+  };
+  const signalId = serverNeuralEntrySignalId(baseState);
 
   return {
     key,
@@ -11181,6 +11197,14 @@ function buildServerNeuralEntryState(
     origem: readServerNeuralSide(reading.origem),
     origemTipo: reading.origemTipo ?? null,
     expectedSide,
+    signal_id: signalId,
+    round_id: reading.lastRoundReal?.roundId ?? triggerRoundKey,
+    module: "paying_numbers",
+    source: serverNeuralEntrySource(reading.origemTipo),
+    entry_side: expectedSide,
+    current_gale: 0,
+    max_gale: 1,
+    gale_status: "WAITING_SG_RESULT",
     status: "awaiting_sg",
     triggerRoundKey,
     sgRoundKey: null,
@@ -11206,7 +11230,7 @@ function resolveServerNeuralEntryRound(
   if (round.result === "T") {
     const kind = state.status === "awaiting_sg" ? "tie_sg" : "tie_g1";
     return {
-      result: {
+      result: withServerNeuralResultGaleFields(state, expectedSide, {
         id: `${state.key}:${roundKey}:${kind}`,
         key: state.key,
         numero: state.numero,
@@ -11219,14 +11243,14 @@ function resolveServerNeuralEntryRound(
         finishedAt,
         tieMultiplier,
         readingSnapshot: snapshot,
-      },
+      }),
     };
   }
 
   if (expectedSide && serverRoundMatchesNeuralSide(round, expectedSide)) {
     const kind = state.status === "awaiting_sg" ? "sg" : "g1";
     return {
-      result: {
+      result: withServerNeuralResultGaleFields(state, expectedSide, {
         id: `${state.key}:${roundKey}:${kind}`,
         key: state.key,
         numero: state.numero,
@@ -11239,27 +11263,36 @@ function resolveServerNeuralEntryRound(
         finishedAt,
         tieMultiplier: null,
         readingSnapshot: snapshot,
-      },
+      }),
     };
   }
 
   if (state.status === "awaiting_sg") {
-    return {
-      state: {
+    const nextState: NeuralEntryState = {
+      ...state,
+      status: "awaiting_g1",
+      sgRoundKey: roundKey,
+      current_gale: 1,
+      max_gale: 1,
+      gale_status: "GALE_1_REQUIRED",
+      readingSnapshot: neuralReadingForEntryState({
         ...state,
         status: "awaiting_g1",
         sgRoundKey: roundKey,
-        readingSnapshot: neuralReadingForEntryState({
-          ...state,
-          status: "awaiting_g1",
-          sgRoundKey: roundKey,
-        }),
-      },
+        current_gale: 1,
+        max_gale: 1,
+        gale_status: "GALE_1_REQUIRED",
+      }),
+    };
+    logServerSignalGaleRequired(nextState, round.id);
+    logServerSignalGaleState(nextState, null);
+    return {
+      state: nextState,
     };
   }
 
   return {
-    result: {
+    result: withServerNeuralResultGaleFields(state, expectedSide, {
       id: `${state.key}:${roundKey}:red`,
       key: state.key,
       numero: state.numero,
@@ -11272,8 +11305,102 @@ function resolveServerNeuralEntryRound(
       finishedAt,
       tieMultiplier: null,
       readingSnapshot: snapshot,
-    },
+    }),
   };
+}
+
+function withServerNeuralResultGaleFields(
+  state: NeuralEntryState,
+  expectedSide: NeuralEntryState["expectedSide"],
+  result: NeuralEntryLastResult,
+): NeuralEntryLastResult {
+  const currentGale = result.kind === "sg" || result.kind === "tie_sg" ? 0 : 1;
+  const resultStage = serverNeuralResultStage(result.kind);
+  const enriched: NeuralEntryLastResult = {
+    ...result,
+    signal_id: state.signal_id ?? serverNeuralEntrySignalId(state),
+    round_id: state.round_id ?? state.triggerRoundKey,
+    module: state.module ?? "paying_numbers",
+    source: state.source ?? serverNeuralEntrySource(state.origemTipo),
+    entry_side: expectedSide,
+    current_gale: currentGale,
+    max_gale: 1,
+    gale_status: serverNeuralResultGaleStatus(result.kind),
+    result: result.outcome,
+    result_stage: resultStage,
+  };
+  logServerSignalGaleState(state, enriched);
+  logServerSignalResult(enriched);
+  return enriched;
+}
+
+function serverNeuralResultStage(kind: NeuralEntryLastResult["kind"]): NonNullable<NeuralEntryLastResult["result_stage"]> {
+  if (kind === "g1" || kind === "tie_g1" || kind === "red") return "G1";
+  return "SG";
+}
+
+function serverNeuralResultGaleStatus(kind: NeuralEntryLastResult["kind"]): NonNullable<NeuralEntryLastResult["gale_status"]> {
+  if (kind === "tie_sg" || kind === "tie_g1") return "RESULT_TIE";
+  if (kind === "g1") return "RESULT_GREEN_G1";
+  if (kind === "red") return "RESULT_RED_FINAL";
+  return "RESULT_GREEN_SG";
+}
+
+function serverNeuralEntrySignalId(state: Pick<NeuralEntryState, "key" | "triggerRoundKey">) {
+  return `neural-entry:${state.key}:${state.triggerRoundKey}`;
+}
+
+function serverNeuralEntrySource(kind: NeuralEntryState["origemTipo"] | NeuralReading["origemTipo"]) {
+  if (kind === "OPOSTO") return "numero_pagante_oposto";
+  if (kind === "TIE") return "tie";
+  return "numero_pagante";
+}
+
+function logServerSignalGaleState(
+  state: NeuralEntryState,
+  result: NeuralEntryLastResult | null,
+) {
+  console.info(
+    "[SIGNAL_GALE_STATE]",
+    JSON.stringify({
+      signal_id: result?.signal_id ?? state.signal_id ?? serverNeuralEntrySignalId(state),
+      source: result?.source ?? state.source ?? serverNeuralEntrySource(state.origemTipo),
+      entry_side: result?.entry_side ?? state.entry_side ?? state.expectedSide,
+      round_id: result?.round_id ?? state.round_id ?? state.triggerRoundKey,
+      current_gale: result?.current_gale ?? state.current_gale ?? (state.status === "awaiting_g1" ? 1 : 0),
+      max_gale: result?.max_gale ?? state.max_gale ?? 1,
+      gale_status: result?.gale_status ?? state.gale_status ?? (state.status === "awaiting_g1" ? "GALE_1_REQUIRED" : "WAITING_SG_RESULT"),
+      result: result?.result ?? null,
+      result_stage: result?.result_stage ?? null,
+    }),
+  );
+}
+
+function logServerSignalGaleRequired(state: NeuralEntryState, fromRoundId: string | number) {
+  console.info(
+    "[SIGNAL_GALE_REQUIRED]",
+    JSON.stringify({
+      signal_id: state.signal_id ?? serverNeuralEntrySignalId(state),
+      entry_side: state.entry_side ?? state.expectedSide,
+      from_round_id: fromRoundId,
+      next_gale: 1,
+      message: "Fazer Gale 1",
+    }),
+  );
+}
+
+function logServerSignalResult(result: NeuralEntryLastResult) {
+  console.info(
+    "[SIGNAL_RESULT]",
+    JSON.stringify({
+      signal_id: result.signal_id ?? result.id,
+      entry_side: result.entry_side ?? result.expectedSide,
+      result: result.result ?? result.outcome,
+      result_stage: result.result_stage ?? serverNeuralResultStage(result.kind),
+      current_gale: result.current_gale ?? (result.kind === "sg" || result.kind === "tie_sg" ? 0 : 1),
+      finalized: true,
+    }),
+  );
 }
 
 function neuralReadingForEntryState(state: NeuralEntryState): NeuralReading {
@@ -11388,6 +11515,14 @@ function normalizeServerNeuralEntryState(value: unknown): NeuralEntryState | nul
     origem: readServerNeuralSide(record.origem),
     origemTipo: readServerNeuralOriginKind(record.origemTipo),
     expectedSide: readServerNeuralSide(record.expectedSide),
+    signal_id: readString(record, "signal_id") || readString(record, "signalId") || null,
+    round_id: readString(record, "round_id") || readString(record, "roundId") || null,
+    module: readString(record, "module") || null,
+    source: readString(record, "source") || null,
+    entry_side: readServerNeuralSide(record.entry_side ?? record.entrySide),
+    current_gale: readServerGaleIndex(record.current_gale ?? record.currentGale),
+    max_gale: 1,
+    gale_status: readServerGaleStatus(record.gale_status ?? record.galeStatus),
     status,
     triggerRoundKey,
     sgRoundKey: readString(record, "sgRoundKey") || null,
@@ -11416,6 +11551,16 @@ function normalizeServerNeuralEntryLastResult(value: unknown): NeuralEntryLastRe
     expectedSide: readServerNeuralSide(record.expectedSide),
     kind: kind as NeuralEntryLastResult["kind"],
     outcome: readServerNeuralOutcome(record.outcome, kind),
+    signal_id: readString(record, "signal_id") || readString(record, "signalId") || null,
+    round_id: readString(record, "round_id") || readString(record, "roundId") || null,
+    module: readString(record, "module") || null,
+    source: readString(record, "source") || null,
+    entry_side: readServerNeuralSide(record.entry_side ?? record.entrySide),
+    current_gale: readServerGaleIndex(record.current_gale ?? record.currentGale),
+    max_gale: 1,
+    gale_status: readServerGaleStatus(record.gale_status ?? record.galeStatus),
+    result: readServerNeuralOutcome(record.result, kind),
+    result_stage: readServerResultStage(record.result_stage ?? record.resultStage),
     resultRoundKey,
     finishedAt,
     tieMultiplier: readNullableNumber(record.tieMultiplier),
@@ -11429,6 +11574,75 @@ function normalizeServerNeuralReading(value: unknown): NeuralReading | null {
   const mode = readString(record, "mode");
   if (mode !== "ACTIVE" && mode !== "OBSERVING" && mode !== "SCANNING") return null;
   return record as unknown as NeuralReading;
+}
+
+function logOppositePayingNumberState(reading: NeuralReading | null | undefined) {
+  if (!reading || typeof reading.numero !== "number") return;
+
+  const pullingSide = readServerNeuralSide(reading.pullingSide ?? reading.direcao ?? reading.origem);
+  const redCount = serverSafeCounter(reading.reds ?? reading.erros);
+  const accuracy = clampPercent(reading.assertividade ?? 0);
+  const confirmed = reading.mode === "ACTIVE" && Boolean(pullingSide) && redCount <= 2;
+  const blockedReason =
+    redCount > 2
+      ? "MAIS_DE_2_REDS"
+      : reading.mode !== "ACTIVE"
+        ? String(reading.paganteStatus || "NUMERO_EM_OBSERVACAO")
+        : "";
+  const state = {
+    round_id: reading.lastRoundReal?.roundId ?? "",
+    signal_id: serverPayingNumbersReadingKey(reading, pullingSide),
+    winner_side: reading.lastRoundReal?.winnerSide ?? "",
+    player_total: reading.lastRoundReal?.playerTotal ?? null,
+    banker_total: reading.lastRoundReal?.bankerTotal ?? null,
+    losing_side: reading.losingSide ?? null,
+    losing_number: reading.losingNumber ?? null,
+    opposite_key: reading.oppositeKey ?? "",
+    pulling_side: pullingSide,
+    entry_side: confirmed ? pullingSide : null,
+    accuracy,
+    sg_count: serverSafeCounter(reading.greenSemGale),
+    g1_count: serverSafeCounter(reading.greenG1),
+    red_count: redCount,
+    confirmed,
+    blocked_reason: blockedReason || null,
+    feedStatus: "live",
+    generated_at: new Date().toISOString(),
+  };
+
+  console.info("[OPPOSITE_PAYING_NUMBER_STATE]", JSON.stringify(state));
+  if (confirmed) {
+    console.info(
+      "[OPPOSITE_PAYING_NUMBER_CONFIRMED]",
+      JSON.stringify({
+        signal_id: state.signal_id,
+        round_id: state.round_id,
+        opposite_key: state.opposite_key,
+        losing_side: state.losing_side,
+        losing_number: state.losing_number,
+        pulling_side: state.pulling_side,
+        entry_side: state.entry_side,
+        accuracy: state.accuracy,
+        red_count: state.red_count,
+      }),
+    );
+    return;
+  }
+
+  if (blockedReason) {
+    console.info(
+      "[OPPOSITE_PAYING_NUMBER_BLOCKED]",
+      JSON.stringify({
+        round_id: state.round_id,
+        opposite_key: state.opposite_key,
+        losing_side: state.losing_side,
+        losing_number: state.losing_number,
+        pulling_side: state.pulling_side,
+        red_count: state.red_count,
+        reason: blockedReason,
+      }),
+    );
+  }
 }
 
 function readServerNeuralSide(value: unknown): NeuralEntryState["expectedSide"] {
@@ -11457,6 +11671,40 @@ function readServerNeuralOutcome(value: unknown, kind: string): NeuralEntryLastR
   if (kind === "red") return "RED";
   if (kind === "tie_sg" || kind === "tie_g1") return "TIE";
   return "GREEN";
+}
+
+function readServerGaleIndex(value: unknown): 0 | 1 | undefined {
+  const numeric = Number(value);
+  if (numeric === 1) return 1;
+  if (numeric === 0) return 0;
+  return undefined;
+}
+
+function readServerGaleStatus(value: unknown): NeuralEntryState["gale_status"] {
+  const text = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (
+    text === "ENTRY_CONFIRMED" ||
+    text === "WAITING_SG_RESULT" ||
+    text === "GALE_1_REQUIRED" ||
+    text === "WAITING_G1_RESULT" ||
+    text === "RESULT_GREEN_SG" ||
+    text === "RESULT_GREEN_G1" ||
+    text === "RESULT_RED_FINAL" ||
+    text === "RESULT_TIE"
+  ) {
+    return text as NeuralEntryState["gale_status"];
+  }
+  return undefined;
+}
+
+function readServerResultStage(value: unknown): NeuralEntryLastResult["result_stage"] {
+  const text = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (text === "SG" || text === "G1" || text === "FINAL") return text as NeuralEntryLastResult["result_stage"];
+  return undefined;
 }
 
 function serverNeuralEntryKey(reading: NeuralReading) {

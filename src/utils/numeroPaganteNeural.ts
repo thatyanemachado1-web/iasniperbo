@@ -15,6 +15,14 @@ interface PayingEvent {
   origem: NeuralSide;
   origemTipo: NonNullable<NeuralReading["origemTipo"]>;
   label: string;
+  roundId: Round["id"];
+  roundKey: string;
+  winnerSide: NeuralSide;
+  bankerTotal: number;
+  playerTotal: number;
+  losingSide: SignalSide | null;
+  losingNumber: number | null;
+  oppositeKey: string | null;
 }
 
 interface DirectionStats {
@@ -48,7 +56,7 @@ interface CandidateQualification {
   accuracy: number;
   expectedSide: NeuralSide;
   origemTipo: NonNullable<NeuralReading["origemTipo"]>;
-  isBlockedByRedSequence: boolean;
+  isBlockedByRedCount: boolean;
   isQualifiedNumber: boolean;
 }
 
@@ -79,7 +87,7 @@ const NEURAL_PANEL_ROUND_LIMIT = 156;
 const NEURAL_GENERAL_SCORE_ROUND_LIMIT = 300;
 const MIN_ACTIVE_VALIDATED = 2;
 const MIN_ACTIVE_GREENS = 2;
-const MIN_ACTIVE_ACCURACY = 90;
+const MIN_ACTIVE_ACCURACY = 100;
 const RED_ALERT_ACCURACY = 45;
 
 export function buildNumeroPaganteNeural(
@@ -107,17 +115,17 @@ export function buildNumeroPaganteNeural(
     accuracy,
     expectedSide,
     origemTipo,
-    isBlockedByRedSequence,
+    isBlockedByRedCount,
     isQualifiedNumber,
   } = qualifyCandidate(latestEvent, currentDirection);
   const mode = isQualifiedNumber ? "ACTIVE" : "OBSERVING";
   const isRedAlert =
-    isBlockedByRedSequence ||
+    isBlockedByRedCount ||
     (total >= MIN_ACTIVE_VALIDATED && accuracy < RED_ALERT_ACCURACY);
   const isSaturated =
     currentStats.sequenceNegative >= 2 ||
     (total >= MIN_ACTIVE_VALIDATED + 2 && accuracy < RED_ALERT_ACCURACY);
-  const paganteStatus = statusFor({ total, accuracy, isBlockedByRedSequence, isRedAlert, isSaturated, mode });
+  const paganteStatus = statusFor({ total, accuracy, isBlockedByRedCount, isRedAlert, isSaturated, mode });
 
   return {
     reading: {
@@ -126,6 +134,17 @@ export function buildNumeroPaganteNeural(
       origem: latestEvent.origem,
       origemTipo,
       direcao: expectedSide,
+      lastRoundReal: {
+        roundId: latestEvent.roundId,
+        roundKey: latestEvent.roundKey,
+        winnerSide: latestEvent.winnerSide,
+        bankerTotal: latestEvent.bankerTotal,
+        playerTotal: latestEvent.playerTotal,
+      },
+      losingSide: latestEvent.losingSide,
+      losingNumber: latestEvent.losingNumber,
+      oppositeKey: latestEvent.oppositeKey,
+      pullingSide: expectedSide,
       validade: "G1",
       alertas: total,
       acertos: totalGreens,
@@ -307,9 +326,9 @@ function qualifyCandidate(
   const accuracy = calculateMotorAssertiveness(totalGreens, stats.red);
   const expectedSide = resultToNeuralSide(direction?.expected ?? sideToResult(event.origem));
   const origemTipo = event.origemTipo;
-  const isBlockedByRedSequence = stats.sequenceNegative >= 2;
+  const isBlockedByRedCount = stats.red > 2;
   const isQualifiedNumber =
-    !isBlockedByRedSequence &&
+    !isBlockedByRedCount &&
     (origemTipo === "PAGANTE" || origemTipo === "OPOSTO" || origemTipo === "TIE") &&
     total >= MIN_ACTIVE_VALIDATED &&
     totalGreens >= MIN_ACTIVE_GREENS &&
@@ -321,7 +340,7 @@ function qualifyCandidate(
     accuracy,
     expectedSide,
     origemTipo,
-    isBlockedByRedSequence,
+    isBlockedByRedCount,
     isQualifiedNumber,
   };
 }
@@ -477,14 +496,16 @@ function pickRoundEvent(
 ): PayingEvent | null {
   const events = payingEventsForRound(rounds[index]);
   if (!events.length) return null;
+  const oppositeEvents = events.filter((event) => event.origemTipo === "OPOSTO");
+  const selectableEvents = oppositeEvents.length ? oppositeEvents : events;
 
-  return events
+  return selectableEvents
     .map((event) => {
       const direction = pickBestDirection(buckets.get(candidateKey(event)), event.origem);
       const qualification = qualifyCandidate(event, direction);
       const stats = direction?.stats ?? cloneStats(EMPTY_DIRECTION_STATS);
       const kindPriority =
-        event.origemTipo === "PAGANTE" ? 3 : event.origemTipo === "TIE" ? 2 : 1;
+        event.origemTipo === "OPOSTO" ? 3 : event.origemTipo === "TIE" ? 2 : 1;
       const matureScore =
         qualification.total >= MIN_ACTIVE_VALIDATED
           ? qualification.accuracy * 100 +
@@ -496,7 +517,7 @@ function pickRoundEvent(
       return {
         event,
         qualification,
-        // O tipo do gatilho e so desempate: se o oposto estiver pagando melhor, ele aparece.
+        // Para numero pagante oposto, a rodada fechada sempre fornece o perdedor como gatilho.
         score:
           (qualification.isQualifiedNumber ? 100000 : 0) +
           matureScore +
@@ -508,40 +529,65 @@ function pickRoundEvent(
 
 function payingEventsForRound(round: Round | undefined): PayingEvent[] {
   if (!round || !isValidRound(round)) return [];
+  const bankerScore = normalizeScore(round.bankerScore);
+  const playerScore = normalizeScore(round.playerScore);
+  const roundKey = roundHistoryKey(round);
 
   if (round.result === "B") {
-    const bankerScore = normalizeScore(round.bankerScore);
-    const playerScore = normalizeScore(round.playerScore);
+    const oppositeKey = numberKey("PLAYER", playerScore);
+    const base = {
+      roundId: round.id,
+      roundKey,
+      winnerSide: "BANKER" as const,
+      bankerTotal: bankerScore,
+      playerTotal: playerScore,
+      losingSide: "PLAYER" as const,
+      losingNumber: playerScore,
+      oppositeKey,
+    };
     return [
       {
         numero: bankerScore,
         origem: "BANKER",
         origemTipo: "PAGANTE",
         label: `${bankerScore} Banker`,
+        ...base,
       },
       {
         numero: playerScore,
         origem: "PLAYER",
         origemTipo: "OPOSTO",
-        label: `${playerScore} Player`,
+        label: `${oppositeKey} perdido`,
+        ...base,
       },
     ];
   }
   if (round.result === "P") {
-    const bankerScore = normalizeScore(round.bankerScore);
-    const playerScore = normalizeScore(round.playerScore);
+    const oppositeKey = numberKey("BANKER", bankerScore);
+    const base = {
+      roundId: round.id,
+      roundKey,
+      winnerSide: "PLAYER" as const,
+      bankerTotal: bankerScore,
+      playerTotal: playerScore,
+      losingSide: "BANKER" as const,
+      losingNumber: bankerScore,
+      oppositeKey,
+    };
     return [
       {
         numero: playerScore,
         origem: "PLAYER",
         origemTipo: "PAGANTE",
         label: `${playerScore} Player`,
+        ...base,
       },
       {
         numero: bankerScore,
         origem: "BANKER",
         origemTipo: "OPOSTO",
-        label: `${bankerScore} Banker`,
+        label: `${oppositeKey} perdido`,
+        ...base,
       },
     ];
   }
@@ -557,6 +603,14 @@ function payingEventsForRound(round: Round | undefined): PayingEvent[] {
       origem: "TIE",
       origemTipo: "TIE",
       label: `${normalizedTieScore} Tie`,
+      roundId: round.id,
+      roundKey,
+      winnerSide: "TIE",
+      bankerTotal: bankerScore,
+      playerTotal: playerScore,
+      losingSide: null,
+      losingNumber: null,
+      oppositeKey: null,
     },
   ];
 }
@@ -571,6 +625,14 @@ function isValidRound(round: Round) {
 
 function normalizeScore(value: number) {
   return Math.max(0, Math.floor(value));
+}
+
+function numberKey(side: SignalSide, number: number) {
+  return `${side === "BANKER" ? "B" : "P"}${number}`;
+}
+
+function roundHistoryKey(round: Round) {
+  return `${round.time}:${round.id}:${round.result}:${round.bankerScore}:${round.playerScore}`;
 }
 
 function candidateKey(event: PayingEvent) {
@@ -592,20 +654,20 @@ function sideToResult(side: NeuralSide): RoundResult {
 function statusFor({
   total,
   accuracy,
-  isBlockedByRedSequence,
+  isBlockedByRedCount,
   isRedAlert,
   isSaturated,
   mode,
 }: {
   total: number;
   accuracy: number;
-  isBlockedByRedSequence: boolean;
+  isBlockedByRedCount: boolean;
   isRedAlert: boolean;
   isSaturated: boolean;
   mode: NeuralReading["mode"];
 }) {
   if (total < MIN_ACTIVE_VALIDATED) return "AMOSTRA_BAIXA";
-  if (isBlockedByRedSequence) return "BLOQUEADO_2_REDS";
+  if (isBlockedByRedCount) return "BLOQUEADO_MAIS_DE_2_REDS";
   if (isRedAlert) return "RISCO_RED";
   if (isSaturated) return "SATURADO";
   if (mode === "ACTIVE" && accuracy >= 70) return "VALIDO_FORTE";
@@ -621,16 +683,18 @@ function alertFor(
   accuracy: number,
 ) {
   const direction = expectedSide === "BANKER" ? "Banker" : expectedSide === "PLAYER" ? "Player" : "Tie";
+  const eventLabel =
+    origemTipo === "OPOSTO" && event.oppositeKey ? `${event.oppositeKey} perdido` : event.label;
   const trigger =
     origemTipo === "OPOSTO"
-      ? "gatilho oposto"
+      ? "numero pagante oposto"
       : origemTipo === "TIE"
         ? "empate puxador"
         : "numero pagante";
   if (total < MIN_ACTIVE_VALIDATED) {
-    return `${event.label}: coletando amostra de ${trigger} para ${direction}.`;
+    return `${eventLabel}: coletando amostra de ${trigger} para ${direction}.`;
   }
-  return `${event.label}: ${trigger} puxando ${direction} ate G1 com ${accuracy.toFixed(1)}%.`;
+  return `${eventLabel}: ${trigger} puxando ${direction} ate G1 com ${accuracy.toFixed(1)}%.`;
 }
 
 function cloneStats(stats: DirectionStats): DirectionStats {
