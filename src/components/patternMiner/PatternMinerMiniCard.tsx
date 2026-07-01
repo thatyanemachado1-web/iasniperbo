@@ -18,12 +18,8 @@ export function PatternMinerMiniCard({
   isUsingRealData: boolean;
 }) {
   const confirmedAlert = findConfirmedPatternAlert(snapshot);
-  const monitoringAlert = snapshot.entryAlerts.find((alert) => alert.kind === "forming") ?? snapshot.formingAlerts[0];
-  const monitoringStrategy =
-    monitoringAlert?.strategy ??
-    snapshot.hotStrategies[0] ??
-    snapshot.ranking[0] ??
-    snapshot.agent.lastDiscovery;
+  const monitoringAlert = findLiveMonitoringAlert(snapshot);
+  const monitoringStrategy = monitoringAlert?.strategy;
   const formationStrategies = buildFormationStrategies(snapshot, [
     confirmedAlert?.strategy.id,
     monitoringStrategy?.id,
@@ -88,6 +84,18 @@ function findConfirmedPatternAlert(snapshot: PatternMinerSnapshot) {
     };
   }
   return undefined;
+}
+
+function findLiveMonitoringAlert(snapshot: PatternMinerSnapshot) {
+  return snapshot.formingAlerts.find((alert) => {
+    const strategy = alert.strategy;
+    return (
+      alert.progress >= 1 &&
+      Boolean(strategy.signal_id) &&
+      typeof strategy.round_id === "number" &&
+      !isPureConfirmedStrategy(strategy)
+    );
+  });
 }
 
 function buildFormationStrategies(
@@ -225,11 +233,11 @@ function WaitingConfirmedEntryBlock({ isUsingRealData }: { isUsingRealData: bool
   return (
     <div className="mt-1 w-full rounded-xl border border-neon-cyan/12 bg-background/25 px-2.5 py-2">
       <div className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
-        Aguardando entrada confirmada
+        Analisando padroes
       </div>
       <div className="mt-1 text-[10px] leading-snug text-muted-foreground">
         {isUsingRealData
-          ? "Nenhum padrao puro neste momento. O card segue monitorando a mesa."
+          ? "Aguardando nova Entrada Confirmada. Os padroes em formacao seguem abaixo."
           : "Aguardando historico real da mesa para liberar o monitoramento."}
       </div>
     </div>
