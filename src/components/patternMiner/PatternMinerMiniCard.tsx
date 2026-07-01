@@ -29,11 +29,7 @@ export function PatternMinerMiniCard({
 
           <div className="min-w-0 flex-1">
             <div className="text-sm font-black">Padroes IA</div>
-            {!isUsingRealData ? (
-              <div className="mt-1 text-[10px] leading-snug text-warning">
-                Aguardando historico real da plataforma.
-              </div>
-            ) : confirmedAlert ? (
+            {confirmedAlert ? (
               <LivePatternStatusBlock alert={confirmedAlert} />
             ) : (
               <WaitingConfirmedEntryBlock />
