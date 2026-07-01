@@ -277,10 +277,11 @@ export function LeituraNeuralMiniCard({
           />
 
           <div className="flex flex-wrap items-center gap-1">
-            <span className="flex min-w-0 items-baseline gap-1">
-              <span className="text-lg font-black leading-none text-foreground sm:text-xl">
-                {activeNumberLabel}
-              </span>
+            <span className="flex min-w-0 items-center gap-1">
+              <NeuralNumberToken
+                label={activeNumberLabel}
+                side={originKind === "OPOSTO" ? data.losingSide ?? data.origem : data.origem}
+              />
               <span className={cn("truncate text-[11px] font-extrabold", sideClass(data.origem))}>
                 {originKind === "OPOSTO" ? "perdido" : sideLabel(data.origem)}
               </span>
@@ -740,6 +741,46 @@ function MiniInfoLine({
       <span className={cn("shrink-0 truncate text-foreground", valueClassName)}>{value}</span>
     </div>
   );
+}
+
+function NeuralNumberToken({
+  label,
+  side,
+}: {
+  label: string;
+  side?: NeuralSide | null;
+}) {
+  const compactLabel = compactNumberTokenLabel(label);
+  return (
+    <span
+      className={cn(
+        "inline-grid size-7 shrink-0 place-items-center rounded-full border font-black leading-none shadow-[0_0_14px_-7px_currentColor]",
+        compactLabel.length > 1 ? "text-[11px]" : "text-[14px]",
+        numberTokenClass(side),
+      )}
+      title={label}
+      aria-label={label}
+    >
+      {compactLabel}
+    </span>
+  );
+}
+
+function compactNumberTokenLabel(label: string) {
+  const text = String(label || "--").trim();
+  const sideNumber = text.match(/^[BP]\s*(\d+)$/i);
+  if (sideNumber?.[1]) return sideNumber[1];
+  const tieNumber = text.match(/^(\d+)\s*x\s*\d+$/i);
+  if (tieNumber?.[1]) return tieNumber[1];
+  const onlyNumber = text.match(/\d+/)?.[0];
+  return onlyNumber || text || "--";
+}
+
+function numberTokenClass(side?: NeuralSide | null) {
+  if (side === "BANKER") return "border-banker/70 bg-banker text-white";
+  if (side === "PLAYER") return "border-player/70 bg-player text-white";
+  if (side === "TIE") return "border-warning/70 bg-warning text-background";
+  return "border-white/20 bg-white/10 text-foreground";
 }
 
 function neuralEntryStatusState(
