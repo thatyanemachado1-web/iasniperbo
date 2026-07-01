@@ -17,7 +17,17 @@ export function PatternMinerMiniCard({
   snapshot: PatternMinerSnapshot;
   isUsingRealData: boolean;
 }) {
-  const confirmedAlert = snapshot.entryAlerts.find(isPureConfirmedDashboardAlert);
+  const confirmedAlert = findConfirmedPatternAlert(snapshot);
+  const monitoringAlert = snapshot.entryAlerts.find((alert) => alert.kind === "forming") ?? snapshot.formingAlerts[0];
+  const monitoringStrategy =
+    monitoringAlert?.strategy ??
+    snapshot.hotStrategies[0] ??
+    snapshot.ranking[0] ??
+    snapshot.agent.lastDiscovery;
+  const formationStrategies = buildFormationStrategies(snapshot, [
+    confirmedAlert?.strategy.id,
+    monitoringStrategy?.id,
+  ]).slice(0, 2);
 
   return (
     <GlassCard className="h-full rounded-xl border-neon-cyan/35 p-3">
@@ -31,11 +41,20 @@ export function PatternMinerMiniCard({
             <div className="text-sm font-black">Padroes IA</div>
             {confirmedAlert ? (
               <LivePatternStatusBlock alert={confirmedAlert} />
+            ) : monitoringStrategy ? (
+              <MonitoringPatternBlock
+                strategy={monitoringStrategy}
+                progress={monitoringAlert?.progress}
+                isUsingRealData={isUsingRealData}
+              />
             ) : (
-              <WaitingConfirmedEntryBlock />
+              <WaitingConfirmedEntryBlock isUsingRealData={isUsingRealData} />
             )}
           </div>
         </div>
+
+        <MiniScoreboard snapshot={snapshot} />
+        <MiniFormationList strategies={formationStrategies} />
 
         <Link
           to="/app/padroes"
@@ -45,6 +64,113 @@ export function PatternMinerMiniCard({
         </Link>
       </div>
     </GlassCard>
+  );
+}
+
+function findConfirmedPatternAlert(snapshot: PatternMinerSnapshot) {
+  const realtimeAlert = [...snapshot.entryAlerts, ...snapshot.formingAlerts].find((alert) =>
+    isPureConfirmedStrategy(alert.strategy),
+  );
+  if (realtimeAlert) {
+    return {
+      ...realtimeAlert,
+      kind: "validated" as const,
+      title: "ENTRADA CONFIRMADA",
+      progress: 1,
+      missingTokens: [],
+    };
+  }
+
+  const learnedStrategy = uniqueStrategies([
+    ...snapshot.hotStrategies,
+    ...snapshot.ranking,
+    snapshot.agent.lastDiscovery,
+  ]).find(isPureConfirmedStrategy);
+
+  if (!learnedStrategy) return undefined;
+  return {
+    id: `validated-${learnedStrategy.id}-${learnedStrategy.round_id ?? "learning"}`,
+    kind: "validated" as const,
+    strategy: learnedStrategy,
+    matchedRounds: [],
+    progress: 1,
+    missingTokens: [],
+    title: "ENTRADA CONFIRMADA",
+  };
+}
+
+function buildFormationStrategies(
+  snapshot: PatternMinerSnapshot,
+  hiddenIds: Array<string | undefined>,
+) {
+  const hidden = new Set(hiddenIds.filter(Boolean));
+  return uniqueStrategies([
+    ...snapshot.formingAlerts.map((alert) => alert.strategy),
+    ...snapshot.hotStrategies,
+    ...snapshot.ranking,
+    snapshot.agent.lastDiscovery,
+  ]).filter((strategy) => !hidden.has(strategy.id));
+}
+
+function uniqueStrategies(strategies: Array<PatternMinerStrategy | undefined>) {
+  const seen = new Set<string>();
+  return strategies.filter((strategy): strategy is PatternMinerStrategy => {
+    if (!strategy || seen.has(strategy.id)) return false;
+    seen.add(strategy.id);
+    return true;
+  });
+}
+
+function MonitoringPatternBlock({
+  strategy,
+  progress,
+  isUsingRealData,
+}: {
+  strategy: PatternMinerStrategy;
+  progress?: number;
+  isUsingRealData: boolean;
+}) {
+  const side = strategy.next_side ?? strategy.expectedResult;
+  const nextSide = side ? formatPulledSide(side) : "Sem tendencia";
+  const accuracy = normalizedPercent(
+    strategy.next_side_probability ?? strategy.assertiveness ?? strategy.accuracy,
+  );
+  const redOk = strategy.red_count <= 2;
+  const sampleOk = !strategy.insufficientSample && strategy.occurrences >= 3 && strategy.totalValidated >= 2;
+  const liveLabel = isUsingRealData ? "monitorando ao vivo" : "aguardando feed real";
+
+  return (
+    <div className="mt-1 rounded-xl border border-neon-cyan/18 bg-background/25 px-2.5 py-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
+          {liveLabel}
+        </span>
+        <AppBadge tone={redOk ? "blue" : "red"} className="px-2 text-[8px]">
+          {progressLabel(progress)}
+        </AppBadge>
+      </div>
+
+      <div className="min-w-0">
+        <PatternSequence sequence={strategy.sequence} compact />
+      </div>
+
+      <div className="mt-1 rounded-lg border border-neon-cyan/12 bg-background/20 px-2 py-1 text-[9px]">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-muted-foreground">Puxando:</span>
+          <span className="font-black">{nextSide}</span>
+          <span className="text-neon-cyan">{formatPercent(accuracy)}</span>
+        </div>
+        <div className="mt-1 grid grid-cols-4 gap-1 text-[8px]">
+          <MiniMeta label="OC" value={strategy.occurrences} />
+          <MiniMeta label="SG" value={strategy.sg_count} />
+          <MiniMeta label="G1" value={strategy.g1_count} />
+          <MiniMeta label="RD" value={strategy.red_count} />
+        </div>
+        <div className="mt-1 text-[8px] leading-snug text-muted-foreground">
+          {entryReadinessText({ accuracy, redOk, sampleOk, hasSide: Boolean(side), isUsingRealData })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -92,21 +218,84 @@ function LivePatternStatusBlock({ alert }: { alert: PatternMinerAlert }) {
   );
 }
 
-function WaitingConfirmedEntryBlock() {
+function WaitingConfirmedEntryBlock({ isUsingRealData }: { isUsingRealData: boolean }) {
   return (
     <div className="mt-1 rounded-xl border border-neon-cyan/12 bg-background/25 px-2.5 py-2">
       <div className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
         Aguardando entrada confirmada
       </div>
       <div className="mt-1 text-[10px] leading-snug text-muted-foreground">
-        Somente sinal puro: 100%, amostra valida, sinal atual e red ate 2.
+        {isUsingRealData
+          ? "Nenhum padrao puro neste momento. O card segue monitorando a mesa."
+          : "Aguardando historico real da mesa para liberar o monitoramento."}
       </div>
     </div>
   );
 }
 
-function isPureConfirmedDashboardAlert(alert: PatternMinerAlert) {
-  return alert.kind === "validated" && isPureConfirmedStrategy(alert.strategy);
+function MiniScoreboard({ snapshot }: { snapshot: PatternMinerSnapshot }) {
+  return (
+    <div className="rounded-xl border border-neon-cyan/12 bg-background/20 px-2.5 py-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
+          Placar IA
+        </span>
+        <span className="text-[8px] font-black text-neon-cyan">
+          {formatPercent(snapshot.scoreboard.assertiveness)}
+        </span>
+      </div>
+      <div className="grid grid-cols-4 gap-1 text-[8px]">
+        <MiniMeta label="SG" value={snapshot.scoreboard.sg} />
+        <MiniMeta label="G1" value={snapshot.scoreboard.g1} />
+        <MiniMeta label="RD" value={snapshot.scoreboard.red} />
+        <MiniMeta label="TIE" value={snapshot.scoreboard.tie} />
+      </div>
+    </div>
+  );
+}
+
+function MiniFormationList({ strategies }: { strategies: PatternMinerStrategy[] }) {
+  if (!strategies.length) return null;
+
+  return (
+    <div className="rounded-xl border border-neon-cyan/12 bg-background/20 px-2.5 py-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
+          Em formacao
+        </span>
+        <span className="text-[8px] text-muted-foreground">{strategies.length} perto</span>
+      </div>
+      <div className="space-y-1.5">
+        {strategies.map((strategy) => {
+          const side = strategy.next_side ?? strategy.expectedResult;
+          const accuracy = normalizedPercent(
+            strategy.next_side_probability ?? strategy.assertiveness ?? strategy.accuracy,
+          );
+          return (
+            <div key={strategy.id} className="rounded-lg border border-neon-cyan/10 bg-background/25 px-2 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[8px] font-black uppercase text-foreground">
+                  Padrao IA
+                </span>
+                <span className="text-[8px] font-black text-neon-cyan">
+                  {formatPercent(accuracy)}
+                </span>
+              </div>
+              <div className="mt-1 min-w-0">
+                <PatternSequence sequence={strategy.sequence} compact />
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[8px] text-muted-foreground">
+                <span>Entrada {side ? formatPulledSide(side) : "-"}</span>
+                <span>SG {strategy.sg_count}</span>
+                <span>G1 {strategy.g1_count}</span>
+                <span>RD {strategy.red_count}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function isPureConfirmedStrategy(strategy: PatternMinerStrategy) {
@@ -137,6 +326,33 @@ function isPureConfirmedStrategy(strategy: PatternMinerStrategy) {
 function normalizedPercent(value: number | undefined) {
   if (value === undefined || Number.isNaN(value)) return undefined;
   return value <= 1 && value >= 0 ? value * 100 : value;
+}
+
+function progressLabel(progress: number | undefined) {
+  if (typeof progress !== "number" || !Number.isFinite(progress)) return "analise";
+  if (progress >= 1) return "formado";
+  return `${Math.round(progress * 100)}%`;
+}
+
+function entryReadinessText({
+  accuracy,
+  redOk,
+  sampleOk,
+  hasSide,
+  isUsingRealData,
+}: {
+  accuracy: number | undefined;
+  redOk: boolean;
+  sampleOk: boolean;
+  hasSide: boolean;
+  isUsingRealData: boolean;
+}) {
+  if (!isUsingRealData) return "Aguardando feed real para confirmar entrada.";
+  if (!hasSide) return "Aguardando puxar PLAYER, BANKER ou TIE.";
+  if (!sampleOk) return "Aguardando amostra valida para confirmar.";
+  if (!redOk) return "Bloqueia acima de 2 reds.";
+  if (accuracy === undefined || accuracy < 99.995) return "Aguardando assertividade 100%.";
+  return "Pronto para virar Entrada Confirmada no sinal atual.";
 }
 
 function MiniMeta({ label, value }: { label: string; value: string | number }) {
