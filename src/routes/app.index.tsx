@@ -69,14 +69,6 @@ function DashboardPage() {
   const { data: d, dashboardUrl, mode, setModuleToggles } = useDashboardData();
   const userSession = readUserSession();
   const fullAccess = hasFullAccess(userSession);
-  const patternMiner = usePatternMiner({
-    rounds: d.rounds,
-    historyLimit: 15000,
-    enabled: mode === "live" && !d.mockMode,
-    serverSnapshot: d.patternMinerSnapshot,
-    feedStatus: d.feedStatus,
-    dashboardUpdatedAt: d.updatedAt,
-  });
   const { history: roundHistory, resetHistory } = useRoundHistory(
     d,
     mode === "live" && !d.mockMode,
@@ -86,15 +78,22 @@ function DashboardPage() {
     limit: 20_000,
     tableId: "bac-bo",
   });
-  const dailySurfSourceRounds = useMemo(
+  const collectedRounds = useMemo(
     () => {
-      const sharedRounds = sharedRoundHistory.rounds.length ? sharedRoundHistory.rounds : [];
-      return [...sharedRounds, ...d.rounds];
+      return mergeDashboardRoundSources(sharedRoundHistory.rounds, roundHistory.todayRounds, d.rounds);
     },
-    [sharedRoundHistory.rounds, d.rounds],
+    [sharedRoundHistory.rounds, roundHistory.todayRounds, d.rounds],
   );
+  const patternMiner = usePatternMiner({
+    rounds: collectedRounds.length ? collectedRounds : d.rounds,
+    historyLimit: 15000,
+    enabled: mode === "live" && !d.mockMode,
+    serverSnapshot: d.patternMinerSnapshot,
+    feedStatus: d.feedStatus,
+    dashboardUpdatedAt: sharedRoundHistory.updatedAt ?? d.updatedAt,
+  });
   const dailySurfMax = useDailySurfMax({
-    rounds: dailySurfSourceRounds,
+    rounds: collectedRounds.length ? collectedRounds : d.rounds,
     tableId: "bac-bo",
     sourceUpdatedAt: sharedRoundHistory.updatedAt ?? d.updatedAt,
     enabled: mode === "live" && !d.mockMode,
@@ -111,6 +110,7 @@ function DashboardPage() {
   const tieResult = calculateTieResult(d.tieAlertScoreboard);
   const neuralResult = calculateNeuralResult(d.neuralReading);
   const surfResult = calculateSurfResult(surfBoard);
+  const visibleRounds = collectedRounds.length ? collectedRounds : d.rounds;
   const tableTieCount = d.rounds.filter((round) => round.result === "T").length;
   const tableTieLabel = formatCompactCount(tableTieCount);
   const tieHitLabel = formatCompactCount(tieResult.greens);
@@ -240,10 +240,10 @@ function DashboardPage() {
           <GlassCard>
             <SectionTitle
               title="Bolinhas Bac Bo"
-              right={<AppBadge tone="blue">Últimas 30 rodadas</AppBadge>}
+              right={<AppBadge tone="blue">Ultimas 30 coletadas</AppBadge>}
             />
             <Suspense fallback={<InlineLoading height="h-16" />}>
-              <RoadmapDots rounds={d.rounds} compact showScore />
+              <RoadmapDots rounds={visibleRounds.slice(-30)} compact showScore />
             </Suspense>
             <Link
               to="/app"
@@ -397,6 +397,18 @@ function formatCompactCount(value: number) {
 
 function neuralMaxSequenceLabel(value: number) {
   return value > 0 ? value : "coletando";
+}
+
+function mergeDashboardRoundSources(...sources) {
+  const byKey = new Map();
+  for (const source of sources) {
+    for (const round of source ?? []) {
+      if (!round || typeof round.id !== "number") continue;
+      const key = `${round.id}:${round.result}:${round.bankerScore}:${round.playerScore}`;
+      byKey.set(key, round);
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) => a.id - b.id);
 }
 
 function DeferredBlock({ children }: { children: React.ReactNode }) {
