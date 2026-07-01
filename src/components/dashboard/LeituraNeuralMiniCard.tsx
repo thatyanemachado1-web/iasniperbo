@@ -1259,7 +1259,7 @@ function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
   if (kind === "TIE") {
     return {
       label: "Tie",
-      className: "border-tie/35 bg-tie/10 text-tie",
+      className: "border-warning/35 bg-warning/10 text-warning",
     };
   }
   return {
@@ -1417,6 +1417,6 @@ function sideLabel(side?: NeuralSide | null) {
 function sideClass(side?: NeuralSide | null) {
   if (side === "BANKER") return "text-banker";
   if (side === "PLAYER") return "text-player";
-  if (side === "TIE") return "text-tie";
+  if (side === "TIE") return "text-warning";
   return "text-muted-foreground";
 }
