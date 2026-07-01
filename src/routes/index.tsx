@@ -75,6 +75,7 @@ export const Route = createFileRoute("/")({
 
 const WAITLIST_URL = "https://wa.me/5567992308362";
 const LOGIN_BOOTSTRAP_FALLBACK_MS = 3500;
+const LOGIN_SAVED_SESSION_FALLBACK_MS = 2200;
 
 const landingFallbackPlans: BillingPlan[] = [
   {
@@ -269,8 +270,22 @@ function LoginPage() {
     const password = String(data.get("password") || "");
     setPrefillEmail(email);
     setCheckoutLeadEmail(email);
+    let fallbackTimer: number | undefined;
+    let navigating = false;
+    const goApp = () => {
+      if (navigating) return;
+      navigating = true;
+      openAppWithFreshBundle();
+    };
+    if (canReuseSavedSessionForLogin(email)) {
+      fallbackTimer = window.setTimeout(() => {
+        setNotice("Abrindo painel com sessao salva...");
+        goApp();
+      }, LOGIN_SAVED_SESSION_FALLBACK_MS);
+    }
     try {
       const access = await checkClientAccess(email, password);
+      if (navigating) return;
       if (!access.registered) {
         if (!salesClosed) setMode("register");
         setNotice(
@@ -285,15 +300,17 @@ function LoginPage() {
         return;
       }
       saveAccessSession(access, email);
-      window.location.href = "/app";
+      goApp();
     } catch (err) {
+      if (navigating) return;
       const message = err instanceof Error ? err.message : "Não foi possível validar seu acesso.";
       if (!salesClosed && shouldOpenRegisterForPasswordSetup(message)) {
         setMode("register");
       }
       setNotice(message);
     } finally {
-      setLoading(false);
+      if (fallbackTimer) window.clearTimeout(fallbackTimer);
+      if (!navigating) setLoading(false);
     }
   }
 
@@ -1148,6 +1165,25 @@ function SalesAccessLoading() {
       </div>
     </div>
   );
+}
+
+function canReuseSavedSessionForLogin(email: string) {
+  const session = readUserSession();
+  return (
+    Boolean(session.clientToken) &&
+    session.registered &&
+    normalizeLoginEmail(session.email) === normalizeLoginEmail(email)
+  );
+}
+
+function openAppWithFreshBundle() {
+  const url = new URL("/app", window.location.origin);
+  url.searchParams.set("entry", String(Date.now()));
+  window.location.assign(url.toString());
+}
+
+function normalizeLoginEmail(email: string) {
+  return email.trim().toLowerCase();
 }
 
 function canEnterWhenSalesClosed(access: ClientAccess) {

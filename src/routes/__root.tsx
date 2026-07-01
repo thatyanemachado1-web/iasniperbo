@@ -13,6 +13,9 @@ import appCss from "../styles.css?url";
 import { InstallAppPrompt } from "@/components/install/InstallAppPrompt";
 import { SiteAnnouncements } from "@/components/ui-app/SiteAnnouncements";
 
+const ASSET_RELOAD_KEY = "sniper_asset_reload_failure";
+const ASSET_ERROR_RE = /failed to fetch dynamically imported module|importing a module script failed|loading chunk|chunkloaderror|preload/i;
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -159,6 +162,7 @@ function ClientOnlyEnhancements() {
 
   useEffect(() => {
     setMounted(true);
+    return installAssetReloadGuard();
   }, []);
 
   if (!mounted) return null;
@@ -169,4 +173,54 @@ function ClientOnlyEnhancements() {
       <SiteAnnouncements />
     </>
   );
+}
+
+function installAssetReloadGuard() {
+  if (typeof window === "undefined") return () => undefined;
+
+  const recover = (failure: string) => {
+    const failureId = failure.slice(0, 220);
+    if (window.sessionStorage.getItem(ASSET_RELOAD_KEY) === failureId) return;
+    window.sessionStorage.setItem(ASSET_RELOAD_KEY, failureId);
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("sbv", String(Date.now()));
+    window.location.replace(nextUrl.toString());
+  };
+
+  const onVitePreloadError = (event: Event) => {
+    event.preventDefault();
+    recover("vite-preload");
+  };
+
+  const onResourceError = (event: Event) => {
+    const target = event.target;
+    if (target instanceof HTMLScriptElement && target.src.includes("/assets/")) {
+      recover(target.src);
+      return;
+    }
+    if (target instanceof HTMLLinkElement && target.href.includes("/assets/")) {
+      recover(target.href);
+      return;
+    }
+
+    const message = "message" in event ? String(event.message || "") : "";
+    if (ASSET_ERROR_RE.test(message)) recover(message);
+  };
+
+  const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+    const message = String(event.reason?.message || event.reason || "");
+    if (!ASSET_ERROR_RE.test(message)) return;
+    event.preventDefault();
+    recover(message);
+  };
+
+  window.addEventListener("vite:preloadError", onVitePreloadError);
+  window.addEventListener("error", onResourceError, true);
+  window.addEventListener("unhandledrejection", onUnhandledRejection);
+
+  return () => {
+    window.removeEventListener("vite:preloadError", onVitePreloadError);
+    window.removeEventListener("error", onResourceError, true);
+    window.removeEventListener("unhandledrejection", onUnhandledRejection);
+  };
 }

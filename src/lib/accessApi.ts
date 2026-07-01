@@ -11,6 +11,8 @@ export class AccessApiError extends Error {
   }
 }
 
+const ACCESS_API_TIMEOUT_MS = 8_000;
+
 export interface ClientAccess {
   registered: boolean;
   approved: boolean;
@@ -206,18 +208,34 @@ async function apiRequest<T>(
     method?: "GET" | "POST";
     body?: Record<string, unknown>;
     authenticated?: boolean;
+    timeoutMs?: number;
   } = {},
 ) {
   const token = readUserSession().clientToken || "";
-  const response = await fetch(`${publicApiBaseUrl()}${path}`, {
-    method: init.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(init.authenticated && token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...(init.body ? { body: JSON.stringify(init.body) } : {}),
-  });
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutId = controller
+    ? setTimeout(() => controller.abort(), init.timeoutMs ?? ACCESS_API_TIMEOUT_MS)
+    : undefined;
+  let response: Response;
+  try {
+    response = await fetch(`${publicApiBaseUrl()}${path}`, {
+      method: init.method || "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(init.authenticated && token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      ...(init.body ? { body: JSON.stringify(init.body) } : {}),
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new AccessApiError("A conexao demorou demais. Atualize a pagina e tente novamente.", 408);
+    }
+    throw error;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
   if (!response.ok) {
     const text = await response.text();
     let message = "";
@@ -230,6 +248,10 @@ async function apiRequest<T>(
     throw new AccessApiError(message || "Não foi possível validar o acesso.", response.status);
   }
   return (await response.json()) as T;
+}
+
+function isAbortError(error: unknown) {
+  return typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError";
 }
 
 function publicApiBaseUrl() {
