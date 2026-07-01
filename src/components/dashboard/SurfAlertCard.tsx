@@ -131,11 +131,17 @@ export function SurfAlertCard({
               </span>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1 text-[8px] font-black uppercase tracking-[0.04em] text-muted-foreground">
-              <span className="rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
-                P3+ {memory.playerDrops3Plus}
+              <span className="flex items-center gap-1 rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
+                <span className="grid size-3 shrink-0 place-items-center rounded-full bg-player text-[7px] leading-none text-white shadow-[0_0_8px_rgba(0,143,255,0.45)]">
+                  P
+                </span>
+                <span>P3+ {memory.playerDrops3Plus}</span>
               </span>
-              <span className="rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
-                B3+ {memory.bankerDrops3Plus}
+              <span className="flex items-center gap-1 rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
+                <span className="grid size-3 shrink-0 place-items-center rounded-full bg-banker text-[7px] leading-none text-white shadow-[0_0_8px_rgba(255,59,78,0.45)]">
+                  B
+                </span>
+                <span>B3+ {memory.bankerDrops3Plus}</span>
               </span>
               <span className="rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
                 AT {memory.currentDropDepth}
