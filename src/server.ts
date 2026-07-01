@@ -2361,7 +2361,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      await saveLiveState(env);
+      await withAuthIoTimeout(saveLiveState(env), "salvar estado no admin auth/check", false);
       const token = await issueSessionToken(
         env,
         {
@@ -2400,7 +2400,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      await saveLiveState(env);
+      await withAuthIoTimeout(saveLiveState(env), "salvar owner no auth/check", false);
       return json({ access: await ownerAccess(env, email, request) });
     }
 
@@ -2411,7 +2411,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      await saveLiveState(env);
+      await withAuthIoTimeout(saveLiveState(env), "salvar admin no auth/check", false);
       return json({ access: await approverAccess(env, email, request) });
     }
 
@@ -2471,18 +2471,18 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       ok = await verifyPassword(password, storedHash);
       if (ok && passwordHashNeedsUpgrade(storedHash)) {
         client.password_hash = await hashPassword(password);
-        await saveLiveState(env);
+        await withAuthIoTimeout(saveLiveState(env), "salvar upgrade de senha no auth/check", false);
       }
       if (ok && "password" in client) {
         delete (client as Record<string, unknown>).password;
-        await saveLiveState(env);
+        await withAuthIoTimeout(saveLiveState(env), "remover senha legada no auth/check", false);
       }
     } else if (legacyPassword) {
       ok = constantTimeStringEqual(password, legacyPassword);
       if (ok) {
         client.password_hash = await hashPassword(password);
         delete (client as Record<string, unknown>).password;
-        await saveLiveState(env);
+        await withAuthIoTimeout(saveLiveState(env), "salvar senha migrada no auth/check", false);
       }
     } else if (clientCanBindPasswordDuringMigration(client)) {
       client.password_hash = await hashPassword(password);
@@ -2512,7 +2512,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     recordAccessEvent(client.enabled ? "client_login" : "client_pending_login", client);
     const access = await clientAccess(env, client, request);
-    await saveLiveState(env);
+    await withAuthIoTimeout(saveLiveState(env), "salvar login no auth/check", false);
     return json({ access });
   }
 
@@ -2704,12 +2704,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         ip_hash: sessionCheck.ipHash || "",
         user_agent_hash: sessionCheck.userAgentHash || "",
       });
-      await saveLiveState(env);
+      await withAuthIoTimeout(saveLiveState(env), "salvar bloqueio de sessao no auth/verify", false);
       return json({ valid: false, reason: "Sessao invalida ou usada em outro dispositivo." }, 401);
     }
 
     const access = await clientAccess(env, client, request, session);
-    await saveLiveState(env);
+    await withAuthIoTimeout(saveLiveState(env), "salvar sessao no auth/verify", false);
     return json({ valid: true, access });
   }
 
@@ -14333,37 +14333,57 @@ function billingClientFromPersistedRows(
     paidAt.slice(0, 10) ||
     readString(user, "created_at") ||
     todayIso();
+  const userPlan = normalizeBillingPlanId(readString(user, "plan"));
+  const subscriptionPlan = normalizeBillingPlanId(readString(subscription, "plan"));
+  const paymentPlan = normalizeBillingPlanId(readString(payment, "plan"));
+  const subscriptionLooksActive = billingSubscriptionIsActive(subscription);
+  const paymentLooksPaid = billingPaymentIsPaid(payment);
   const plan =
-    normalizeBillingPlanId(readString(user, "plan")) ||
-    normalizeBillingPlanId(readString(subscription, "plan")) ||
-    normalizeBillingPlanId(readString(payment, "plan")) ||
+    (subscriptionLooksActive && subscriptionPlan) ||
+    (paymentLooksPaid && paymentPlan) ||
+    userPlan ||
+    subscriptionPlan ||
+    paymentPlan ||
     "free";
   const planConfig = getBillingPlan(plan, env);
-  const expiresAt =
-    readString(user, "expires_at") ||
-    readString(subscription, "expires_at") ||
-    (billingPaymentIsPaid(payment) ? addDaysIso(startsAt, planConfig.durationDays) : "");
+  const userExpiresAt = readString(user, "expires_at");
+  const subscriptionExpiresAt = readString(subscription, "expires_at");
+  const paymentExpiresAt = paymentLooksPaid ? addDaysIso(startsAt, planConfig.durationDays) : "";
+  const activeUserExpiresAt = userExpiresAt && !isExpiredIso(userExpiresAt) ? userExpiresAt : "";
+  const activePaymentExpiresAt =
+    paymentExpiresAt && !isExpiredIso(paymentExpiresAt) ? paymentExpiresAt : "";
+  const expiresAt = subscriptionLooksActive
+    ? subscriptionExpiresAt || activePaymentExpiresAt || activeUserExpiresAt || ""
+    : activePaymentExpiresAt || activeUserExpiresAt || subscriptionExpiresAt || userExpiresAt || paymentExpiresAt;
   const subscriptionActive = billingSubscriptionIsActive(subscription, expiresAt);
-  const paymentActive = billingPaymentIsPaid(payment) && Boolean(expiresAt) && !isExpiredIso(expiresAt);
+  const paymentActive =
+    paymentLooksPaid && Boolean(paymentExpiresAt || expiresAt) && !isExpiredIso(paymentExpiresAt || expiresAt);
+  const paidActive = subscriptionActive || paymentActive;
   const persistedStatus = readString(user, "access_status").toLowerCase();
-  const trialActive = persistedStatus === "trial" && Boolean(expiresAt) && !isExpiredIso(expiresAt);
+  const blocked = readBooleanField(user, "is_blocked") || readBooleanField(user, "isBlocked") || persistedStatus === "blocked";
+  const trialActive = !paidActive && persistedStatus === "trial" && Boolean(expiresAt) && !isExpiredIso(expiresAt);
   const enabled =
-    readBooleanField(user, "enabled") ||
-    subscriptionActive ||
-    paymentActive ||
-    trialActive ||
-    ["approved", "active", "manual_vip"].includes(persistedStatus);
-  const accessStatus =
-    persistedStatus === "trial" && isExpiredIso(expiresAt)
-      ? "expired"
-      : persistedStatus ||
-        (enabled
-          ? subscriptionActive || paymentActive
-            ? "approved"
-            : "trial"
-          : isExpiredIso(expiresAt)
-            ? "expired"
-            : readString(subscription, "status") || readString(payment, "status") || "expired");
+    !blocked &&
+    (readBooleanField(user, "enabled") ||
+      paidActive ||
+      trialActive ||
+      ["approved", "active", "manual_vip"].includes(persistedStatus));
+  let accessStatus = "";
+  if (blocked) {
+    accessStatus = "blocked";
+  } else if (paidActive) {
+    accessStatus = "approved";
+  } else if (persistedStatus === "trial" && isExpiredIso(expiresAt)) {
+    accessStatus = "expired";
+  } else {
+    accessStatus =
+      persistedStatus ||
+      (enabled
+        ? "trial"
+        : isExpiredIso(expiresAt)
+          ? "expired"
+          : readString(subscription, "status") || readString(payment, "status") || "expired");
+  }
 
   return {
     id:
@@ -14435,12 +14455,12 @@ function billingRowTime(row: Record<string, unknown>) {
 function billingSubscriptionIsActive(subscription: Record<string, unknown>, fallbackExpiresAt = "") {
   const status = readString(subscription, "status").toLowerCase();
   const expiresAt = readString(subscription, "expires_at") || fallbackExpiresAt;
-  return ["active", "approved", "paid"].includes(status) && (!expiresAt || !isExpiredIso(expiresAt));
+  return ["active", "approved", "paid", "manual_vip"].includes(status) && (!expiresAt || !isExpiredIso(expiresAt));
 }
 
 function billingPaymentIsPaid(payment: Record<string, unknown>) {
   const status = (readString(payment, "status") || readString(payment, "raw_status")).toLowerCase();
-  return ["approved", "paid"].includes(status);
+  return ["active", "approved", "paid"].includes(status);
 }
 
 function refreshExpiredBillingForClient(client: Record<string, unknown>) {

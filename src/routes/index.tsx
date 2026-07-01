@@ -33,6 +33,8 @@ import { NeuralLines } from "@/components/brand/NeuralLines";
 import { SniperLogoMark } from "@/components/brand/SniperLogoMark";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import {
+  ACCESS_VALIDATION_ERROR_MESSAGE,
+  AccessApiError,
   checkClientAccess,
   createPublicBillingCheckout,
   getBillingPlans,
@@ -303,7 +305,7 @@ function LoginPage() {
       goApp();
     } catch (err) {
       if (navigating) return;
-      const message = err instanceof Error ? err.message : "Não foi possível validar seu acesso.";
+      const message = loginAccessErrorMessage(err);
       if (!salesClosed && shouldOpenRegisterForPasswordSetup(message)) {
         setMode("register");
       }
@@ -1205,6 +1207,18 @@ function shouldOpenRegisterForPasswordSetup(message: string) {
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
   return normalized.includes("conta encontrada sem senha") || normalized.includes("crie sua senha");
+}
+
+function loginAccessErrorMessage(error: unknown) {
+  if (error instanceof AccessApiError) {
+    const message = error.message.trim();
+    if (error.status === 0 || error.status === 408 || error.status >= 500 || !message) {
+      return ACCESS_VALIDATION_ERROR_MESSAGE;
+    }
+    return message;
+  }
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return ACCESS_VALIDATION_ERROR_MESSAGE;
 }
 
 function formatMoney(amount: number, currency: string) {

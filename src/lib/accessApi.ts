@@ -1,6 +1,9 @@
 import { getInitialApiUrl } from "@/lib/adminApi";
 import { readUserSession, saveUserSession, type UserSession } from "@/lib/userSession";
 
+export const ACCESS_VALIDATION_ERROR_MESSAGE =
+  "Não foi possível validar sua assinatura. Tente novamente ou fale com suporte.";
+
 export class AccessApiError extends Error {
   status: number;
 
@@ -12,6 +15,7 @@ export class AccessApiError extends Error {
 }
 
 const ACCESS_API_TIMEOUT_MS = 8_000;
+const LOGIN_ACCESS_TIMEOUT_MS = 15_000;
 
 export interface ClientAccess {
   registered: boolean;
@@ -107,7 +111,11 @@ export function saveAccessSession(access: ClientAccess, fallbackEmail = "") {
 }
 
 export async function checkClientAccess(email: string, password: string) {
-  const data = await publicRequest<{ access: ClientAccess }>("/auth/check", { email, password });
+  const data = await publicRequest<{ access: ClientAccess }>(
+    "/auth/check",
+    { email, password },
+    { timeoutMs: LOGIN_ACCESS_TIMEOUT_MS },
+  );
   return data.access;
 }
 
@@ -198,8 +206,12 @@ export async function createPublicBillingCheckout(
   });
 }
 
-async function publicRequest<T>(path: string, body: Record<string, unknown>) {
-  return apiRequest<T>(path, { method: "POST", body });
+async function publicRequest<T>(
+  path: string,
+  body: Record<string, unknown>,
+  init: { timeoutMs?: number } = {},
+) {
+  return apiRequest<T>(path, { method: "POST", body, ...init });
 }
 
 async function apiRequest<T>(
@@ -230,9 +242,9 @@ async function apiRequest<T>(
     });
   } catch (error) {
     if (isAbortError(error)) {
-      throw new AccessApiError("A conexao demorou demais. Atualize a pagina e tente novamente.", 408);
+      throw new AccessApiError(ACCESS_VALIDATION_ERROR_MESSAGE, 408);
     }
-    throw error;
+    throw new AccessApiError(ACCESS_VALIDATION_ERROR_MESSAGE, 0);
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
@@ -245,13 +257,16 @@ async function apiRequest<T>(
     } catch {
       message = text;
     }
-    throw new AccessApiError(message || "Não foi possível validar o acesso.", response.status);
+    throw new AccessApiError(message || ACCESS_VALIDATION_ERROR_MESSAGE, response.status);
   }
   return (await response.json()) as T;
 }
 
 function isAbortError(error: unknown) {
-  return typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError";
+  return (
+    (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
 }
 
 function publicApiBaseUrl() {
