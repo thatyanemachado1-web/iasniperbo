@@ -696,8 +696,8 @@ function resolveSnapshotRuntimeStatus(
   return { status: "AGUARDANDO PADRAO" as const, blocked_reason: "" };
 }
 
-function buildPatternSignalId(strategy: PatternMinerStrategy, latestRound: Round, generatedAt: string) {
-  return `pattern-ai:${strategy.id}:${latestRound.id}:${strategy.next_side || "NONE"}:${Date.parse(generatedAt) || Date.now()}`;
+function buildPatternSignalId(strategy: PatternMinerStrategy, latestRound: Round, _generatedAt: string) {
+  return `pattern-ai:${strategy.id}:${latestRound.id}:${strategy.next_side || "NONE"}`;
 }
 
 function isFeedStale(context: PatternMinerRuntimeContext, generatedAt: string) {

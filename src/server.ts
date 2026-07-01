@@ -12357,6 +12357,7 @@ function normalizeSignal(
   const side = normalizeSignalSide(signal.side || signal.direcao || signal.entry || signal.entrada);
   const status = normalizeSignalStatus(signal.status || signal.resultado || signal.state, side);
   const protection = String(signal.protection || signal.validade || signal.gale || fallback.protection || "G1");
+  const signalId = normalizeIncomingSignalId(signal, fallback, side, status, protection);
   const terminalStatus = terminalSignalStatus(status);
   const incomingLastResult = readServerLastResult(signal.lastResult);
   const previousVisibleEntry =
@@ -12377,7 +12378,8 @@ function normalizeSignal(
   if (canPromoteRecentLastResult && incomingLastResult) {
     const resolvedProtection = incomingLastResult.protection || protection;
     return {
-      id: String(signal.id || signal.signalId || fallback.id || incomingLastResult.id),
+      id: signalId || incomingLastResult.id,
+      signal_id: signalId || incomingLastResult.id,
       side,
       status: incomingLastResult.status,
       protection: resolvedProtection,
@@ -12406,7 +12408,7 @@ function normalizeSignal(
       incomingLastResult && incomingLastResult.side === side
         ? incomingLastResult
         : {
-            id: String(signal.id || signal.signalId || fallback.id || `result-${Date.now()}`),
+            id: signalId || fallback.id || "result",
             side,
             status: terminalStatus,
             protection,
@@ -12414,7 +12416,8 @@ function normalizeSignal(
           };
 
     return {
-      id: String(signal.id || signal.signalId || fallback.id || `result-${Date.now()}`),
+      id: signalId || fallback.id || "result",
+      signal_id: signalId || fallback.id || "result",
       side,
       status: terminalStatus,
       protection,
@@ -12426,7 +12429,8 @@ function normalizeSignal(
   if (status === "g1" && incomingLastResult && (side === "BANKER" || side === "PLAYER")) {
     const resolvedProtection = incomingLastResult.protection || protection;
     return {
-      id: String(signal.id || signal.signalId || fallback.id || `result-${Date.now()}`),
+      id: signalId || incomingLastResult.id,
+      signal_id: signalId || incomingLastResult.id,
       side,
       status: incomingLastResult.status,
       protection: resolvedProtection,
@@ -12440,13 +12444,43 @@ function normalizeSignal(
   }
 
   return {
-    id: String(signal.id || signal.signalId || `signal-${Date.now()}`),
+    id: signalId,
+    signal_id: signalId,
     side,
     status,
     protection,
     strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
     lastResult: null,
   };
+}
+
+function normalizeIncomingSignalId(
+  signal: Record<string, unknown>,
+  fallback: DashboardData["currentSignal"],
+  side: DashboardData["currentSignal"]["side"],
+  status: DashboardData["currentSignal"]["status"],
+  protection: string,
+) {
+  const explicitId =
+    readString(signal, "id") ||
+    readString(signal, "signalId") ||
+    readString(signal, "signal_id") ||
+    readString(signal, "key");
+  if (explicitId) return explicitId;
+
+  const fallbackIsSameSignal =
+    fallback &&
+    fallback.side === side &&
+    fallback.status === status &&
+    String(fallback.protection || "") === String(protection || "");
+  if (fallbackIsSameSignal && fallback.id) return fallback.id;
+
+  const roundId =
+    readString(signal, "round_id") ||
+    readString(signal, "roundId") ||
+    readString(signal, "detected_round_id") ||
+    readString(signal, "entry_round_id");
+  return ["signal", roundId || "current", side || "NONE", status || "waiting", protection || "-"].join(":");
 }
 
 function normalizeBettingTiming(value: unknown): DashboardData["bettingTiming"] | null {
@@ -12486,7 +12520,7 @@ function readServerLastResult(value: unknown): DashboardData["currentSignal"]["l
   const status = terminalSignalStatus(normalizeSignalStatus(record.status || record.resultado || record.state, side));
   if (!status || (side !== "BANKER" && side !== "PLAYER")) return null;
   return {
-    id: String(record.id || record.signalId || `result-${Date.now()}`),
+    id: readString(record, "id") || readString(record, "signalId") || readString(record, "signal_id") || "result",
     side,
     status,
     protection: String(record.protection || record.validade || record.gale || "G1"),

@@ -87,23 +87,7 @@ function findConfirmedPatternAlert(snapshot: PatternMinerSnapshot) {
       missingTokens: [],
     };
   }
-
-  const learnedStrategy = uniqueStrategies([
-    ...snapshot.hotStrategies,
-    ...snapshot.ranking,
-    snapshot.agent.lastDiscovery,
-  ]).find(isPureConfirmedStrategy);
-
-  if (!learnedStrategy) return undefined;
-  return {
-    id: `validated-${learnedStrategy.id}-${learnedStrategy.round_id ?? "learning"}`,
-    kind: "validated" as const,
-    strategy: learnedStrategy,
-    matchedRounds: [],
-    progress: 1,
-    missingTokens: [],
-    title: "ENTRADA CONFIRMADA",
-  };
+  return undefined;
 }
 
 function buildFormationStrategies(
