@@ -32,31 +32,32 @@ export function PatternMinerMiniCard({
   return (
     <GlassCard className="h-full rounded-xl border-neon-cyan/35 p-3">
       <div className="flex h-full min-w-0 flex-col gap-2.5">
-        <div className="flex items-start gap-2.5">
+        <div className="flex items-center gap-2.5">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-xl btn-primary-grad glow-blue">
             <BrainCircuit className="size-4" />
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-black">Padroes IA</div>
-            {!confirmedAlert && monitoringStrategy && (
-              <PatternLiveStatusHeader
-                strategy={monitoringStrategy}
-                progress={monitoringAlert?.progress}
-                isUsingRealData={isUsingRealData}
-              />
-            )}
-            {confirmedAlert ? (
-              <LivePatternStatusBlock alert={confirmedAlert} />
-            ) : monitoringStrategy ? (
-              <MonitoringPatternBlock
-                strategy={monitoringStrategy}
-                isUsingRealData={isUsingRealData}
-              />
-            ) : (
-              <WaitingConfirmedEntryBlock isUsingRealData={isUsingRealData} />
-            )}
-          </div>
+          <div className="min-w-0 text-sm font-black">Padroes IA</div>
+        </div>
+
+        <div className="min-w-0">
+          {!confirmedAlert && monitoringStrategy && (
+            <PatternLiveStatusHeader
+              strategy={monitoringStrategy}
+              progress={monitoringAlert?.progress}
+              isUsingRealData={isUsingRealData}
+            />
+          )}
+          {confirmedAlert ? (
+            <LivePatternStatusBlock alert={confirmedAlert} />
+          ) : monitoringStrategy ? (
+            <MonitoringPatternBlock
+              strategy={monitoringStrategy}
+              isUsingRealData={isUsingRealData}
+            />
+          ) : (
+            <WaitingConfirmedEntryBlock isUsingRealData={isUsingRealData} />
+          )}
         </div>
 
         <MiniScoreboard snapshot={snapshot} />
@@ -140,7 +141,7 @@ function PatternLiveStatusHeader({
   const liveLabel = isUsingRealData ? "monitorando ao vivo" : "aguardando feed real";
 
   return (
-    <div className="mt-1 flex items-center justify-between gap-2 px-0.5">
+    <div className="flex items-center justify-between gap-2 px-0.5">
       <span className="text-[9px] font-black uppercase leading-tight tracking-[0.12em] text-neon-cyan">
         {liveLabel}
       </span>
