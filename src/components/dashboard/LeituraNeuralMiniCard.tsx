@@ -31,6 +31,11 @@ interface NeuralEntryHistoryItem extends NeuralEntryDisplayResult {
   id: string;
 }
 
+interface HeldNeuralEntry {
+  state: NeuralEntryState;
+  heldAt: number;
+}
+
 interface NeuralScoreSummary {
   totalAlerts: number | null;
   greens: number | null;
@@ -57,6 +62,7 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
 const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
 const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
+const HELD_NEURAL_ENTRY_MAX_MS = 90_000;
 
 const SCANNING_READING: NeuralReading = {
   mode: "SCANNING",
@@ -97,6 +103,23 @@ export function LeituraNeuralMiniCard({
   const originKind = neuralOriginKind(data);
   const originBadge = originBadgeFor(originKind);
   const pullingSide = data.direcao ?? data.origem;
+  const activeEntryState = liveNeuralEntryState(neuralEntryState);
+  const [heldEntry, setHeldEntry] = useState<HeldNeuralEntry | null>(() =>
+    activeEntryState ? { state: activeEntryState, heldAt: Date.now() } : null,
+  );
+  const visibleHeldEntry =
+    heldEntry &&
+    !neuralEntryResultMatchesState(neuralEntryLastResult, heldEntry.state) &&
+    !isHeldNeuralEntryExpired(heldEntry)
+      ? heldEntry.state
+      : null;
+  const visibleActiveEntry =
+    activeEntryState && !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
+      ? activeEntryState
+      : null;
+  const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
+  const confirmedEntrySide = liveNeuralEntrySide(visibleEntryState);
+  const liveEntry = Boolean(confirmedEntrySide);
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
@@ -113,12 +136,31 @@ export function LeituraNeuralMiniCard({
     "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
-  const confirmedEntrySide = mode === "ACTIVE" ? pullingSide : null;
   const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
   const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
   const lastOfficialResultRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
   const mountedAtRef = useRef(Date.now());
+
+  useEffect(() => {
+    setHeldEntry((current) => {
+      if (activeEntryState) {
+        if (neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)) return null;
+        return {
+          state: activeEntryState,
+          heldAt:
+            current && isSameNeuralEntryState(current.state, activeEntryState)
+              ? current.heldAt
+              : Date.now(),
+        };
+      }
+
+      if (!current) return null;
+      if (neuralEntryResultMatchesState(neuralEntryLastResult, current.state)) return null;
+      if (isHeldNeuralEntryExpired(current)) return null;
+      return current;
+    });
+  }, [activeEntryState, neuralEntryLastResult]);
 
   useEffect(() => {
     const result = displayResultFromOfficialEntry(neuralEntryLastResult);
@@ -203,7 +245,7 @@ export function LeituraNeuralMiniCard({
           <TieMultiplierMiniLine multipliers={tieMultipliers} />
           <div className="mt-1.5">
             <NeuralEntryStatusCard
-              confirmedSide={null}
+              confirmedSide={confirmedEntrySide}
               result={entryResult}
               history={entryHistory}
             />
@@ -237,12 +279,23 @@ export function LeituraNeuralMiniCard({
           </div>
 
           {pullingSide ? (
-            <div className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]">
+            <div
+              className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]"
+              title={data.paganteAlert ?? undefined}
+            >
               <span className="text-neon-cyan">
-                {originKind === "OPOSTO" ? "Numero oposto puxando" : postTie ? "Cor pos-empate" : "Puxando"}
+                {liveEntry
+                  ? originKind === "OPOSTO"
+                    ? "Numero oposto puxando"
+                    : postTie
+                      ? "Cor pos-empate"
+                      : "Puxando"
+                  : "Ultima leitura"}
               </span>{" "}
               <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>{" "}
-              <span className="text-[9px] text-muted-foreground/85">até {data.validade ?? "G1"}</span>
+              <span className="text-[9px] text-muted-foreground/85">
+                {liveEntry ? `ate ${data.validade ?? "G1"}` : "sem entrada"}
+              </span>
             </div>
           ) : (
             <div className="truncate text-[10px] font-semibold text-muted-foreground">
@@ -1087,6 +1140,51 @@ function neuralStatusKind(reading: NeuralReading): "green" | "amber" | "red" | "
   }
 
   return "amber";
+}
+
+function liveNeuralEntrySide(entryState: NeuralEntryState | null | undefined): NeuralSide | null {
+  if (!entryState) return null;
+  const side = entryState.expectedSide ?? entryState.origem;
+  return isNeuralSide(side) ? side : null;
+}
+
+function liveNeuralEntryState(entryState: NeuralEntryState | null | undefined): NeuralEntryState | null {
+  if (!entryState || (entryState.status !== "awaiting_sg" && entryState.status !== "awaiting_g1")) {
+    return null;
+  }
+
+  return liveNeuralEntrySide(entryState) ? entryState : null;
+}
+
+function neuralEntryResultMatchesState(
+  result: NeuralEntryLastResult | null | undefined,
+  state: NeuralEntryState | null | undefined,
+) {
+  if (!result || !state) return false;
+
+  const resultMatchesKey =
+    Boolean(result.key && state.key && result.key === state.key) ||
+    Boolean(result.id && state.key && result.id.startsWith(`${state.key}:`));
+  if (!resultMatchesKey) return false;
+
+  const resultFinishedAt = dateMs(result.finishedAt);
+  const stateStartedAt = dateMs(state.startedAt);
+  if (!resultFinishedAt || !stateStartedAt) return true;
+  return resultFinishedAt >= stateStartedAt - 1000;
+}
+
+function isSameNeuralEntryState(left: NeuralEntryState, right: NeuralEntryState) {
+  return left.key === right.key && left.triggerRoundKey === right.triggerRoundKey;
+}
+
+function isHeldNeuralEntryExpired(entry: HeldNeuralEntry) {
+  return Date.now() - entry.heldAt > HELD_NEURAL_ENTRY_MAX_MS;
+}
+
+function dateMs(value: unknown) {
+  if (typeof value !== "string" || !value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 function statusLabel(reading: NeuralReading) {
