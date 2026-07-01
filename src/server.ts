@@ -11016,9 +11016,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   const dashboardWithNeuralEntry = hasIncomingNeuralLifecycle
     ? syncServerNeuralReadingFromIncomingLifecycle(nextDashboard)
     : trackServerNeuralEntryLifecycle(nextDashboard, currentDashboard, incomingLatestRound, receivedNewRound);
-  const dashboardWithVisibleNeuralSignal = hasIncomingNeuralLifecycle
-    ? dashboardWithNeuralEntry
-    : exposeServerNeuralEntryAsCurrentSignal(dashboardWithNeuralEntry);
+  const dashboardWithVisibleNeuralSignal = exposeServerNeuralEntryAsCurrentSignal(dashboardWithNeuralEntry);
   const dashboardWithLateSignalGuard =
     acceptsCurrentCycle && !hasIncomingNeuralLifecycle
       ? guardLateServerNeuralSignal(dashboardWithVisibleNeuralSignal, currentDashboard)
@@ -11033,15 +11031,16 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
 
 function syncServerNeuralReadingFromIncomingLifecycle(dashboard: LiveDashboardData): LiveDashboardData {
   const state = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
+  const result = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
   if (state) {
     return {
       ...dashboard,
       neuralEntryState: state,
+      neuralEntryLastResult: result,
       neuralReading: neuralReadingForEntryState(state),
     };
   }
 
-  const result = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
   if (!result) return dashboard;
   return {
     ...dashboard,
@@ -11146,7 +11145,8 @@ function exposeServerNeuralEntryAsCurrentSignal(dashboard: LiveDashboardData): L
     !currentSignal ||
     currentSignal.side === "NONE" ||
     currentSignal.status === "waiting" ||
-    String(currentSignal.id || "").startsWith("neural-entry:");
+    String(currentSignal.id || "").startsWith("neural-entry:") ||
+    String(currentSignal.id || "").startsWith("neural-reading:");
 
   if (!currentSignalIsIdle) return dashboard;
 
@@ -11508,21 +11508,28 @@ function normalizeServerNeuralEntryState(value: unknown): NeuralEntryState | nul
   const status = readString(record, "status");
   const triggerRoundKey = readString(record, "triggerRoundKey");
   if (!key || !triggerRoundKey || (status !== "awaiting_sg" && status !== "awaiting_g1")) return null;
+  const origemTipo = readServerNeuralOriginKind(record.origemTipo);
+  const expectedSide = readServerNeuralSide(record.expectedSide);
+  const signalId = readString(record, "signal_id") || readString(record, "signalId") || serverNeuralEntrySignalId({ key, triggerRoundKey });
+  const currentGale =
+    readServerGaleIndex(record.current_gale ?? record.currentGale) ?? (status === "awaiting_g1" ? 1 : 0);
 
   return {
     key,
     numero: readNullableNumber(record.numero),
     origem: readServerNeuralSide(record.origem),
-    origemTipo: readServerNeuralOriginKind(record.origemTipo),
-    expectedSide: readServerNeuralSide(record.expectedSide),
-    signal_id: readString(record, "signal_id") || readString(record, "signalId") || null,
-    round_id: readString(record, "round_id") || readString(record, "roundId") || null,
-    module: readString(record, "module") || null,
-    source: readString(record, "source") || null,
-    entry_side: readServerNeuralSide(record.entry_side ?? record.entrySide),
-    current_gale: readServerGaleIndex(record.current_gale ?? record.currentGale),
+    origemTipo,
+    expectedSide,
+    signal_id: signalId,
+    round_id: readString(record, "round_id") || readString(record, "roundId") || triggerRoundKey,
+    module: readString(record, "module") || "paying_numbers",
+    source: readString(record, "source") || serverNeuralEntrySource(origemTipo),
+    entry_side: readServerNeuralSide(record.entry_side ?? record.entrySide) ?? expectedSide,
+    current_gale: currentGale,
     max_gale: 1,
-    gale_status: readServerGaleStatus(record.gale_status ?? record.galeStatus),
+    gale_status:
+      readServerGaleStatus(record.gale_status ?? record.galeStatus) ??
+      (status === "awaiting_g1" ? "GALE_1_REQUIRED" : "WAITING_SG_RESULT"),
     status,
     triggerRoundKey,
     sgRoundKey: readString(record, "sgRoundKey") || null,
