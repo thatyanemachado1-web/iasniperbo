@@ -87,15 +87,7 @@ function findConfirmedPatternAlert(snapshot: PatternMinerSnapshot) {
 }
 
 function findLiveMonitoringAlert(snapshot: PatternMinerSnapshot) {
-  return snapshot.formingAlerts.find((alert) => {
-    const strategy = alert.strategy;
-    return (
-      alert.progress >= 1 &&
-      Boolean(strategy.signal_id) &&
-      typeof strategy.round_id === "number" &&
-      !isPureConfirmedStrategy(strategy)
-    );
-  });
+  return [...snapshot.entryAlerts, ...snapshot.formingAlerts].find((alert) => !isPureConfirmedStrategy(alert.strategy));
 }
 
 function buildFormationStrategies(
