@@ -60,7 +60,6 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
   neuralEntryLastResult?: NeuralEntryLastResult | null;
 };
 
-const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
 const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
 const HELD_NEURAL_ENTRY_MAX_MS = 90_000;
@@ -128,7 +127,6 @@ export function LeituraNeuralMiniCard({
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
-  const tieMultipliers = tieMultiplierStats(rounds);
   const generalScoreState = neuralScoreState(generalScore);
   const sequenceCopy = neuralSequenceCopy(
     numberFrom(generalScore.currentGreenSequence),
@@ -255,7 +253,6 @@ export function LeituraNeuralMiniCard({
           >
             <span className="max-w-full whitespace-normal break-words">{sequenceCopy.label}</span>
           </div>
-          <TieMultiplierMiniLine multipliers={tieMultipliers} />
           <div className="mt-1.5">
             <NeuralEntryStatusCard
               confirmedSide={confirmedEntrySide}
@@ -401,7 +398,6 @@ export function LeituraNeuralMiniCard({
                     : `Janela: ${data.paganteWindow} rodadas`}
                 </div>
               ) : null}
-              <TieMultiplierMiniLine multipliers={tieMultipliers} />
               {data.paganteStatus && data.paganteStatus !== "VALIDO" ? (
                 <div
                   className={cn(
@@ -422,7 +418,6 @@ export function LeituraNeuralMiniCard({
                 <Sparkles className="size-2.5" />
                 Observando
               </div>
-              <TieMultiplierMiniLine multipliers={tieMultipliers} />
             </div>
           )}
         </div>
@@ -952,34 +947,6 @@ function NeuralGeneralScorePopover({
   );
 }
 
-function TieMultiplierMiniLine({
-  multipliers,
-}: {
-  multipliers: Array<{ label: (typeof TIE_MULTIPLIER_LABELS)[number]; value: number }>;
-}) {
-  return (
-    <div
-      className="mt-1 rounded-lg border border-warning/15 bg-warning/5 px-1.5 py-1"
-      title="Empates pegos no historico real carregado hoje"
-    >
-      <div className="mb-0.5 truncate text-[6.5px] font-black uppercase tracking-[0.1em] text-warning/90">
-        Empates do dia
-      </div>
-      <div className="flex flex-wrap items-end gap-x-1.5 gap-y-1">
-        {multipliers.map((item) => (
-          <span key={item.label} className="inline-flex items-end gap-0.5 leading-none">
-            <span className="grid place-items-center">
-              <span className="text-[6px] font-black text-warning">{item.label}</span>
-              <span className="size-2 rounded-full border border-warning/45 bg-warning shadow-[0_0_8px_-3px_var(--warning)]" />
-            </span>
-            <span className="text-[7.5px] font-black text-foreground">{item.value}</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function neuralToolInsight(reading: NeuralReading) {
   const side = reading.direcao ?? reading.origem;
   const validity = reading.validade ?? "G1";
@@ -1147,25 +1114,6 @@ function buildGeneralScore(
     maxGreenSequence,
     maxRedSequence,
   };
-}
-
-function tieMultiplierStats(rounds: Round[] | undefined) {
-  const counts = new Map<(typeof TIE_MULTIPLIER_LABELS)[number], number>(
-    TIE_MULTIPLIER_LABELS.map((label) => [label, 0]),
-  );
-
-  for (const round of rounds ?? []) {
-    if (round.result !== "T") continue;
-    const multiplier = multiplierForTieRound(round);
-    if (!multiplier) continue;
-    const label = `${multiplier}x` as (typeof TIE_MULTIPLIER_LABELS)[number];
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-
-  return TIE_MULTIPLIER_LABELS.map((label) => ({
-    label,
-    value: counts.get(label) ?? 0,
-  }));
 }
 
 function multiplierForTieRound(round: Round) {
