@@ -36,6 +36,8 @@ function PatternMinerPage() {
     rounds: dashboardData.rounds,
     historyLimit,
     enabled: hasRealHistory,
+    feedStatus: (dashboardData as any).feedStatus,
+    dashboardUpdatedAt: dashboardData.updatedAt,
   });
   const primaryAlerts = [...snapshot.entryAlerts, ...snapshot.formingAlerts];
 

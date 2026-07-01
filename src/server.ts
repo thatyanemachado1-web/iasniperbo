@@ -374,7 +374,10 @@ const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
+const AUTH_IO_TIMEOUT_MS = 1_200;
 const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
+const DASHBOARD_READ_SYNC_MIN_INTERVAL_MS = 1_000;
+const DASHBOARD_READ_SYNC_TIMEOUT_MS = 700;
 const CLIENT_REGISTRY_PROTECTION_INTERVAL_MS = 60_000;
 const CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS = 5 * 60_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
@@ -569,6 +572,8 @@ let liveStateLoadedAt = 0;
 let liveStateLoadPromise: Promise<void> | null = null;
 let liveStateSavePromise: Promise<LiveStateSaveStatus> | null = null;
 let liveStateSavePending = false;
+let dashboardReadSyncPromise: Promise<void> | null = null;
+let dashboardReadSyncedAt = 0;
 let protectedClientRegistryState: Record<string, unknown> | null = null;
 let protectedClientRegistryLoadedAt = 0;
 let clientRegistrySnapshotSavedAt = 0;
@@ -2460,19 +2465,27 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     let client =
       findClientByEmail(email) ||
-      (await hydrateClientFromBilling(env, email)) ||
+      (await withAuthIoTimeout(hydrateClientFromBilling(env, email), "hidratar cliente no auth/check", null)) ||
       syncClientFromRecipientEmail(email) ||
       syncClientFromAdminUserEmail(env, email);
     if (!client) {
-      await recoverClientRegistryForAuth(env, email, "auth_check");
+      await withAuthIoTimeout(
+        recoverClientRegistryForAuth(env, email, "auth_check"),
+        "recuperar cadastro de clientes no auth/check",
+        false,
+      );
       client =
         findClientByEmail(email) ||
-        (await hydrateClientFromBilling(env, email)) ||
+        (await withAuthIoTimeout(hydrateClientFromBilling(env, email), "hidratar cliente no auth/check", null)) ||
         syncClientFromRecipientEmail(email) ||
         syncClientFromAdminUserEmail(env, email);
     }
     if (!client && password) {
-      client = await ensureBlockedTrialClientForLogin(env, request, email, password);
+      client = await withAuthIoTimeout(
+        ensureBlockedTrialClientForLogin(env, request, email, password),
+        "recriar bloqueio de trial no auth/check",
+        null,
+      );
     }
     if (!client) {
       return json({
@@ -2559,13 +2572,17 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     let existingIndex = liveClients.findIndex((item) => readString(item, "email").toLowerCase() === email);
     if (existingIndex < 0) {
-      await hydrateClientFromBilling(env, email);
+      await withAuthIoTimeout(hydrateClientFromBilling(env, email), "hidratar cliente no auth/register", null);
       syncClientFromRecipientEmail(email) || syncClientFromAdminUserEmail(env, email);
       existingIndex = liveClients.findIndex((item) => readString(item, "email").toLowerCase() === email);
     }
     if (existingIndex < 0) {
-      await recoverClientRegistryForAuth(env, email, "auth_register");
-      await hydrateClientFromBilling(env, email);
+      await withAuthIoTimeout(
+        recoverClientRegistryForAuth(env, email, "auth_register"),
+        "recuperar cadastro de clientes no auth/register",
+        false,
+      );
+      await withAuthIoTimeout(hydrateClientFromBilling(env, email), "hidratar cliente no auth/register", null);
       syncClientFromRecipientEmail(email) || syncClientFromAdminUserEmail(env, email);
       existingIndex = liveClients.findIndex((item) => readString(item, "email").toLowerCase() === email);
     }
@@ -2662,22 +2679,42 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     let client =
       findClientByEmail(session.email) ||
-      (await hydrateClientFromBilling(env, session.email)) ||
+      (await withAuthIoTimeout(
+        hydrateClientFromBilling(env, session.email),
+        "hidratar cliente no auth/verify",
+        null,
+      )) ||
       syncClientFromRecipientEmail(session.email) ||
       syncClientFromAdminUserEmail(env, session.email);
     if (!client) {
-      await recoverClientRegistryForAuth(env, session.email, "auth_verify");
+      await withAuthIoTimeout(
+        recoverClientRegistryForAuth(env, session.email, "auth_verify"),
+        "recuperar cadastro de clientes no auth/verify",
+        false,
+      );
       client =
         findClientByEmail(session.email) ||
-        (await hydrateClientFromBilling(env, session.email)) ||
+        (await withAuthIoTimeout(
+          hydrateClientFromBilling(env, session.email),
+          "hidratar cliente no auth/verify",
+          null,
+        )) ||
         syncClientFromRecipientEmail(session.email) ||
         syncClientFromAdminUserEmail(env, session.email);
     }
     if (!client && session.scope === "client") {
-      client = await ensureSessionClientForExpiredTrial(env, request, session);
+      client = await withAuthIoTimeout(
+        ensureSessionClientForExpiredTrial(env, request, session),
+        "reconstruir sessao trial expirada no auth/verify",
+        null,
+      );
     }
     if (!client && session.scope === "client" && session.approved && ["premium", "vip"].includes(session.plan)) {
-      client = await restoreClientFromApprovedSession(env, request, session);
+      client = await withAuthIoTimeout(
+        restoreClientFromApprovedSession(env, request, session),
+        "restaurar cliente premium no auth/verify",
+        null,
+      );
     }
     if (!client) {
       return json({
@@ -3208,7 +3245,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       return json({ error: "Nao autorizado." }, 401);
     }
 
-    await syncDashboardReadState(env);
+    scheduleDashboardReadStateSync(env, ctx);
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
     if (cycle.changed) {
       liveDashboardData = cycle.dashboard;
@@ -14301,6 +14338,15 @@ function serverReadOptionalNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function serverReadRoundScore(value: unknown) {
+  if (value === undefined || value === null || value === "") return Number.NaN;
+  const text = String(value).trim();
+  const match = text.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return Number.NaN;
+  const numeric = Number(match[0].replace(",", "."));
+  return Number.isFinite(numeric) ? numeric : Number.NaN;
+}
+
 function serverSafeCounter(value: unknown) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
@@ -14346,8 +14392,8 @@ function normalizeRounds(rounds: unknown[], limit = 30) {
       return {
         id: Number(item.id || item.round || item.roundId || 1000 + index),
         result,
-        bankerScore: Number(item.bankerScore ?? item.banker_score ?? item.banker ?? 0),
-        playerScore: Number(item.playerScore ?? item.player_score ?? item.player ?? 0),
+        bankerScore: serverReadRoundScore(item.bankerScore ?? item.banker_score ?? item.banker),
+        playerScore: serverReadRoundScore(item.playerScore ?? item.player_score ?? item.player),
         tieMultiplier: readNullableNumber(item.tieMultiplier ?? item.tie_multiplier ?? item.multiplier),
         time: String(item.time || item.createdAt || "--:--"),
         recordedAt: normalizeRoundRecordedAt(item),
@@ -14518,8 +14564,8 @@ function storedValidatorRoundFromRow(row: Record<string, unknown>): Round | null
   return {
     id,
     result,
-    bankerScore: Number(row.banker_score ?? row.bankerScore ?? 0),
-    playerScore: Number(row.player_score ?? row.playerScore ?? 0),
+    bankerScore: serverReadRoundScore(row.banker_score ?? row.bankerScore ?? row.banker),
+    playerScore: serverReadRoundScore(row.player_score ?? row.playerScore ?? row.player),
     tieMultiplier: readNullableNumber(row.tie_multiplier ?? row.tieMultiplier ?? row.multiplier),
     time: readString(row, "round_time") || readString(row, "time") || readString(row, "created_at") || "--:--",
     recordedAt: readString(row, "created_at") || readString(row, "recordedAt") || readString(row, "recorded_at"),
@@ -15635,18 +15681,49 @@ async function loadBillingClientByEmail(env: unknown, email: string) {
 
   const encodedEmail = encodeURIComponent(cleanEmail);
   const [users, subscriptions, payments] = await Promise.all([
-    fetchSupabaseRows(env, "users", `select=*&email=ilike.${encodedEmail}&limit=1`),
+    fetchSupabaseRows(env, "users", `select=*&email=ilike.${encodedEmail}&limit=1`, AUTH_IO_TIMEOUT_MS),
     fetchSupabaseRows(
       env,
       "subscriptions",
       `select=*&email=ilike.${encodedEmail}&order=updated_at.desc.nullslast&limit=20`,
+      AUTH_IO_TIMEOUT_MS,
     ),
-    fetchSupabaseRows(env, "payments", `select=*&email=ilike.${encodedEmail}&order=updated_at.desc.nullslast&limit=20`),
+    fetchSupabaseRows(
+      env,
+      "payments",
+      `select=*&email=ilike.${encodedEmail}&order=updated_at.desc.nullslast&limit=20`,
+      AUTH_IO_TIMEOUT_MS,
+    ),
   ]);
 
-  const user = users[0] || {};
-  const subscription = pickBillingSubscription(subscriptions);
-  const payment = pickBillingPayment(payments);
+  let hydratedUsers = users;
+  let hydratedSubscriptions = subscriptions;
+  let hydratedPayments = payments;
+  if (!users.length && !subscriptions.length && !payments.length) {
+    const wildcardEmail = encodeURIComponent(`*${cleanEmail}*`);
+    const [looseUsers, looseSubscriptions, loosePayments] = await Promise.all([
+      fetchSupabaseRows(env, "users", `select=*&email=ilike.${wildcardEmail}&limit=5`, AUTH_IO_TIMEOUT_MS),
+      fetchSupabaseRows(
+        env,
+        "subscriptions",
+        `select=*&email=ilike.${wildcardEmail}&order=updated_at.desc.nullslast&limit=40`,
+        AUTH_IO_TIMEOUT_MS,
+      ),
+      fetchSupabaseRows(
+        env,
+        "payments",
+        `select=*&email=ilike.${wildcardEmail}&order=updated_at.desc.nullslast&limit=40`,
+        AUTH_IO_TIMEOUT_MS,
+      ),
+    ]);
+    hydratedUsers = looseUsers;
+    hydratedSubscriptions = looseSubscriptions;
+    hydratedPayments = loosePayments;
+  }
+
+  const user = pickBillingRecordByEmail(hydratedUsers, cleanEmail) || hydratedUsers[0] || {};
+  const subscription = pickBillingSubscription(hydratedSubscriptions, cleanEmail);
+  const payment = pickBillingPayment(hydratedPayments, cleanEmail);
   if (!hasRecordFields(user) && !hasRecordFields(subscription) && !hasRecordFields(payment)) {
     return null;
   }
@@ -15654,10 +15731,21 @@ async function loadBillingClientByEmail(env: unknown, email: string) {
   return billingClientFromPersistedRows(env, cleanEmail, user, subscription, payment);
 }
 
+function pickBillingRecordByEmail(rows: Record<string, unknown>[], cleanEmail: string) {
+  return rows.find((row) => readString(row, "email").trim().toLowerCase() === cleanEmail) || null;
+}
+
 async function hydrateClientsFromBillingUsers(env: unknown) {
   if (!getSupabasePersistenceConfig(env)) return false;
 
-  const users = await fetchSupabaseRowsPaged(env, "users", "select=*&order=created_at.desc.nullslast");
+  const users = await fetchSupabaseRowsPaged(
+    env,
+    "users",
+    "select=*&order=created_at.desc.nullslast",
+    1000,
+    8,
+    AUTH_IO_TIMEOUT_MS,
+  );
   if (!users.length) return false;
 
   let changed = false;
@@ -15797,18 +15885,26 @@ function billingClientFromPersistedRows(
   };
 }
 
-function pickBillingSubscription(rows: Record<string, unknown>[]) {
-  const sorted = sortBillingRows(rows).sort(
+function pickBillingSubscription(rows: Record<string, unknown>[], cleanEmail = "") {
+  const scopedRows = filterBillingRowsByEmail(rows, cleanEmail);
+  const sorted = sortBillingRows(scopedRows).sort(
     (a, b) => Number(billingSubscriptionIsActive(b)) - Number(billingSubscriptionIsActive(a)),
   );
   return sorted[0] || {};
 }
 
-function pickBillingPayment(rows: Record<string, unknown>[]) {
-  const sorted = sortBillingRows(rows).sort(
+function pickBillingPayment(rows: Record<string, unknown>[], cleanEmail = "") {
+  const scopedRows = filterBillingRowsByEmail(rows, cleanEmail);
+  const sorted = sortBillingRows(scopedRows).sort(
     (a, b) => Number(billingPaymentIsPaid(b)) - Number(billingPaymentIsPaid(a)),
   );
   return sorted[0] || {};
+}
+
+function filterBillingRowsByEmail(rows: Record<string, unknown>[], cleanEmail: string) {
+  if (!cleanEmail) return rows;
+  const exact = rows.filter((row) => readString(row, "email").trim().toLowerCase() === cleanEmail);
+  return exact.length ? exact : rows;
 }
 
 function sortBillingRows(rows: Record<string, unknown>[]) {
@@ -15964,9 +16060,11 @@ async function deletePersistedBillingRecords(env: unknown, user: Record<string, 
   ]);
 }
 
-async function fetchSupabaseRows(env: unknown, table: string, query: string) {
+async function fetchSupabaseRows(env: unknown, table: string, query: string, timeoutMs = LIVE_STATE_IO_TIMEOUT_MS) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return [];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
@@ -15992,23 +16090,43 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
   }
 }
 
-async function fetchSupabaseRowsPaged(env: unknown, table: string, query: string, pageSize = 1000) {
+async function fetchSupabaseRowsPaged(
+  env: unknown,
+  table: string,
+  query: string,
+  pageSize = 1000,
+  maxPages = 40,
+  timeoutMs = LIVE_STATE_IO_TIMEOUT_MS,
+) {
   const rows: Record<string, unknown>[] = [];
   let page = 0;
 
-  while (true) {
-    const pageRows = await fetchSupabaseRowsRange(env, table, query, page * pageSize, pageSize);
+  while (page < maxPages) {
+    const pageRows = await fetchSupabaseRowsRange(env, table, query, page * pageSize, pageSize, timeoutMs);
     rows.push(...pageRows);
     if (pageRows.length < pageSize) break;
     page += 1;
   }
 
+  if (page >= maxPages) {
+    console.warn(`Leitura paginada de ${table} atingiu o limite de ${maxPages} paginas.`);
+  }
+
   return rows;
 }
 
-async function fetchSupabaseRowsRange(env: unknown, table: string, query: string, offset: number, pageSize: number) {
+async function fetchSupabaseRowsRange(
+  env: unknown,
+  table: string,
+  query: string,
+  offset: number,
+  pageSize: number,
+  timeoutMs = LIVE_STATE_IO_TIMEOUT_MS,
+) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return [];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
@@ -18425,12 +18543,29 @@ async function loadLiveState(env: unknown) {
 }
 
 async function syncDashboardReadState(env: unknown) {
-  const durableState = await loadDurableLiveState(env);
+  const durableState = await loadDurableLiveState(env, DASHBOARD_READ_SYNC_TIMEOUT_MS);
   const durableDashboard = readRecord(durableState?.dashboard);
   if (!hasRecordFields(durableDashboard)) return;
   if (compareDashboardStateFreshness(durableDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
     liveDashboardData = restoreDashboardData(durableDashboard);
   }
+}
+
+function scheduleDashboardReadStateSync(env: unknown, ctx?: unknown) {
+  const now = Date.now();
+  if (dashboardReadSyncPromise) return;
+  if (dashboardReadSyncedAt && now - dashboardReadSyncedAt < DASHBOARD_READ_SYNC_MIN_INTERVAL_MS) return;
+
+  dashboardReadSyncPromise = syncDashboardReadState(env)
+    .catch((error) => {
+      console.warn("Falha ao sincronizar dashboard no read.", error);
+    })
+    .finally(() => {
+      dashboardReadSyncedAt = Date.now();
+      dashboardReadSyncPromise = null;
+    });
+
+  runBackgroundTask(ctx, dashboardReadSyncPromise, "sincronizar dashboard no read");
 }
 async function loadLiveStateFresh(env: unknown) {
   const currentSalesSettings = liveSalesSettings;
@@ -18848,10 +18983,23 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
 function compareDashboardStateFreshness(left: Record<string, unknown>, right: Record<string, unknown>) {
   const leftScore = dashboardStateFreshnessScore(left);
   const rightScore = dashboardStateFreshnessScore(right);
-  for (let index = 0; index < leftScore.length; index += 1) {
-    const diff = leftScore[index] - rightScore[index];
+  const leadingDiffs = [
+    leftScore.hasCurrentCycle - rightScore.hasCurrentCycle,
+    leftScore.hasLiveRounds - rightScore.hasLiveRounds,
+  ];
+  for (const diff of leadingDiffs) {
     if (diff !== 0) return diff;
   }
+  if (leftScore.latestObservedAt > 0 && rightScore.latestObservedAt > 0) {
+    const observedDiff = leftScore.latestObservedAt - rightScore.latestObservedAt;
+    if (observedDiff !== 0) return observedDiff;
+  }
+  const roundDiff = leftScore.lastRoundId - rightScore.lastRoundId;
+  if (roundDiff !== 0) return roundDiff;
+  const fallbackObservedDiff = leftScore.latestObservedAt - rightScore.latestObservedAt;
+  if (fallbackObservedDiff !== 0) return fallbackObservedDiff;
+  const lengthDiff = leftScore.roundsLength - rightScore.roundsLength;
+  if (lengthDiff !== 0) return lengthDiff;
   return 0;
 }
 
@@ -18891,9 +19039,25 @@ function dashboardStateFreshnessScore(state: Record<string, unknown>) {
   const lastRound = rounds[rounds.length - 1] ?? {};
   const lastRoundId = Number(readString(lastRound, "id") || lastRound.id || 0) || 0;
   const updatedAtMs = Date.parse(readString(state, "updatedAt") || "");
+  const lastRoundRecordedAtMs = Date.parse(
+    readString(lastRound, "recordedAt") ||
+      readString(lastRound, "recorded_at") ||
+      readString(lastRound, "timestamp") ||
+      "",
+  );
+  const latestObservedAt = Math.max(
+    Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
+    Number.isFinite(lastRoundRecordedAtMs) ? lastRoundRecordedAtMs : 0,
+  );
   const hasCurrentCycle = readDashboardCycleDate(state) === cycleDate ? 1 : 0;
   const hasLiveRounds = rounds.length > 0 ? 1 : 0;
-  return [hasCurrentCycle, hasLiveRounds, lastRoundId, Number.isFinite(updatedAtMs) ? updatedAtMs : 0, rounds.length];
+  return {
+    hasCurrentCycle,
+    hasLiveRounds,
+    latestObservedAt,
+    lastRoundId,
+    roundsLength: rounds.length,
+  };
 }
 
 function pickStateArray(primary: unknown, secondary: unknown) {
@@ -19411,15 +19575,15 @@ async function saveLiveStateCache(state: Record<string, unknown>) {
   }
 }
 
-async function loadDurableLiveState(env: unknown) {
-  return loadDurableLiveStateById(env, LIVE_STATE_ID);
+async function loadDurableLiveState(env: unknown, timeoutMs = LIVE_STATE_IO_TIMEOUT_MS) {
+  return loadDurableLiveStateById(env, LIVE_STATE_ID, timeoutMs);
 }
 
-async function loadDurableLiveStateById(env: unknown, id: string) {
+async function loadDurableLiveStateById(env: unknown, id: string, timeoutMs = LIVE_STATE_IO_TIMEOUT_MS) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return null;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(
@@ -19502,6 +19666,10 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function withAuthIoTimeout<T>(promise: Promise<T>, label: string, fallback: T): Promise<T> {
+  return withTimeout(promise, AUTH_IO_TIMEOUT_MS, label, fallback);
 }
 
 function getSupabasePersistenceConfig(env: unknown) {

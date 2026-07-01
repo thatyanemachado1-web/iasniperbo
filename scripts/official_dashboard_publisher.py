@@ -33,7 +33,12 @@ else:
     URLError = requests.RequestException
 
 
-USER_AGENT = "Mozilla/5.0 SNIPERBO-Official-Publisher/1.0"
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/126.0.0.0 Safari/537.36 "
+    "SNIPERBO-Official-Publisher/1.0"
+)
 POST_TIMEOUT = (3.0, 5.0)
 UPLOAD_WARNING_MS = 2000.0
 DIRECT_TELEGRAM_TARGET_MS = 300.0
