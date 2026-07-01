@@ -4,6 +4,8 @@ import type { PatternMinerHistoryLimit, PatternMinerSnapshot } from "@/types/pat
 import { DEFAULT_PATTERN_MINER_CONFIG } from "@/patternMiner/PatternMinerEngine";
 import { PatternMinerAgent } from "@/patternMiner/PatternMinerAgent";
 
+const SERVER_SNAPSHOT_MAX_LAG_MS = 120_000;
+
 interface UsePatternMinerParams {
   rounds: Round[];
   historyLimit?: PatternMinerHistoryLimit;
@@ -56,13 +58,26 @@ function shouldUseServerSnapshot(
   const snapshotMs = Date.parse(serverSnapshot.updatedAt || "");
   const dashboardMs = Date.parse(String(dashboardUpdatedAt || ""));
   if (!Number.isFinite(snapshotMs)) return false;
-  if (Number.isFinite(dashboardMs) && snapshotMs + 5_000 < dashboardMs) return false;
+  if (Number.isFinite(dashboardMs) && snapshotMs + SERVER_SNAPSHOT_MAX_LAG_MS < dashboardMs) return false;
   const latestRound = rounds[rounds.length - 1];
-  const latestAlert = [...serverSnapshot.entryAlerts, ...serverSnapshot.formingAlerts]
+  const latestAlertRoundId = [...serverSnapshot.entryAlerts, ...serverSnapshot.formingAlerts]
     .map((alert) => alert?.strategy)
-    .find(Boolean);
-  if (!latestAlert?.round_id) return false;
-  return latestAlert.round_id >= latestRound.id;
+    .map((strategy) => strategy?.round_id)
+    .filter((roundId): roundId is number => typeof roundId === "number" && Number.isFinite(roundId))
+    .sort((a, b) => b - a)[0];
+  if (typeof latestAlertRoundId === "number") return latestAlertRoundId >= latestRound.id;
+  return hasSharedPatternMinerBank(serverSnapshot);
+}
+
+function hasSharedPatternMinerBank(serverSnapshot: PatternMinerSnapshot) {
+  return (
+    serverSnapshot.entryAlerts.length > 0 ||
+    serverSnapshot.formingAlerts.length > 0 ||
+    serverSnapshot.hotStrategies.length > 0 ||
+    serverSnapshot.ranking.length > 0 ||
+    serverSnapshot.strategies.length > 0 ||
+    serverSnapshot.scoreboard.totalValidated > 0
+  );
 }
 
 function buildEmptySnapshot(historyLimit: PatternMinerHistoryLimit): PatternMinerSnapshot {
