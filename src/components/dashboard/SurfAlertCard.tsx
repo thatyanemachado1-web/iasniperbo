@@ -91,9 +91,6 @@ export function SurfAlertCard({
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
               Surf Analyzer
             </div>
-            <div className="mt-0.5 text-xs text-muted-foreground">
-              Fase da mesa, força e risco contrário.
-            </div>
           </div>
           <div className="flex max-w-[54%] shrink-0 flex-wrap items-center justify-end gap-1">
             <AppBadge
@@ -163,7 +160,6 @@ export function SurfAlertCard({
       ) : (
         <SectionTitle
           title="Surf Analyzer"
-          subtitle="Fase da mesa, força e risco contrário."
           right={
             <div className="flex shrink-0 items-center gap-1.5">
               <AppBadge tone={strengthBand.tone} pulse={enabled && alert.surf_alert}>
