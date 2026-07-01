@@ -48,30 +48,34 @@ export function SurfAlertCard({
   const memoryActionable = Boolean(
     !memoryRiskBlocked &&
     memory.surfBias &&
-      ["PRE_SURF", "SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF", "VIRADA_SURF"].includes(
+      ["SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF", "VIRADA_SURF"].includes(
         memory.surfStatus,
       ),
   );
   const liveSurfEntry = surfEntryFromAlert(alert);
-  const hasLiveSurfSignal = !memoryRiskBlocked && alert.surf_alert && liveSurfEntry !== "AGUARDAR";
+  const liveSurfConfidence = clampPercent(alert.surf_prediction_confidence ?? alert.surf_confidence);
+  const hasLiveSurfSignal =
+    !memoryRiskBlocked && alert.surf_alert && liveSurfEntry !== "AGUARDAR" && liveSurfConfidence >= 60;
   const probableSurfEntry = hasLiveSurfSignal
     ? liveSurfEntry
     : memoryActionable && memory.surfBias
       ? memory.surfBias
       : "AGUARDAR";
   const compactConfidence = hasLiveSurfSignal
-    ? clampPercent(alert.surf_prediction_confidence ?? alert.surf_confidence)
-    : memory.totalDrops3Plus
+    ? liveSurfConfidence
+    : memoryActionable
       ? memory.confidence
       : 0;
   const compactStatus = hasLiveSurfSignal
     ? alert.surf_prediction_status || alert.surf_status || alert.surf_phase
-    : memory.totalDrops3Plus
+    : memoryActionable
       ? memory.surfStatus
-      : "SEM_SURF";
+      : "ANALISANDO";
   const compactReason = hasLiveSurfSignal
     ? buildLiveSurfReason(probableSurfEntry, compactConfidence, memory)
-    : memory.reason;
+    : memoryActionable
+      ? memory.reason
+      : "Aguardando formacao limpa do Surf.";
 
   return (
     <GlassCard
@@ -95,7 +99,7 @@ export function SurfAlertCard({
           <div className="flex max-w-[54%] shrink-0 flex-wrap items-center justify-end gap-1">
             <AppBadge
               tone={strengthBand.tone}
-              pulse={enabled && alert.surf_alert}
+              pulse={enabled && hasLiveSurfSignal}
               className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
             >
               {formatSurfStatusLabel(compactStatus)}
@@ -110,7 +114,7 @@ export function SurfAlertCard({
           </div>
           <div className="mt-2 rounded-xl border border-neon-cyan/15 bg-background/30 px-2.5 py-2 shadow-[inset_0_0_18px_rgba(0,229,255,0.035)]">
             <div className="text-[8px] font-black uppercase tracking-[0.14em] text-neon-cyan">
-              Entrada provável Surf
+              {probableSurfEntry === "AGUARDAR" ? "Analisando Surf" : "Entrada provável Surf"}
             </div>
             <div className="mt-1 flex items-center justify-between gap-2">
               <span

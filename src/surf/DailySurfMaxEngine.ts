@@ -527,6 +527,9 @@ function applyDailySurfMemoryToAlert(alert: SurfAlert, memory: DailySurfMemory):
     ? alert.surf_prediction_side
     : alert.surf_side;
   const actionable = isActionableMemory(memory);
+  const memoryBlocksEntry = memory.surfStatus === "SURF_ESTICADO" || memory.surfStatus === "RISCO_QUEBRA";
+  if (!actionable && !memoryBlocksEntry) return alert;
+
   const memorySide: SurfSide = memory.surfBias ?? "NONE";
   const sideAligned = memory.surfBias && currentSide === memory.surfBias;
   const sideDiverged =
@@ -579,7 +582,7 @@ function applyDailySurfMemoryToAlert(alert: SurfAlert, memory: DailySurfMemory):
 function isActionableMemory(memory: DailySurfMemory) {
   return Boolean(
     memory.surfBias &&
-      ["PRE_SURF", "SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF", "VIRADA_SURF"].includes(
+      ["SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF", "VIRADA_SURF"].includes(
         memory.surfStatus,
       ),
   );

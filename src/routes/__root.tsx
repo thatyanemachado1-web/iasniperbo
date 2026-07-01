@@ -14,7 +14,51 @@ import { InstallAppPrompt } from "@/components/install/InstallAppPrompt";
 import { SiteAnnouncements } from "@/components/ui-app/SiteAnnouncements";
 
 const ASSET_RELOAD_KEY = "sniper_asset_reload_failure";
+const BOOT_RELOAD_KEY = "sniper_boot_reload_failure";
 const ASSET_ERROR_RE = /failed to fetch dynamically imported module|importing a module script failed|loading chunk|chunkloaderror|preload/i;
+const EARLY_ASSET_GUARD_SCRIPT = `
+(() => {
+  const assetKey = "sniper_asset_reload_failure";
+  const bootKey = "sniper_boot_reload_failure";
+  const assetErrorRe = /failed to fetch dynamically imported module|importing a module script failed|loading chunk|chunkloaderror|preload/i;
+  const reloadOnce = (key, reason) => {
+    const id = String(reason || "boot").slice(0, 220);
+    try {
+      if (sessionStorage.getItem(key) === id) return;
+      sessionStorage.setItem(key, id);
+    } catch {}
+    const nextUrl = new URL(location.href);
+    nextUrl.searchParams.set("sbv", String(Date.now()));
+    location.replace(nextUrl.toString());
+  };
+  addEventListener("vite:preloadError", (event) => {
+    event.preventDefault();
+    reloadOnce(assetKey, "vite-preload");
+  });
+  addEventListener("error", (event) => {
+    const target = event.target;
+    const src = target && "src" in target ? target.src : "";
+    const href = target && "href" in target ? target.href : "";
+    if ((src && src.includes("/assets/")) || (href && href.includes("/assets/"))) {
+      reloadOnce(assetKey, src || href);
+      return;
+    }
+    const message = String(event.message || "");
+    if (assetErrorRe.test(message)) reloadOnce(assetKey, message);
+  }, true);
+  addEventListener("unhandledrejection", (event) => {
+    const message = String(event.reason?.message || event.reason || "");
+    if (!assetErrorRe.test(message)) return;
+    event.preventDefault();
+    reloadOnce(assetKey, message);
+  });
+  setTimeout(() => {
+    const text = document.body?.innerText || "";
+    if (!text.includes("Carregando painel")) return;
+    reloadOnce(bootKey, "stuck-loading-panel");
+  }, 7000);
+})();
+`;
 
 function NotFoundComponent() {
   return (
@@ -136,6 +180,7 @@ function RootShell({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR">
       <head>
+        <script dangerouslySetInnerHTML={{ __html: EARLY_ASSET_GUARD_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
@@ -162,6 +207,7 @@ function ClientOnlyEnhancements() {
 
   useEffect(() => {
     setMounted(true);
+    window.sessionStorage.removeItem(BOOT_RELOAD_KEY);
     return installAssetReloadGuard();
   }, []);
 
