@@ -53,7 +53,6 @@ export function SurfAlertCard({
   const probableSurfEntry = memoryActionable && memory.surfBias ? memory.surfBias : "AGUARDAR";
   const compactConfidence = memory.totalDrops3Plus ? memory.confidence : 0;
   const compactStatus = memory.totalDrops3Plus ? memory.surfStatus : "SEM_SURF";
-  const maxima = dailySurfMax.dailyMaxSurf;
 
   return (
     <GlassCard
@@ -125,25 +124,12 @@ export function SurfAlertCard({
                 AT {memory.currentDropDepth}
               </span>
             </div>
-            <div className="mt-2 rounded-lg border border-neon-cyan/10 bg-secondary/20 p-1.5">
-              <div className="mb-1 text-[7px] font-black uppercase tracking-[0.14em] text-neon-cyan/90">
-                Maximas do dia
-              </div>
-              <div className="grid grid-cols-3 gap-1 text-[8px] font-black uppercase tracking-[0.04em]">
-                <span className="rounded-full border border-player/30 bg-player/10 px-1.5 py-1 text-player">
-                  P {maxima.player}
-                </span>
-                <span className="rounded-full border border-tie/30 bg-tie/10 px-1.5 py-1 text-tie">
-                  T {maxima.tie}
-                </span>
-                <span className="rounded-full border border-banker/30 bg-banker/10 px-1.5 py-1 text-banker">
-                  B {maxima.banker}
-                </span>
-              </div>
-            </div>
             <div className="mt-1.5 line-clamp-2 text-[9px] leading-snug text-muted-foreground">
               {memory.reason}
             </div>
+          </div>
+          <div className="mt-2">
+            <SurfMaximaPanel snapshot={dailySurfMax} />
           </div>
         </div>
       ) : (
