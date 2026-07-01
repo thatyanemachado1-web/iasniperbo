@@ -43,8 +43,16 @@ export function SurfAlertCard({
         : "border-neon-cyan/30";
   const surfDecision = buildSurfDecision(confidence, breakRisk, dominantSide);
   const enabled = toggles?.surfAnalyzer !== false;
-  const probableSurfEntry =
-    dominantSide === "BANKER" || dominantSide === "PLAYER" ? dominantSide : "AGUARDAR";
+  const memory = dailySurfMax.dailySurfMemory;
+  const memoryActionable = Boolean(
+    memory.surfBias &&
+      ["PRE_SURF", "SURF_AGRESSIVO", "SURF_DOMINANTE", "RECUPERACAO_SURF"].includes(
+        memory.surfStatus,
+      ),
+  );
+  const probableSurfEntry = memoryActionable && memory.surfBias ? memory.surfBias : "AGUARDAR";
+  const compactConfidence = memory.totalDrops3Plus ? memory.confidence : 0;
+  const compactStatus = memory.totalDrops3Plus ? memory.surfStatus : "SEM_SURF";
 
   return (
     <GlassCard
@@ -74,7 +82,7 @@ export function SurfAlertCard({
               pulse={enabled && alert.surf_alert}
               className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
             >
-              {alert.surf_status ?? alert.surf_phase}
+              {compactStatus}
             </AppBadge>
             <ModuleToggleStrip
               toggles={toggles}
@@ -102,8 +110,22 @@ export function SurfAlertCard({
                 {probableSurfEntry}
               </span>
               <span className="shrink-0 text-[10px] font-black leading-none text-neon-cyan">
-                {confidence}%
+                {compactConfidence}%
               </span>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-1 text-[8px] font-black uppercase tracking-[0.04em] text-muted-foreground">
+              <span className="rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
+                P3+ {memory.playerDrops3Plus}
+              </span>
+              <span className="rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
+                B3+ {memory.bankerDrops3Plus}
+              </span>
+              <span className="rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
+                AT {memory.currentDropDepth}
+              </span>
+            </div>
+            <div className="mt-1.5 line-clamp-2 text-[9px] leading-snug text-muted-foreground">
+              {memory.reason}
             </div>
           </div>
         </div>
@@ -126,6 +148,7 @@ export function SurfAlertCard({
         />
       )}
 
+      {!compact && (
       <div className={cn("transition duration-200", !enabled && "opacity-45 saturate-50")}>
         <div
           className={cn(
@@ -237,6 +260,7 @@ export function SurfAlertCard({
           mostra tendência. Só seguir o lado do Surf quando o risco de quebra estiver controlado.
         </div>
       </div>
+      )}
 
       {!enabled && (
         <div className="mt-2 rounded-lg border border-border/70 bg-secondary/25 px-3 py-2 text-[11px] font-semibold text-muted-foreground">

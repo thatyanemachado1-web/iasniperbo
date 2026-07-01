@@ -36,6 +36,7 @@ import { buildSignalCopy } from "@/lib/operationalCopy";
 import { usePatternMiner } from "@/hooks/usePatternMiner";
 import { useRoundHistory } from "@/hooks/useRoundHistory";
 import { useDailySurfMax } from "@/hooks/useDailySurfMax";
+import { DailySurfMaxEngine } from "@/surf/DailySurfMaxEngine";
 
 export const Route = createFileRoute("/app/")({
   component: DashboardPage,
@@ -67,7 +68,11 @@ function DashboardPage() {
     sourceUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
     enabled: mode === "live" && !d.mockMode,
   });
-  const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
+  const baseSurfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
+  const surfAlert = useMemo(
+    () => DailySurfMaxEngine.applyDailySurfMemoryToAlert(baseSurfAlert, dailySurfMax.dailySurfMemory),
+    [baseSurfAlert, dailySurfMax.dailySurfMemory],
+  );
   const tieAlertEnabled = d.moduleToggles?.tieAlert !== false;
   const surfAnalyzerEnabled = d.moduleToggles?.surfAnalyzer !== false;
   const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;

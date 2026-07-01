@@ -116,6 +116,7 @@ function preserveDailyMax(current: DailySurfMaxSnapshot, next: DailySurfMaxSnaps
       player: Math.max(current.dailyMaxSurf.player, next.dailyMaxSurf.player),
       tie: Math.max(current.dailyMaxSurf.tie, next.dailyMaxSurf.tie),
     },
+    dailySurfMemory: next.dailySurfMemory,
   };
 }
 
@@ -149,6 +150,33 @@ function isSameSnapshot(left: DailySurfMaxSnapshot, right: DailySurfMaxSnapshot)
     left.dailyMaxSurf.tie === right.dailyMaxSurf.tie &&
     left.dailyMaxSurf.date === right.dailyMaxSurf.date &&
     left.dailyMaxSurf.table_id === right.dailyMaxSurf.table_id &&
-    left.dailyMaxSurf.last_round_id === right.dailyMaxSurf.last_round_id
+    left.dailyMaxSurf.last_round_id === right.dailyMaxSurf.last_round_id &&
+    isSameDailySurfMemory(left.dailySurfMemory, right.dailySurfMemory)
+  );
+}
+
+function isSameDailySurfMemory(
+  left: DailySurfMaxSnapshot["dailySurfMemory"],
+  right: DailySurfMaxSnapshot["dailySurfMemory"],
+) {
+  return (
+    left.dateKey === right.dateKey &&
+    left.playerDrops3Plus === right.playerDrops3Plus &&
+    left.bankerDrops3Plus === right.bankerDrops3Plus &&
+    left.playerMaxDepth === right.playerMaxDepth &&
+    left.bankerMaxDepth === right.bankerMaxDepth &&
+    left.totalDrops3Plus === right.totalDrops3Plus &&
+    left.dominantSide === right.dominantSide &&
+    left.dominantPercent === right.dominantPercent &&
+    left.recoverySide === right.recoverySide &&
+    left.stretchedSide === right.stretchedSide &&
+    left.currentDropSide === right.currentDropSide &&
+    left.currentDropDepth === right.currentDropDepth &&
+    left.surfBias === right.surfBias &&
+    left.surfStatus === right.surfStatus &&
+    left.confidence === right.confidence &&
+    left.reason === right.reason &&
+    left.playerMaxDeficit === right.playerMaxDeficit &&
+    left.bankerMaxDeficit === right.bankerMaxDeficit
   );
 }
