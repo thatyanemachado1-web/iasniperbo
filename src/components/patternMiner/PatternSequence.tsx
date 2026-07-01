@@ -23,7 +23,7 @@ export function PatternSequence({
       {sequence.map((token, index) => {
         const side = token[0] as RoundResult;
         const chipLabel = patternTokenChipLabel(token, showSideLetters);
-        const caption = patternTokenCaption(token, compact);
+        const caption = patternTokenCaption(token, compact, showSideLetters);
 
         return (
           <div key={`${token}-${index}`} className="inline-flex items-center gap-1.5">
@@ -108,7 +108,8 @@ function patternTokenChipLabel(token: string, showSideLetters: boolean) {
   return value ? `${side}${value}` : side;
 }
 
-function patternTokenCaption(token: string, compact: boolean) {
+function patternTokenCaption(token: string, compact: boolean, showSideLetters: boolean) {
+  if (!showSideLetters) return "";
   const side = token[0];
   const value = token.slice(1);
   if (side === "T") return value ? `Empate ${value}` : "Empate";
