@@ -37,7 +37,7 @@ export function PatternMinerMiniCard({
             <BrainCircuit className="size-4" />
           </div>
 
-          <div className="min-w-0 text-sm font-black">Padroes IA</div>
+          <div className="min-w-0 text-base font-black leading-tight">Padroes IA</div>
         </div>
 
         <div className="min-w-0 w-full self-stretch">
