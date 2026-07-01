@@ -103,6 +103,15 @@ function DashboardPage() {
   const dataModeTone = mode === "live" ? "green" : mode === "connecting" ? "blue" : "amber";
   const dashboardSourceLabel = formatDashboardSource(dashboardUrl);
 
+  useEffect(() => {
+    if (d.moduleToggles?.tieAlert === false || d.moduleToggles?.surfAnalyzer === false) {
+      setModuleToggles({
+        tieAlert: true,
+        surfAnalyzer: true,
+      });
+    }
+  }, [d.moduleToggles?.tieAlert, d.moduleToggles?.surfAnalyzer]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
