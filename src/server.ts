@@ -291,6 +291,7 @@ type AdminActionType =
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
+const LIVE_DASHBOARD_STATE_ID = `${LIVE_STATE_ID}:dashboard`;
 const LIVE_STATE_TABLE = "sniper_live_state";
 const SNIPER_DEPLOY_MARKER = "2026-06-25-client-registration-persistence-v3";
 const CLIENT_REGISTRY_SNAPSHOT_LATEST_ID = `${LIVE_STATE_ID}:client_registry_latest`;
@@ -363,6 +364,7 @@ const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
+const DASHBOARD_PUBLISH_SAVE_TIMEOUT_MS = 1_500;
 const AUTH_IO_TIMEOUT_MS = 1_200;
 const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
 const DASHBOARD_READ_SYNC_MIN_INTERVAL_MS = 1_000;
@@ -747,6 +749,12 @@ function redirectLegacyAdminRoute(request: Request) {
 function shouldLoadLiveStateForRequest(request: Request) {
   if (request.method === "OPTIONS") return false;
   const url = new URL(request.url);
+  if (
+    request.method === "POST" &&
+    (url.pathname === "/dashboard/publish" || url.pathname === "/dashboard/signal")
+  ) {
+    return false;
+  }
   if (url.pathname.startsWith("/assets/")) return false;
   if (url.pathname.startsWith("/favicon")) return false;
   if (url.pathname === "/robots.txt" || url.pathname === "/sitemap.xml" || url.pathname === "/manifest.webmanifest") {
@@ -3211,11 +3219,20 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     request.method === "POST" &&
     (url.pathname === "/dashboard" || url.pathname === "/dashboard/signal" || url.pathname === "/dashboard/publish")
   ) {
-    if (!(await isDashboardWriteAuthorized(request, url, env))) {
+    const isPublisherEndpoint = url.pathname === "/dashboard/publish" || url.pathname === "/dashboard/signal";
+    const publishStartedAt = Date.now();
+    if (isPublisherEndpoint) {
+      const security = await readDashboardPublishSecurity(request, url, env);
+      logDashboardPublishSecurity(url.pathname, security);
+      if (!security.authorized) {
+        return json({ error: "Nao autorizado." }, security.status);
+      }
+    } else if (!(await isDashboardWriteAuthorized(request, url, env))) {
       return json({ error: "Nao autorizado." }, 401);
     }
 
-    const body = await request.json().catch(() => ({}));
+    const rawBody = await request.json().catch(() => ({}));
+    const body = isPublisherEndpoint ? enforceDashboardPublishDeadline(rawBody) : rawBody;
     const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
     const incomingState = readRecord(body);
     if (
@@ -3238,8 +3255,14 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     const calendarChange = incomingRounds.length
       ? trackNeuralCalendarRounds(incomingRounds)
       : emptyNeuralCalendarChangeSet();
-    const saveStateTask = saveLiveState(env);
-    runBackgroundTask(ctx, saveStateTask, "salvar estado vivo do dashboard");
+    const publishSaveStatus = isPublisherEndpoint ? await saveDashboardPublishState(env) : null;
+    if (isPublisherEndpoint) {
+      const publishPersisted = publishSaveStatus.durableConfigured ? publishSaveStatus.durable : publishSaveStatus.cache;
+      if (!publishPersisted) {
+        return json({ ok: false, saved: "failed", saveStatus: publishSaveStatus }, 503);
+      }
+    }
+    runBackgroundTask(ctx, deferBackgroundTask(() => saveLiveState(env)), "salvar estado vivo do dashboard");
     runBackgroundTask(
       ctx,
       persistDashboardRoundIngestion(
@@ -3251,9 +3274,13 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       ),
       "persistir rodada e monitorar sinais",
     );
-    if (url.pathname === "/dashboard/publish" || url.pathname === "/dashboard/signal") {
-      const saveStatus = await saveStateTask;
-      return json({ ok: true, saved: saveStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
+    if (isPublisherEndpoint) {
+      logDashboardPublishAck(url.pathname, publishStartedAt, 200, liveDashboardData, body);
+      return json({
+        ...buildDashboardPublishAck(liveDashboardData, incomingRounds.length, body),
+        saved: "persisted",
+        saveStatus: publishSaveStatus,
+      });
     }
     return json({ ok: true, saved: "queued", dashboard: publicDashboardSnapshot(liveDashboardData) });
   }
@@ -3271,6 +3298,192 @@ function runBackgroundTask(ctx: unknown, promise: Promise<unknown>, label: strin
     return;
   }
   void task;
+}
+
+function deferBackgroundTask(task: () => Promise<unknown> | unknown) {
+  return new Promise<unknown>((resolve, reject) => {
+    setTimeout(() => {
+      Promise.resolve()
+        .then(task)
+        .then(resolve, reject);
+    }, 0);
+  });
+}
+
+function buildDashboardPublishAck(dashboard: LiveDashboardData, received: number, source?: unknown) {
+  const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
+  const lastRound = rounds.length ? rounds[rounds.length - 1] : null;
+  const sourceTiming = readDashboardSignalTiming(source);
+  const signal = readRecord(dashboard.currentSignal);
+  const cardSignalId = dashboardSignalId(dashboard);
+  const module = readString(sourceTiming, "module") || readString(signal, "module") || "";
+  const roundId = readString(sourceTiming, "round_id") || String(lastRound?.id ?? "");
+  const expired = isDashboardSignalTimingExpired(sourceTiming);
+  logCardRendered(cardSignalId, module, roundId, readString(signal, "status"));
+  return {
+    ok: true,
+    saved: "queued",
+    received,
+    updatedAt: dashboard.updatedAt ?? "",
+    lastRoundId: lastRound?.id ?? null,
+    signal_id: readString(sourceTiming, "signal_id"),
+    card_signal_id: cardSignalId,
+    module,
+    round_id: roundId,
+    expires_at: readString(sourceTiming, "expires_at"),
+    expired,
+  };
+}
+
+async function readDashboardPublishSecurity(request: Request, url: URL, env: unknown) {
+  const bearerToken = getBearerToken(request);
+  const publisherToken = request.headers.get("x-sniper-publisher-token")?.trim() || "";
+  const adminEmail = (request.headers.get("x-sniper-admin-email") || "").trim();
+  const adminPassword = request.headers.get("x-sniper-admin-password") || "";
+  const acceptedTokens = dashboardPublisherTokens(env);
+  const bearerSecretValid = Boolean(bearerToken && acceptedTokens.includes(bearerToken));
+  const publisherSecretValid = Boolean(publisherToken && acceptedTokens.includes(publisherToken));
+  let sessionAuthorized = false;
+
+  if (bearerToken && !bearerSecretValid) {
+    const session = await verifySessionToken(env, bearerToken);
+    sessionAuthorized = Boolean(
+      session &&
+        (session.scope === "owner" || session.scope === "admin_approver") &&
+        (await sessionMatchesRequestBinding(env, request, session)),
+    );
+  }
+
+  const officialAuthorized = await isOfficialDashboardPublisherAuthorized(request, env);
+  const hasSecretHeader = Boolean(bearerToken || publisherToken || adminEmail || adminPassword);
+  const secretValid = Boolean(bearerSecretValid || publisherSecretValid || sessionAuthorized || officialAuthorized);
+  const authorized = secretValid;
+  return {
+    endpoint: url.pathname,
+    has_secret_header: hasSecretHeader,
+    secret_valid: secretValid,
+    authorized,
+    status: authorized ? 200 : hasSecretHeader ? 403 : 401,
+  };
+}
+
+function logDashboardPublishSecurity(endpoint: string, security: Record<string, unknown>) {
+  console.info(
+    `[PUBLISH_SECURITY] endpoint=${endpoint} has_secret_header=${Boolean(security.has_secret_header)} secret_valid=${Boolean(
+      security.secret_valid,
+    )} authorized=${Boolean(security.authorized)} status=${security.status}`,
+  );
+}
+
+function enforceDashboardPublishDeadline(body: unknown) {
+  const record = readRecord(body);
+  const timing = readDashboardSignalTiming(record);
+  if (!isDashboardSignalTimingExpired(timing)) return body;
+
+  const signalId = readString(timing, "signal_id");
+  const module = readString(timing, "module");
+  const ageMs = dashboardSignalTimingAgeMs(timing);
+  console.warn(`[EXPIRED_SIGNAL] signal_id=${signalId} module=${module} age_ms=${ageMs} reason=worker_deadline_exceeded`);
+
+  const next: Record<string, unknown> = {
+    ...record,
+    currentSignal: {
+      id: "waiting",
+      side: "NONE",
+      status: "waiting",
+      protection: "-",
+      strength: 0,
+      lastResult: null,
+      expiredSignalId: signalId,
+    },
+    neuralEntryState: null,
+    neuralEntryLastResult: null,
+    signalTiming: {
+      ...timing,
+      expired: true,
+      action: "discarded_by_worker",
+    },
+  };
+  const neuralReading = readRecord(record.neuralReading);
+  if (Object.keys(neuralReading).length) {
+    next.neuralReading = {
+      ...neuralReading,
+      mode: "SCANNING",
+      paganteStatus: "EXPIRED_SIGNAL",
+      paganteAlert: "Sinal expirado antes de publicar. Aguardando proxima rodada real.",
+    };
+  }
+  for (const key of ["patternMinerSnapshot", "patternMiner"]) {
+    const pattern = readRecord(record[key]);
+    if (Array.isArray(pattern.entryAlerts)) {
+      next[key] = { ...pattern, entryAlerts: [] };
+    }
+  }
+  return next;
+}
+
+function readDashboardSignalTiming(value: unknown) {
+  const record = readRecord(value);
+  const timing = readRecord(record.signalTiming || record.signal_timing);
+  if (Object.keys(timing).length) return timing;
+  const signal = readRecord(record.currentSignal || record.current_signal);
+  return {
+    signal_id: readString(signal, "signal_id") || readString(signal, "signalId") || readString(signal, "id"),
+    module: readString(signal, "module"),
+    round_id: readString(signal, "round_id") || readString(signal, "roundId"),
+    generated_at: readString(signal, "generated_at") || readString(signal, "generatedAt"),
+    expires_at: readString(signal, "expires_at") || readString(signal, "expiresAt"),
+  };
+}
+
+function isDashboardSignalTimingExpired(timing: Record<string, unknown>) {
+  const expiresAt = Date.parse(readString(timing, "expires_at") || readString(timing, "expiresAt"));
+  return Number.isFinite(expiresAt) && Date.now() > expiresAt;
+}
+
+function dashboardSignalTimingAgeMs(timing: Record<string, unknown>) {
+  const generatedAt = Date.parse(readString(timing, "generated_at") || readString(timing, "generatedAt"));
+  if (!Number.isFinite(generatedAt)) return 0;
+  return Math.max(0, Date.now() - generatedAt);
+}
+
+function dashboardSignalId(dashboard: LiveDashboardData) {
+  const signal = readRecord(dashboard.currentSignal);
+  return (
+    readString(signal, "signal_id") ||
+    readString(signal, "signalId") ||
+    readString(signal, "id") ||
+    readString(readRecord(dashboard.neuralEntryState), "key") ||
+    ""
+  );
+}
+
+function logDashboardPublishAck(
+  endpoint: string,
+  startedAtMs: number,
+  status: number,
+  dashboard: LiveDashboardData,
+  source: unknown,
+) {
+  const timing = readDashboardSignalTiming(source);
+  const finishedAtMs = Date.now();
+  const signalId = readString(timing, "signal_id") || dashboardSignalId(dashboard);
+  const module = readString(timing, "module");
+  const expired = isDashboardSignalTimingExpired(timing);
+  console.info(
+    `[DASHBOARD_PUBLISH] signal_id=${signalId} module=${module} publish_started_at=${new Date(
+      startedAtMs,
+    ).toISOString()} publish_finished_at=${new Date(finishedAtMs).toISOString()} duration_ms=${
+      finishedAtMs - startedAtMs
+    } status=${status} expired=${expired}`,
+  );
+}
+
+function logCardRendered(signalId: string, module: string, roundId: string, status: string) {
+  if (!signalId) return;
+  console.info(
+    `[CARD_RENDERED] signal_id=${signalId} module=${module} round_id=${roundId} rendered_at=${new Date().toISOString()} status=${status}`,
+  );
 }
 
 async function persistDashboardRoundIngestion(
@@ -16239,8 +16452,14 @@ async function loadLiveState(env: unknown) {
 }
 
 async function syncDashboardReadState(env: unknown) {
-  const durableState = await loadDurableLiveState(env, DASHBOARD_READ_SYNC_TIMEOUT_MS);
-  const durableDashboard = readRecord(durableState?.dashboard);
+  const [durableState, dashboardState] = await Promise.all([
+    loadDurableLiveState(env, DASHBOARD_READ_SYNC_TIMEOUT_MS),
+    loadDurableLiveStateById(env, LIVE_DASHBOARD_STATE_ID, DASHBOARD_READ_SYNC_TIMEOUT_MS),
+  ]);
+  const durableDashboard = pickDashboardState(
+    readRecord(durableState?.dashboard),
+    readRecord(dashboardState?.dashboard),
+  );
   if (!hasRecordFields(durableDashboard)) return;
   if (compareDashboardStateFreshness(durableDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
     liveDashboardData = restoreDashboardData(durableDashboard);
@@ -16267,13 +16486,17 @@ async function loadLiveStateFresh(env: unknown) {
   const currentSalesSettings = liveSalesSettings;
   const currentSiteContentSettings = liveSiteContentSettings;
   try {
-    const [durableState, cacheState] = await withTimeout(
-      Promise.all([loadDurableLiveState(env), loadLiveStateCache()]),
+    const [durableState, dashboardState, cacheState] = await withTimeout(
+      Promise.all([loadDurableLiveState(env), loadDurableLiveStateById(env, LIVE_DASHBOARD_STATE_ID), loadLiveStateCache()]),
       LIVE_STATE_IO_TIMEOUT_MS,
       "carregar estado vivo",
-      [null, null] as [Record<string, unknown> | null, Record<string, unknown> | null],
+      [null, null, null] as [
+        Record<string, unknown> | null,
+        Record<string, unknown> | null,
+        Record<string, unknown> | null,
+      ],
     );
-    const state = mergeLiveStates(durableState, cacheState);
+    const state = mergeLiveStates(durableState, cacheState, dashboardState);
     if (state) {
       const shouldPersistRecoveredRegistry = shouldPersistRecoveredClientRegistry(env, durableState, cacheState, state);
       applyLiveState(state);
@@ -16555,10 +16778,15 @@ function parseStoredEngineCalendarStats(value: unknown, kind: EngineCalendarAggr
     .filter((row): row is EngineCalendarAggregateStat => Boolean(row));
 }
 
-function mergeLiveStates(durableState: Record<string, unknown> | null, cacheState: Record<string, unknown> | null) {
-  if (!durableState && !cacheState) return null;
+function mergeLiveStates(
+  durableState: Record<string, unknown> | null,
+  cacheState: Record<string, unknown> | null,
+  dashboardState?: Record<string, unknown> | null,
+) {
+  if (!durableState && !cacheState && !dashboardState) return null;
   const durable = durableState || {};
   const cache = cacheState || {};
+  const dashboard = dashboardState || {};
   const durableSavedAt = stateSavedAtMs(durable);
   const cacheSavedAt = stateSavedAtMs(cache);
   const deletedEntities = mergeDeletedEntityStates(durable.deletedEntities, cache.deletedEntities).slice(0, 1000);
@@ -16569,7 +16797,7 @@ function mergeLiveStates(durableState: Record<string, unknown> | null, cacheStat
   return {
     ...cache,
     ...durable,
-    dashboard: pickDashboardState(durable.dashboard, cache.dashboard),
+    dashboard: pickDashboardState(pickDashboardState(durable.dashboard, cache.dashboard), dashboard.dashboard),
     validatorRoundHistory: mergeMonitorRoundHistory(
       normalizeStoredRoundHistory(cache.validatorRoundHistory),
       normalizeStoredRoundHistory(durable.validatorRoundHistory),
@@ -17207,6 +17435,24 @@ async function saveLiveStateNow(env: unknown): Promise<LiveStateSaveStatus> {
   return liveStateSaveStatus;
 }
 
+async function saveDashboardPublishState(env: unknown): Promise<LiveStateSaveStatus> {
+  const state = {
+    dashboard: liveDashboardData,
+    savedAt: new Date().toISOString(),
+  };
+  const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
+  const [durableResult, cacheResult] = await Promise.allSettled([
+    saveDurableLiveStateById(env, LIVE_DASHBOARD_STATE_ID, state, DASHBOARD_PUBLISH_SAVE_TIMEOUT_MS),
+    saveLiveStateCache(state),
+  ]);
+  return {
+    durable: durableResult.status === "fulfilled" && durableResult.value === true,
+    cache: cacheResult.status === "fulfilled" && cacheResult.value === true,
+    durableConfigured,
+    saved_at: new Date().toISOString(),
+  };
+}
+
 async function saveLiveStateCache(state: Record<string, unknown>) {
   const cache = getLiveStateCache();
   if (!cache) return false;
@@ -17269,11 +17515,16 @@ async function saveDurableLiveState(env: unknown, state: Record<string, unknown>
   return saveDurableLiveStateById(env, LIVE_STATE_ID, state);
 }
 
-async function saveDurableLiveStateById(env: unknown, id: string, state: Record<string, unknown>) {
+async function saveDurableLiveStateById(
+  env: unknown,
+  id: string,
+  state: Record<string, unknown>,
+  timeoutMs = LIVE_STATE_IO_TIMEOUT_MS,
+) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return false;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`${config.url}/rest/v1/${LIVE_STATE_TABLE}?on_conflict=id`, {

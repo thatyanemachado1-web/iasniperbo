@@ -39,9 +39,12 @@ USER_AGENT = (
     "Chrome/126.0.0.0 Safari/537.36 "
     "SNIPERBO-Official-Publisher/1.0"
 )
-POST_TIMEOUT = (3.0, 5.0)
-UPLOAD_WARNING_MS = 2000.0
-DIRECT_TELEGRAM_TARGET_MS = 300.0
+POST_TIMEOUT = (0.25, 2.0)
+LIVE_SIGNAL_TTL_MS = 2000
+LIVE_SIGNAL_TARGET_MS = 800.0
+LIVE_SIGNAL_TIMEOUT_SECONDS = 2.0
+UPLOAD_WARNING_MS = LIVE_SIGNAL_TARGET_MS
+DIRECT_TELEGRAM_TARGET_MS = LIVE_SIGNAL_TARGET_MS
 DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 1.2
 DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS = {
     "duplicate_signal",
@@ -173,6 +176,330 @@ def iso_now_ms() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()) + f".{int((time.time() % 1) * 1000):03d}"
 
 
+def utc_iso_from_epoch_ms(value_ms: int) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(value_ms / 1000.0)) + f".{value_ms % 1000:03d}Z"
+
+
+def epoch_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def parse_epoch_ms(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if number > 10_000_000_000:
+            return int(number)
+        if number > 10_000_000:
+            return int(number * 1000)
+        return 0
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    try:
+        if text.isdigit():
+            return parse_epoch_ms(float(text))
+        normalized = text.replace("Z", "+00:00")
+        from datetime import datetime
+
+        return int(datetime.fromisoformat(normalized).timestamp() * 1000)
+    except Exception:
+        return 0
+
+
+def first_epoch_ms(*values: Any) -> int:
+    for value in values:
+        parsed = parse_epoch_ms(value)
+        if parsed:
+            return parsed
+    return 0
+
+
+def is_live_entry_status(status: Any) -> bool:
+    text = str(status or "").strip().casefold()
+    return text in {
+        "pending",
+        "g1",
+        "awaiting_sg",
+        "awaiting_g1",
+        "aguardando_resultado",
+        "aguardando_g1",
+        "tie_watch",
+        "active",
+        "ativo",
+        "confirmed",
+        "confirmado",
+        "green",
+        "green_g1",
+        "red",
+        "tie",
+    }
+
+
+def dashboard_signal_context(payload: dict[str, Any]) -> dict[str, Any] | None:
+    signal = payload.get("currentSignal") if isinstance(payload.get("currentSignal"), dict) else {}
+    neural_state = payload.get("neuralEntryState") if isinstance(payload.get("neuralEntryState"), dict) else {}
+    neural_result = payload.get("neuralEntryLastResult") if isinstance(payload.get("neuralEntryLastResult"), dict) else {}
+    last_result = signal.get("lastResult") if isinstance(signal.get("lastResult"), dict) else {}
+    round_id = extract_round_id(payload)
+    payload_time_ms = first_epoch_ms(payload.get("updatedAt"), payload.get("updated_at"), payload.get("timestamp"))
+
+    if neural_result.get("id") or neural_result.get("resultRoundKey"):
+        signal_id = str(neural_result.get("id") or neural_result.get("resultRoundKey") or round_id)
+        return {
+            "signal_id": signal_id,
+            "module": "paying_numbers_result",
+            "round_id": str(neural_result.get("resultRoundKey") or round_id),
+            "status": str(neural_result.get("kind") or neural_result.get("outcome") or "result"),
+            "source_generated_ms": first_epoch_ms(
+                neural_result.get("finishedAt"),
+                neural_result.get("generated_at"),
+                neural_result.get("generatedAt"),
+                last_result.get("finishedAt"),
+                payload_time_ms,
+            ),
+        }
+
+    signal_status = str(signal.get("status") or "").strip()
+    signal_side = direct_telegram_entry(signal.get("side") or signal.get("entry"))
+    state_status = str(neural_state.get("status") or "").strip()
+    state_side = direct_telegram_entry(neural_state.get("expectedSide") or neural_state.get("entry"))
+    if (signal_side and is_live_entry_status(signal_status)) or (state_side and is_live_entry_status(state_status)):
+        signal_id = str(
+            signal.get("id")
+            or signal.get("signalId")
+            or neural_state.get("key")
+            or neural_state.get("triggerRoundKey")
+            or f"paying:{round_id}:{signal_side or state_side}:{signal_status or state_status}"
+        )
+        return {
+            "signal_id": signal_id,
+            "module": "paying_numbers",
+            "round_id": str(round_id or neural_state.get("triggerRoundKey") or ""),
+            "status": signal_status or state_status or "pending",
+            "source_generated_ms": first_epoch_ms(
+                signal.get("generated_at"),
+                signal.get("generatedAt"),
+                signal.get("createdAt"),
+                signal.get("updatedAt"),
+                neural_state.get("generated_at"),
+                neural_state.get("generatedAt"),
+                neural_state.get("createdAt"),
+                neural_state.get("updatedAt"),
+                payload_time_ms,
+            ),
+        }
+
+    for pattern_key in ("patternMinerSnapshot", "patternMiner"):
+        pattern = payload.get(pattern_key)
+        if not isinstance(pattern, dict):
+            continue
+        alerts = pattern.get("entryAlerts")
+        if isinstance(alerts, list) and alerts:
+            first = alerts[0] if isinstance(alerts[0], dict) else {}
+            signal_id = str(first.get("id") or first.get("key") or first.get("pattern") or f"ai:{round_id}")
+            return {
+                "signal_id": signal_id,
+                "module": "ai_patterns",
+                "round_id": str(round_id),
+                "status": str(first.get("status") or first.get("title") or "confirmed"),
+                "source_generated_ms": first_epoch_ms(
+                    first.get("generated_at"),
+                    first.get("generatedAt"),
+                    first.get("createdAt"),
+                    first.get("updatedAt"),
+                    payload_time_ms,
+                ),
+            }
+
+    surf = payload.get("currentSurfAlert") if isinstance(payload.get("currentSurfAlert"), dict) else {}
+    surf_side = direct_telegram_entry(surf.get("surf_prediction_side") or surf.get("surf_side") or surf.get("side"))
+    surf_status = str(surf.get("surf_status") or surf.get("status") or surf.get("phase") or "").strip()
+    if surf_side and is_live_entry_status(surf_status):
+        return {
+            "signal_id": str(surf.get("id") or f"surf:{round_id}:{surf_side}:{surf_status}"),
+            "module": "surf_alert",
+            "round_id": str(round_id),
+            "status": surf_status,
+            "source_generated_ms": first_epoch_ms(
+                surf.get("generated_at"),
+                surf.get("generatedAt"),
+                surf.get("createdAt"),
+                surf.get("updatedAt"),
+                payload_time_ms,
+            ),
+        }
+
+    tie = payload.get("currentTieAlert") if isinstance(payload.get("currentTieAlert"), dict) else {}
+    if str(tie.get("status") or "").strip().casefold() == "active":
+        return {
+            "signal_id": str(tie.get("id") or f"tie:{round_id}:{tie.get('level') or ''}"),
+            "module": "ties_only",
+            "round_id": str(round_id),
+            "status": "active",
+            "source_generated_ms": first_epoch_ms(
+                tie.get("generated_at"),
+                tie.get("generatedAt"),
+                tie.get("createdAt"),
+                tie.get("updatedAt"),
+                payload_time_ms,
+            ),
+        }
+
+    return None
+
+
+def strip_expired_live_signal(
+    payload: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    include_timing: bool = True,
+) -> dict[str, Any]:
+    guarded = copy.deepcopy(payload)
+    guarded["currentSignal"] = {
+        "id": "waiting",
+        "side": "NONE",
+        "status": "waiting",
+        "protection": "-",
+        "strength": 0,
+        "lastResult": None,
+        "expiredSignalId": context.get("signal_id"),
+    }
+    guarded["neuralEntryState"] = None
+    guarded["neuralEntryLastResult"] = None
+    neural = guarded.get("neuralReading")
+    if isinstance(neural, dict):
+        guarded["neuralReading"] = {
+            **neural,
+            "mode": "SCANNING",
+            "paganteStatus": "EXPIRED_SIGNAL",
+            "paganteAlert": "Sinal expirado antes de publicar. Aguardando proxima rodada real.",
+        }
+    for pattern_key in ("patternMinerSnapshot", "patternMiner"):
+        pattern = guarded.get(pattern_key)
+        if isinstance(pattern, dict) and isinstance(pattern.get("entryAlerts"), list):
+            guarded[pattern_key] = {**pattern, "entryAlerts": []}
+    if include_timing:
+        guarded["signalTiming"] = {
+            **context,
+            "expired": True,
+            "action": "discarded",
+        }
+    else:
+        guarded.pop("signalTiming", None)
+    return guarded
+
+
+def attach_live_signal_timing(
+    payload: dict[str, Any],
+    seen_signals: dict[str, int],
+    expired_signals: set[str],
+    *,
+    action: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    context = dashboard_signal_context(payload)
+    if not context:
+        cleaned = dict(payload)
+        cleaned.pop("signalTiming", None)
+        return cleaned, None
+
+    now_ms = epoch_ms()
+    signal_id = str(context["signal_id"])
+    source_generated_ms = int(context.get("source_generated_ms") or 0)
+    generated_ms = seen_signals.setdefault(signal_id, source_generated_ms or now_ms)
+    expires_ms = generated_ms + LIVE_SIGNAL_TTL_MS
+    context = {
+        **context,
+        "generated_at": utc_iso_from_epoch_ms(generated_ms),
+        "expires_at": utc_iso_from_epoch_ms(expires_ms),
+        "generated_ms": generated_ms,
+        "expires_ms": expires_ms,
+        "age_ms": now_ms - generated_ms,
+        "expired": now_ms > expires_ms,
+    }
+    if signal_id in expired_signals:
+        return strip_expired_live_signal(payload, context, include_timing=False), None
+
+    log_signal_timing(context, action)
+    if context["expired"]:
+        log_expired_signal(context, "deadline_exceeded_before_publish")
+        expired_signals.add(signal_id)
+        if len(expired_signals) > 500:
+            expired_signals.clear()
+        return strip_expired_live_signal(payload, context), context
+
+    stamped = copy.deepcopy(payload)
+    stamped["signalTiming"] = {
+        key: value
+        for key, value in context.items()
+        if key not in {"generated_ms", "expires_ms", "age_ms"}
+    }
+    signal = stamped.get("currentSignal")
+    if isinstance(signal, dict):
+        stamped["currentSignal"] = {
+            **signal,
+            "signal_id": signal_id,
+            "generated_at": context["generated_at"],
+            "expires_at": context["expires_at"],
+            "module": context["module"],
+            "round_id": context["round_id"],
+        }
+    return stamped, context
+
+
+def signal_timing_from_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    timing = payload.get("signalTiming") if isinstance(payload.get("signalTiming"), dict) else {}
+    signal_id = str(timing.get("signal_id") or "")
+    if not signal_id:
+        return None
+    generated_ms = parse_epoch_ms(timing.get("generated_at"))
+    expires_ms = parse_epoch_ms(timing.get("expires_at"))
+    if not expires_ms and generated_ms:
+        expires_ms = generated_ms + LIVE_SIGNAL_TTL_MS
+    if not generated_ms or not expires_ms:
+        return None
+    return {**timing, "generated_ms": generated_ms, "expires_ms": expires_ms}
+
+
+def remaining_live_timeout(payload: dict[str, Any], fallback: float) -> float:
+    timing = signal_timing_from_payload(payload)
+    if not timing:
+        return min(float(fallback), LIVE_SIGNAL_TIMEOUT_SECONDS)
+    if bool(timing.get("expired")):
+        return min(float(fallback), LIVE_SIGNAL_TIMEOUT_SECONDS)
+    remaining = (int(timing["expires_ms"]) - epoch_ms()) / 1000.0
+    if remaining <= 0:
+        return min(float(fallback), LIVE_SIGNAL_TIMEOUT_SECONDS)
+    return max(0.05, min(float(fallback), LIVE_SIGNAL_TIMEOUT_SECONDS, remaining))
+
+
+def log_signal_timing(context: dict[str, Any], action: str) -> None:
+    logging.info(
+        "[SIGNAL_TIMING] signal_id=%s module=%s round_id=%s generated_at=%s expires_at=%s started_at=%s finished_at=%s duration_ms=%s expired=%s action=%s",
+        context.get("signal_id"),
+        context.get("module"),
+        context.get("round_id"),
+        context.get("generated_at"),
+        context.get("expires_at"),
+        context.get("generated_at"),
+        utc_iso_from_epoch_ms(epoch_ms()),
+        int(context.get("age_ms") or 0),
+        bool(context.get("expired")),
+        action,
+    )
+
+
+def log_expired_signal(context: dict[str, Any], reason: str) -> None:
+    logging.warning(
+        "[EXPIRED_SIGNAL] signal_id=%s module=%s age_ms=%s reason=%s",
+        context.get("signal_id"),
+        context.get("module"),
+        int(context.get("age_ms") or max(0, epoch_ms() - int(context.get("generated_ms") or epoch_ms()))),
+        reason,
+    )
+
+
 def read_entry_status(entry: Any) -> str:
     if not isinstance(entry, dict):
         return ""
@@ -224,6 +551,10 @@ LATE_ENTRY_WINDOW_SECONDS = 2.0
 
 
 def suppress_late_open_entries(payload: dict[str, Any]) -> dict[str, Any]:
+    return payload
+
+
+def _suppress_late_open_entries_by_betting_timer(payload: dict[str, Any]) -> dict[str, Any]:
     timing = payload.get("bettingTiming") if isinstance(payload.get("bettingTiming"), dict) else {}
     phase = str(timing.get("phase") or "").strip().casefold()
     try:
@@ -457,7 +788,7 @@ def publish_payload(
         token=token,
         extra_headers=publisher_headers,
         payload=local_payload,
-        timeout=float(args.remote_timeout),
+        timeout=remaining_live_timeout(local_payload, float(args.remote_timeout)),
     )
     return (body if isinstance(body, dict) else {}, status_code, upload_ms)
 
@@ -531,9 +862,49 @@ def publish_urgent_signal(
         token=token,
         extra_headers=publisher_headers,
         payload=build_urgent_signal_payload(local_payload),
-        timeout=min(args.remote_timeout, 1.2),
+        timeout=remaining_live_timeout(local_payload, min(args.remote_timeout, LIVE_SIGNAL_TIMEOUT_SECONDS)),
     )
     return (body if isinstance(body, dict) else {}, status_code, upload_ms)
+
+
+def log_dashboard_publish(
+    payload: dict[str, Any],
+    response: dict[str, Any],
+    started_ms: int,
+    finished_ms: int,
+    duration_ms: float,
+    status_code: int,
+) -> None:
+    timing = signal_timing_from_payload(payload) or {}
+    signal_id = str(timing.get("signal_id") or response.get("signal_id") or "")
+    module = str(timing.get("module") or response.get("module") or "")
+    expires_ms = int(timing.get("expires_ms") or parse_epoch_ms(response.get("expires_at")) or 0)
+    expired = bool(expires_ms and finished_ms > expires_ms)
+    ack_signal_id = str(response.get("card_signal_id") or response.get("signal_id") or "")
+    same_signal = not signal_id or not ack_signal_id or signal_id == ack_signal_id
+    log_fn = logging.info if status_code == 200 and duration_ms <= LIVE_SIGNAL_TARGET_MS and same_signal and not expired else logging.warning
+    log_fn(
+        "[DASHBOARD_PUBLISH] signal_id=%s module=%s publish_started_at=%s publish_finished_at=%s duration_ms=%.0f status=%s expired=%s ack_signal_id=%s same_signal=%s",
+        signal_id,
+        module,
+        utc_iso_from_epoch_ms(started_ms),
+        utc_iso_from_epoch_ms(finished_ms),
+        duration_ms,
+        status_code,
+        expired,
+        ack_signal_id,
+        same_signal,
+    )
+    if expired:
+        log_expired_signal(
+            {
+                **timing,
+                "signal_id": signal_id,
+                "module": module,
+                "age_ms": max(0, finished_ms - int(timing.get("generated_ms") or started_ms)),
+            },
+            "dashboard_publish_finished_after_deadline",
+        )
 
 
 def direct_telegram_entry(value: Any) -> str:
@@ -1407,7 +1778,26 @@ def direct_telegram_signals(payload: dict[str, Any], pattern_round_bank: list[di
             "message": build_direct_telegram_message("ties_only", "TIE", variables),
         })
 
-    return dedupe_direct_telegram_candidates(candidates)
+    return stamp_direct_telegram_candidates(dedupe_direct_telegram_candidates(candidates), payload)
+
+
+def stamp_direct_telegram_candidates(candidates: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    root_timing = signal_timing_from_payload(payload) or {}
+    now_ms = epoch_ms()
+    generated_ms = int(root_timing.get("generated_ms") or now_ms)
+    expires_ms = int(root_timing.get("expires_ms") or (generated_ms + LIVE_SIGNAL_TTL_MS))
+    stamped: list[dict[str, Any]] = []
+    for candidate in candidates:
+        module = str(candidate.get("moduleKey") or root_timing.get("module") or "")
+        signal_id = str(candidate.get("signalKey") or root_timing.get("signal_id") or "")
+        stamped.append({
+            **candidate,
+            "signal_id": signal_id,
+            "module": module,
+            "generated_at": utc_iso_from_epoch_ms(generated_ms),
+            "expires_at": utc_iso_from_epoch_ms(expires_ms),
+        })
+    return stamped
 
 
 def dedupe_direct_telegram_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1447,6 +1837,32 @@ def publish_direct_telegram_signal(
     channel_id = config.get("channel_id", "")
     if not url or not secret:
         return False, 0, 0.0, "not_configured"
+    signal_id = str(signal.get("signal_id") or signal.get("signalKey") or "")
+    module = str(signal.get("module") or signal.get("moduleKey") or "")
+    generated_ms = parse_epoch_ms(signal.get("generated_at")) or epoch_ms()
+    expires_ms = parse_epoch_ms(signal.get("expires_at")) or (generated_ms + LIVE_SIGNAL_TTL_MS)
+    started_ms = epoch_ms()
+    if started_ms > expires_ms:
+        context = {
+            "signal_id": signal_id,
+            "module": module,
+            "generated_ms": generated_ms,
+            "age_ms": started_ms - generated_ms,
+        }
+        log_expired_signal(context, "telegram_deadline_exceeded_before_send")
+        logging.warning(
+            "[TELEGRAM_SEND] signal_id=%s module=%s started_at=%s finished_at=%s duration_ms=%s status=%s expired=%s",
+            signal_id,
+            module,
+            utc_iso_from_epoch_ms(started_ms),
+            utc_iso_from_epoch_ms(started_ms),
+            0,
+            "EXPIRED_SIGNAL",
+            True,
+        )
+        return False, 0, 0.0, "expired_signal"
+
+    remaining_seconds = max(0.05, min(LIVE_SIGNAL_TIMEOUT_SECONDS, (expires_ms - started_ms) / 1000.0))
     body, status_code, upload_ms = request_json_with_meta(
         f"{url}/engine/signal",
         method="POST",
@@ -1464,8 +1880,31 @@ def publish_direct_telegram_signal(
             **({"protection": signal["protection"]} if signal.get("protection") else {}),
             "buttonLabel": "Abrir Sniper Bo IA",
         },
-        timeout=(0.25, 1.0),
+        timeout=(min(0.25, remaining_seconds), remaining_seconds),
     )
+    finished_ms = epoch_ms()
+    expired_after_send = finished_ms > expires_ms
+    logging.info(
+        "[TELEGRAM_SEND] signal_id=%s module=%s started_at=%s finished_at=%s duration_ms=%.0f status=%s expired=%s",
+        signal_id,
+        module,
+        utc_iso_from_epoch_ms(started_ms),
+        utc_iso_from_epoch_ms(finished_ms),
+        upload_ms,
+        status_code,
+        expired_after_send,
+    )
+    if expired_after_send:
+        log_expired_signal(
+            {
+                "signal_id": signal_id,
+                "module": module,
+                "generated_ms": generated_ms,
+                "age_ms": finished_ms - generated_ms,
+            },
+            "telegram_finished_after_deadline",
+        )
+        return False, status_code, upload_ms, "expired_signal"
     sent = body.get("sent") if isinstance(body, dict) else []
     blocked = body.get("blocked") if isinstance(body, dict) else []
     if isinstance(sent, list) and sent:
@@ -1638,6 +2077,9 @@ def main() -> int:
     parser.add_argument("--skip-full-publish", action="store_true", help="Only publish urgent signal payloads; do not POST the heavy full dashboard.")
     parser.add_argument("--log-file", type=Path, default=Path("official_dashboard_publisher.log"))
     args = parser.parse_args()
+    args.remote_timeout = max(0.05, min(float(args.remote_timeout), LIVE_SIGNAL_TIMEOUT_SECONDS))
+    args.urgent_retry_interval = max(0.2, min(float(args.urgent_retry_interval), 0.8))
+    args.non_entry_urgent_interval = max(float(args.non_entry_urgent_interval), 2.0)
     if not acquire_process_lock(args):
         return 0
     if not args.signal_url:
@@ -1699,12 +2141,16 @@ def main() -> int:
     direct_telegram_pending: list[dict[str, Any]] = []
     direct_telegram_result_keys: set[str] = set()
     direct_telegram_module_hold_until: dict[str, float] = {}
+    seen_live_signals: dict[str, int] = {}
+    expired_live_signals: set[str] = set()
     direct_pattern_bank_file = direct_pattern_bank_path(args, env)
     direct_pattern_round_bank = load_direct_pattern_round_bank(direct_pattern_bank_file)
     direct_pattern_bank_last_save = 0.0
     logging.info("Pattern miner bank loaded: rounds=%s path=%s", len(direct_pattern_round_bank), direct_pattern_bank_file)
     logging.info("Official dashboard publisher started: %s -> %s", args.local_url, args.remote_url)
     while True:
+        live_signal_context: dict[str, Any] | None = None
+        signal_fingerprint = ""
         try:
             if rate_limit_sleep > 0:
                 time.sleep(rate_limit_sleep)
@@ -1758,8 +2204,20 @@ def main() -> int:
                 logging.info("entrada bloqueada liberada apos resolucao de G1.")
                 queued_locked_urgent_payload = None
 
+            local_payload, live_signal_context = attach_live_signal_timing(
+                local_payload,
+                seen_live_signals,
+                expired_live_signals,
+                action="publish_cycle",
+            )
             signal_fingerprint = dashboard_signal_fingerprint(local_payload)
-            signal_changed = bool(args.urgent_signal and signal_fingerprint and signal_fingerprint != last_signal_fingerprint)
+            live_signal_active = bool(live_signal_context and not live_signal_context.get("expired"))
+            signal_changed = bool(
+                args.urgent_signal
+                and live_signal_active
+                and signal_fingerprint
+                and signal_fingerprint != last_signal_fingerprint
+            )
             next_direct_pending: list[dict[str, Any]] = []
             for pending in direct_telegram_pending:
                 outcome = resolve_direct_telegram_outcome(pending, local_payload)
@@ -1806,7 +2264,7 @@ def main() -> int:
                         result_reason,
                         outcome.get("label"),
                     )
-                    if result_ok or result_reason == "duplicate_signal":
+                    if result_ok or result_reason in {"duplicate_signal", "expired_signal"}:
                         direct_telegram_result_keys.add(result_key)
                         direct_telegram_result_keys.add(aggregate_result_key)
                         module_key = str(pending.get("moduleKey") or "")
@@ -1814,7 +2272,7 @@ def main() -> int:
                             direct_telegram_module_hold_until[module_key] = (
                                 time.monotonic() + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
                             )
-                    else:
+                    elif result_reason != "expired_signal":
                         next_direct_pending.append(pending)
                 except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
                     logging.warning("direct telegram result publish failed: %s", exc)
@@ -1878,7 +2336,7 @@ def main() -> int:
                         direct_status,
                         direct_reason,
                     )
-                    if direct_ok or direct_reason in DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS:
+                    if direct_ok or direct_reason in DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS or direct_reason == "expired_signal":
                         direct_telegram_sent_keys.add(direct_key)
                         if direct_ok:
                             direct_telegram_pending = [
@@ -1907,14 +2365,12 @@ def main() -> int:
             urgent_published = False
             if signal_changed:
                 now_signal = time.monotonic()
-                if now_signal < urgent_backoff_until:
-                    logging.info("Urgent signal in backoff; publishing full dashboard with latest payload instead.")
-                    signal_changed = False
                 min_urgent_interval = urgent_signal_min_interval(local_payload, args)
                 if (now_signal - last_signal_attempt_at) >= min_urgent_interval:
                     last_signal_attempt_at = now_signal
                     try:
                         t1_perf = time.perf_counter()
+                        urgent_started_ms = epoch_ms()
                         signal_response, signal_status_code, signal_upload_ms = publish_urgent_signal(
                             args,
                             token,
@@ -1927,6 +2383,14 @@ def main() -> int:
                             local_payload,
                             t0_iso,
                             (t1_perf - t0_perf) * 1000.0,
+                            signal_upload_ms,
+                            signal_status_code,
+                        )
+                        log_dashboard_publish(
+                            build_urgent_signal_payload(local_payload),
+                            signal_response,
+                            urgent_started_ms,
+                            epoch_ms(),
                             signal_upload_ms,
                             signal_status_code,
                         )
@@ -1953,22 +2417,15 @@ def main() -> int:
                         else:
                             status_code = getattr(exc, "code", 0)
                             body = exc.read().decode("utf-8", errors="replace")[:180] if hasattr(exc, "read") else str(exc)[:180]
-                        urgent_failures += 1
-                        if status_code == 429:
-                            urgent_backoff_seconds = min(60.0, max(10.0, 10.0 * urgent_failures))
-                            urgent_backoff_until = time.monotonic() + urgent_backoff_seconds
-                            logging.warning(
-                                "Urgent signal HTTP 429; backing off urgent channel for %.1fs: %s",
-                                urgent_backoff_seconds,
-                                body,
-                            )
-                        else:
-                            urgent_backoff_until = time.monotonic() + min(30.0, max(2.0, 2.0 * urgent_failures))
-                            logging.warning("Urgent signal HTTP %s: %s", status_code, body)
+                        if live_signal_context:
+                            log_expired_signal(live_signal_context, f"urgent_publish_http_{status_code}_no_retry")
+                        last_signal_fingerprint = signal_fingerprint
+                        logging.warning("Urgent signal HTTP %s; live signal will not be retried: %s", status_code, body)
                     except (URLError, TimeoutError, OSError, RuntimeError) as exc:
-                        urgent_failures += 1
-                        urgent_backoff_until = time.monotonic() + min(20.0, max(2.0, 2.0 * urgent_failures))
-                        logging.warning("Urgent signal publish failed once for this signal: %s; publishing full dashboard with latest payload instead.", exc)
+                        if live_signal_context:
+                            log_expired_signal(live_signal_context, "urgent_publish_failed_no_retry")
+                        last_signal_fingerprint = signal_fingerprint
+                        logging.warning("Urgent signal publish failed; live signal will not be retried: %s", exc)
 
             if args.skip_full_publish:
 
@@ -1986,6 +2443,7 @@ def main() -> int:
                 continue
 
             t1_perf = time.perf_counter()
+            dashboard_started_ms = epoch_ms()
             response, status_code, upload_ms = publish_payload(args, token, local_payload, admin_email, admin_password)
             log_publish_timing(
                 "dashboard",
@@ -1995,15 +2453,18 @@ def main() -> int:
                 upload_ms,
                 status_code,
             )
+            log_dashboard_publish(local_payload, response, dashboard_started_ms, epoch_ms(), upload_ms, status_code)
             token_index = 0
             dashboard = response.get("dashboard") if isinstance(response, dict) else {}
-            rounds = len((dashboard or {}).get("rounds") or [])
-            signal = (dashboard or {}).get("currentSignal") or {}
+            rounds = len((dashboard or {}).get("rounds") or []) if dashboard else len(local_payload.get("rounds") or [])
+            signal = (dashboard or {}).get("currentSignal") or local_payload.get("currentSignal") or {}
             logging.info(
-                "Published official dashboard: rounds=%s signal=%s side=%s",
+                "Published official dashboard: rounds=%s signal=%s side=%s signal_id=%s ack_signal_id=%s",
                 rounds,
-                signal.get("status"),
-                signal.get("side"),
+                signal.get("status") if isinstance(signal, dict) else None,
+                signal.get("side") if isinstance(signal, dict) else None,
+                (signal_timing_from_payload(local_payload) or {}).get("signal_id"),
+                response.get("card_signal_id") or response.get("signal_id") if isinstance(response, dict) else "",
             )
             last_fingerprint = fingerprint
             if signal_fingerprint:
@@ -2037,11 +2498,16 @@ def main() -> int:
                 using_admin_session = False
         except (URLError, TimeoutError, OSError, RuntimeError) as exc:
             logging.warning("Publish failed: %s", exc)
-            full_publish_failures += 1
-            full_backoff_seconds = min(180.0, max(60.0, 30.0 * full_publish_failures))
-            full_publish_backoff_until = time.monotonic() + full_backoff_seconds
-            logging.warning("Full dashboard publish backoff for %.1fs; urgent signal remains active.", full_backoff_seconds)
-            # Do not mark failed payloads as published; next loop must send the latest state.
+            if live_signal_context:
+                last_signal_fingerprint = signal_fingerprint
+                log_expired_signal(live_signal_context, "dashboard_publish_failed_no_retry")
+                full_publish_backoff_until = 0.0
+            else:
+                full_publish_failures += 1
+                full_backoff_seconds = min(180.0, max(60.0, 30.0 * full_publish_failures))
+                full_publish_backoff_until = time.monotonic() + full_backoff_seconds
+                logging.warning("Full dashboard publish backoff for %.1fs; urgent signal remains active.", full_backoff_seconds)
+                # Do not mark failed payloads as published; next loop must send the latest state.
 
         time.sleep(max(0.25, args.interval))
 
