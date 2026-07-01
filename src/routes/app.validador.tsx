@@ -16,7 +16,6 @@ import {
   ShieldCheck,
   Trash2,
   Trophy,
-  Wand2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -55,7 +54,6 @@ import {
   matchesPattern,
   sideName,
   sideTone,
-  type PatternMiningFilters,
 } from "@/neuralValidator/NeuralValidatorEngine";
 import {
   DEFAULT_MESSAGE_TEMPLATES,
@@ -75,7 +73,6 @@ import {
 import type { Round, RoundResult } from "@/types/dashboard";
 import type {
   LiveValidatorHit,
-  PatternSuggestion,
   SavedValidatorPattern,
   ValidatorConfig,
   ValidatorDestination,
@@ -296,25 +293,6 @@ function NeuralValidatorPage() {
     analyzingTemplate: DEFAULT_MESSAGE_TEMPLATES.analyzing,
     signalModules: defaultTelegramModuleConfigs(),
   });
-  const [filters, setFilters] = useState<PatternMiningFilters>({
-    historySize: Math.min(5000, planLimits.history),
-    patternLength: 3,
-    entryType: "AI",
-    galeLimit: 1,
-    minAccuracy: 70,
-    minOccurrences: 5,
-    includeTie: true,
-    includeNumbers: true,
-    includeOpposite: true,
-    hotOnly: false,
-    lowRedOnly: false,
-  });
-
-  const suggestions = useMemo(() => {
-    if (!hasHistory || !planLimits.ai) return [];
-    return engine.minePatterns(historyRounds, filters);
-  }, [filters, hasHistory, historyRounds, planLimits.ai]);
-
   const historySignature = roundsSignature(historyRounds);
   const patternSignature = pattern.map(formatToken).join(">");
   const validationHistoryRounds = historyRounds;
@@ -550,14 +528,6 @@ function NeuralValidatorPage() {
   function saveAndClearPattern() {
     if (!saveCurrentPattern()) return;
     setPattern([]);
-  }
-
-  function saveSuggestion(suggestion: PatternSuggestion) {
-    saveCurrentPattern(
-      suggestion.validation,
-      suggestion.pattern,
-      `IA ${sideName(suggestion.pulledSide)} ${formatPercent(suggestion.validation.accuracy)}`,
-    );
   }
 
   function removePattern(id: string) {
@@ -942,11 +912,10 @@ function NeuralValidatorPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-5">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-4">
           <TabsTrigger value="dashboard" className="gap-1.5"><Activity className="size-3.5" /> Dashboard</TabsTrigger>
           <TabsTrigger value="channels" className="gap-1.5"><Send className="size-3.5" /> Central Telegram</TabsTrigger>
           <TabsTrigger value="validator" className="gap-1.5"><ShieldCheck className="size-3.5" /> Validador</TabsTrigger>
-          <TabsTrigger value="ai" className="gap-1.5"><Wand2 className="size-3.5" /> IA de Padroes</TabsTrigger>
           <TabsTrigger value="saved" className="gap-1.5"><Save className="size-3.5" /> Padroes Salvos</TabsTrigger>
         </TabsList>
 
@@ -955,7 +924,6 @@ function NeuralValidatorPage() {
             hasHistory={hasHistory}
             liveHits={liveHits}
             savedPatterns={savedPatterns}
-            suggestions={suggestions}
             channels={channels}
             historyRounds={historyRounds}
           />
@@ -976,23 +944,6 @@ function NeuralValidatorPage() {
             hasHistory={hasValidationHistory}
             savedPatternName={currentSavedPattern?.name ?? ""}
             recentSavedPatterns={savedPatterns.slice(0, 4)}
-          />
-        </TabsContent>
-
-        <TabsContent value="ai" className="space-y-4">
-          <AiPatternsTab
-            filters={filters}
-            setFilters={setFilters}
-            suggestions={suggestions}
-            hasHistory={hasHistory}
-            aiEnabled={planLimits.ai}
-            historyLimit={planLimits.history}
-            onValidateSuggestion={(suggestion) => {
-              setPattern(suggestion.pattern);
-              setManualResult(suggestion.validation);
-              showNotice("Sugestao carregada no validador.");
-            }}
-            onSaveSuggestion={saveSuggestion}
           />
         </TabsContent>
 
@@ -1092,14 +1043,12 @@ function DashboardTab({
   hasHistory,
   liveHits,
   savedPatterns,
-  suggestions,
   channels,
   historyRounds,
 }: {
   hasHistory: boolean;
   liveHits: LiveValidatorHit[];
   savedPatterns: SavedValidatorPattern[];
-  suggestions: PatternSuggestion[];
   channels: ValidatorNotificationChannel[];
   historyRounds: Round[];
 }) {
@@ -1160,21 +1109,7 @@ function DashboardTab({
         </GlassCard>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <GlassCard>
-          <SectionTitle title="Estrategias quentes da IA" subtitle="Top sugestoes calculadas com o historico real disponivel." />
-          <div className="mt-4 space-y-2">
-            {suggestions.slice(0, 4).map((suggestion, index) => (
-              <SuggestionRow key={suggestion.id} suggestion={suggestion} rank={index + 1} />
-            ))}
-            {!suggestions.length && (
-              <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
-                Nenhuma sugestao com amostra suficiente no filtro atual.
-              </div>
-            )}
-          </div>
-        </GlassCard>
-
+      <div className="grid gap-4">
         <GlassCard>
           <SectionTitle title="Ultimos padroes salvos" subtitle="Contadores proprios, separados dos outros motores." />
           <div className="mt-4 space-y-2">
@@ -1395,107 +1330,6 @@ function RecentSavedPatternsPanel({ patterns }: { patterns: SavedValidatorPatter
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function AiPatternsTab({
-  filters,
-  setFilters,
-  suggestions,
-  hasHistory,
-  aiEnabled,
-  historyLimit,
-  onValidateSuggestion,
-  onSaveSuggestion,
-}: {
-  filters: PatternMiningFilters;
-  setFilters: (filters: PatternMiningFilters) => void;
-  suggestions: PatternSuggestion[];
-  hasHistory: boolean;
-  aiEnabled: boolean;
-  historyLimit: number;
-  onValidateSuggestion: (suggestion: PatternSuggestion) => void;
-  onSaveSuggestion: (suggestion: PatternSuggestion) => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <GlassCard>
-        <SectionTitle title="Filtros da IA" subtitle="A IA minera apenas o historico real da mesa." />
-        <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <Field label="Historico">
-            <Select value={String(filters.historySize)} onValueChange={(value) => setFilters({ ...filters, historySize: Math.min(Number(value), historyLimit) })}>
-              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {availableHistoryOptions(historyLimit).map((option) => <SelectItem key={option} value={String(option)}>{option / 1000}k</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Tamanho">
-            <Select value={String(filters.patternLength)} onValueChange={(value) => setFilters({ ...filters, patternLength: Number(value) })}>
-              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {[2, 3, 4, 5].map((value) => <SelectItem key={value} value={String(value)}>{value} resultados</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Entrada">
-            <Select value={filters.entryType} onValueChange={(value) => setFilters({ ...filters, entryType: value as ValidatorEntryType })}>
-              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {ENTRY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Gale maximo">
-            <Select value={String(filters.galeLimit)} onValueChange={(value) => setFilters({ ...filters, galeLimit: Number(value) as ValidatorGaleLimit })}>
-              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="0">SG</SelectItem>
-                <SelectItem value="1">G1</SelectItem>
-                <SelectItem value="2">G2</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Assertividade minima">
-            <Input type="number" value={filters.minAccuracy} onChange={(event) => setFilters({ ...filters, minAccuracy: Number(event.target.value) || 0 })} />
-          </Field>
-          <Field label="Minimo aparicoes">
-            <Input type="number" value={filters.minOccurrences} onChange={(event) => setFilters({ ...filters, minOccurrences: Number(event.target.value) || 1 })} />
-          </Field>
-        </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          <FilterSwitch label="Incluir Tie" checked={filters.includeTie} onCheckedChange={(checked) => setFilters({ ...filters, includeTie: checked })} />
-          <FilterSwitch label="Incluir numeros" checked={filters.includeNumbers} onCheckedChange={(checked) => setFilters({ ...filters, includeNumbers: checked })} />
-          <FilterSwitch label="Lado oposto" checked={filters.includeOpposite} onCheckedChange={(checked) => setFilters({ ...filters, includeOpposite: checked })} />
-          <FilterSwitch label="Apenas quentes" checked={filters.hotOnly} onCheckedChange={(checked) => setFilters({ ...filters, hotOnly: checked })} />
-          <FilterSwitch label="Baixo RED" checked={filters.lowRedOnly} onCheckedChange={(checked) => setFilters({ ...filters, lowRedOnly: checked })} />
-        </div>
-      </GlassCard>
-
-      {!aiEnabled && (
-        <GlassCard className="border-warning/40">
-          <div className="text-sm font-black text-warning">IA de Padroes liberada para VIP/Admin.</div>
-          <p className="mt-1 text-xs text-muted-foreground">Clientes Free podem validar poucos padroes manualmente, sem mineracao completa.</p>
-        </GlassCard>
-      )}
-
-      <div className="grid gap-3 xl:grid-cols-2">
-        {suggestions.map((suggestion, index) => (
-          <SuggestionCard
-            key={suggestion.id}
-            suggestion={suggestion}
-            rank={index + 1}
-            onValidate={() => onValidateSuggestion(suggestion)}
-            onSave={() => onSaveSuggestion(suggestion)}
-          />
-        ))}
-      </div>
-      {hasHistory && aiEnabled && !suggestions.length && (
-        <GlassCard>
-          <div className="text-sm text-muted-foreground">Nenhum padrao encontrou a assertividade minima com amostra real suficiente.</div>
-        </GlassCard>
-      )}
     </div>
   );
 }
@@ -2403,59 +2237,6 @@ function ValidationDetailsPanel({ result, config }: { result: ValidatorResult | 
   );
 }
 
-function SuggestionCard({
-  suggestion,
-  rank,
-  onValidate,
-  onSave,
-}: {
-  suggestion: PatternSuggestion;
-  rank: number;
-  onValidate: () => void;
-  onSave: () => void;
-}) {
-  return (
-    <GlassCard className="rounded-xl">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 text-sm font-black">
-            Padrao IA Top {rank}
-          </div>
-          <div className="mt-2"><PatternLine pattern={suggestion.pattern} pulledSide={suggestion.pulledSide} /></div>
-        </div>
-        <AppBadge tone={suggestion.status === "quente" ? "green" : "blue"}>{suggestion.status}</AppBadge>
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-        <MiniStat label="Apareceu" value={suggestion.occurrences} />
-        <MiniStat label="SG" value={suggestion.validation.sgWins} tone="text-success" />
-        <MiniStat label="G1" value={suggestion.validation.g1Wins} tone="text-neon-cyan" />
-        <MiniStat label="RED" value={suggestion.validation.losses} tone="text-destructive" />
-        <MiniStat label="TIE" value={suggestion.validation.ties} tone="text-warning" />
-        <MiniStat label="Assert." value={formatPercent(suggestion.validation.accuracy)} tone="text-neon-cyan" />
-        <MiniStat label="Risco" value={suggestion.risk} />
-        <MiniStat label="Loss max" value={suggestion.validation.bestLossStreak} />
-      </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button type="button" size="sm" className="btn-primary-grad" onClick={onValidate}>Validar</Button>
-        <Button type="button" size="sm" variant="secondary" onClick={onSave}>Salvar padrao</Button>
-        <Button type="button" size="sm" variant="secondary" onClick={onSave}>Monitorar ao vivo</Button>
-      </div>
-    </GlassCard>
-  );
-}
-
-function SuggestionRow({ suggestion, rank }: { suggestion: PatternSuggestion; rank: number }) {
-  return (
-    <div className="rounded-xl border border-border/70 bg-secondary/20 p-3">
-      <div className="flex items-center gap-2 text-xs">
-        <span className="flex size-7 items-center justify-center rounded-lg bg-neon-cyan/10 font-black text-neon-cyan">{rank}</span>
-        <div className="min-w-0 flex-1"><PatternLine pattern={suggestion.pattern} pulledSide={suggestion.pulledSide} compact /></div>
-        <span className="font-black text-neon-cyan">{formatPercent(suggestion.validation.accuracy)}</span>
-      </div>
-    </div>
-  );
-}
-
 function PatternLine({
   pattern,
   pulledSide,
@@ -2682,15 +2463,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     <label className="space-y-1.5">
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
       {children}
-    </label>
-  );
-}
-
-function FilterSwitch({ label, checked, onCheckedChange }: { label: string; checked: boolean; onCheckedChange: (checked: boolean) => void }) {
-  return (
-    <label className="flex items-center justify-between rounded-xl border border-border/70 bg-secondary/20 px-3 py-2 text-sm">
-      <span>{label}</span>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </label>
   );
 }
