@@ -245,22 +245,6 @@ def dashboard_signal_context(payload: dict[str, Any]) -> dict[str, Any] | None:
     round_id = extract_round_id(payload)
     payload_time_ms = first_epoch_ms(payload.get("updatedAt"), payload.get("updated_at"), payload.get("timestamp"))
 
-    if neural_result.get("id") or neural_result.get("resultRoundKey"):
-        signal_id = str(neural_result.get("id") or neural_result.get("resultRoundKey") or round_id)
-        return {
-            "signal_id": signal_id,
-            "module": "paying_numbers_result",
-            "round_id": str(neural_result.get("resultRoundKey") or round_id),
-            "status": str(neural_result.get("kind") or neural_result.get("outcome") or "result"),
-            "source_generated_ms": first_epoch_ms(
-                neural_result.get("finishedAt"),
-                neural_result.get("generated_at"),
-                neural_result.get("generatedAt"),
-                last_result.get("finishedAt"),
-                payload_time_ms,
-            ),
-        }
-
     signal_status = str(signal.get("status") or "").strip()
     signal_side = direct_telegram_entry(signal.get("side") or signal.get("entry"))
     state_status = str(neural_state.get("status") or "").strip()
@@ -287,6 +271,22 @@ def dashboard_signal_context(payload: dict[str, Any]) -> dict[str, Any] | None:
                 neural_state.get("generatedAt"),
                 neural_state.get("createdAt"),
                 neural_state.get("updatedAt"),
+                payload_time_ms,
+            ),
+        }
+
+    if neural_result.get("id") or neural_result.get("resultRoundKey"):
+        signal_id = str(neural_result.get("id") or neural_result.get("resultRoundKey") or round_id)
+        return {
+            "signal_id": signal_id,
+            "module": "paying_numbers_result",
+            "round_id": str(neural_result.get("resultRoundKey") or round_id),
+            "status": str(neural_result.get("kind") or neural_result.get("outcome") or "result"),
+            "source_generated_ms": first_epoch_ms(
+                neural_result.get("finishedAt"),
+                neural_result.get("generated_at"),
+                neural_result.get("generatedAt"),
+                last_result.get("finishedAt"),
                 payload_time_ms,
             ),
         }
@@ -348,6 +348,101 @@ def dashboard_signal_context(payload: dict[str, Any]) -> dict[str, Any] | None:
         }
 
     return None
+
+
+def neural_status_slug(value: Any) -> str:
+    text = str(value or "").strip().casefold()
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    return text.strip("_")
+
+
+def is_neural_reading_live_entry(reading: dict[str, Any]) -> bool:
+    mode = str(reading.get("mode") or "").strip().casefold()
+    status = neural_status_slug(reading.get("paganteStatus") or reading.get("status"))
+    if not status and mode != "active":
+        return False
+    if any(
+        marker in status
+        for marker in (
+            "bloqueado",
+            "expired",
+            "expirado",
+            "feed_pausado",
+            "stale",
+            "green",
+            "red",
+            "risco",
+            "esticado",
+            "observ",
+            "iniciante",
+        )
+    ):
+        return False
+    return mode == "active" or status in {
+        "valido",
+        "valido_forte",
+        "confirmado",
+        "confirmed",
+        "entrada_ativa",
+        "active",
+        "ativo",
+        "awaiting_sg",
+        "awaiting_g1",
+        "aguardando_resultado",
+        "aguardando_g1",
+    }
+
+
+def promote_neural_reading_to_current_signal(payload: dict[str, Any]) -> dict[str, Any]:
+    reading = payload.get("neuralReading") if isinstance(payload.get("neuralReading"), dict) else {}
+    if not reading or not is_neural_reading_live_entry(reading):
+        return payload
+
+    current_signal = payload.get("currentSignal") if isinstance(payload.get("currentSignal"), dict) else {}
+    current_side = direct_telegram_entry(current_signal.get("side") or current_signal.get("entry"))
+    current_status = read_entry_status(current_signal)
+    current_is_idle = not current_side or current_side == "NONE" or current_status in {"", "waiting"}
+    if not current_is_idle:
+        return payload
+
+    side = direct_telegram_entry(reading.get("direcao") or reading.get("origem"))
+    if not side:
+        return payload
+
+    round_id = extract_round_id(payload)
+    number = str(reading.get("numero") or "").strip()
+    status = neural_status_slug(reading.get("paganteStatus") or reading.get("status")) or "active"
+    signal_status = "g1" if "g1" in status else "pending"
+    signal_id = f"neural-reading:{round_id}:{number or '-'}:{side}:{status}"
+    generated_at = (
+        str(payload.get("updatedAt") or payload.get("updated_at") or reading.get("updatedAt") or reading.get("generatedAt") or "")
+        .strip()
+    )
+    promoted_signal: dict[str, Any] = {
+        "id": signal_id,
+        "signal_id": signal_id,
+        "side": side,
+        "entry": side,
+        "status": signal_status,
+        "protection": str(reading.get("validade") or current_signal.get("protection") or "G1"),
+        "strength": direct_float(reading.get("assertividade") or reading.get("confidence") or current_signal.get("strength")),
+        "lastResult": None,
+        "module": "paying_numbers",
+        "round_id": str(round_id),
+        "source": "neuralReading",
+    }
+    if generated_at:
+        promoted_signal["generatedAt"] = generated_at
+        promoted_signal["updatedAt"] = generated_at
+
+    logging.info(
+        "neuralReading promovida para currentSignal: signal_id=%s side=%s round_id=%s status=%s",
+        signal_id,
+        side,
+        round_id,
+        signal_status,
+    )
+    return {**payload, "currentSignal": promoted_signal}
 
 
 def strip_expired_live_signal(
@@ -2204,6 +2299,7 @@ def main() -> int:
                 logging.info("entrada bloqueada liberada apos resolucao de G1.")
                 queued_locked_urgent_payload = None
 
+            local_payload = promote_neural_reading_to_current_signal(local_payload)
             local_payload, live_signal_context = attach_live_signal_timing(
                 local_payload,
                 seen_live_signals,

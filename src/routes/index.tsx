@@ -186,7 +186,6 @@ const PARTICLES = Array.from({ length: 28 }, (_, i) => {
 });
 
 function LoginPage() {
-  const savedUser = readUserSession();
   const loginCardRef = useRef<HTMLDivElement | null>(null);
   const plansCardRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -195,17 +194,28 @@ function LoginPage() {
   const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState("");
   const [notice, setNotice] = useState("");
   const [pendingAccess, setPendingAccess] = useState<ClientAccess | null>(null);
-  const [prefillEmail, setPrefillEmail] = useState(savedUser.email || "");
+  const [prefillEmail, setPrefillEmail] = useState("");
   const [salesClosed, setSalesClosed] = useState(false);
   const [plans, setPlans] = useState<BillingPlan[]>(landingFallbackPlans);
-  const [checkoutLeadName, setCheckoutLeadName] = useState(savedUser.name || "");
-  const [checkoutLeadEmail, setCheckoutLeadEmail] = useState(savedUser.email || "");
+  const [checkoutLeadName, setCheckoutLeadName] = useState("");
+  const [checkoutLeadEmail, setCheckoutLeadEmail] = useState("");
   const [selectedCountryId, setSelectedCountryId] = useState(DEFAULT_COUNTRY_DIAL.id);
   const [whatsappPhone, setWhatsappPhone] = useState("");
   const [slideIndex, setSlideIndex] = useState(0);
   const slide = FEATURE_SLIDES[slideIndex];
   const selectedCountry =
     COUNTRY_DIAL_OPTIONS.find((option) => option.id === selectedCountryId) ?? DEFAULT_COUNTRY_DIAL;
+
+  useEffect(() => {
+    const savedUser = readUserSession();
+    if (savedUser.email) {
+      setPrefillEmail(savedUser.email);
+      setCheckoutLeadEmail(savedUser.email);
+    }
+    if (savedUser.name && savedUser.email) {
+      setCheckoutLeadName(savedUser.name);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;

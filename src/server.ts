@@ -12024,8 +12024,9 @@ function isLateEntryWindow(timing: DashboardData["bettingTiming"]) {
   if (!timing) return false;
   if (!isFreshBettingTiming(timing)) return false;
   if (timing.phase === "CLOSED") return true;
-  const remaining = typeof timing.remainingSeconds === "number" ? timing.remainingSeconds : null;
-  return timing.phase === "OPEN" && remaining !== null && remaining <= LATE_ENTRY_BLOCK_SECONDS;
+  // The live publisher owns freshness through generated_at/expires_at. The Bac Bo
+  // timer can report OPEN with 0s remaining while a valid signal is still live.
+  return false;
 }
 
 function isFreshBettingTiming(timing: DashboardData["bettingTiming"]) {
