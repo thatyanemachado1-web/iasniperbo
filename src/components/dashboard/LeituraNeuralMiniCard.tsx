@@ -754,8 +754,8 @@ function NeuralNumberToken({
   return (
     <span
       className={cn(
-        "inline-grid size-6 shrink-0 place-items-center rounded-full border-[1.5px] font-black leading-none tabular-nums shadow-[0_0_12px_-7px_currentColor] [-webkit-text-stroke:0.25px_currentColor]",
-        compactLabel.length > 1 ? "text-[12px]" : "text-[15px]",
+        "inline-grid size-5 shrink-0 place-items-center rounded-full border font-black leading-none tabular-nums shadow-[0_0_10px_-7px_currentColor] [-webkit-text-stroke:0.2px_currentColor]",
+        compactLabel.length > 1 ? "text-[10px]" : "text-[12px]",
         numberTokenClass(side),
       )}
       title={label}
