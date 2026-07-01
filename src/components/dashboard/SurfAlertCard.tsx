@@ -67,6 +67,9 @@ export function SurfAlertCard({
     : memory.totalDrops3Plus
       ? memory.surfStatus
       : "SEM_SURF";
+  const compactReason = hasLiveSurfSignal
+    ? buildLiveSurfReason(probableSurfEntry, compactConfidence, memory)
+    : memory.reason;
 
   return (
     <GlassCard
@@ -139,7 +142,7 @@ export function SurfAlertCard({
               </span>
             </div>
             <div className="mt-1.5 line-clamp-2 text-[9px] leading-snug text-muted-foreground">
-              {memory.reason}
+              {compactReason}
             </div>
           </div>
           <div className="mt-2">
@@ -301,6 +304,21 @@ function surfEntryFromAlert(alert: SurfAlert): "BANKER" | "PLAYER" | "AGUARDAR" 
       ? alert.surf_prediction_side
       : alert.surf_side;
   return side === "BANKER" || side === "PLAYER" ? side : "AGUARDAR";
+}
+
+function buildLiveSurfReason(
+  entry: "BANKER" | "PLAYER" | "AGUARDAR",
+  confidence: number,
+  memory: DailySurfMaxSnapshot["dailySurfMemory"],
+) {
+  if (entry === "AGUARDAR") return memory.reason;
+
+  return [
+    `Surf ativo para ${entry} com ${confidence}% de confianca.`,
+    `AT ${memory.currentDropDepth || 0}`,
+    `P3+ ${memory.playerDrops3Plus}`,
+    `B3+ ${memory.bankerDrops3Plus}`,
+  ].join(" ");
 }
 
 function buildSurfDecision(confidence: number, breakRisk: number, side: string) {
