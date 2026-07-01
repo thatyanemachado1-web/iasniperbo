@@ -16670,10 +16670,23 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
 function compareDashboardStateFreshness(left: Record<string, unknown>, right: Record<string, unknown>) {
   const leftScore = dashboardStateFreshnessScore(left);
   const rightScore = dashboardStateFreshnessScore(right);
-  for (let index = 0; index < leftScore.length; index += 1) {
-    const diff = leftScore[index] - rightScore[index];
+  const leadingDiffs = [
+    leftScore.hasCurrentCycle - rightScore.hasCurrentCycle,
+    leftScore.hasLiveRounds - rightScore.hasLiveRounds,
+  ];
+  for (const diff of leadingDiffs) {
     if (diff !== 0) return diff;
   }
+  if (leftScore.latestObservedAt > 0 && rightScore.latestObservedAt > 0) {
+    const observedDiff = leftScore.latestObservedAt - rightScore.latestObservedAt;
+    if (observedDiff !== 0) return observedDiff;
+  }
+  const roundDiff = leftScore.lastRoundId - rightScore.lastRoundId;
+  if (roundDiff !== 0) return roundDiff;
+  const fallbackObservedDiff = leftScore.latestObservedAt - rightScore.latestObservedAt;
+  if (fallbackObservedDiff !== 0) return fallbackObservedDiff;
+  const lengthDiff = leftScore.roundsLength - rightScore.roundsLength;
+  if (lengthDiff !== 0) return lengthDiff;
   return 0;
 }
 
@@ -16683,9 +16696,25 @@ function dashboardStateFreshnessScore(state: Record<string, unknown>) {
   const lastRound = rounds[rounds.length - 1] ?? {};
   const lastRoundId = Number(readString(lastRound, "id") || lastRound.id || 0) || 0;
   const updatedAtMs = Date.parse(readString(state, "updatedAt") || "");
+  const lastRoundRecordedAtMs = Date.parse(
+    readString(lastRound, "recordedAt") ||
+      readString(lastRound, "recorded_at") ||
+      readString(lastRound, "timestamp") ||
+      "",
+  );
+  const latestObservedAt = Math.max(
+    Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
+    Number.isFinite(lastRoundRecordedAtMs) ? lastRoundRecordedAtMs : 0,
+  );
   const hasCurrentCycle = readDashboardCycleDate(state) === cycleDate ? 1 : 0;
   const hasLiveRounds = rounds.length > 0 ? 1 : 0;
-  return [hasCurrentCycle, hasLiveRounds, lastRoundId, Number.isFinite(updatedAtMs) ? updatedAtMs : 0, rounds.length];
+  return {
+    hasCurrentCycle,
+    hasLiveRounds,
+    latestObservedAt,
+    lastRoundId,
+    roundsLength: rounds.length,
+  };
 }
 
 function pickStateArray(primary: unknown, secondary: unknown) {

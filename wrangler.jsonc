@@ -3,5 +3,32 @@
   "name": "sniper-bo-ia",
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "src/server.ts",
+  "main": ".output/server/index.mjs",
+  "workers_dev": false,
+  "preview_urls": false,
+  "main_module": ".output/server/index.mjs",
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".output/public"
+  },
+  "no_bundle": true,
+  "rules": [
+    {
+      "type": "ESModule",
+      "globs": [
+        "**/*.mjs",
+        "**/*.js"
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "sniperbo.com/*",
+      "zone_name": "sniperbo.com"
+    },
+    {
+      "pattern": "www.sniperbo.com/*",
+      "zone_name": "sniperbo.com"
+    }
+  ]
 }
