@@ -1103,6 +1103,9 @@ def direct_float(value: Any) -> float:
     try:
         return float(text)
     except (TypeError, ValueError):
+        match = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*x\s*$", text, re.IGNORECASE)
+        if match:
+            return float(match.group(1))
         return 0.0
 
 
@@ -1225,10 +1228,7 @@ def direct_normalize_pattern_round(round_item: Any) -> dict[str, Any] | None:
 
 
 def direct_int(value: Any) -> int:
-    try:
-        return int(float(str(value).strip().replace(",", ".")))
-    except (TypeError, ValueError):
-        return 0
+    return int(direct_float(value))
 
 
 def direct_pattern_round_key(round_item: dict[str, Any]) -> str:

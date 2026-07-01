@@ -699,8 +699,11 @@ function readRecord(value: unknown): Record<string, unknown> {
 
 function readOptionalNumber(value: unknown) {
   if (value === undefined || value === null || value === "") return null;
-  const numeric = Number(String(value).replace("%", "").replace(",", ".").trim());
-  return Number.isFinite(numeric) ? numeric : null;
+  const text = String(value).replace(",", ".").trim();
+  const numeric = Number(text.replace("%", ""));
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Number(text.match(/^\s*(-?\d+(?:\.\d+)?)\s*(?:x|%)?\s*$/i)?.[1]);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function readOptionalString(value: unknown) {

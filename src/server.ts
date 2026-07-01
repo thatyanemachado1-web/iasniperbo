@@ -10876,8 +10876,11 @@ function safeNumber(value: unknown) {
 
 function readNullableNumber(value: unknown) {
   if (value === undefined || value === null || value === "") return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+  const text = String(value).trim().replace(",", ".");
+  const number = Number(text);
+  if (Number.isFinite(number)) return number;
+  const parsed = Number(text.match(/^\s*(-?\d+(?:\.\d+)?)\s*(?:x|%)?\s*$/i)?.[1]);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function updateDashboardData(current: LiveDashboardData, body: unknown) {

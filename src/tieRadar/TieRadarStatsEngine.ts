@@ -124,9 +124,13 @@ function normalizeRoundSide(value: unknown): RoundResult | null {
 }
 
 function normalizeMultiplier(value: unknown) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  const rounded = Math.round(numeric);
+  const text = String(value ?? "").trim().replace(",", ".");
+  const numeric = Number(text);
+  const parsed = Number.isFinite(numeric)
+    ? numeric
+    : Number(text.match(/^\s*(4|6|10|25|88)\s*x?\s*$/i)?.[1]);
+  if (!Number.isFinite(parsed)) return null;
+  const rounded = Math.round(parsed);
   return [4, 6, 10, 25, 88].includes(rounded) ? rounded : null;
 }
 

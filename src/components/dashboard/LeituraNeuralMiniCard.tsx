@@ -136,7 +136,7 @@ export function LeituraNeuralMiniCard({
     "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
-  const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
+  const [entryResult, setEntryResult] = useState<NeuralEntryHistoryItem | null>(null);
   const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
   const lastOfficialResultRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
@@ -163,24 +163,32 @@ export function LeituraNeuralMiniCard({
   }, [activeEntryState, neuralEntryLastResult]);
 
   useEffect(() => {
-    const result = displayResultFromOfficialEntry(neuralEntryLastResult);
-    if (!result || lastOfficialResultRef.current === result.id) return;
+    const result = displayResultFromOfficialEntry(neuralEntryLastResult, rounds);
+    if (!result) return;
+    if (lastOfficialResultRef.current === result.id) {
+      if (result.kind === "tie" || result.multiplier) {
+        setEntryResult((current) =>
+          current && current.id === result.id && neuralEntryDisplayChanged(current, result)
+            ? result
+            : current,
+        );
+        setEntryHistory((items) => mergeNeuralEntryHistory(items, result));
+      }
+      return;
+    }
 
     lastOfficialResultRef.current = result.id;
     if (isOfficialEntryOlderThanSession(neuralEntryLastResult, mountedAtRef.current)) return;
 
     setEntryResult(result);
-    setEntryHistory((items) => {
-      if (items.some((item) => item.id === result.id)) return items;
-      return [result, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
-    });
+    setEntryHistory((items) => mergeNeuralEntryHistory(items, result));
 
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
     entryResultTimeoutRef.current = window.setTimeout(
       () => setEntryResult(null),
       result.kind === "red" ? 1600 : 3200,
     );
-  }, [neuralEntryLastResult]);
+  }, [neuralEntryLastResult, rounds]);
 
   useEffect(() => {
     writeNeuralEntryHistory(entryHistory);
@@ -451,24 +459,79 @@ function normalizeNeuralEntryHistoryItem(value: unknown): NeuralEntryHistoryItem
   };
 }
 
-function displayResultFromOfficialEntry(result: NeuralEntryLastResult | null | undefined): NeuralEntryHistoryItem | null {
+function mergeNeuralEntryHistory(
+  items: NeuralEntryHistoryItem[],
+  result: NeuralEntryHistoryItem,
+) {
+  const existingIndex = items.findIndex((item) => item.id === result.id);
+  if (existingIndex < 0) return [result, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
+  if (!neuralEntryDisplayChanged(items[existingIndex], result)) return items;
+
+  const next = [...items];
+  next[existingIndex] = result;
+  return next.slice(0, MAX_NEURAL_ENTRY_HISTORY);
+}
+
+function neuralEntryDisplayChanged(
+  current: NeuralEntryDisplayResult,
+  next: NeuralEntryDisplayResult,
+) {
+  return (
+    current.kind !== next.kind ||
+    current.side !== next.side ||
+    current.multiplier !== next.multiplier ||
+    current.minute !== next.minute
+  );
+}
+
+function displayResultFromOfficialEntry(
+  result: NeuralEntryLastResult | null | undefined,
+  rounds?: Round[],
+): NeuralEntryHistoryItem | null {
   if (!result?.id) return null;
 
   const side = normalizeEntrySide(result.expectedSide ?? result.origem);
+  const resultRound = roundFromResult(result, rounds);
+  const resultRoundIsTie = resultRound?.result === "T";
   const kind: NeuralEntryDisplayKind =
-    result.outcome === "TIE" || result.kind === "tie_sg" || result.kind === "tie_g1"
+    resultRoundIsTie || result.outcome === "TIE" || result.kind === "tie_sg" || result.kind === "tie_g1"
       ? "tie"
       : result.outcome === "RED" || result.kind === "red"
         ? "red"
         : "green";
+  const tieMultiplier =
+    kind === "tie"
+      ? normalizeTieMultiplier(result.tieMultiplier) ??
+        tieMultiplierFromResultRound(result, rounds) ??
+        tieMultiplierFromResultText(result)
+      : null;
 
   return {
     id: result.id,
     kind,
     side: kind === "tie" ? "TIE" : side,
-    multiplier: kind === "tie" ? result.tieMultiplier ?? null : null,
+    multiplier: tieMultiplier,
     minute: minuteLabelFromOfficialResult(result),
   };
+}
+
+function tieMultiplierFromResultRound(
+  result: NeuralEntryLastResult,
+  rounds: Round[] | undefined,
+) {
+  const round = roundFromResult(result, rounds);
+  return round ? multiplierForTieRound(round) : null;
+}
+
+function roundFromResult(result: NeuralEntryLastResult, rounds: Round[] | undefined) {
+  if (!rounds?.length) return null;
+  return rounds.find((item) => roundHistoryKey(item) === result.resultRoundKey) ?? null;
+}
+
+function tieMultiplierFromResultText(result: NeuralEntryLastResult) {
+  return normalizeTieMultiplier(
+    result.readingSnapshot?.paganteAlert ?? result.readingSnapshot?.paganteStatus ?? result.id,
+  );
 }
 
 function isOfficialEntryOlderThanSession(
@@ -1007,10 +1070,16 @@ function multiplierForTieRound(round: Round) {
 }
 
 function normalizeTieMultiplier(value: unknown) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  const rounded = Math.round(numeric);
+  const text = String(value ?? "").trim().replace(",", ".");
+  const numeric = Number(text);
+  const parsed = Number.isFinite(numeric) ? numeric : Number(text.match(/\b(4|6|10|25|88)\s*x?\b/i)?.[1]);
+  if (!Number.isFinite(parsed)) return null;
+  const rounded = Math.round(parsed);
   return [4, 6, 10, 25, 88].includes(rounded) ? rounded : null;
+}
+
+function roundHistoryKey(round: Round) {
+  return `${round.time}:${round.id}:${round.result}:${round.bankerScore}:${round.playerScore}`;
 }
 
 function numberPaymentStage(sg: number | null, g1: number | null, red: number | null) {
