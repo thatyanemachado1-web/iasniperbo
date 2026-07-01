@@ -40,7 +40,7 @@ export function PatternMinerMiniCard({
           <div className="min-w-0 text-sm font-black">Padroes IA</div>
         </div>
 
-        <div className="min-w-0">
+        <div className="min-w-0 w-full self-stretch">
           {!confirmedAlert && monitoringStrategy && (
             <PatternLiveStatusHeader
               strategy={monitoringStrategy}
@@ -141,7 +141,7 @@ function PatternLiveStatusHeader({
   const liveLabel = isUsingRealData ? "monitorando ao vivo" : "aguardando feed real";
 
   return (
-    <div className="flex items-center justify-between gap-2 px-0.5">
+    <div className="flex w-full items-center justify-between gap-2 px-0.5">
       <span className="text-[9px] font-black uppercase leading-tight tracking-[0.12em] text-neon-cyan">
         {liveLabel}
       </span>
@@ -168,7 +168,7 @@ function MonitoringPatternBlock({
   const sampleOk = !strategy.insufficientSample && strategy.occurrences >= 3 && strategy.totalValidated >= 2;
 
   return (
-    <div className="mt-1 rounded-xl border border-neon-cyan/18 bg-background/25 px-2.5 py-2">
+    <div className="mt-1 w-full rounded-xl border border-neon-cyan/18 bg-background/25 px-2.5 py-2">
       <div className="min-w-0">
         <PatternSequence sequence={strategy.sequence} compact showSideLetters={false} />
       </div>
@@ -202,7 +202,7 @@ function LivePatternStatusBlock({ alert }: { alert: PatternMinerAlert }) {
   );
 
   return (
-    <div className="mt-1 rounded-xl border border-success/25 bg-success/10 px-2.5 py-2">
+    <div className="mt-1 w-full rounded-xl border border-success/25 bg-success/10 px-2.5 py-2">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-[9px] font-black uppercase tracking-[0.12em] text-success">
           ENTRADA CONFIRMADA
@@ -239,7 +239,7 @@ function LivePatternStatusBlock({ alert }: { alert: PatternMinerAlert }) {
 
 function WaitingConfirmedEntryBlock({ isUsingRealData }: { isUsingRealData: boolean }) {
   return (
-    <div className="mt-1 rounded-xl border border-neon-cyan/12 bg-background/25 px-2.5 py-2">
+    <div className="mt-1 w-full rounded-xl border border-neon-cyan/12 bg-background/25 px-2.5 py-2">
       <div className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
         Aguardando entrada confirmada
       </div>
@@ -254,7 +254,7 @@ function WaitingConfirmedEntryBlock({ isUsingRealData }: { isUsingRealData: bool
 
 function MiniScoreboard({ snapshot }: { snapshot: PatternMinerSnapshot }) {
   return (
-    <div className="rounded-xl border border-neon-cyan/12 bg-background/20 px-2.5 py-2">
+    <div className="w-full rounded-xl border border-neon-cyan/12 bg-background/20 px-2.5 py-2">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
           Placar IA
@@ -277,7 +277,7 @@ function MiniFormationList({ strategies }: { strategies: PatternMinerStrategy[] 
   if (!strategies.length) return null;
 
   return (
-    <div className="rounded-xl border border-neon-cyan/12 bg-background/20 px-2.5 py-2">
+    <div className="w-full rounded-xl border border-neon-cyan/12 bg-background/20 px-2.5 py-2">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
           Em formacao
