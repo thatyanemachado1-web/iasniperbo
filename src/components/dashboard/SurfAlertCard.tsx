@@ -137,16 +137,16 @@ export function SurfAlertCard({
                 <span className="grid size-3 shrink-0 place-items-center rounded-full bg-player text-[7px] leading-none text-white shadow-[0_0_8px_rgba(0,143,255,0.45)]">
                   P
                 </span>
-                <span>P3+ {memory.playerDrops3Plus}</span>
+                <span>Player: {memory.playerDrops3Plus}x</span>
               </span>
               <span className="flex items-center gap-1 rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
                 <span className="grid size-3 shrink-0 place-items-center rounded-full bg-banker text-[7px] leading-none text-white shadow-[0_0_8px_rgba(255,59,78,0.45)]">
                   B
                 </span>
-                <span>B3+ {memory.bankerDrops3Plus}</span>
+                <span>Banker: {memory.bankerDrops3Plus}x</span>
               </span>
               <span className="rounded-full border border-neon-cyan/15 bg-secondary/30 px-1.5 py-1">
-                AT {memory.currentDropDepth}
+                Atual: {memory.currentDropDepth}
               </span>
             </div>
             <div className="mt-1.5 line-clamp-2 text-[9px] leading-snug text-muted-foreground">
@@ -325,12 +325,7 @@ function buildLiveSurfReason(
 ) {
   if (entry === "AGUARDAR") return memory.reason;
 
-  return [
-    `Surf ativo para ${entry} com ${confidence}% de confianca.`,
-    `AT ${memory.currentDropDepth || 0}`,
-    `P3+ ${memory.playerDrops3Plus}`,
-    `B3+ ${memory.bankerDrops3Plus}`,
-  ].join(" ");
+  return `Entrada: ${entry}. Confiança ${confidence}%. Coluna atual: ${memory.currentDropDepth || 0} casas.`;
 }
 
 function buildSurfDecision(confidence: number, breakRisk: number, side: string) {
