@@ -1263,6 +1263,7 @@ function neuralReadingForVisibleEntry(
   if (!entryState) return fallback;
 
   const snapshot = entryState.readingSnapshot ?? null;
+  const baseReading = snapshot ? { ...SCANNING_READING, ...snapshot } : fallback;
   const expectedSide = normalizeNeuralSideKey(
     entryState.expectedSide ??
       entryState.entry_side ??
@@ -1272,20 +1273,23 @@ function neuralReadingForVisibleEntry(
   );
 
   return {
-    ...fallback,
-    ...(snapshot ?? {}),
+    ...baseReading,
     mode: "ACTIVE",
     numero:
       typeof entryState.numero === "number"
         ? entryState.numero
         : typeof snapshot?.numero === "number"
           ? snapshot.numero
-          : fallback.numero,
-    origem: entryState.origem ?? snapshot?.origem ?? fallback.origem,
-    origemTipo: entryState.origemTipo ?? snapshot?.origemTipo ?? fallback.origemTipo,
-    direcao: expectedSide ?? snapshot?.direcao ?? fallback.direcao,
-    pullingSide: expectedSide ?? snapshot?.pullingSide ?? fallback.pullingSide ?? null,
-    validade: snapshot?.validade ?? fallback.validade ?? "G1",
+          : baseReading.numero,
+    origem: entryState.origem ?? snapshot?.origem ?? baseReading.origem,
+    origemTipo: entryState.origemTipo ?? snapshot?.origemTipo ?? baseReading.origemTipo,
+    direcao: expectedSide ?? snapshot?.direcao ?? baseReading.direcao,
+    pullingSide: expectedSide ?? snapshot?.pullingSide ?? baseReading.pullingSide ?? null,
+    validade: snapshot?.validade ?? baseReading.validade ?? "G1",
+    lastRoundReal: snapshot?.lastRoundReal ?? null,
+    losingSide: snapshot?.losingSide ?? null,
+    losingNumber: snapshot?.losingNumber ?? null,
+    oppositeKey: snapshot?.oppositeKey ?? null,
     paganteStatus: "ENTRADA_ATIVA",
   };
 }
