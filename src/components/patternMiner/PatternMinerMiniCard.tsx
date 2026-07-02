@@ -11,17 +11,18 @@ import {
 import { PatternSequence } from "@/components/patternMiner/PatternSequence";
 import { cn } from "@/lib/utils";
 import { dashboardSideTextClass } from "@/lib/sideColors";
-import {
-  formatPulledSide,
-  statusLabel,
-  statusTone,
-} from "@/patternMiner/PatternMinerDisplay";
+import { formatPulledSide, statusLabel } from "@/patternMiner/PatternMinerDisplay";
 import {
   patternIaEntryResultClass,
   patternIaEntrySideClass,
   patternIaEntrySideLabel,
 } from "@/patternMiner/PatternMinerEntryHistory";
-import type { PatternIaEntryHistoryItem, PatternIaLifecycleView, PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
+import type {
+  PatternIaEntryHistoryItem,
+  PatternIaLifecycleView,
+  PatternMinerSnapshot,
+  PatternMinerStrategy,
+} from "@/types/patternMiner";
 
 export function PatternMinerMiniCard({
   snapshot,
@@ -71,7 +72,7 @@ export function PatternMinerMiniCard({
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
           Padrões IA
         </div>
-        <div className="flex max-w-[65%] flex-col items-end gap-0.5">
+        <div className="flex max-w-[62%] flex-col items-end gap-0.5">
           <AppBadge
             tone={view.badgeTone}
             pulse={view.pulse}
@@ -80,7 +81,7 @@ export function PatternMinerMiniCard({
             {view.badge}
           </AppBadge>
           {lifecycle.queueLength > 0 ? (
-            <span className="text-[7px] font-bold text-neon-cyan">+{lifecycle.queueLength} na fila</span>
+            <span className="text-[7px] font-bold text-neon-cyan">+{lifecycle.queueLength} fila</span>
           ) : null}
         </div>
       </div>
@@ -94,46 +95,19 @@ export function PatternMinerMiniCard({
         </div>
 
         <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-          <PatternStatChip label="Assert." value={view.strengthLabel} tone={view.strengthTone} />
-          <PatternStatChip label="Ocorr." value={view.samplesLabel} tone="muted" />
+          <PatternStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
+          <PatternStatChip label="Amostras" value={view.samplesLabel} tone="muted" />
           <PatternStatChip label="Status" value={view.statusChip} tone={view.statusTone} />
         </div>
 
         {activeStrategy ? (
           <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5">
             <div className="text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan/85">
-              {activeStrategy.pattern_signature || "Sequência"} · banco {formatAnalyzedRounds(snapshot.analyzedRounds)}
+              Sequência · banco {formatAnalyzedRounds(snapshot.analyzedRounds)}
             </div>
             <div className="mt-1 min-w-0 overflow-hidden">
               <PatternSequence sequence={activeStrategy.sequence} compact />
             </div>
-            <div className="mt-1 grid grid-cols-4 gap-1 text-[7px]">
-              <MiniMeta label="SG" value={activeStrategy.sg_count ?? activeStrategy.sg} />
-              <MiniMeta label="G1" value={activeStrategy.g1_count ?? activeStrategy.g1} />
-              <MiniMeta label="RD" value={activeStrategy.red_count ?? activeStrategy.red} />
-              <MiniMeta label="TIE" value={activeStrategy.tie_after_count ?? activeStrategy.tie} />
-            </div>
-            {(lifecycle.active || confirmedAlert) && (
-              <div className="mt-1 rounded border border-white/5 bg-background/30 px-1.5 py-1 text-[8px] leading-snug">
-                <div className="flex flex-wrap gap-x-2 gap-y-0.5">
-                  <span>
-                    <span className="text-muted-foreground">SIG:</span>{" "}
-                    <span className="font-black">{lifecycle.active?.signal_id || activeStrategy.signal_id || "-"}</span>
-                  </span>
-                  <span>
-                    <span className="text-muted-foreground">EVT:</span>{" "}
-                    <span className="font-black">{lifecycle.active?.event_id || activeStrategy.event_id || "-"}</span>
-                  </span>
-                  <span>
-                    <span className="text-muted-foreground">RID:</span>{" "}
-                    <span className="font-black">{activeStrategy.round_id ?? "-"}</span>
-                  </span>
-                </div>
-                {view.blockedReason ? (
-                  <div className="mt-0.5 font-semibold text-destructive">{view.blockedReason}</div>
-                ) : null}
-              </div>
-            )}
             {formingAlert && !confirmedAlert && lifecycle.status === "AGUARDANDO PADRAO" ? (
               <div className="mt-1 text-[9px] font-semibold text-warning">
                 Formação {Math.round(formingAlert.progress * 100)}%
@@ -176,67 +150,26 @@ function buildPatternView(
   }
 
   if (lifecycle.resultFlash === "green" && flashLabel(lifecycle.status)) {
-    return {
-      badge: lifecycle.status,
-      badgeTone: "green" as const,
-      pulse: true,
-      action: lifecycle.status,
-      headline: "Resultado confirmado na mesa",
-      actionClass: "text-success",
-      panelClass: "border-success/50 bg-success/15",
-      borderClass: "border-success/40",
-      strengthLabel: "--",
-      strengthTone: "green" as const,
-      samplesLabel: "0",
-      statusChip: "WIN",
-      statusTone: "green" as const,
-      blockedReason: "",
-    };
+    return flashView(lifecycle.status, "Resultado confirmado na mesa", "green");
   }
 
   if (lifecycle.resultFlash === "tie") {
-    return {
-      badge: "EMPATE",
-      badgeTone: "amber" as const,
-      pulse: true,
-      action: lifecycle.status,
-      headline: "Empate após entrada",
-      actionClass: "text-warning",
-      panelClass: "border-warning/50 bg-warning/15",
-      borderClass: "border-warning/40",
-      strengthLabel: "--",
-      strengthTone: "amber" as const,
-      samplesLabel: "0",
-      statusChip: "TIE",
-      statusTone: "amber" as const,
-      blockedReason: "",
-    };
+    return flashView(lifecycle.status, "Empate após entrada", "amber");
   }
 
   if (lifecycle.resultFlash === "red") {
-    return {
-      badge: "RED FINAL",
-      badgeTone: "red" as const,
-      pulse: true,
-      action: "RED FINAL",
-      headline: "Perdeu SG e G1",
-      actionClass: "text-destructive",
-      panelClass: "border-destructive/50 bg-destructive/15",
-      borderClass: "border-destructive/40",
-      strengthLabel: "--",
-      strengthTone: "red" as const,
-      samplesLabel: "0",
-      statusChip: "RED",
-      statusTone: "red" as const,
-      blockedReason: "",
-    };
+    return flashView("RED FINAL", "Perdeu SG e G1", "red");
   }
 
   const strategy = lifecycle.active?.strategy ?? confirmedAlert?.strategy ?? formingAlert?.strategy ?? activeStrategy;
   const assertiveness = strategy?.accuracy ?? strategy?.assertiveness;
   const strengthLabel = assertiveness !== undefined ? `${Math.round(assertiveness)}%` : "--";
-  const samplesLabel = strategy?.occurrences ? String(strategy.occurrences) : "0";
-  const statusChip = strategy ? compactStatus(lifecycle.status || strategy.status) : "OFF";
+  const samplesLabel = strategy?.occurrences
+    ? String(strategy.occurrences)
+    : strategy?.totalValidated
+      ? String(strategy.totalValidated)
+      : "0";
+  const statusChip = strategy ? compactStatus(lifecycle.status || String(strategy.status)) : "OFF";
 
   if (lifecycle.status === "FAZER GALE 1" && lifecycle.active) {
     const side = lifecycle.active.entry_side;
@@ -248,56 +181,23 @@ function buildPatternView(
       headline: `Perdeu SG · aguardando G1 em ${formatPulledSide(side)}`,
       actionClass: "text-warning",
       panelClass: "border-warning/35 bg-warning/10",
-      borderClass: "border-warning/30",
+      borderClass: "border-warning/25",
       strengthLabel,
       strengthTone: "amber" as const,
       samplesLabel,
       statusChip,
       statusTone: "amber" as const,
-      blockedReason: "",
     };
   }
 
   if (lifecycle.active && lifecycle.status === "ENTRADA CONFIRMADA") {
     const side = lifecycle.active.entry_side;
-    return {
-      badge: "Entrada Confirmada",
-      badgeTone: "green" as const,
-      pulse: true,
-      action: `Entrar ${sideLabel(side)}`,
-      headline: `${formatPulledSide(side)} · assertividade ${strengthLabel}`,
-      actionClass: dashboardSideTextClass(side === "B" ? "BANKER" : side === "P" ? "PLAYER" : "TIE"),
-      panelClass: "border-success/35 bg-success/10",
-      borderClass: "border-success/30",
-      strengthLabel,
-      strengthTone: "green" as const,
-      samplesLabel,
-      statusChip,
-      statusTone: "green" as const,
-      blockedReason: "",
-    };
+    return confirmedView(side, strengthLabel, samplesLabel, statusChip);
   }
 
-  if (confirmedAlert?.strategy && !String(confirmedAlert.strategy.status).startsWith("BLOQUEADO")) {
+  if (confirmedAlert?.strategy?.status === "ENTRADA CONFIRMADA") {
     const side = confirmedAlert.strategy.next_side ?? confirmedAlert.strategy.expectedResult;
-    if (side && confirmedAlert.strategy.status === "ENTRADA CONFIRMADA") {
-      return {
-        badge: "Confirmado",
-        badgeTone: "green" as const,
-        pulse: true,
-        action: `Entrar ${sideLabel(side)}`,
-        headline: `${formatPulledSide(side)} · assertividade ${strengthLabel}`,
-        actionClass: dashboardSideTextClass(side === "B" ? "BANKER" : side === "P" ? "PLAYER" : "TIE"),
-        panelClass: "border-success/35 bg-success/10",
-        borderClass: "border-success/30",
-        strengthLabel,
-        strengthTone: "green" as const,
-        samplesLabel,
-        statusChip,
-        statusTone: "green" as const,
-        blockedReason: "",
-      };
-    }
+    if (side) return confirmedView(side, strengthLabel, samplesLabel, statusChip);
   }
 
   if (formingAlert?.strategy || snapshot.runtimeStatus === "PADRAO EM FORMACAO") {
@@ -317,18 +217,17 @@ function buildPatternView(
       samplesLabel,
       statusChip,
       statusTone: "amber" as const,
-      blockedReason: "",
     };
   }
 
   const blockedStatus = snapshot.runtimeStatus || strategy?.status;
   if (blockedStatus && String(blockedStatus).startsWith("BLOQUEADO")) {
     return {
-      badge: statusLabel(blockedStatus),
+      badge: statusLabel(blockedStatus as never),
       badgeTone: "red" as const,
       pulse: false,
       action: "Bloqueado",
-      headline: snapshot.runtimeBlockedReason || strategy?.blocked_reason || statusLabel(blockedStatus),
+      headline: snapshot.runtimeBlockedReason || strategy?.blocked_reason || statusLabel(blockedStatus as never),
       actionClass: "text-destructive",
       panelClass: "border-destructive/30 bg-destructive/10",
       borderClass: "border-destructive/25",
@@ -337,18 +236,17 @@ function buildPatternView(
       samplesLabel,
       statusChip,
       statusTone: "red" as const,
-      blockedReason: snapshot.runtimeBlockedReason || strategy?.blocked_reason || "",
     };
   }
 
   if (activeStrategy && !activeStrategy.insufficientSample && activeStrategy.expectedResult) {
     const side = activeStrategy.expectedResult;
     return {
-      badge: "Padrão Quente",
+      badge: "Observando",
       badgeTone: "blue" as const,
       pulse: false,
-      action: "Aguardar 100%",
-      headline: `${formatPulledSide(side)} · aguardando confirmação`,
+      action: "Aguardar",
+      headline: `Hot ${formatPulledSide(side)} · sem sequência ativa agora`,
       actionClass: "text-muted-foreground",
       panelClass: "border-border/60 bg-secondary/20",
       borderClass: "border-neon-cyan/20",
@@ -357,7 +255,6 @@ function buildPatternView(
       samplesLabel,
       statusChip,
       statusTone: "cyan" as const,
-      blockedReason: "",
     };
   }
 
@@ -380,7 +277,71 @@ function buildPatternView(
     samplesLabel: snapshot.scoreboard.totalValidated ? String(snapshot.scoreboard.totalValidated) : "0",
     statusChip: "OFF",
     statusTone: "muted" as const,
-    blockedReason: "",
+  };
+}
+
+function confirmedView(
+  side: "B" | "P" | "T",
+  strengthLabel: string,
+  samplesLabel: string,
+  statusChip: string,
+) {
+  return {
+    badge: "Confirmado",
+    badgeTone: "green" as const,
+    pulse: true,
+    action: `Entrar ${sideLabel(side)}`,
+    headline: `${formatPulledSide(side)} · assertividade ${strengthLabel}`,
+    actionClass: dashboardSideTextClass(side === "B" ? "BANKER" : side === "P" ? "PLAYER" : "TIE"),
+    panelClass: "border-success/35 bg-success/10",
+    borderClass: "border-success/30",
+    strengthLabel,
+    strengthTone: "green" as const,
+    samplesLabel,
+    statusChip,
+    statusTone: "green" as const,
+  };
+}
+
+function flashView(action: string, headline: string, tone: "green" | "amber" | "red") {
+  const map = {
+    green: {
+      badgeTone: "green" as const,
+      actionClass: "text-success",
+      panelClass: "border-success/50 bg-success/15",
+      borderClass: "border-success/40",
+      statusTone: "green" as const,
+      statusChip: "WIN",
+      strengthTone: "green" as const,
+    },
+    amber: {
+      badgeTone: "amber" as const,
+      actionClass: "text-warning",
+      panelClass: "border-warning/50 bg-warning/15",
+      borderClass: "border-warning/40",
+      statusTone: "amber" as const,
+      statusChip: "TIE",
+      strengthTone: "amber" as const,
+    },
+    red: {
+      badgeTone: "red" as const,
+      actionClass: "text-destructive",
+      panelClass: "border-destructive/50 bg-destructive/15",
+      borderClass: "border-destructive/40",
+      statusTone: "red" as const,
+      statusChip: "RED",
+      strengthTone: "red" as const,
+    },
+  }[tone];
+
+  return {
+    badge: action,
+    pulse: true,
+    action,
+    headline,
+    strengthLabel: "--",
+    samplesLabel: "0",
+    ...map,
   };
 }
 
@@ -399,7 +360,6 @@ function idleView(badge: string, action: string, headline: string) {
     samplesLabel: "0",
     statusChip: "OFF",
     statusTone: "muted" as const,
-    blockedReason: "",
   };
 }
 
@@ -432,15 +392,6 @@ function PatternStatChip({
   );
 }
 
-function MiniMeta({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded border border-neon-cyan/10 bg-background/30 px-1 py-0.5 text-center">
-      <span className="text-[6px] font-bold uppercase text-muted-foreground">{label} </span>
-      <span className="text-[8px] font-black">{value}</span>
-    </div>
-  );
-}
-
 function sideLabel(side: "B" | "P" | "T") {
   if (side === "B") return "BANKER";
   if (side === "P") return "PLAYER";
@@ -449,11 +400,13 @@ function sideLabel(side: "B" | "P" | "T") {
 
 function compactStatus(status: string) {
   const label = statusLabel(status as never);
-  if (label.length <= 10) return label.toUpperCase();
+  if (label.length <= 8) return label.toUpperCase();
   if (status === "ENTRADA CONFIRMADA") return "CONFIRM.";
   if (status === "PADRAO EM FORMACAO") return "FORM.";
+  if (status === "VERY_HOT") return "M.QUENTE";
+  if (status === "OBSERVATION") return "OBS";
   if (status === "BLOQUEADO POR MAIS DE 2 REDS") return ">2 REDS";
-  return label.slice(0, 10).toUpperCase();
+  return label.slice(0, 8).toUpperCase();
 }
 
 function formatAnalyzedRounds(value: number) {
@@ -462,39 +415,55 @@ function formatAnalyzedRounds(value: number) {
   return `${value}r`;
 }
 
-const VISIBLE_PATTERN_IA_ENTRY_HISTORY = 8;
+const VISIBLE_PATTERN_IA_ENTRY_HISTORY = 6;
 
 function PatternIaEntryHistoryList({ history }: { history: PatternIaEntryHistoryItem[] }) {
   const visible = history.slice(0, VISIBLE_PATTERN_IA_ENTRY_HISTORY);
+  const latest = history[0];
+  const summaryHint = latest
+    ? `${patternIaEntrySideLabel(latest.entry_side, latest.tie_multiplier)} ${latest.result_label}`
+    : "sem entradas";
 
   return (
-    <div className="rounded-lg border border-white/8 bg-background/12 px-2 py-1.5">
-      <div className="mb-1 text-[8px] font-black uppercase tracking-[0.14em] text-muted-foreground">
-        Ultimas entradas
+    <details className="group rounded-lg border border-white/8 bg-background/12 px-2 py-1">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 py-0.5 marker:content-none [&::-webkit-details-marker]:hidden">
+        <span className="flex min-w-0 items-center gap-1 text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/75">
+          <ChevronRight className="size-2.5 shrink-0 transition group-open:rotate-90" />
+          <span className="truncate">Ultimas entradas</span>
+        </span>
+        <span className="truncate text-[7px] font-semibold text-muted-foreground/60 group-open:hidden">
+          {history.length ? `${history.length} · ${summaryHint}` : summaryHint}
+        </span>
+        <span className="hidden text-[7px] font-semibold text-muted-foreground/60 group-open:inline">
+          {history.length ? `${history.length} no ciclo` : "coletando"}
+        </span>
+      </summary>
+
+      <div className="mt-1 border-t border-white/5 pt-1">
+        {visible.length ? (
+          <div className="max-h-20 space-y-0.5 overflow-y-auto pr-0.5">
+            {visible.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/8 px-1.5 py-0.5 text-[7.5px] font-semibold leading-tight"
+              >
+                <span className="min-w-0 truncate">
+                  <span className={patternIaEntrySideClass(item.entry_side)}>
+                    {patternIaEntrySideLabel(
+                      item.entry_side,
+                      item.entry_side === "T" ? item.tie_multiplier : undefined,
+                    )}
+                  </span>{" "}
+                  <span className={patternIaEntryResultClass(item.result_label)}>{item.result_label}</span>
+                </span>
+                <span className="shrink-0 text-[7px] text-muted-foreground/70">Min {item.minute}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="pb-0.5 text-[7.5px] font-semibold text-muted-foreground/70">Sem entradas recentes.</div>
+        )}
       </div>
-      {visible.length ? (
-        <div className="max-h-24 space-y-0.5 overflow-y-auto pr-0.5">
-          {visible.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/10 px-1.5 py-0.5 text-[7.5px] font-semibold leading-tight"
-            >
-              <span className="min-w-0 truncate">
-                <span className={patternIaEntrySideClass(item.entry_side)}>
-                  {patternIaEntrySideLabel(
-                    item.entry_side,
-                    item.entry_side === "T" ? item.tie_multiplier : undefined,
-                  )}
-                </span>{" "}
-                <span className={patternIaEntryResultClass(item.result_label)}>{item.result_label}</span>
-              </span>
-              <span className="shrink-0 text-[7px] text-muted-foreground/75">Min {item.minute}</span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="text-[7.5px] font-semibold text-muted-foreground/70">Sem entradas recentes.</div>
-      )}
-    </div>
+    </details>
   );
 }
