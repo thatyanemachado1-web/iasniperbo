@@ -18,6 +18,7 @@ import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
 import { SurfAnalyzerEngine } from "./surf/SurfAnalyzerEngine";
+import { TieRadarEngine } from "./tieRadar/TieRadarEngine";
 import {
   buildTiePullerStats,
   emptyTieMultiplierCounts,
@@ -12621,6 +12622,28 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       incoming.currentSurfAlert ??
       incoming.surfAlert) as DashboardData["currentSurfAlert"] | undefined;
     pickedSections.currentSurfAlert = SurfAnalyzerEngine.mergeWithIncoming(computedSurf, incomingSurf);
+  }
+
+  const tieRoundSource = surfRoundSource;
+  if (acceptsCurrentCycle && tieRoundSource.length >= 3) {
+    const computedTie = TieRadarEngine.analyze(tieRoundSource, cycleDate);
+    const incomingTie = (pickedSections.currentTieAlert ??
+      incoming.currentTieAlert ??
+      incoming.tieAlert) as DashboardData["currentTieAlert"] | undefined;
+    const mergedTie = TieRadarEngine.mergeWithIncoming(computedTie, incomingTie);
+    pickedSections.currentTieAlert = mergedTie.alert;
+    if (mergedTie.tiePullers.length) {
+      const baseScoreboard = pickedSections.tieAlertScoreboard ?? currentDashboard.tieAlertScoreboard;
+      pickedSections.tieAlertScoreboard = {
+        ...(baseScoreboard ?? {
+          greenTieAlerts: 0,
+          expired: 0,
+          totalAlerts: 0,
+          assertiveness: 0,
+        }),
+        tiePullers: mergedTie.tiePullers,
+      };
+    }
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;

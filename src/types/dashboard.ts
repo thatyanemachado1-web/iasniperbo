@@ -215,6 +215,7 @@ export interface TieAlert {
   confidence: number; // 0-100
   validityRounds: number;
   status: TieAlertStatus;
+  source?: "engine" | "publisher" | "merged" | "stale";
 }
 
 export type EngineState = "AGUARDAR" | "ATENCAO" | "ENTRADA" | "BLOQUEADO";

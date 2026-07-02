@@ -36,7 +36,6 @@ export function TieAlertCard({
   compact?: boolean;
 }) {
   const enabled = toggles?.tieAlert !== false;
-  const status = tieRadarStatus(alert);
   const multipliers = tieMultiplierStats(rounds, scoreboard);
   const tiePullers = tiePullerStats(rounds, scoreboard);
   const mainTiePuller = tiePullers[0];
@@ -44,6 +43,78 @@ export function TieAlertCard({
     (best, item) => (item.value > best.value ? item : best),
     multipliers[0],
   );
+  const view = buildTieView(alert, mainTiePuller, bestMultiplier);
+
+  if (compact) {
+    return (
+      <GlassCard
+        className={cn(
+          "digital-risk-card h-full min-h-[220px] border-warning/18 p-2 sm:p-2",
+          view.borderClass,
+          !enabled && "border-muted-foreground/20",
+        )}
+      >
+        <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warning/22 to-transparent" />
+        <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
+            Radar de Empate
+          </div>
+          <div className="flex max-w-[58%] shrink-0 flex-wrap items-center justify-end gap-1">
+            <AppBadge
+              tone={view.badgeTone}
+              pulse={enabled && alert.status === "active"}
+              className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
+            >
+              {view.badge}
+            </AppBadge>
+            <ModuleToggleStrip toggles={toggles} modules={["tieAlert"]} onChange={onModuleTogglesChange} compact />
+          </div>
+        </div>
+
+        <div className={cn("space-y-2 transition duration-200", !enabled && "opacity-45 saturate-50")}>
+          <div className={cn("rounded-xl border px-3 py-2.5 text-center", view.panelClass)}>
+            <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>{view.action}</div>
+            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              {view.headline}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1.5 text-center">
+            <TieStatChip label="Força" value={`${alert.confidence}%`} tone={view.badgeTone === "green" ? "green" : "amber"} />
+            <TieStatChip label="Validade" value={`${alert.validityRounds}r`} tone="muted" />
+            <TieStatChip label="Nível" value={normalizeRiskLabel(alert.level)} tone={view.badgeTone === "green" ? "green" : "amber"} />
+          </div>
+
+          <div className="rounded-lg border border-warning/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+            <div className="font-black uppercase tracking-[0.08em] text-warning/85">Puxador · reseta 00:00 (BR)</div>
+            <div className="mt-0.5 font-semibold text-foreground">
+              {mainTiePuller ? tiePullerSummary(mainTiePuller) : "Coletando numeros puxadores"}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-5 gap-1">
+            {multipliers.map((item) => (
+              <div key={item.label} className="rounded-md border border-warning/18 bg-warning/10 px-1 py-0.5 text-center">
+                <div className="text-[8px] font-black text-warning">{item.label}</div>
+                <div className="text-[10px] font-black">{item.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {!enabled && <DisabledTieNote />}
+        {locked && (
+          <PremiumLock
+            title="Radar de Empate Premium"
+            description="Leitura estatistica de empate disponivel para assinantes"
+          />
+        )}
+      </GlassCard>
+    );
+  }
+
+  const status = tieRadarStatus(alert);
   const tiePattern = bestTiePattern(patternMinerSnapshot);
 
   return (
@@ -292,11 +363,7 @@ export function TieAlertCard({
         ) : null}
       </div>
 
-      {!enabled && (
-        <div className="mt-2 rounded-lg border border-border/70 bg-secondary/25 px-3 py-2 text-[11px] font-semibold text-muted-foreground">
-          Radar de Empate desativado neste painel.
-        </div>
-      )}
+      {!enabled && <DisabledTieNote />}
 
       {locked && (
         <PremiumLock
@@ -306,6 +373,101 @@ export function TieAlertCard({
       )}
     </GlassCard>
   );
+}
+
+function DisabledTieNote() {
+  return (
+    <div className="mt-2 rounded-lg border border-border/70 bg-secondary/25 px-3 py-2 text-[11px] font-semibold text-muted-foreground">
+      Radar de Empate desativado neste painel.
+    </div>
+  );
+}
+
+function TieStatChip({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "green" | "amber" | "muted";
+}) {
+  const toneClass = {
+    green: "border-success/30 bg-success/8 text-success",
+    amber: "border-warning/30 bg-warning/8 text-warning",
+    muted: "border-border/60 bg-secondary/25 text-foreground",
+  }[tone];
+
+  return (
+    <div className={cn("rounded-lg border px-1 py-1.5", toneClass)}>
+      <div className="text-[8px] font-black uppercase tracking-[0.08em] opacity-75">{label}</div>
+      <div className="mt-0.5 text-[11px] font-black leading-none">{value}</div>
+    </div>
+  );
+}
+
+function buildTieView(
+  alert: TieAlert,
+  mainTiePuller: TiePullerStat | undefined,
+  bestMultiplier: { label: string; value: number },
+) {
+  if (alert.status === "green") {
+    return {
+      badge: "Tie green",
+      badgeTone: "green" as const,
+      action: "Tie pegou",
+      headline: `Confirmado · Força ${alert.confidence}% · ${alert.validityRounds} rodadas`,
+      actionClass: "text-success",
+      panelClass: "border-success/35 bg-success/10",
+      borderClass: "border-success/30",
+    };
+  }
+
+  if (alert.status === "active" && (normalizeRisk(alert.level) === "ALTO" || alert.confidence >= 65)) {
+    return {
+      badge: "Tie forte",
+      badgeTone: "amber" as const,
+      action: "Possível Tie",
+      headline: mainTiePuller
+        ? `${tiePullerSummary(mainTiePuller)} · Validade ${alert.validityRounds}r`
+        : `Pressão alta · Validade ${alert.validityRounds} rodadas`,
+      actionClass: "text-warning",
+      panelClass: "border-warning/35 bg-warning/10",
+      borderClass: "border-warning/30",
+    };
+  }
+
+  if (alert.status === "active") {
+    return {
+      badge: "Em observacao",
+      badgeTone: "amber" as const,
+      action: "Monitorar",
+      headline: `Empate em observação · Força ${alert.confidence}%`,
+      actionClass: "text-warning",
+      panelClass: "border-warning/25 bg-warning/8",
+      borderClass: "border-warning/20",
+    };
+  }
+
+  return {
+    badge: "Observando",
+    badgeTone: "muted" as const,
+    action: "Aguardar",
+    headline:
+      bestMultiplier.value > 0
+        ? `Sem alerta ativo · Maior mult. ${bestMultiplier.label}`
+        : "Sem alerta de empate ativo agora",
+    actionClass: "text-muted-foreground",
+    panelClass: "border-border/60 bg-secondary/20",
+    borderClass: "border-border/50",
+  };
+}
+
+function normalizeRiskLabel(level: TieAlert["level"]) {
+  const risk = normalizeRisk(level);
+  if (risk === "ALTO") return "ALTO";
+  if (risk === "MEDIO") return "MÉDIO";
+  return "BAIXO";
 }
 
 function tieStatusLabel(status: TieAlert["status"]) {
