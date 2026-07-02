@@ -518,7 +518,14 @@ const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES: Record<ValidatorTelegramM
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
-let liveDashboardData: LiveDashboardData = resetDashboardDailyCycle(mockDashboardData);
+let liveDashboardData: LiveDashboardData = pausedDashboardSnapshot(
+  resetDashboardDailyCycle({
+    ...mockDashboardData,
+    mockMode: true,
+    rounds: [],
+    updatedAt: "",
+  }),
+);
 let liveValidatorRoundHistory: Round[] = [];
 let liveValidatorPatterns: SavedValidatorPattern[] = [];
 let liveValidatorChannels: ValidatorNotificationChannel[] = [];
