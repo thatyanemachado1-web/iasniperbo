@@ -90,15 +90,15 @@ export function TieAlertCard({
           </div>
 
           <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-            <TieStatChip label="Força" value={`${alert.confidence}%`} tone={view.badgeTone === "green" ? "green" : "amber"} />
+            <TieStatChip label="Forca" value={`${alert.confidence}%`} tone={view.badgeTone === "green" ? "green" : "amber"} />
             <TieStatChip label="Validade" value={`${alert.validityRounds}r`} tone="muted" />
-            <TieStatChip label="Nível" value={normalizeRiskLabel(alert.level)} tone={view.badgeTone === "green" ? "green" : "amber"} />
+            <TieStatChip label="Nivel" value={normalizeRiskLabel(alert.level)} tone={view.badgeTone === "green" ? "green" : "amber"} />
           </div>
 
           <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Puxador · reseta 00:00 (BR)</div>
+            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Puxador - reseta 00:00 (BR)</div>
             <div className="mt-0.5 font-semibold text-foreground">
-              {mainTiePuller ? tiePullerSummary(mainTiePuller) : "Coletando numeros puxadores"}
+              {mainTiePuller ? <TiePullerSummaryInline item={mainTiePuller} /> : "Coletando numeros puxadores"}
             </div>
           </div>
 
@@ -254,7 +254,7 @@ export function TieAlertCard({
             )}
           >
             <div className="text-muted-foreground">Forca</div>
-            <div className="font-semibold text-neon-purple">{alert.confidence}%</div>
+            <div className="font-semibold text-tie">{alert.confidence}%</div>
           </div>
           <div
             className={cn(
@@ -296,7 +296,7 @@ export function TieAlertCard({
               Numero puxando Tie
             </div>
             <div className={cn("mt-1 font-black text-warning", compact && "mt-0.5")}>
-              {mainTiePuller ? tiePullerSummary(mainTiePuller) : "Coletando"}
+              {mainTiePuller ? <TiePullerSummaryInline item={mainTiePuller} /> : "Coletando"}
             </div>
           </div>
           <div
@@ -310,7 +310,7 @@ export function TieAlertCard({
             </div>
             <div className={cn("mt-1 font-black text-warning", compact && "mt-0.5")}>
               {bestMultiplier?.value > 0
-                ? `🟡 ${bestMultiplier.label} (${bestMultiplier.value})`
+                ? `${bestMultiplier.label} (${bestMultiplier.value})`
                 : "Coletando"}
             </div>
           </div>
@@ -426,7 +426,7 @@ function buildTieView(
       badge: "Tie green",
       badgeTone: "green" as const,
       action: "Tie pegou",
-      headline: `Confirmado · Força ${alert.confidence}% · ${alert.validityRounds} rodadas`,
+      headline: `Confirmado - Forca ${alert.confidence}% - ${alert.validityRounds} rodadas`,
       actionClass: "text-success",
       panelClass: "border-success/35 bg-success/10",
       borderClass: "border-success/30",
@@ -437,10 +437,10 @@ function buildTieView(
     return {
       badge: "Tie forte",
       badgeTone: "amber" as const,
-      action: "Possível Tie",
+      action: "Possivel Tie",
       headline: mainTiePuller
-        ? `${tiePullerSummary(mainTiePuller)} · Validade ${alert.validityRounds}r`
-        : `Pressão alta · Validade ${alert.validityRounds} rodadas`,
+        ? `${tiePullerSummary(mainTiePuller)} - Validade ${alert.validityRounds}r`
+        : `Pressao alta - Validade ${alert.validityRounds} rodadas`,
       actionClass: "text-warning",
       panelClass: "border-warning/35 bg-warning/10",
       borderClass: "border-warning/30",
@@ -452,7 +452,7 @@ function buildTieView(
       badge: "Em observacao",
       badgeTone: "amber" as const,
       action: "Monitorar",
-      headline: `Empate em observação · Força ${alert.confidence}%`,
+      headline: `Empate em observacao - Forca ${alert.confidence}%`,
       actionClass: "text-warning",
       panelClass: "border-warning/25 bg-warning/8",
       borderClass: "border-warning/20",
@@ -465,7 +465,7 @@ function buildTieView(
     action: "Aguardar",
     headline:
       bestMultiplier.value > 0
-        ? `Sem alerta ativo · Maior mult. ${bestMultiplier.label}`
+        ? `Sem alerta ativo - Maior mult. ${bestMultiplier.label}`
         : "Sem alerta de empate ativo agora",
     actionClass: "text-muted-foreground",
     panelClass: "border-border/60 bg-secondary/20",
@@ -476,7 +476,7 @@ function buildTieView(
 function normalizeRiskLabel(level: TieAlert["level"]) {
   const risk = normalizeRisk(level);
   if (risk === "ALTO") return "ALTO";
-  if (risk === "MEDIO") return "MÉDIO";
+  if (risk === "MEDIO") return "MEDIO";
   return "BAIXO";
 }
 
@@ -491,7 +491,7 @@ function tieRadarStatus(alert: TieAlert) {
     return {
       badge: "Tie green",
       badgeTone: "green" as const,
-      label: "🟡 Tie pegou",
+      label: "Tie pegou",
       description: "Empate confirmado dentro da validade.",
       className: "text-success",
     };
@@ -512,7 +512,7 @@ function tieRadarStatus(alert: TieAlert) {
     return {
       badge: "Tie forte",
       badgeTone: "amber" as const,
-      label: "🟡 Possivel Tie",
+      label: "Possivel Tie",
       description: "So considerar entrada se a validade estiver aberta.",
       className: "text-warning",
     };
@@ -521,7 +521,7 @@ function tieRadarStatus(alert: TieAlert) {
   return {
     badge: "Em observacao",
     badgeTone: "amber" as const,
-    label: "🟡 Observacao",
+    label: "Observacao",
     description: "Empate sendo monitorado, sem confirmacao forte.",
     className: "text-warning",
   };
@@ -555,7 +555,7 @@ function tiePullerStats(rounds: Round[] | undefined, scoreboard?: TieAlertScoreb
 }
 
 function tiePullerSummary(item: TiePullerStat) {
-  return `${sideDot(item.side)} ${sideShortLabel(item.side)}${item.score} com ${item.ties} Tie`;
+  return `${sideLabel(item.side)} ${item.score} com ${item.ties} Tie`;
 }
 
 function TiePullerLine({ item, compact = false }: { item: TiePullerStat; compact?: boolean }) {
@@ -567,12 +567,12 @@ function TiePullerLine({ item, compact = false }: { item: TiePullerStat; compact
       )}
     >
       <div className="min-w-0">
-        <div className={cn("truncate font-black", sideTextClass(item.side))}>
-          {sideDot(item.side)} {sideShortLabel(item.side)}{item.score}
-          <span className="ml-1 text-warning">puxou {item.ties} Tie</span>
+        <div className="flex min-w-0 items-center gap-1.5 font-black">
+          <SideNumber side={item.side} value={item.score} />
+          <span className="min-w-0 truncate text-warning">puxou {item.ties} Tie</span>
         </div>
         <div className="text-[9px] font-semibold text-muted-foreground">
-          ate {item.window} casas · {item.samples} amostras
+          ate {item.window} casas - {item.samples} amostras
         </div>
       </div>
       <div className="shrink-0 text-right">
@@ -585,22 +585,48 @@ function TiePullerLine({ item, compact = false }: { item: TiePullerStat; compact
   );
 }
 
-function sideDot(side: TiePullerStat["side"]) {
-  if (side === "B") return "🔴";
-  if (side === "P") return "🔵";
-  return "🟡";
+function TiePullerSummaryInline({ item }: { item: TiePullerStat }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <SideNumber side={item.side} value={item.score} />
+      <span className="truncate">
+        <span className={sideTextClass(item.side)}>com {item.ties}</span>{" "}
+        <span className="text-warning">Tie</span>
+      </span>
+    </span>
+  );
 }
 
-function sideShortLabel(side: TiePullerStat["side"]) {
-  if (side === "B") return "B";
-  if (side === "P") return "P";
-  return "T";
+function SideNumber({ side, value }: { side: TiePullerStat["side"]; value: number }) {
+  return (
+    <span
+      className={cn(
+        "grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-black leading-none",
+        sideDotClass(side),
+      )}
+      title={`${sideLabel(side)} ${value}`}
+    >
+      {value}
+    </span>
+  );
+}
+
+function sideLabel(side: TiePullerStat["side"]) {
+  if (side === "B") return "Banker";
+  if (side === "P") return "Player";
+  return "Tie";
+}
+
+function sideDotClass(side: TiePullerStat["side"]) {
+  if (side === "B") return "border-banker/60 bg-banker text-white shadow-[0_0_14px_-6px_var(--banker)]";
+  if (side === "P") return "border-player/60 bg-player text-white shadow-[0_0_14px_-6px_var(--player)]";
+  return "border-tie/70 bg-tie text-background shadow-[0_0_14px_-6px_var(--tie)]";
 }
 
 function sideTextClass(side: TiePullerStat["side"]) {
-  if (side === "B") return "text-destructive";
-  if (side === "P") return "text-neon-blue";
-  return "text-warning";
+  if (side === "B") return "text-banker";
+  if (side === "P") return "text-player";
+  return "text-tie";
 }
 
 function normalizeRisk(level: TieAlert["level"]) {

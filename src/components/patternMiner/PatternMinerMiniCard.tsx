@@ -9,21 +9,24 @@ import {
 } from "@/components/dashboard/dashboardModuleCardLayout";
 import { PatternSequence } from "@/components/patternMiner/PatternSequence";
 import { cn } from "@/lib/utils";
-import { dashboardSideTextClass } from "@/lib/sideColors";
+import { sideBgClass, sideTextClass } from "@/lib/sideColors";
 import { formatPulledSide, statusLabel } from "@/patternMiner/PatternMinerDisplay";
+import type { RoundResult } from "@/types/dashboard";
 import type { PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
 
 export function PatternMinerMiniCard({
   snapshot,
   isUsingRealData,
+  latestRoundId,
   className,
 }: {
   snapshot: PatternMinerSnapshot;
   isUsingRealData: boolean;
+  latestRoundId?: number;
   className?: string;
 }) {
-  const confirmedAlert = snapshot.entryAlerts[0];
-  const formingAlert = snapshot.formingAlerts[0];
+  const confirmedAlert = pickLatestAlert(snapshot.entryAlerts, latestRoundId);
+  const formingAlert = pickLatestAlert(snapshot.formingAlerts, latestRoundId);
   const activeStrategy =
     confirmedAlert?.strategy ?? formingAlert?.strategy ?? snapshot.hotStrategies[0] ?? snapshot.ranking[0];
   const view = buildPatternView(snapshot, isUsingRealData, confirmedAlert, formingAlert, activeStrategy);
@@ -42,7 +45,7 @@ export function PatternMinerMiniCard({
 
       <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-          Padrões IA
+          Padroes IA
         </div>
         <AppBadge
           tone={view.badgeTone}
@@ -62,7 +65,7 @@ export function PatternMinerMiniCard({
         </div>
 
         <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-          <PatternStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
+          <PatternStatChip label="Forca" value={view.strengthLabel} tone={view.strengthTone} />
           <PatternStatChip label="Amostras" value={view.samplesLabel} tone="muted" />
           <PatternStatChip label="Status" value={view.statusChip} tone={view.statusTone} />
         </div>
@@ -70,23 +73,23 @@ export function PatternMinerMiniCard({
         {activeStrategy ? (
           <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5">
             <div className="text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan/85">
-              Sequência · banco {formatAnalyzedRounds(snapshot.analyzedRounds)}
+              Sequencia - banco {formatAnalyzedRounds(snapshot.analyzedRounds)}
             </div>
             <div className="mt-1 min-w-0 overflow-hidden">
               <PatternSequence sequence={activeStrategy.sequence} compact />
             </div>
             {formingAlert && !confirmedAlert ? (
               <div className="mt-1 text-[9px] font-semibold text-warning">
-                Formação {Math.round(formingAlert.progress * 100)}%
+                Formacao {Math.round(formingAlert.progress * 100)}%
                 {formingAlert.missingTokens.length
-                  ? ` · falta ${formingAlert.missingTokens.join(" → ")}`
+                  ? ` - falta ${formingAlert.missingTokens.join(" -> ")}`
                   : ""}
               </div>
             ) : null}
           </div>
         ) : (
           <div className="rounded-lg border border-border/50 bg-secondary/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-            Coletando histórico para mineração de padrões.
+            Coletando historico para mineracao de padroes.
           </div>
         )}
 
@@ -115,7 +118,7 @@ function buildPatternView(
       badgeTone: "muted" as const,
       pulse: false,
       action: "Aguardar",
-      headline: "Histórico real ainda não disponível",
+      headline: "Historico real ainda nao disponivel",
       actionClass: "text-muted-foreground",
       panelClass: "border-border/60 bg-secondary/20",
       borderClass: "border-border/50",
@@ -135,20 +138,21 @@ function buildPatternView(
 
   if (confirmedAlert?.strategy?.expectedResult) {
     const side = confirmedAlert.strategy.expectedResult;
+    const sideView = patternSideView(side);
     return {
       badge: "Confirmado",
-      badgeTone: "green" as const,
+      badgeTone: sideView.badgeTone,
       pulse: true,
-      action: `Entrar ${sideLabel(side)}`,
-      headline: `${formatPulledSide(side)} · assertividade ${strengthLabel}`,
-      actionClass: dashboardSideTextClass(side === "B" ? "BANKER" : side === "P" ? "PLAYER" : "TIE"),
-      panelClass: "border-success/35 bg-success/10",
-      borderClass: "border-success/30",
+      action: side === "T" ? "Possivel Tie" : `Entrar ${sideLabel(side)}`,
+      headline: `${formatPulledSide(side)} - assertividade ${strengthLabel}`,
+      actionClass: sideTextClass[side],
+      panelClass: sideView.panelClass,
+      borderClass: sideView.borderClass,
       strengthLabel,
-      strengthTone: "green" as const,
+      strengthTone: sideView.statTone,
       samplesLabel,
       statusChip,
-      statusTone: "green" as const,
+      statusTone: sideView.statTone,
     };
   }
 
@@ -160,10 +164,10 @@ function buildPatternView(
       badgeTone: "amber" as const,
       pulse: true,
       action: side ? `Monitorar ${sideLabel(side)}` : "Monitorar",
-      headline: `Padrão ${progress}% formado · aguardar confirmação`,
-      actionClass: "text-warning",
-      panelClass: "border-warning/30 bg-warning/10",
-      borderClass: "border-warning/25",
+      headline: `Padrao ${progress}% formado - aguardar confirmacao`,
+      actionClass: side ? sideTextClass[side] : "text-warning",
+      panelClass: side ? sideBgClass[side] : "border-warning/30 bg-warning/10",
+      borderClass: side ? patternSideView(side).borderClass : "border-warning/25",
       strengthLabel,
       strengthTone: "amber" as const,
       samplesLabel,
@@ -179,7 +183,7 @@ function buildPatternView(
       badgeTone: "blue" as const,
       pulse: false,
       action: "Aguardar",
-      headline: `Hot ${formatPulledSide(side)} · sem sequência ativa agora`,
+      headline: `Hot ${formatPulledSide(side)} - sem sequencia ativa agora`,
       actionClass: "text-muted-foreground",
       panelClass: "border-border/60 bg-secondary/20",
       borderClass: "border-neon-cyan/20",
@@ -198,8 +202,8 @@ function buildPatternView(
     action: "Aguardar",
     headline:
       snapshot.analyzedRounds > 0
-        ? `${snapshot.agent.catalogedStrategies} padrões catalogados · sem entrada agora`
-        : "Sem padrão validado no momento",
+        ? `${snapshot.agent.catalogedStrategies} padroes catalogados - sem entrada agora`
+        : "Sem padrao validado no momento",
     actionClass: "text-muted-foreground",
     panelClass: "border-border/60 bg-secondary/20",
     borderClass: "border-border/50",
@@ -220,12 +224,15 @@ function PatternStatChip({
 }: {
   label: string;
   value: string;
-  tone: "green" | "amber" | "cyan" | "muted";
+  tone: "green" | "amber" | "cyan" | "muted" | "blue" | "red" | "gold";
 }) {
   const toneClass = {
     green: "border-success/30 bg-success/8 text-success",
     amber: "border-warning/30 bg-warning/8 text-warning",
     cyan: "border-neon-cyan/30 bg-neon-cyan/8 text-neon-cyan",
+    blue: "border-player/35 bg-player/10 text-player",
+    red: "border-banker/30 bg-banker/8 text-banker",
+    gold: "border-tie/35 bg-tie/10 text-tie",
     muted: "border-border/60 bg-secondary/25 text-foreground",
   }[tone];
 
@@ -241,6 +248,39 @@ function sideLabel(side: "B" | "P" | "T") {
   if (side === "B") return "BANKER";
   if (side === "P") return "PLAYER";
   return "TIE";
+}
+
+function pickLatestAlert<T extends PatternMinerSnapshot["entryAlerts"][number]>(
+  alerts: T[],
+  latestRoundId?: number,
+) {
+  if (latestRoundId === undefined) return alerts[0];
+  return alerts.find((alert) => alert.matchedRounds.at(-1)?.id === latestRoundId);
+}
+
+function patternSideView(side: RoundResult) {
+  if (side === "B") {
+    return {
+      badgeTone: "red" as const,
+      panelClass: "border-banker/35 bg-banker/10",
+      borderClass: "border-banker/35",
+      statTone: "red" as const,
+    };
+  }
+  if (side === "P") {
+    return {
+      badgeTone: "blue" as const,
+      panelClass: "border-player/35 bg-player/10",
+      borderClass: "border-player/35",
+      statTone: "blue" as const,
+    };
+  }
+  return {
+    badgeTone: "gold" as const,
+    panelClass: "border-tie/40 bg-tie/10",
+    borderClass: "border-tie/35",
+    statTone: "gold" as const,
+  };
 }
 
 function compactStatus(strategy: PatternMinerStrategy) {

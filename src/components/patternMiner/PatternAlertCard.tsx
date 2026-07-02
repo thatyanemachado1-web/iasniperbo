@@ -15,18 +15,18 @@ export function PatternAlertCard({ alert }: { alert: PatternMinerAlert }) {
   const Icon = alert.kind === "validated" ? BrainCircuit : Flame;
 
   return (
-    <GlassCard className="rounded-xl p-4 border-neon-cyan/35">
+    <GlassCard className="rounded-xl border-neon-cyan/35 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
-          <div className="size-10 rounded-xl btn-primary-grad flex items-center justify-center glow-blue">
+          <div className="flex size-10 items-center justify-center rounded-xl btn-primary-grad glow-blue">
             <Icon className="size-5" />
           </div>
           <div>
             <div className="text-sm font-black">
-              {alert.kind === "validated" ? "🧠 PADRÃO VALIDADO" : "🔥 PADRÃO EM FORMAÇÃO"}
+              {alert.kind === "validated" ? "PADRAO VALIDADO" : "PADRAO EM FORMACAO"}
             </div>
             <div className="text-[11px] text-muted-foreground">
-              Progresso {(alert.progress * 100).toFixed(0)}% · Validade SG + G1
+              Progresso {(alert.progress * 100).toFixed(0)}% - Validade SG + G1
             </div>
           </div>
         </div>
@@ -42,12 +42,12 @@ export function PatternAlertCard({ alert }: { alert: PatternMinerAlert }) {
         )}
       </div>
 
-      <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
-        <Metric label="Ocorrências" value={strategy.occurrences} />
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:grid-cols-6">
+        <Metric label="Ocorrencias" value={strategy.occurrences} />
         <Metric label="SG" value={strategy.sg} tone="text-success" />
         <Metric label="G1" value={strategy.g1} tone="text-neon-cyan" />
         <Metric label="RED" value={strategy.red} tone="text-destructive" />
-        <Metric label="🟡 TIE" value={strategy.tie} tone="text-warning" />
+        <Metric label="TIE" value={strategy.tie} tone="text-tie" />
         <Metric
           label="Assertividade"
           value={formatPercent(strategy.assertiveness)}
