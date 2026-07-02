@@ -108,17 +108,22 @@ export function LeituraNeuralMiniCard({
   const losingLabel = losingNumberLabel(data, losingKey);
   const activeNumberLabel = activeNumberDisplayLabel(data, losingKey);
   const activeEntryState = liveNeuralEntryState(neuralEntryState);
+  const readingEntryKey = neuralReadingEntryKey(data);
+  const activeEntryMatchesReading = neuralEntryMatchesReading(activeEntryState, data);
   const [heldEntry, setHeldEntry] = useState<HeldNeuralEntry | null>(() =>
-    activeEntryState ? { state: activeEntryState, heldAt: Date.now() } : null,
+    activeEntryMatchesReading && activeEntryState ? { state: activeEntryState, heldAt: Date.now() } : null,
   );
   const visibleHeldEntry =
     heldEntry &&
+    neuralEntryMatchesReading(heldEntry.state, data) &&
     !neuralEntryResultMatchesState(neuralEntryLastResult, heldEntry.state) &&
     !isHeldNeuralEntryExpired(heldEntry)
       ? heldEntry.state
       : null;
   const visibleActiveEntry =
-    activeEntryState && !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
+    activeEntryState &&
+    activeEntryMatchesReading &&
+    !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
       ? activeEntryState
       : null;
   const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
@@ -148,6 +153,11 @@ export function LeituraNeuralMiniCard({
   useEffect(() => {
     setHeldEntry((current) => {
       if (activeEntryState) {
+        if (!activeEntryMatchesReading) {
+          return current && neuralEntryMatchesReading(current.state, data) && !isHeldNeuralEntryExpired(current)
+            ? current
+            : null;
+        }
         if (neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)) return null;
         return {
           state: activeEntryState,
@@ -159,11 +169,12 @@ export function LeituraNeuralMiniCard({
       }
 
       if (!current) return null;
+      if (!neuralEntryMatchesReading(current.state, data)) return null;
       if (neuralEntryResultMatchesState(neuralEntryLastResult, current.state)) return null;
       if (isHeldNeuralEntryExpired(current)) return null;
       return current;
     });
-  }, [activeEntryState, neuralEntryLastResult]);
+  }, [activeEntryMatchesReading, activeEntryState, neuralEntryLastResult, readingEntryKey]);
 
   useEffect(() => {
     const result = displayResultFromOfficialEntry(neuralEntryLastResult, rounds);
@@ -1319,6 +1330,47 @@ function liveNeuralEntryState(entryState: NeuralEntryState | null | undefined): 
   }
 
   return liveNeuralEntrySide(entryState) ? entryState : null;
+}
+
+function neuralEntryMatchesReading(
+  entryState: NeuralEntryState | null | undefined,
+  reading: NeuralReading,
+) {
+  if (!entryState) return false;
+  const readingKey = neuralReadingEntryKey(reading);
+  if (!readingKey) return false;
+
+  if (entryState.key === readingKey) return true;
+
+  const snapshot = entryState.readingSnapshot;
+  const numero =
+    typeof entryState.numero === "number"
+      ? entryState.numero
+      : typeof snapshot?.numero === "number"
+        ? snapshot.numero
+        : null;
+  const origem = normalizeNeuralSideKey(entryState.origem ?? snapshot?.origem);
+  const origemTipo = entryState.origemTipo ?? snapshot?.origemTipo ?? null;
+  const expectedSide = normalizeNeuralSideKey(
+    entryState.expectedSide ?? snapshot?.direcao ?? snapshot?.pullingSide ?? snapshot?.origem,
+  );
+
+  if (typeof numero !== "number" || !origem || !origemTipo || !expectedSide) return false;
+  return `${numero}:${origem}:${origemTipo}:${expectedSide}` === readingKey;
+}
+
+function neuralReadingEntryKey(reading: NeuralReading) {
+  if (typeof reading.numero !== "number") return "";
+  const origem = normalizeNeuralSideKey(reading.origem);
+  const origemTipo = reading.origemTipo ?? (reading.postTie || reading.origem === "TIE" ? "TIE" : null);
+  const expectedSide = normalizeNeuralSideKey(reading.direcao ?? reading.pullingSide ?? reading.origem);
+  if (!origem || !origemTipo || !expectedSide) return "";
+  return `${reading.numero}:${origem}:${origemTipo}:${expectedSide}`;
+}
+
+function normalizeNeuralSideKey(value: unknown): NeuralSide | null {
+  if (value === "BANKER" || value === "PLAYER" || value === "TIE") return value;
+  return null;
 }
 
 function neuralEntryResultMatchesState(
