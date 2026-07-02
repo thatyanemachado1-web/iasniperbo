@@ -146,6 +146,20 @@ export interface PatternIaLifecycleView {
   max_gale: 1;
   finalized: boolean;
   blocked_reason?: string;
+  entryHistory: PatternIaEntryHistoryItem[];
+}
+
+export type PatternIaEntryResultLabel = "GREEN SG" | "GREEN G1" | "RED G1";
+
+export interface PatternIaEntryHistoryItem {
+  id: string;
+  signal_id: string;
+  event_id?: string;
+  entry_side: RoundResult;
+  result_label: PatternIaEntryResultLabel;
+  tie_multiplier?: number;
+  finalized_at: string;
+  minute: string;
 }
 
 export interface PatternMinerStoredBank {

@@ -144,6 +144,7 @@ function emptyLifecycle(): PatternIaLifecycleView {
     current_gale: 0,
     max_gale: 1,
     finalized: false,
+    entryHistory: [],
   };
 }
 

@@ -16,7 +16,12 @@ import {
   statusLabel,
   statusTone,
 } from "@/patternMiner/PatternMinerDisplay";
-import type { PatternIaLifecycleView, PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
+import {
+  patternIaEntryResultClass,
+  patternIaEntrySideClass,
+  patternIaEntrySideLabel,
+} from "@/patternMiner/PatternMinerEntryHistory";
+import type { PatternIaEntryHistoryItem, PatternIaLifecycleView, PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
 
 export function PatternMinerMiniCard({
   snapshot,
@@ -143,6 +148,8 @@ export function PatternMinerMiniCard({
             Coletando histórico para mineração de padrões.
           </div>
         )}
+
+        <PatternIaEntryHistoryList history={lifecycle.entryHistory} />
 
         <Link
           to="/app/padroes"
@@ -453,4 +460,41 @@ function formatAnalyzedRounds(value: number) {
   if (!value) return "0r";
   if (value >= 1000) return `${Math.round(value / 100) / 10}k`;
   return `${value}r`;
+}
+
+const VISIBLE_PATTERN_IA_ENTRY_HISTORY = 8;
+
+function PatternIaEntryHistoryList({ history }: { history: PatternIaEntryHistoryItem[] }) {
+  const visible = history.slice(0, VISIBLE_PATTERN_IA_ENTRY_HISTORY);
+
+  return (
+    <div className="rounded-lg border border-white/8 bg-background/12 px-2 py-1.5">
+      <div className="mb-1 text-[8px] font-black uppercase tracking-[0.14em] text-muted-foreground">
+        Ultimas entradas
+      </div>
+      {visible.length ? (
+        <div className="max-h-24 space-y-0.5 overflow-y-auto pr-0.5">
+          {visible.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/10 px-1.5 py-0.5 text-[7.5px] font-semibold leading-tight"
+            >
+              <span className="min-w-0 truncate">
+                <span className={patternIaEntrySideClass(item.entry_side)}>
+                  {patternIaEntrySideLabel(
+                    item.entry_side,
+                    item.entry_side === "T" ? item.tie_multiplier : undefined,
+                  )}
+                </span>{" "}
+                <span className={patternIaEntryResultClass(item.result_label)}>{item.result_label}</span>
+              </span>
+              <span className="shrink-0 text-[7px] text-muted-foreground/75">Min {item.minute}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[7.5px] font-semibold text-muted-foreground/70">Sem entradas recentes.</div>
+      )}
+    </div>
+  );
 }

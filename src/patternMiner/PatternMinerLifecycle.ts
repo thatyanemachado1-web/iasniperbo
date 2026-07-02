@@ -1,12 +1,19 @@
 import type { Round, RoundResult } from "@/types/dashboard";
 import type {
   PatternIaActiveSignal,
+  PatternIaEntryHistoryItem,
+  PatternIaEntryResultLabel,
   PatternIaLifecycleView,
   PatternIaResultStage,
   PatternMinerAlert,
   PatternMinerOperationalStatus,
   PatternMinerSnapshot,
 } from "@/types/patternMiner";
+import {
+  appendPatternIaEntryHistory,
+  buildPatternIaEntryHistoryItem,
+  readPatternIaEntryHistory,
+} from "./PatternMinerEntryHistory.ts";
 
 const RESULT_FLASH_MS = 2_500;
 
@@ -19,6 +26,8 @@ interface LifecycleStore {
   flashUntilMs: number;
   lastProcessedRoundId: number;
   seenSignalIds: Set<string>;
+  entryHistory: PatternIaEntryHistoryItem[];
+  historyBootstrapped: boolean;
 }
 
 const store: LifecycleStore = {
@@ -30,6 +39,8 @@ const store: LifecycleStore = {
   flashUntilMs: 0,
   lastProcessedRoundId: 0,
   seenSignalIds: new Set(),
+  entryHistory: [],
+  historyBootstrapped: false,
 };
 
 export function resetPatternIaLifecycleForTests() {
@@ -41,6 +52,30 @@ export function resetPatternIaLifecycleForTests() {
   store.flashUntilMs = 0;
   store.lastProcessedRoundId = 0;
   store.seenSignalIds.clear();
+  store.entryHistory = [];
+  store.historyBootstrapped = false;
+}
+
+function ensureEntryHistoryLoaded() {
+  if (store.historyBootstrapped) return;
+  store.entryHistory = readPatternIaEntryHistory();
+  store.historyBootstrapped = true;
+}
+
+function recordEntryHistory(
+  active: PatternIaActiveSignal,
+  resultLabel: PatternIaEntryResultLabel,
+  resultRound: Round,
+) {
+  ensureEntryHistoryLoaded();
+  const item = buildPatternIaEntryHistoryItem({
+    signal_id: active.signal_id,
+    event_id: active.event_id,
+    entry_side: active.entry_side,
+    result_label: resultLabel,
+    result_round: resultRound,
+  });
+  store.entryHistory = appendPatternIaEntryHistory(store.entryHistory, item);
 }
 
 function isConfirmedEntryAlert(alert: PatternMinerAlert) {
@@ -129,6 +164,7 @@ function advanceLifecycle(rounds: Round[], nowMs = Date.now()) {
       store.status = "GREEN SG";
       store.resultFlash = entrySide === "T" ? "tie" : "green";
       store.flashUntilMs = nowMs + RESULT_FLASH_MS;
+      recordEntryHistory(store.active, "GREEN SG", latestPending);
       logPatternResult(store.active, entrySide, entrySide === "T" ? "TIE" : "GREEN", "green_sg", 0, true);
       return;
     }
@@ -137,6 +173,7 @@ function advanceLifecycle(rounds: Round[], nowMs = Date.now()) {
       store.status = "GREEN SG";
       store.resultFlash = "tie";
       store.flashUntilMs = nowMs + RESULT_FLASH_MS;
+      recordEntryHistory(store.active, "GREEN SG", latestPending);
       logPatternResult(store.active, entrySide, "TIE", "green_sg", 0, true);
       return;
     }
@@ -152,6 +189,7 @@ function advanceLifecycle(rounds: Round[], nowMs = Date.now()) {
       store.status = "GREEN G1";
       store.resultFlash = entrySide === "T" ? "tie" : "green";
       store.flashUntilMs = nowMs + RESULT_FLASH_MS;
+      recordEntryHistory(store.active, "GREEN G1", latestPending);
       logPatternResult(store.active, entrySide, entrySide === "T" ? "TIE" : "GREEN", "green_g1", 1, true);
       return;
     }
@@ -160,6 +198,7 @@ function advanceLifecycle(rounds: Round[], nowMs = Date.now()) {
       store.status = "GREEN G1";
       store.resultFlash = "tie";
       store.flashUntilMs = nowMs + RESULT_FLASH_MS;
+      recordEntryHistory(store.active, "GREEN G1", latestPending);
       logPatternResult(store.active, entrySide, "TIE", "green_g1", 1, true);
       return;
     }
@@ -167,6 +206,7 @@ function advanceLifecycle(rounds: Round[], nowMs = Date.now()) {
     store.status = "RED FINAL";
     store.resultFlash = "red";
     store.flashUntilMs = nowMs + RESULT_FLASH_MS;
+    recordEntryHistory(store.active, "RED G1", latestPending);
     logPatternResult(store.active, entrySide, "RED", "red_final", 1, true);
   }
 }
@@ -203,6 +243,7 @@ export function resolvePatternIaLifecycle(
   rounds: Round[],
   nowMs = Date.now(),
 ): PatternIaLifecycleView {
+  ensureEntryHistoryLoaded();
   enqueueConfirmedSignals(snapshot);
   advanceLifecycle(rounds, nowMs);
 
@@ -223,6 +264,7 @@ export function resolvePatternIaLifecycle(
       store.resultStage === "red_final" ||
       store.resultStage === "tie_hit",
     blocked_reason: strategy?.blocked_reason,
+    entryHistory: store.entryHistory,
   };
 }
 

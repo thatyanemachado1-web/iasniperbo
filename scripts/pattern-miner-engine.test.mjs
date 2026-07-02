@@ -9,6 +9,7 @@ import {
   resetPatternIaLifecycleForTests,
   resolvePatternIaLifecycle,
 } from "../src/patternMiner/PatternMinerLifecycle.ts";
+import { patternIaEntrySideLabel, resetPatternIaEntryHistoryForTests } from "../src/patternMiner/PatternMinerEntryHistory.ts";
 import { formatPatternToken } from "../src/patternMiner/PatternMinerDisplay.ts";
 
 function round(id, result, bankerScore = 7, playerScore = 5) {
@@ -106,7 +107,10 @@ assert.equal(allowed.status, "PADRAO 100%");
 const blocked = resolvePatternStatusFromMetrics({ occurrences: 40, accuracy: 100, redCount: 3 });
 assert.equal(blocked.status, "BLOQUEADO POR MAIS DE 2 REDS");
 
+assert.equal(patternIaEntrySideLabel("T", 8), "T EMPATE 8X");
+
 resetPatternIaLifecycleForTests();
+resetPatternIaEntryHistoryForTests();
 const lifecycleSnapshot = {
   ...incoming,
   entryAlerts: incoming.entryAlerts,
@@ -118,14 +122,23 @@ assert.ok(lifecycleRound1.active?.signal_id);
 const afterSgWin = resolvePatternIaLifecycle(lifecycleSnapshot, [...sampleRounds, round(11, "B")]);
 assert.equal(afterSgWin.status, "GREEN SG");
 assert.equal(afterSgWin.resultFlash, "green");
+assert.equal(afterSgWin.entryHistory.length, 1);
+assert.equal(afterSgWin.entryHistory[0].result_label, "GREEN SG");
+assert.equal(afterSgWin.entryHistory[0].entry_side, "B");
+
+assert.equal(patternIaEntrySideLabel("T", 8), "T EMPATE 8X");
 
 resetPatternIaLifecycleForTests();
+resetPatternIaEntryHistoryForTests();
 const lifecycleSnapshot2 = { ...incoming };
 resolvePatternIaLifecycle(lifecycleSnapshot2, sampleRounds);
 const afterSgLoss = resolvePatternIaLifecycle(lifecycleSnapshot2, [...sampleRounds, round(11, "P")]);
 assert.equal(afterSgLoss.status, "FAZER GALE 1");
 
+assert.equal(patternIaEntrySideLabel("T", 8), "T EMPATE 8X");
+
 resetPatternIaLifecycleForTests();
+resetPatternIaEntryHistoryForTests();
 resolvePatternIaLifecycle(lifecycleSnapshot2, sampleRounds);
 resolvePatternIaLifecycle(lifecycleSnapshot2, [...sampleRounds, round(11, "P")]);
 const afterRed = resolvePatternIaLifecycle(lifecycleSnapshot2, [...sampleRounds, round(11, "P"), round(12, "P")]);
