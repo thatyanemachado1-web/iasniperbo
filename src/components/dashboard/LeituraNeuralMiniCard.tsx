@@ -129,6 +129,7 @@ export function LeituraNeuralMiniCard({
   const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
   const confirmedEntrySide = liveNeuralEntrySide(visibleEntryState);
   const liveEntry = Boolean(confirmedEntrySide);
+  const numberDisplayTone = neuralNumberDisplayTone(liveEntry, originBadge);
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
@@ -291,16 +292,16 @@ export function LeituraNeuralMiniCard({
                 side={originKind === "OPOSTO" ? data.losingSide ?? data.origem : data.origem}
               />
               <span className={cn("truncate text-[11px] font-extrabold", sideClass(data.origem))}>
-                {originKind === "OPOSTO" ? "perdido" : sideLabel(data.origem)}
+                {liveEntry ? (originKind === "OPOSTO" ? "perdido" : sideLabel(data.origem)) : "numero da vez"}
               </span>
             </span>
             <span
               className={cn(
                 "rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase leading-none tracking-[0.08em]",
-                originBadge.className,
+                numberDisplayTone.className,
               )}
             >
-              {originBadge.label}
+              {numberDisplayTone.label}
             </span>
           </div>
 
@@ -316,11 +317,11 @@ export function LeituraNeuralMiniCard({
                     : postTie
                       ? "Cor pos-empate"
                       : "Puxando"
-                  : "Ultima leitura"}
+                  : "Numero da vez"}
               </span>{" "}
               <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>{" "}
               <span className="text-[9px] text-muted-foreground/85">
-                {liveEntry ? `ate ${data.validade ?? "G1"}` : "sem entrada"}
+                {liveEntry ? `ate ${data.validade ?? "G1"}` : "em analise"}
               </span>
             </div>
           ) : (
@@ -338,13 +339,25 @@ export function LeituraNeuralMiniCard({
                 <MiniInfoLine label="Ultima rodada real" value={lastRoundLabel} />
               ) : null}
               {originKind === "OPOSTO" && losingLabel ? (
-                <MiniInfoLine label="Numero perdedor" value={losingLabel} valueClassName={sideClass(data.losingSide ?? data.origem)} />
+                <MiniInfoLine
+                  label={liveEntry ? "Numero perdedor" : "Numero da vez"}
+                  value={losingLabel}
+                  valueClassName={sideClass(data.losingSide ?? data.origem)}
+                />
               ) : null}
               {originKind === "OPOSTO" && losingKey ? (
-                <MiniInfoLine label="Numero Pagante Oposto" value={losingKey} valueClassName={sideClass(data.losingSide ?? data.origem)} />
+                <MiniInfoLine
+                  label={liveEntry ? "Numero Pagante Oposto" : "Leitura oposto"}
+                  value={losingKey}
+                  valueClassName={sideClass(data.losingSide ?? data.origem)}
+                />
               ) : null}
               {pullingSide ? (
-                <MiniInfoLine label="Puxando" value={sideLabel(pullingSide)} valueClassName={sideClass(pullingSide)} />
+                <MiniInfoLine
+                  label={liveEntry ? "Puxando" : "Leitura"}
+                  value={sideLabel(pullingSide)}
+                  valueClassName={sideClass(pullingSide)}
+                />
               ) : null}
               <div className="flex items-baseline justify-between gap-1">
                 <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
@@ -1265,6 +1278,14 @@ function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
   return {
     label: "Pagante",
     className: "border-success/35 bg-success/10 text-success",
+  };
+}
+
+function neuralNumberDisplayTone(liveEntry: boolean, originBadge: ReturnType<typeof originBadgeFor>) {
+  if (liveEntry) return originBadge;
+  return {
+    label: "Analise",
+    className: "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
   };
 }
 
