@@ -16,10 +16,10 @@ export function surfRiskBand(risk: number): { label: string; tone: BadgeTone; st
 }
 export function surfStrengthBand(confidence: number): { label: string; tone: BadgeTone; status: string } {
   const value = clampPercent(confidence);
-  if (value >= 60) {
+  if (value >= 89) {
     return { label: "FORTE PARA SURF", tone: "green", status: "Força suficiente para seguir o lado do surf." };
   }
-  if (value >= 50) {
+  if (value >= 85) {
     return { label: "SURF EM OBSERVAÇÃO", tone: "amber", status: "Aguardar mais uma casa antes de seguir." };
   }
   return { label: "RISCO DE QUEBRA", tone: "red", status: "Não seguir surf agora." };

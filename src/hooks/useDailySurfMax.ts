@@ -30,7 +30,7 @@ export function useDailySurfMax({
     DailySurfMaxEngine.load(tableId, storageScope),
   );
 
-  const todayKey = useBrasiliaCycleDateKey();
+  const todayKey = DailySurfMaxEngine.todayKey();
   const signature = useMemo(
     () => roundsSignature(rounds, sourceUpdatedAt, tableId),
     [rounds, sourceUpdatedAt, tableId],
@@ -138,23 +138,6 @@ function roundsSignature(
 function roundSourceKey(round: DailySurfRoundSource | undefined) {
   if (!round) return "";
   return `${round.key ?? ""}:${round.id}:${round.time}:${round.result}:${round.bankerScore}:${round.playerScore}`;
-}
-
-function useBrasiliaCycleDateKey(pollMs = 30_000) {
-  const [todayKey, setTodayKey] = useState(() => DailySurfMaxEngine.todayKey());
-
-  useEffect(() => {
-    const sync = () => {
-      const next = DailySurfMaxEngine.todayKey();
-      setTodayKey((current) => (current === next ? current : next));
-    };
-    sync();
-    if (typeof window === "undefined") return;
-    const timer = window.setInterval(sync, pollMs);
-    return () => window.clearInterval(timer);
-  }, [pollMs]);
-
-  return todayKey;
 }
 
 function isSameSnapshot(left: DailySurfMaxSnapshot, right: DailySurfMaxSnapshot) {

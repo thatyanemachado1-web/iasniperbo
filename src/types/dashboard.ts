@@ -181,7 +181,6 @@ export interface SurfAlert {
   surf_alert: boolean;
   surf_phase: SurfPhase;
   surf_side: SurfSide;
-  source?: "engine" | "publisher" | "merged" | "stale";
   surf_status?: string;
   surf_risk: number; // 0-100
   surf_break_risk?: number; // 0-100
@@ -215,7 +214,6 @@ export interface TieAlert {
   confidence: number; // 0-100
   validityRounds: number;
   status: TieAlertStatus;
-  source?: "engine" | "publisher" | "merged" | "stale";
 }
 
 export type EngineState = "AGUARDAR" | "ATENCAO" | "ENTRADA" | "BLOQUEADO";

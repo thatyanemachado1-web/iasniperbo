@@ -5,7 +5,6 @@ import type {
   PatternMinerHistoryLimit,
   PatternMinerScoreboard,
   PatternMinerSnapshot,
-  PatternMinerSource,
   PatternMinerStrategy,
   PatternMinerStrategyStatus,
 } from "@/types/patternMiner";
@@ -101,60 +100,6 @@ export class PatternMinerEngine {
       analyzedRounds: analyzedRounds.length,
       historyLimit: this.config.historyLimit,
       updatedAt,
-    };
-  }
-
-  private static dashboardEngine = new PatternMinerEngine(DEFAULT_PATTERN_MINER_CONFIG);
-
-  static analyzeFromHistory(rounds: Round[]): PatternMinerSnapshot {
-    const snapshot = PatternMinerEngine.dashboardEngine.analyze(rounds);
-    return { ...snapshot, source: "engine" };
-  }
-
-  static mergeWithIncoming(
-    computed: PatternMinerSnapshot,
-    incoming?: PatternMinerSnapshot,
-  ): PatternMinerSnapshot {
-    if (!incoming || !hasPatternMinerPayload(incoming)) {
-      return { ...computed, source: computed.source ?? "engine" };
-    }
-
-    const incomingAnalyzed = incoming.analyzedRounds ?? 0;
-    const computedAnalyzed = computed.analyzedRounds ?? 0;
-    const base = incomingAnalyzed >= computedAnalyzed ? incoming : computed;
-    const supplement = base === incoming ? computed : incoming;
-    const entryAlerts = mergePatternEntryAlerts(computed, incoming);
-    const formingAlerts = mergePatternFormingAlerts(computed, incoming);
-    const hasIncomingValidated = incoming.entryAlerts.some((alert) => alert.kind === "validated");
-    const hasComputedValidated = computed.entryAlerts.some((alert) => alert.kind === "validated");
-
-    let source: PatternMinerSource = "engine";
-    if (hasIncomingValidated && hasComputedValidated) source = "merged";
-    else if (hasIncomingValidated && !hasComputedValidated) source = "publisher";
-    else if (hasComputedValidated) source = "engine";
-    else if (incomingAnalyzed > computedAnalyzed) source = "publisher";
-
-    return {
-      ...base,
-      strategies: base.strategies.length ? base.strategies : supplement.strategies,
-      ranking: base.ranking.length ? base.ranking : supplement.ranking,
-      hotStrategies: base.hotStrategies.length ? base.hotStrategies : supplement.hotStrategies,
-      entryAlerts,
-      formingAlerts,
-      scoreboard:
-        base.scoreboard.totalValidated >= (supplement.scoreboard?.totalValidated ?? 0)
-          ? base.scoreboard
-          : supplement.scoreboard,
-      agent: {
-        ...base.agent,
-        catalogedStrategies: Math.max(base.agent.catalogedStrategies, supplement.agent.catalogedStrategies),
-        hotStrategies: Math.max(base.agent.hotStrategies, supplement.agent.hotStrategies),
-        lastDiscovery: base.agent.lastDiscovery ?? supplement.agent.lastDiscovery,
-      },
-      analyzedRounds: Math.max(incomingAnalyzed, computedAnalyzed),
-      historyLimit: base.historyLimit ?? supplement.historyLimit,
-      updatedAt: new Date().toISOString(),
-      source,
     };
   }
 
@@ -352,52 +297,6 @@ export class PatternMinerEngine {
         : undefined,
     };
   }
-}
-
-function hasPatternMinerPayload(snapshot: PatternMinerSnapshot) {
-  return Boolean(
-    snapshot.ranking.length ||
-      snapshot.hotStrategies.length ||
-      snapshot.entryAlerts.length ||
-      snapshot.formingAlerts.length ||
-      snapshot.scoreboard.totalValidated,
-  );
-}
-
-function mergePatternEntryAlerts(
-  computed: PatternMinerSnapshot,
-  incoming: PatternMinerSnapshot,
-): PatternMinerAlert[] {
-  const byStrategy = new Map<string, PatternMinerAlert>();
-  for (const alert of [...computed.entryAlerts, ...incoming.entryAlerts]) {
-    if (alert.kind !== "validated") continue;
-    const existing = byStrategy.get(alert.strategy.id);
-    if (!existing || (alert.strategy.assertiveness ?? 0) > (existing.strategy.assertiveness ?? 0)) {
-      byStrategy.set(alert.strategy.id, alert);
-    }
-  }
-  return [...byStrategy.values()].sort(
-    (left, right) => (right.strategy.assertiveness ?? 0) - (left.strategy.assertiveness ?? 0),
-  );
-}
-
-function mergePatternFormingAlerts(
-  computed: PatternMinerSnapshot,
-  incoming: PatternMinerSnapshot,
-): PatternMinerAlert[] {
-  const byId = new Map<string, PatternMinerAlert>();
-  for (const alert of [...computed.formingAlerts, ...incoming.formingAlerts]) {
-    const existing = byId.get(alert.id);
-    if (!existing || alert.progress > existing.progress) {
-      byId.set(alert.id, alert);
-    }
-  }
-  return [...byId.values()]
-    .sort((left, right) => {
-      if (left.progress !== right.progress) return right.progress - left.progress;
-      return (right.strategy.assertiveness ?? 0) - (left.strategy.assertiveness ?? 0);
-    })
-    .slice(0, 40);
 }
 
 function applyValidation(

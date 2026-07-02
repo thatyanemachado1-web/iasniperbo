@@ -17,8 +17,6 @@ import { DEFAULT_PATTERN_MINER_CONFIG, PatternMinerEngine } from "./patternMiner
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
-import { SurfAnalyzerEngine } from "./surf/SurfAnalyzerEngine";
-import { TieRadarEngine } from "./tieRadar/TieRadarEngine";
 import {
   buildTiePullerStats,
   emptyTieMultiplierCounts,
@@ -623,10 +621,6 @@ function withSecurityHeaders(response: Response): Response {
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
   headers.set("Permissions-Policy", "camera=(), geolocation=(), payment=(), usb=()");
   headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-  if ((headers.get("content-type") || "").includes("text/html")) {
-    headers.set("Cache-Control", "no-cache, no-store, must-revalidate");
-    headers.set("Pragma", "no-cache");
-  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -12613,55 +12607,6 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   if (generatedNeural) {
     pickedSections.neuralReading = generatedNeural.reading;
     pickedSections.neuralScoreboard = generatedNeural.scoreboard;
-  }
-
-  const surfRoundSource = liveValidatorRoundHistory.length
-    ? liveValidatorRoundHistory
-    : incomingRounds.length
-      ? incomingRounds
-      : currentDashboard.rounds;
-  if (acceptsCurrentCycle && surfRoundSource.length >= 2) {
-    const computedSurf = SurfAnalyzerEngine.analyze(surfRoundSource, cycleDate);
-    const incomingSurf = (pickedSections.currentSurfAlert ??
-      incoming.currentSurfAlert ??
-      incoming.surfAlert) as DashboardData["currentSurfAlert"] | undefined;
-    pickedSections.currentSurfAlert = SurfAnalyzerEngine.mergeWithIncoming(computedSurf, incomingSurf);
-  }
-
-  const tieRoundSource = surfRoundSource;
-  if (acceptsCurrentCycle && tieRoundSource.length >= 3) {
-    const computedTie = TieRadarEngine.analyze(tieRoundSource, cycleDate);
-    const incomingTie = (pickedSections.currentTieAlert ??
-      incoming.currentTieAlert ??
-      incoming.tieAlert) as DashboardData["currentTieAlert"] | undefined;
-    const mergedTie = TieRadarEngine.mergeWithIncoming(computedTie, incomingTie);
-    pickedSections.currentTieAlert = mergedTie.alert;
-    if (mergedTie.tiePullers.length) {
-      const baseScoreboard = pickedSections.tieAlertScoreboard ?? currentDashboard.tieAlertScoreboard;
-      pickedSections.tieAlertScoreboard = {
-        ...(baseScoreboard ?? {
-          greenTieAlerts: 0,
-          expired: 0,
-          totalAlerts: 0,
-          assertiveness: 0,
-        }),
-        tiePullers: mergedTie.tiePullers,
-      };
-    }
-  }
-
-  const patternRoundSource = surfRoundSource;
-  if (acceptsCurrentCycle && patternRoundSource.length >= 6) {
-    const computedPattern = PatternMinerEngine.analyzeFromHistory(
-      patternRoundSource.slice(-DEFAULT_PATTERN_MINER_CONFIG.historyLimit),
-    );
-    const incomingPattern = (pickedSections.patternMinerSnapshot ??
-      incoming.patternMinerSnapshot ??
-      incoming.patternMiner) as PatternMinerSnapshot | undefined;
-    pickedSections.patternMinerSnapshot = PatternMinerEngine.mergeWithIncoming(
-      computedPattern,
-      incomingPattern,
-    );
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;
