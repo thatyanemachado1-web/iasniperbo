@@ -16,9 +16,10 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { MainSignalLivePopupBridge } from "@/components/dashboard/MainSignalLivePopupBridge";
+import { NeuralEntryLivePopupBridge } from "@/components/dashboard/NeuralEntryLivePopupBridge";
 import { ValidatorLivePopupBridge } from "@/components/validator/ValidatorLivePopupBridge";
 import { canSeeAdminUi } from "@/lib/adminSession";
-import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { hasFullAccess, hasSignalAccess, readUserSession } from "@/lib/userSession";
 import { useEffect, useState, type ReactNode } from "react";
 
 const navItems = [
@@ -43,6 +44,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const userSession = readUserSession();
   const canSeeAdmin = canSeeAdminUi();
   const fullAccess = hasFullAccess(userSession);
+  const signalAccess = hasSignalAccess(userSession);
   const visibleNavItems = fullAccess
     ? navItems.filter((item) => item.to !== "/app/planos")
     : navItems;
@@ -173,7 +175,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-28 lg:pb-8">{children}</main>
       </div>
 
-      {fullAccess && <MainSignalLivePopupBridge />}
+      {signalAccess && <MainSignalLivePopupBridge />}
+      {signalAccess && <NeuralEntryLivePopupBridge />}
       {fullAccess && <ValidatorLivePopupBridge />}
 
       {/* Bottom nav mobile */}
