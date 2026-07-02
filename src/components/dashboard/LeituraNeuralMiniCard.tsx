@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import {
@@ -63,6 +63,7 @@ export function LeituraNeuralMiniCard({
   const hasNumber = typeof data.numero === "number" && Boolean(data.origem);
   const pullingSide = data.direcao ?? data.origem;
   const confirmedSide = mode === "ACTIVE" ? pullingSide : null;
+  const numberTokenSide = hasNumber && confirmedSide ? confirmedSide : null;
   const generalScore = buildGeneralScore(neuralScoreboard, data);
   const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
   const view = buildNeuralView(data, hasNumber, confirmedSide, accuracy, generalScore, mode);
@@ -161,8 +162,12 @@ export function LeituraNeuralMiniCard({
           <NeuralStatChip
             label="Número"
             value={hasNumber ? formatNeuralNumber(data) : "--"}
-            tone={hasNumber ? view.numberTone : "muted"}
-          />
+            tone={numberTokenSide ? sideNumberTone(numberTokenSide) : "muted"}
+          >
+            {hasNumber ? (
+              <NeuralNumberToken label={formatNeuralNumber(data)} side={numberTokenSide} />
+            ) : null}
+          </NeuralStatChip>
           <NeuralStatChip label="Validade" value={data.validade ?? "G1"} tone="muted" />
         </div>
 
@@ -485,10 +490,12 @@ function NeuralStatChip({
   label,
   value,
   tone,
+  children,
 }: {
   label: string;
   value: string;
   tone: "green" | "amber" | "cyan" | "red" | "muted" | "banker" | "player" | "tie";
+  children?: ReactNode;
 }) {
   const toneClass = {
     green: "border-success/30 bg-success/8 text-success",
@@ -497,16 +504,58 @@ function NeuralStatChip({
     red: "border-destructive/30 bg-destructive/8 text-destructive",
     muted: "border-border/60 bg-secondary/25 text-foreground",
     banker: "border-banker/30 bg-banker/8 text-banker",
-    player: "border-border/60 bg-secondary/25 text-foreground",
-    tie: "border-border/60 bg-secondary/25 text-foreground",
+    player: "border-player/30 bg-player/8 text-player",
+    tie: "border-warning/30 bg-warning/8 text-warning",
   }[tone];
 
   return (
     <div className={cn("rounded-lg border px-1 py-1.5", toneClass)}>
       <div className="text-[8px] font-black uppercase tracking-[0.08em] opacity-75">{label}</div>
-      <div className="mt-0.5 truncate text-[11px] font-black leading-none">{value}</div>
+      <div className="mt-0.5 flex min-h-4 items-center justify-center text-[11px] font-black leading-none">
+        {children ?? <span className="truncate">{value}</span>}
+      </div>
     </div>
   );
+}
+
+function NeuralNumberToken({
+  label,
+  side,
+}: {
+  label: string;
+  side?: NeuralSide | null;
+}) {
+  const compactLabel = compactNumberTokenLabel(label);
+  return (
+    <span
+      className={cn(
+        "inline-grid size-5 shrink-0 place-items-center rounded-full border font-black leading-none tabular-nums shadow-[0_0_10px_-7px_currentColor] [-webkit-text-stroke:0.2px_currentColor]",
+        compactLabel.length > 1 ? "text-[10px]" : "text-[12px]",
+        numberTokenClass(side),
+      )}
+      title={label}
+      aria-label={label}
+    >
+      {compactLabel}
+    </span>
+  );
+}
+
+function compactNumberTokenLabel(label: string) {
+  const text = String(label || "--").trim();
+  const sideNumber = text.match(/^(\d+)\s*[BP]$/i) || text.match(/^[BP]\s*(\d+)$/i);
+  if (sideNumber?.[1]) return sideNumber[1];
+  const tieNumber = text.match(/^(\d+)\s*x\s*\d*$/i);
+  if (tieNumber?.[1]) return tieNumber[1];
+  const onlyNumber = text.match(/\d+/)?.[0];
+  return onlyNumber || text || "--";
+}
+
+function numberTokenClass(side?: NeuralSide | null) {
+  if (side === "BANKER") return "border-banker/70 bg-banker text-white";
+  if (side === "PLAYER") return "border-player/70 bg-player text-white";
+  if (side === "TIE") return "border-warning/70 bg-warning text-background";
+  return "border-white/20 bg-white/10 text-foreground";
 }
 
 function buildGeneralScore(scoreboard: NeuralScoreboard | undefined, fallbackReading: NeuralReading) {
@@ -590,8 +639,10 @@ function sideActionClass(side: NeuralSide) {
   return dashboardSideTextClass(side);
 }
 
-function sideNumberTone(side: NeuralReading["origem"]) {
+function sideNumberTone(side: NeuralSide | null | undefined) {
   if (side === "BANKER") return "banker" as const;
+  if (side === "PLAYER") return "player" as const;
+  if (side === "TIE") return "tie" as const;
   return "muted" as const;
 }
 
