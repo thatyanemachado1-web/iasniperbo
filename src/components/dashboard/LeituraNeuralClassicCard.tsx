@@ -117,10 +117,7 @@ export function LeituraNeuralClassicCard({
     "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
-  const rawConfirmedEntrySide = mode === "ACTIVE" ? pullingSide : null;
-  const confirmedEntrySide = shouldHideResolvedEntry(rawConfirmedEntrySide, neuralEntryLastResult)
-    ? null
-    : rawConfirmedEntrySide;
+  const confirmedEntrySide = mode === "ACTIVE" ? pullingSide : null;
   const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
   const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
   const lastOfficialResultRef = useRef<string | null>(null);
@@ -143,7 +140,7 @@ export function LeituraNeuralClassicCard({
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
     entryResultTimeoutRef.current = window.setTimeout(
       () => setEntryResult(null),
-      result.kind === "red" ? 1100 : 1650,
+      result.kind === "red" ? 1600 : 3200,
     );
   }, [neuralEntryLastResult]);
 
@@ -162,11 +159,8 @@ export function LeituraNeuralClassicCard({
       className={cn(
         "neural-mini-card relative z-10 flex w-full shrink-0 flex-col overflow-visible rounded-xl border border-neon-cyan/25 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_24px_-18px_var(--neon-cyan)] backdrop-blur-xl",
         DASHBOARD_MODULE_CARD_ROOT,
-        confirmedEntrySide && sideBorderClass(confirmedEntrySide),
+        mode === "ACTIVE" && "border-neon-purple/35 shadow-[0_0_28px_-18px_var(--neon-purple)]",
         greenFlash && "result-green-flash",
-        entryResult?.kind === "red" && "neural-entry-flash-red",
-        entryResult?.kind === "tie" && "neural-entry-flash-tie",
-        entryResult?.kind === "green" && "neural-entry-flash-green",
         className,
       )}
       aria-label="Leitura neural de números pagantes"
@@ -606,7 +600,7 @@ function neuralEntryStatusState(
   if (confirmedSide) {
     return {
       kicker: "Entrada confirmada",
-      label: confirmedSide === "TIE" ? "POSSIVEL TIE" : `ENTRAR ${sideLabel(confirmedSide).toUpperCase()}`,
+      label: sideLabel(confirmedSide).toUpperCase(),
       description: null,
       sideClass: sideClass(confirmedSide),
       className: dashboardSideChipClass(confirmedSide),
@@ -968,7 +962,7 @@ function numberPaymentStage(sg: number | null, g1: number | null, red: number | 
   if (losses >= 2) {
     return {
       label: "Bloqueado",
-      title: "Esse numero tomou 2 reds e saiu da linha.",
+      title: "Esse nÃºmero tomou 2 reds e saiu da linha.",
       className: "border-destructive/35 bg-destructive/10 text-destructive",
     };
   }
@@ -976,7 +970,7 @@ function numberPaymentStage(sg: number | null, g1: number | null, red: number | 
   if (greens <= 3 && losses === 0) {
     return {
       label: "Novo",
-      title: "Comecou a pagar agora.",
+      title: "ComeÃ§ou a pagar agora.",
       className: "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
     };
   }
@@ -984,7 +978,7 @@ function numberPaymentStage(sg: number | null, g1: number | null, red: number | 
   if (greens >= 8 && losses === 0) {
     return {
       label: "Esticado",
-      title: "Ja pagou bastante sem red. Entrar com mais cautela.",
+      title: "JÃ¡ pagou bastante sem red. Entrar com mais cautela.",
       className: "border-warning/35 bg-warning/10 text-warning",
     };
   }
@@ -992,14 +986,14 @@ function numberPaymentStage(sg: number | null, g1: number | null, red: number | 
   if (greens >= 8) {
     return {
       label: "Maduro",
-      title: "Ja tem bastante leitura validada.",
+      title: "JÃ¡ tem bastante leitura validada.",
       className: "border-warning/30 bg-warning/10 text-warning",
     };
   }
 
   return {
     label: "Pagando",
-    title: "Numero pagante com validacao ativa.",
+    title: "NÃºmero pagante com validaÃ§Ã£o ativa.",
     className: "border-success/30 bg-success/10 text-success",
   };
 }
@@ -1143,23 +1137,4 @@ function sideLabel(side?: NeuralSide | null) {
 
 function sideClass(side?: NeuralSide | null) {
   return dashboardSideTextClass(side);
-}
-
-function sideBorderClass(side: NeuralSide) {
-  if (side === "BANKER") return "border-banker/35 shadow-[0_0_28px_-18px_var(--banker)]";
-  if (side === "PLAYER") return "border-player/35 shadow-[0_0_28px_-18px_var(--player)]";
-  return "border-tie/35 shadow-[0_0_28px_-18px_var(--tie)]";
-}
-
-function shouldHideResolvedEntry(
-  confirmedSide: NeuralSide | null | undefined,
-  result: NeuralEntryLastResult | null | undefined,
-) {
-  if (!confirmedSide || !result?.id) return false;
-  const resultSide = normalizeEntrySide(result.expectedSide ?? result.origem);
-  if (resultSide !== confirmedSide) return false;
-  if (!result.finishedAt) return true;
-  const finishedAt = new Date(result.finishedAt).getTime();
-  if (Number.isNaN(finishedAt)) return false;
-  return Date.now() - finishedAt < 90000;
 }

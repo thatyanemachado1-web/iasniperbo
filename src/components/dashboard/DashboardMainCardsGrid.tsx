@@ -54,7 +54,6 @@ export function DashboardMainCardsGrid({
           <HotPatternDashboardCard
             snapshot={patternMinerSnapshot}
             isUsingRealData={patternMinerIsUsingRealData}
-            latestRoundId={data.rounds.at(-1)?.id}
           />
         </div>
       </section>
