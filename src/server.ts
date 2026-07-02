@@ -17,6 +17,7 @@ import { DEFAULT_PATTERN_MINER_CONFIG, PatternMinerEngine } from "./patternMiner
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
+import { SurfAnalyzerEngine } from "./surf/SurfAnalyzerEngine";
 import {
   buildTiePullerStats,
   emptyTieMultiplierCounts,
@@ -12607,6 +12608,19 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   if (generatedNeural) {
     pickedSections.neuralReading = generatedNeural.reading;
     pickedSections.neuralScoreboard = generatedNeural.scoreboard;
+  }
+
+  const surfRoundSource = liveValidatorRoundHistory.length
+    ? liveValidatorRoundHistory
+    : incomingRounds.length
+      ? incomingRounds
+      : currentDashboard.rounds;
+  if (acceptsCurrentCycle && surfRoundSource.length >= 2) {
+    const computedSurf = SurfAnalyzerEngine.analyze(surfRoundSource);
+    const incomingSurf = (pickedSections.currentSurfAlert ??
+      incoming.currentSurfAlert ??
+      incoming.surfAlert) as DashboardData["currentSurfAlert"] | undefined;
+    pickedSections.currentSurfAlert = SurfAnalyzerEngine.mergeWithIncoming(computedSurf, incomingSurf);
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;

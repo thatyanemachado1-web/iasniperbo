@@ -71,7 +71,7 @@ export function SurfAlertCard({
               pulse={enabled && alert.surf_alert}
               className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
             >
-              {alert.surf_status ?? alert.surf_phase}
+              {formatSurfStatus(alert.surf_status ?? alert.surf_phase)}
             </AppBadge>
             <ModuleToggleStrip
               toggles={toggles}
@@ -88,7 +88,7 @@ export function SurfAlertCard({
           right={
             <div className="flex shrink-0 items-center gap-1.5">
               <AppBadge tone={strengthBand.tone} pulse={enabled && alert.surf_alert}>
-                {alert.surf_status ?? alert.surf_phase}
+                {formatSurfStatus(alert.surf_status ?? alert.surf_phase)}
               </AppBadge>
               <ModuleToggleStrip
                 toggles={toggles}
@@ -228,13 +228,17 @@ export function SurfAlertCard({
   );
 }
 
+function formatSurfStatus(status: string | null | undefined) {
+  return String(status ?? "ANALISANDO").replaceAll("_", " ");
+}
+
 function buildSurfDecision(confidence: number, breakRisk: number, side: string) {
   const sideLabel = side === "BANKER" || side === "PLAYER" ? side : "AGUARDAR";
 
-  if (confidence >= 89 && sideLabel !== "AGUARDAR") {
+  if (confidence >= 60 && sideLabel !== "AGUARDAR") {
     return {
       kicker: "Decisão do Surf",
-      title: "Forte para surf",
+      title: confidence >= 80 ? "Surf dominante" : "Surf agressivo",
       action: `Seguir ${sideLabel}`,
       borderClass: "border-success/35 bg-success/10",
       iconClass: "text-success",
@@ -242,7 +246,7 @@ function buildSurfDecision(confidence: number, breakRisk: number, side: string) 
     };
   }
 
-  if (confidence >= 85) {
+  if (confidence >= 50) {
     return {
       kicker: "Decisão do Surf",
       title: "Surf em observação",

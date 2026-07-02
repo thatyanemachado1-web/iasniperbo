@@ -181,6 +181,7 @@ export interface SurfAlert {
   surf_alert: boolean;
   surf_phase: SurfPhase;
   surf_side: SurfSide;
+  source?: "engine" | "publisher" | "merged" | "stale";
   surf_status?: string;
   surf_risk: number; // 0-100
   surf_break_risk?: number; // 0-100
