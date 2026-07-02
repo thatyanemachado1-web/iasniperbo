@@ -623,6 +623,10 @@ function withSecurityHeaders(response: Response): Response {
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
   headers.set("Permissions-Policy", "camera=(), geolocation=(), payment=(), usb=()");
   headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  if ((headers.get("content-type") || "").includes("text/html")) {
+    headers.set("Cache-Control", "no-cache, no-store, must-revalidate");
+    headers.set("Pragma", "no-cache");
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

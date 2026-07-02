@@ -208,7 +208,7 @@ function SurfMaximaPanel({ snapshot, compact = false }: { snapshot: DailySurfMax
 
   if (compact) {
     return (
-      <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+      <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
         <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
           Máxima hoje · reseta 00:00 (BR)
         </div>

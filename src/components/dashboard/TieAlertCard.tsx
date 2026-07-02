@@ -56,7 +56,7 @@ export function TieAlertCard({
     return (
       <GlassCard
         className={cn(
-          "digital-risk-card border-warning/18 p-2 sm:p-2",
+          "digital-risk-card border-white/10 p-2 sm:p-2",
           DASHBOARD_MODULE_CARD_ROOT,
           view.borderClass,
           !enabled && "border-muted-foreground/20",
@@ -64,7 +64,7 @@ export function TieAlertCard({
         )}
       >
         <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warning/22 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
         <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Radar de Empate
@@ -95,8 +95,8 @@ export function TieAlertCard({
             <TieStatChip label="Nível" value={normalizeRiskLabel(alert.level)} tone={view.badgeTone === "green" ? "green" : "amber"} />
           </div>
 
-          <div className="rounded-lg border border-warning/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-            <div className="font-black uppercase tracking-[0.08em] text-warning/85">Puxador · reseta 00:00 (BR)</div>
+          <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Puxador · reseta 00:00 (BR)</div>
             <div className="mt-0.5 font-semibold text-foreground">
               {mainTiePuller ? tiePullerSummary(mainTiePuller) : "Coletando numeros puxadores"}
             </div>
@@ -104,8 +104,8 @@ export function TieAlertCard({
 
           <div className="grid grid-cols-5 gap-1">
             {multipliers.map((item) => (
-              <div key={item.label} className="rounded-md border border-warning/18 bg-warning/10 px-1 py-0.5 text-center">
-                <div className="text-[8px] font-black text-warning">{item.label}</div>
+              <div key={item.label} className="rounded-md border border-white/10 bg-secondary/20 px-1 py-0.5 text-center">
+                <div className="text-[8px] font-black text-muted-foreground">{item.label}</div>
                 <div className="text-[10px] font-black">{item.value}</div>
               </div>
             ))}

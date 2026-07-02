@@ -90,7 +90,7 @@ export function ModuleMiniScoreboard({
     >
       <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.045]" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/24 to-transparent" />
-      <div className="pointer-events-none absolute bottom-0 left-3 right-3 h-px bg-gradient-to-r from-transparent via-neon-cyan/22 to-transparent" />
+      <div className="pointer-events-none absolute bottom-0 left-3 right-3 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
       <div className="relative flex items-center gap-2.5">
         <MiniCircularProgress value={assertiveness} color={tone.progress} />
 
@@ -146,27 +146,27 @@ function moduleSequenceState(sequencePositive: number, sequenceNegative: number,
   if (sequenceExpired !== undefined && sequenceExpired > 0) {
     return {
       label: `${sequenceExpired} expirado${sequenceExpired === 1 ? "" : "s"}`,
-      className: "border-tie/25 bg-tie/10 text-tie",
+      className: "border-white/10 bg-white/5 text-muted-foreground",
     };
   }
 
   if (sequenceNegative > 0) {
     return {
       label: `${sequenceNegative} RED ${sequenceNegative === 1 ? "atual" : "seguidos"}`,
-      className: "border-destructive/30 bg-destructive/10 text-destructive",
+      className: "border-white/10 bg-white/5 text-muted-foreground",
     };
   }
 
   if (sequencePositive > 0) {
     return {
       label: `${sequencePositive} GREEN ${sequencePositive === 1 ? "atual" : "seguidos"}`,
-      className: "border-success/30 bg-success/10 text-success",
+      className: "border-white/10 bg-white/5 text-muted-foreground",
     };
   }
 
   return {
     label: "coletando",
-    className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
+    className: "border-white/10 bg-white/5 text-muted-foreground",
   };
 }
 
@@ -343,7 +343,7 @@ function ScoreboardDetailsModal({
 function ToolInfoLine({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">{label}: </span>
+      <span className="font-black uppercase tracking-[0.1em] text-muted-foreground">{label}: </span>
       {value}
     </div>
   );
@@ -397,13 +397,13 @@ function scoreboardDataState(chips: ScoreChipData[]) {
   if ((totalChip && totalValue <= 0) || !hasUsefulValue) {
     return {
       label: "Coletando",
-      className: "border-warning/25 bg-warning/10 text-warning",
+      className: "border-white/10 bg-white/5 text-muted-foreground",
     };
   }
 
   return {
     label: "Dados reais",
-    className: "border-success/25 bg-success/10 text-success",
+    className: "border-white/10 bg-white/5 text-muted-foreground",
   };
 }
 
@@ -418,12 +418,7 @@ function readChipNumber(value: string | number | undefined) {
   return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
 }
 
-function chipClass(variant: ScoreChipVariant) {
-  if (variant === "green") return "border-success/25 bg-success/10 text-success";
-  if (variant === "red") return "border-destructive/30 bg-destructive/10 text-destructive";
-  if (variant === "purple") return "border-tie/25 bg-tie/10 text-tie";
-  if (variant === "yellow") return "border-warning/25 bg-warning/10 text-warning";
-  if (variant === "cyan") return "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan";
+function chipClass(_variant: ScoreChipVariant) {
   return "border-white/10 bg-white/5 text-muted-foreground";
 }
 

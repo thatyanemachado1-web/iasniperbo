@@ -108,7 +108,7 @@ export function LeituraNeuralMiniCard({
   return (
     <GlassCard
       className={cn(
-        "digital-risk-card border-neon-purple/18 p-2 sm:p-2",
+        "digital-risk-card border-white/10 p-2 sm:p-2",
         DASHBOARD_MODULE_CARD_ROOT,
         view.borderClass,
         greenFlash && "result-green-flash",
@@ -124,7 +124,7 @@ export function LeituraNeuralMiniCard({
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Leitura Neural
           </div>
-          <div className="text-[8px] font-bold uppercase tracking-[0.1em] text-neon-purple/75">
+          <div className="text-[8px] font-bold uppercase tracking-[0.1em] text-muted-foreground">
             {originSubtitle(data)}
           </div>
         </div>
@@ -166,8 +166,8 @@ export function LeituraNeuralMiniCard({
           <NeuralStatChip label="Validade" value={data.validade ?? "G1"} tone="muted" />
         </div>
 
-        <div className="rounded-lg border border-neon-purple/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-          <div className="font-black uppercase tracking-[0.08em] text-neon-purple/85">
+        <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+          <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
             Placar geral · reseta 00:00 (BR)
           </div>
           <div className="mt-0.5 font-semibold text-foreground">
@@ -177,8 +177,8 @@ export function LeituraNeuralMiniCard({
         </div>
 
         {hasNumber && pullingSide ? (
-          <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5 text-[9px]">
-            <div className="font-black uppercase tracking-[0.08em] text-neon-cyan/85">Leitura ativa</div>
+          <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px]">
+            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Leitura ativa</div>
             <div className="mt-0.5 font-semibold text-foreground">
               <span className={sideClass(data.origem)}>{formatNeuralNumber(data)}</span>
               {" · puxando "}

@@ -31,14 +31,14 @@ export function PatternMinerMiniCard({
   return (
     <GlassCard
       className={cn(
-        "digital-risk-card border-neon-cyan/18 p-2 sm:p-2",
+        "digital-risk-card border-white/10 p-2 sm:p-2",
         DASHBOARD_MODULE_CARD_ROOT,
         view.borderClass,
         className,
       )}
     >
       <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/22 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
       <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
