@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDashboardData } from "@/hooks/useDashboardData";
-import { usePatternMiner } from "@/hooks/usePatternMiner";
+import { usePatternMiner, resolvePatternMinerFeedStatus } from "@/hooks/usePatternMiner";
 import { useRoundHistory } from "@/hooks/useRoundHistory";
 import {
   PATTERN_MINER_HISTORY_OPTIONS,
@@ -44,7 +44,7 @@ function PatternMinerPage() {
     enabled: hasRealHistory,
     serverSnapshot:
       hasRealHistory && historyLimit === 15000 ? dashboardData.patternMinerSnapshot : undefined,
-    feedStatus: (dashboardData as { feedStatus?: string | null }).feedStatus,
+    feedStatus: resolvePatternMinerFeedStatus(dashboardData),
     dashboardUpdatedAt: roundHistory.sourceUpdatedAt ?? dashboardData.updatedAt,
   });
   const primaryAlerts = [...snapshot.entryAlerts, ...snapshot.formingAlerts];

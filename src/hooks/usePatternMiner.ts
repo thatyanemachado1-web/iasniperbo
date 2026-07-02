@@ -1,10 +1,16 @@
 import { useMemo } from "react";
-import type { Round } from "@/types/dashboard";
+import type { DashboardData, Round } from "@/types/dashboard";
 import type { PatternMinerHistoryLimit, PatternMinerSnapshot } from "@/types/patternMiner";
 import { DEFAULT_PATTERN_MINER_CONFIG } from "@/patternMiner/PatternMinerEngine";
 import { PatternMinerAgent } from "@/patternMiner/PatternMinerAgent";
 
 const SERVER_SNAPSHOT_MAX_LAG_MS = 120_000;
+
+export function resolvePatternMinerFeedStatus(data: Pick<DashboardData, "currentSignal" | "neuralReading">) {
+  if (data.currentSignal?.id === "feed-paused") return "paused";
+  if (data.neuralReading?.paganteStatus === "FEED_PAUSADO") return "paused";
+  return null;
+}
 
 interface UsePatternMinerParams {
   rounds: Round[];

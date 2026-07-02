@@ -30,7 +30,7 @@ import {
   calculateTieResult,
 } from "@/utils/moduleResults";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
-import { usePatternMiner } from "@/hooks/usePatternMiner";
+import { usePatternMiner, resolvePatternMinerFeedStatus } from "@/hooks/usePatternMiner";
 import { useRoundHistory } from "@/hooks/useRoundHistory";
 import { useDailySurfMax } from "@/hooks/useDailySurfMax";
 
@@ -55,7 +55,7 @@ function DashboardPage() {
     historyLimit: 15000,
     enabled: mode === "live" && !d.mockMode,
     serverSnapshot: d.patternMinerSnapshot,
-    feedStatus: d.feedStatus,
+    feedStatus: resolvePatternMinerFeedStatus(d),
     dashboardUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
   });
   const dailySurfSourceRounds = useMemo(
