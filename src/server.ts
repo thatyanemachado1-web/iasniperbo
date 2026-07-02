@@ -12646,6 +12646,20 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     }
   }
 
+  const patternRoundSource = surfRoundSource;
+  if (acceptsCurrentCycle && patternRoundSource.length >= 6) {
+    const computedPattern = PatternMinerEngine.analyzeFromHistory(
+      patternRoundSource.slice(-DEFAULT_PATTERN_MINER_CONFIG.historyLimit),
+    );
+    const incomingPattern = (pickedSections.patternMinerSnapshot ??
+      incoming.patternMinerSnapshot ??
+      incoming.patternMiner) as PatternMinerSnapshot | undefined;
+    pickedSections.patternMinerSnapshot = PatternMinerEngine.mergeWithIncoming(
+      computedPattern,
+      incomingPattern,
+    );
+  }
+
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;
   const currentLatestRound = latestRoundFromRoundList(currentDashboard.rounds);
   const incomingLatestRound = latestRoundFromRoundList(incomingRounds);

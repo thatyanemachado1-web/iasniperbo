@@ -36,6 +36,8 @@ function PatternMinerPage() {
     rounds: dashboardData.rounds,
     historyLimit,
     enabled: hasRealHistory,
+    serverSnapshot:
+      hasRealHistory && historyLimit === 15000 ? dashboardData.patternMinerSnapshot : undefined,
   });
   const primaryAlerts = [...snapshot.entryAlerts, ...snapshot.formingAlerts];
 
