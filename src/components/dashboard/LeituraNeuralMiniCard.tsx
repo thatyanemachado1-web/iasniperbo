@@ -125,6 +125,7 @@ export function LeituraNeuralMiniCard({
   const confirmedEntrySide = liveNeuralEntrySide(visibleEntryState);
   const liveEntry = Boolean(confirmedEntrySide);
   const showLiveNumberSnapshot = hasNumber && liveEntry;
+  const currentRoundNumber = currentRoundNumberFromRounds(rounds);
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
@@ -241,9 +242,20 @@ export function LeituraNeuralMiniCard({
 
       {!showLiveNumberSnapshot ? (
         <div className="relative mt-2">
-          <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
-            {hasNumber ? "Aguardando entrada confirmada..." : "IA procurando números pagantes..."}
-          </div>
+          {currentRoundNumber ? (
+            <div className="flex flex-wrap items-center gap-1">
+              <NeuralNumberToken label={currentRoundNumber.label} side={currentRoundNumber.side} />
+              <span className="text-[11px] font-extrabold text-neon-cyan">Numero da vez</span>
+              <span className={cn("text-[10px] font-bold", sideClass(currentRoundNumber.side))}>
+                {sideLabel(currentRoundNumber.side)}
+              </span>
+              <span className="text-[9px] text-muted-foreground/85">em analise</span>
+            </div>
+          ) : (
+            <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
+              {hasNumber ? "Aguardando entrada confirmada..." : "IA procurando números pagantes..."}
+            </div>
+          )}
           <TypingDots />
           <div
             className={cn(
@@ -1143,6 +1155,34 @@ function normalizeTieMultiplier(value: unknown) {
 
 function roundHistoryKey(round: Round) {
   return `${round.time}:${round.id}:${round.result}:${round.bankerScore}:${round.playerScore}`;
+}
+
+function currentRoundNumberFromRounds(rounds?: Round[] | null) {
+  const round = rounds?.at(-1);
+  if (!round) return null;
+
+  const bankerScore = Math.round(Number(round.bankerScore));
+  const playerScore = Math.round(Number(round.playerScore));
+  if (!Number.isFinite(bankerScore) || !Number.isFinite(playerScore)) return null;
+
+  if (round.result === "T" || bankerScore === playerScore) {
+    return {
+      label: `${bankerScore}x${playerScore}`,
+      side: "TIE" as const,
+    };
+  }
+
+  if (round.result === "B" || bankerScore > playerScore) {
+    return {
+      label: `P${playerScore}`,
+      side: "PLAYER" as const,
+    };
+  }
+
+  return {
+    label: `B${bankerScore}`,
+    side: "BANKER" as const,
+  };
 }
 
 function numberPaymentStage(sg: number | null, g1: number | null, red: number | null) {
