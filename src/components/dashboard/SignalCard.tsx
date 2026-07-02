@@ -3,7 +3,6 @@ import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { LeituraNeuralResponsiveCard } from "@/components/dashboard/LeituraNeuralResponsiveCard";
-import { sideDotClass } from "@/lib/sideColors";
 import { cn } from "@/lib/utils";
 import type {
   MainSignal,
@@ -76,9 +75,9 @@ export function SignalCard({
         ? "from-tie/35"
         : "from-neon-cyan/15";
   const displaySide = isResultStatus
-    ? "AGUARDAR ANALISE"
+    ? "AGUARDAR ANÁLISE"
     : isTieWatch
-      ? "POSSIVEL TIE"
+      ? "POSSÍVEL EMPATE"
       : isWaiting
         ? "AGUARDAR ENTRADA"
         : signal.side;
@@ -87,7 +86,7 @@ export function SignalCard({
       ? "text-[1.85rem] leading-none sm:text-3xl"
       : "text-4xl leading-none sm:text-5xl";
   const sideCaption = isResultStatus
-    ? "Ultima entrada finalizada"
+    ? "Última entrada finalizada"
     : isTieWatch || isWaiting
       ? "Sem entrada principal"
       : "Lado da entrada";
@@ -153,11 +152,11 @@ export function SignalCard({
       <SectionTitle
         title={
           isResultStatus
-            ? "Aguardar analise"
+            ? "Aguardar análise"
             : isWaiting
               ? "Aguardar entrada"
               : isTieWatch
-                ? "Possivel tie"
+                ? "Possível empate"
                 : "Entrada confirmada"
         }
         right={
@@ -181,7 +180,7 @@ export function SignalCard({
               <span
                 className={`rounded-full border px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide ${tieRisk.className}`}
               >
-                Risco de tie: {tieRisk.label}
+                Risco de empate: {tieRisk.label}
               </span>
             )}
           </div>
@@ -210,11 +209,11 @@ export function SignalCard({
       </div>
       <div className="relative mt-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
         <div className="rounded-xl border border-white/5 bg-secondary/32 p-2.5">
-          <div className="text-muted-foreground">Protecao</div>
+          <div className="text-muted-foreground">Proteção</div>
           <div className="font-semibold text-foreground">{visibleProtection}</div>
         </div>
         <div className="rounded-xl border border-white/5 bg-secondary/32 p-2.5">
-          <div className="text-muted-foreground">Confianca</div>
+          <div className="text-muted-foreground">Confiança</div>
           <div className="font-semibold text-neon-cyan">{visibleStrength}%</div>
         </div>
         <div className="rounded-xl border border-white/5 bg-secondary/32 p-2.5">
@@ -227,12 +226,12 @@ export function SignalCard({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex items-center gap-1.5 font-semibold text-muted-foreground">
               <CheckCircle2 className="size-3.5" />
-              Ultima entrada
+              Última entrada
             </div>
             <div className={`font-extrabold ${lastResult.className}`}>{lastResult.label}</div>
           </div>
           <div className="mt-1 text-muted-foreground">
-            {lastResult.side} com protecao {lastResult.protection}
+            {lastResult.side} com proteção {lastResult.protection}
           </div>
         </div>
       )}
@@ -244,7 +243,7 @@ export function SignalCard({
               Surf
             </div>
             <div className={`font-semibold ${riskTone}`}>
-              Risco contrario: {surfSummary.oppositeRiskLevel} ({surfSummary.oppositeRisk}%)
+              Risco contrário: {surfSummary.oppositeRiskLevel} ({surfSummary.oppositeRisk}%)
             </div>
           </div>
           <div className="mt-1 text-muted-foreground">{surfSummary.status}</div>
@@ -272,7 +271,7 @@ function buildMotorSequence(
   if (reds > 0) {
     return {
       label: `${label}: ${reds} RED ${reds === 1 ? "atual" : "seguidos"}`,
-      title: "Sequencia atual desse motor depois da ultima quebra.",
+      title: "Sequência atual desse motor depois da última quebra.",
       className: "border-destructive/30 bg-destructive/10 text-destructive",
     };
   }
@@ -280,13 +279,13 @@ function buildMotorSequence(
   if (greens > 0) {
     return {
       label: `${label}: ${greens} GREEN ${greens === 1 ? "atual" : "seguidos"}`,
-      title: "Sequencia atual de greens desse motor.",
+      title: "Sequência atual de greens desse motor.",
       className: "border-success/30 bg-success/10 text-success",
     };
   }
 
   return {
-    label: `${label}: sem sequencia ainda`,
+    label: `${label}: sem sequência ainda`,
     title: "Aguardando o primeiro resultado real desse motor.",
     className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
   };
@@ -298,7 +297,6 @@ function safeSequenceNumber(value: number | null | undefined) {
 }
 
 interface OperationalFocusSummary {
-  side: FocusSide;
   sideLabel: string;
   sideClassName: string;
   strength: string;
@@ -319,13 +317,8 @@ function OperationalFocus({
         <div className="text-[9px] font-black uppercase tracking-[0.14em] text-muted-foreground">
           Melhor leitura agora
         </div>
-        <div
-          className={cn(
-            "mt-1 inline-flex items-center gap-2 text-base font-black leading-tight",
-            focus.sideClassName,
-          )}
-        >
-          <SideIdentity side={focus.side} label={focus.sideLabel} />
+        <div className={cn("mt-1 text-base font-black leading-tight", focus.sideClassName)}>
+          {focus.sideLabel}
         </div>
         <div
           className={cn(
@@ -403,7 +396,7 @@ function buildOperationalFocus(
   if (tie.active) {
     return focusSummary(
       "TIE",
-      "Tie",
+      "🟡 Tie",
       tie.high ? "Possivel Tie" : "Observacao",
       tie.high
         ? "Radar de Empate com forca alta. Aguardar validade aberta."
@@ -431,7 +424,6 @@ function focusSummary(
   badgeClassName: string,
 ): OperationalFocusSummary {
   return {
-    side,
     sideLabel,
     sideClassName: focusSideClass(side),
     strength,
@@ -479,28 +471,10 @@ function tieFocus(alert?: TieAlert): { active: boolean; high: boolean } {
 }
 
 function sideDisplay(side: FocusSide) {
-  if (side === "BANKER") return "Banker";
-  if (side === "PLAYER") return "Player";
-  if (side === "TIE") return "Tie";
+  if (side === "BANKER") return "🔴 Banker";
+  if (side === "PLAYER") return "🔵 Player";
+  if (side === "TIE") return "🟡 Tie";
   return "Aguardando";
-}
-
-function SideIdentity({ side, label }: { side: FocusSide; label: string }) {
-  const dot = focusDotClass(side);
-  if (!dot) return <span>{label}</span>;
-  return (
-    <>
-      <span className={cn("inline-flex size-2.5 shrink-0 rounded-full border", dot)} />
-      <span>{label}</span>
-    </>
-  );
-}
-
-function focusDotClass(side: FocusSide) {
-  if (side === "BANKER") return sideDotClass.B;
-  if (side === "PLAYER") return sideDotClass.P;
-  if (side === "TIE") return sideDotClass.T;
-  return "";
 }
 
 function focusSideClass(side: FocusSide) {
@@ -514,10 +488,10 @@ function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRoun
   if (signal.status === "waiting" && tieAlertIsActive) {
     return {
       badge: "Tie ativo",
-      badgeTone: "gold" as const,
+      badgeTone: "purple" as const,
       pulse: true,
       kicker: `${tieAlertRounds} casas`,
-      value: "Possivel TIE",
+      value: "Possível EMPATE",
       valueClass: "text-tie",
       Icon: Radio,
     };
@@ -536,10 +510,10 @@ function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRoun
   if (signal.status === "tie_watch") {
     return {
       badge: "Tie ativo",
-      badgeTone: "gold" as const,
+      badgeTone: "purple" as const,
       pulse: true,
       kicker: "4 casas",
-      value: "Possivel TIE",
+      value: "Possível EMPATE",
       valueClass: "text-tie",
       Icon: Radio,
     };
@@ -549,7 +523,7 @@ function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRoun
       badge: "G1 ativo",
       badgeTone: "amber" as const,
       pulse: true,
-      kicker: "Protecao",
+      kicker: "Proteção",
       value: "Aguardando G1",
       valueClass: "text-warning",
       Icon: Radio,
@@ -580,7 +554,7 @@ function signalStatus(signal: MainSignal, tieAlertIsActive = false, tieAlertRoun
   if (signal.status === "tie") {
     return {
       badge: "Tie",
-      badgeTone: "gold" as const,
+      badgeTone: "amber" as const,
       pulse: false,
       kicker: "Resultado",
       value: "TIE",

@@ -10,8 +10,16 @@ const SIDE_LABEL: Record<RoundResult, string> = {
   T: "TIE",
 };
 
+const SIDE_ICON: Record<RoundResult, string> = {
+  B: "🔴",
+  P: "",
+  T: "",
+};
+
 export function formatPatternToken(token: string) {
-  return token;
+  const side = token[0] as RoundResult;
+  const icon = SIDE_ICON[side];
+  return icon ? `${icon} ${token}` : token;
 }
 
 export function formatPatternSequence(sequence: string[]) {
@@ -19,7 +27,8 @@ export function formatPatternSequence(sequence: string[]) {
 }
 
 export function formatPulledSide(side: RoundResult) {
-  return SIDE_LABEL[side];
+  const icon = SIDE_ICON[side];
+  return icon ? `${icon} ${SIDE_LABEL[side]}` : SIDE_LABEL[side];
 }
 
 export function formatStrategyConclusion(strategy: PatternMinerStrategy) {
@@ -37,12 +46,12 @@ export function formatPercent(value: number | undefined) {
 
 export function statusLabel(status: PatternMinerStrategyStatus) {
   const labels: Record<PatternMinerStrategyStatus, string> = {
-    VERY_HOT: "MUITO QUENTE",
-    HOT: "QUENTE",
-    STABLE: "ESTAVEL",
-    OBSERVATION: "EM OBSERVACAO",
-    WEAK: "FRACA",
-    INACTIVE: "INATIVA",
+    VERY_HOT: "🔥 MUITO QUENTE",
+    HOT: "🔥 QUENTE",
+    STABLE: "🟡 ESTAVEL",
+    OBSERVATION: "🟠 EM OBSERVACAO",
+    WEAK: "🔴 FRACA",
+    INACTIVE: "⚫ INATIVA",
   };
   return labels[status];
 }
