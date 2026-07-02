@@ -62,7 +62,10 @@ export function LeituraNeuralMiniCard({
   const mode = data.mode ?? "SCANNING";
   const hasNumber = typeof data.numero === "number" && Boolean(data.origem);
   const pullingSide = data.direcao ?? data.origem;
-  const confirmedSide = mode === "ACTIVE" ? pullingSide : null;
+  const rawConfirmedSide = mode === "ACTIVE" ? pullingSide : null;
+  const confirmedSide = shouldHideResolvedEntry(rawConfirmedSide, neuralEntryLastResult)
+    ? null
+    : rawConfirmedSide;
   const numberTokenSide = hasNumber && confirmedSide ? confirmedSide : null;
   const generalScore = buildGeneralScore(neuralScoreboard, data);
   const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
@@ -90,7 +93,7 @@ export function LeituraNeuralMiniCard({
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
     entryResultTimeoutRef.current = window.setTimeout(
       () => setEntryResult(null),
-      result.kind === "red" ? 1600 : 3200,
+      result.kind === "red" ? 1100 : 1650,
     );
   }, [neuralEntryLastResult]);
 
@@ -113,6 +116,9 @@ export function LeituraNeuralMiniCard({
         DASHBOARD_MODULE_CARD_ROOT,
         view.borderClass,
         greenFlash && "result-green-flash",
+        entryResult?.kind === "red" && "neural-entry-flash-red",
+        entryResult?.kind === "tie" && "neural-entry-flash-tie",
+        entryResult?.kind === "green" && "neural-entry-flash-green",
         className,
       )}
       aria-label="Leitura neural de números pagantes"
@@ -158,9 +164,9 @@ export function LeituraNeuralMiniCard({
         )}
 
         <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-          <NeuralStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
+          <NeuralStatChip label="Forca" value={view.strengthLabel} tone={view.strengthTone} />
           <NeuralStatChip
-            label="Número"
+            label="Numero"
             value={hasNumber ? formatNeuralNumber(data) : "--"}
             tone={numberTokenSide ? sideNumberTone(numberTokenSide) : "muted"}
           >
@@ -173,11 +179,11 @@ export function LeituraNeuralMiniCard({
 
         <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
           <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
-            Placar geral · reseta 00:00 (BR)
+            Placar geral - reseta 00:00 (BR)
           </div>
           <div className="mt-0.5 font-semibold text-foreground">
-            SG {formatCount(generalScore.sg)} · G1 {formatCount(generalScore.g1)} · RD{" "}
-            {formatCount(generalScore.reds)} · {formatPercent(generalScore.accuracy)}
+            SG {formatCount(generalScore.sg)} - G1 {formatCount(generalScore.g1)} - RD{" "}
+            {formatCount(generalScore.reds)} - {formatPercent(generalScore.accuracy)}
           </div>
         </div>
 
@@ -186,14 +192,16 @@ export function LeituraNeuralMiniCard({
             <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Leitura ativa</div>
             <div className="mt-0.5 font-semibold text-foreground">
               <span className={sideClass(data.origem)}>{formatNeuralNumber(data)}</span>
-              {" · puxando "}
+              {" - puxando "}
               <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>
-              {data.origemTipo === "OPOSTO" ? " · gatilho oposto" : data.postTie ? " · pós-empate" : ""}
+              {data.origemTipo === "OPOSTO" ? " - gatilho oposto" : data.postTie ? " - pos-empate" : ""}
             </div>
           </div>
         ) : null}
 
-        {neuralEntryState?.expectedSide && !entryResult ? (
+        {neuralEntryState?.expectedSide &&
+        !entryResult &&
+        !shouldHideResolvedEntry(neuralEntryState.expectedSide, neuralEntryLastResult) ? (
           <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1 text-[9px] text-muted-foreground">
             Entrada oficial:{" "}
             <span className={sideClass(neuralEntryState.expectedSide)}>
@@ -226,8 +234,8 @@ function buildNeuralView(
       badge: "Risco alto",
       badgeTone: "red" as const,
       pulse: false,
-      action: "Não seguir",
-      headline: data.paganteAlert ?? "Número esticado ou em risco elevado",
+      action: "Nao seguir",
+      headline: data.paganteAlert ?? "Numero esticado ou em risco elevado",
       actionClass: "text-destructive",
       panelClass: "border-destructive/35 bg-destructive/10",
       borderClass: "border-destructive/30",
@@ -239,16 +247,16 @@ function buildNeuralView(
 
   if (confirmedSide && hasNumber) {
     return {
-      badge: originKind === "OPOSTO" ? "Oposto" : data.postTie ? "Pós-empate" : "Pagante",
-      badgeTone: "green" as const,
+      badge: originKind === "OPOSTO" ? "Oposto" : data.postTie ? "Pos-empate" : "Pagante",
+      badgeTone: sideBadgeTone(confirmedSide),
       pulse: true,
       action: `Entrar ${sideLabel(confirmedSide).toUpperCase()}`,
-      headline: `${formatNeuralNumber(data)} · até ${validity} · ${strengthLabel}`,
+      headline: `${formatNeuralNumber(data)} - ate ${validity} - ${strengthLabel}`,
       actionClass: sideActionClass(confirmedSide),
-      panelClass: "border-success/35 bg-success/10",
-      borderClass: "border-success/30",
+      panelClass: sidePanelClass(confirmedSide),
+      borderClass: sideBorderClass(confirmedSide),
       strengthLabel,
-      strengthTone: "green" as const,
+      strengthTone: sideStatTone(confirmedSide),
       numberTone: sideNumberTone(data.origem),
     };
   }
@@ -260,7 +268,7 @@ function buildNeuralView(
       badgeTone: "amber" as const,
       pulse: true,
       action: side ? `Monitorar ${side}` : "Monitorar",
-      headline: "Número apareceu · aguardando confirmação da engine",
+      headline: "Numero apareceu - aguardando confirmacao da engine",
       actionClass: "text-warning",
       panelClass: "border-warning/30 bg-warning/10",
       borderClass: "border-warning/25",
@@ -277,7 +285,7 @@ function buildNeuralView(
       badgeTone: "blue" as const,
       pulse: false,
       action: side ? `Monitorar ${side}` : "Monitorar",
-      headline: "Número detectado · sem entrada confirmada agora",
+      headline: "Numero detectado - sem entrada confirmada agora",
       actionClass: "text-warning",
       panelClass: "border-warning/25 bg-warning/8",
       borderClass: "border-neon-purple/20",
@@ -292,7 +300,7 @@ function buildNeuralView(
     badgeTone: "muted" as const,
     pulse: false,
     action: "Aguardar",
-    headline: "IA procurando números pagantes no ciclo atual",
+    headline: "IA procurando numeros pagantes no ciclo atual",
     actionClass: "text-muted-foreground",
     panelClass: "border-border/60 bg-secondary/20",
     borderClass: "border-border/50",
@@ -465,7 +473,7 @@ function buildEntryResultView(result: NeuralEntryDisplayResult) {
       action: "RED",
       headline: "Entrada neural não bateu",
       actionClass: "text-destructive",
-      panelClass: "border-destructive/35 bg-destructive/10",
+      panelClass: "neural-entry-flash-red border-destructive/35 bg-destructive/10",
     };
   }
 
@@ -474,7 +482,7 @@ function buildEntryResultView(result: NeuralEntryDisplayResult) {
       action: `GREEN EMPATE ${result.multiplier ? `${result.multiplier}X` : ""}`.trim(),
       headline: "Empate confirmado na validade",
       actionClass: "text-warning",
-      panelClass: "border-warning/35 bg-warning/10",
+      panelClass: "neural-entry-flash-tie border-warning/35 bg-warning/10",
     };
   }
 
@@ -482,7 +490,7 @@ function buildEntryResultView(result: NeuralEntryDisplayResult) {
     action: `GREEN ${sideLabel(result.side).toUpperCase()}`,
     headline: "Entrada neural confirmada",
     actionClass: sideActionClass(result.side),
-    panelClass: "border-success/35 bg-success/10",
+    panelClass: "neural-entry-flash-green border-success/35 bg-success/10",
   };
 }
 
@@ -504,8 +512,8 @@ function NeuralStatChip({
     red: "border-destructive/30 bg-destructive/8 text-destructive",
     muted: "border-border/60 bg-secondary/25 text-foreground",
     banker: "border-banker/30 bg-banker/8 text-banker",
-    player: "border-player/30 bg-player/8 text-player",
-    tie: "border-warning/30 bg-warning/8 text-warning",
+    player: "border-player/35 bg-player/10 text-player",
+    tie: "border-tie/35 bg-tie/10 text-tie",
   }[tone];
 
   return (
@@ -607,15 +615,15 @@ function normalizeEntrySide(side: unknown): NeuralSide {
 
 function originSubtitle(data: NeuralReading) {
   const kind = neuralOriginKind(data);
-  if (kind === "OPOSTO") return "número oposto";
-  if (kind === "TIE" || data.postTie) return "pós-empate";
-  return "número pagante";
+  if (kind === "OPOSTO") return "numero oposto";
+  if (kind === "TIE" || data.postTie) return "pos-empate";
+  return "numero pagante";
 }
 
 function formatNeuralNumber(data: NeuralReading) {
   if (typeof data.numero !== "number") return "--";
   if (data.origem === "TIE") return `${data.numero}x`;
-  return `${data.numero} ${sideLabel(data.origem).slice(0, 1)}`;
+  return String(data.numero);
 }
 
 function pullingSideLabel(data: NeuralReading) {
@@ -633,6 +641,30 @@ function neuralStatusKind(reading: NeuralReading): "green" | "amber" | "red" | "
   if (reading.isRedAlert || reading.isSaturated) return "red";
   if (reading.mode === "ACTIVE") return "green";
   return "amber";
+}
+
+function sideBadgeTone(side: NeuralSide) {
+  if (side === "BANKER") return "red" as const;
+  if (side === "PLAYER") return "blue" as const;
+  return "gold" as const;
+}
+
+function sidePanelClass(side: NeuralSide) {
+  if (side === "BANKER") return "border-banker/35 bg-banker/10";
+  if (side === "PLAYER") return "border-player/35 bg-player/10";
+  return "border-tie/35 bg-tie/10";
+}
+
+function sideBorderClass(side: NeuralSide) {
+  if (side === "BANKER") return "border-banker/35";
+  if (side === "PLAYER") return "border-player/35";
+  return "border-tie/35";
+}
+
+function sideStatTone(side: NeuralSide) {
+  if (side === "BANKER") return "banker" as const;
+  if (side === "PLAYER") return "player" as const;
+  return "tie" as const;
 }
 
 function sideActionClass(side: NeuralSide) {
@@ -681,4 +713,17 @@ function sideLabel(side?: NeuralSide | null) {
 
 function sideClass(side?: NeuralSide | null) {
   return dashboardSideTextClass(side);
+}
+
+function shouldHideResolvedEntry(
+  confirmedSide: NeuralSide | null | undefined,
+  result: NeuralEntryLastResult | null | undefined,
+) {
+  if (!confirmedSide || !result?.id) return false;
+  const resultSide = normalizeEntrySide(result.expectedSide ?? result.origem);
+  if (resultSide !== confirmedSide) return false;
+  if (!result.finishedAt) return true;
+  const finishedAt = new Date(result.finishedAt).getTime();
+  if (Number.isNaN(finishedAt)) return false;
+  return Date.now() - finishedAt < 90000;
 }
