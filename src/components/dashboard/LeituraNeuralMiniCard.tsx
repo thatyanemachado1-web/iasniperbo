@@ -62,7 +62,7 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
 
 const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
-const HELD_NEURAL_ENTRY_MAX_MS = 90_000;
+const HELD_NEURAL_ENTRY_MAX_MS = 180_000;
 
 const SCANNING_READING: NeuralReading = {
   mode: "SCANNING",
@@ -87,7 +87,25 @@ export function LeituraNeuralMiniCard({
   neuralEntryLastResult,
   ...reading
 }: LeituraNeuralMiniCardProps) {
-  const data = { ...SCANNING_READING, ...reading };
+  const incomingData = { ...SCANNING_READING, ...reading };
+  const activeEntryState = liveNeuralEntryState(neuralEntryState);
+  const [heldEntry, setHeldEntry] = useState<HeldNeuralEntry | null>(() =>
+    activeEntryState && !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
+      ? { state: activeEntryState, heldAt: Date.now() }
+      : null,
+  );
+  const visibleHeldEntry =
+    heldEntry &&
+    !neuralEntryResultMatchesState(neuralEntryLastResult, heldEntry.state) &&
+    !isHeldNeuralEntryExpired(heldEntry)
+      ? heldEntry.state
+      : null;
+  const visibleActiveEntry =
+    activeEntryState && !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
+      ? activeEntryState
+      : null;
+  const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
+  const data = neuralReadingForVisibleEntry(incomingData, visibleEntryState);
   const mode = data.mode ?? "SCANNING";
   const hasNumber = typeof data.numero === "number" && Boolean(data.origem);
   const sg = optionalNumberFrom(data.greenSemGale);
@@ -107,26 +125,6 @@ export function LeituraNeuralMiniCard({
   const losingKey = losingNumberKey(data);
   const losingLabel = losingNumberLabel(data, losingKey);
   const activeNumberLabel = activeNumberDisplayLabel(data, losingKey);
-  const activeEntryState = liveNeuralEntryState(neuralEntryState);
-  const readingEntryKey = neuralReadingEntryKey(data);
-  const activeEntryMatchesReading = neuralEntryMatchesReading(activeEntryState, data);
-  const [heldEntry, setHeldEntry] = useState<HeldNeuralEntry | null>(() =>
-    activeEntryMatchesReading && activeEntryState ? { state: activeEntryState, heldAt: Date.now() } : null,
-  );
-  const visibleHeldEntry =
-    heldEntry &&
-    neuralEntryMatchesReading(heldEntry.state, data) &&
-    !neuralEntryResultMatchesState(neuralEntryLastResult, heldEntry.state) &&
-    !isHeldNeuralEntryExpired(heldEntry)
-      ? heldEntry.state
-      : null;
-  const visibleActiveEntry =
-    activeEntryState &&
-    activeEntryMatchesReading &&
-    !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
-      ? activeEntryState
-      : null;
-  const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
   const confirmedEntrySide = liveNeuralEntrySide(visibleEntryState);
   const liveEntry = Boolean(confirmedEntrySide);
   const waitingFreshReading = hasNumber && !liveEntry && isBlockedWaitingNeuralReading(data);
@@ -156,11 +154,6 @@ export function LeituraNeuralMiniCard({
   useEffect(() => {
     setHeldEntry((current) => {
       if (activeEntryState) {
-        if (!activeEntryMatchesReading) {
-          return current && neuralEntryMatchesReading(current.state, data) && !isHeldNeuralEntryExpired(current)
-            ? current
-            : null;
-        }
         if (neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)) return null;
         return {
           state: activeEntryState,
@@ -172,12 +165,11 @@ export function LeituraNeuralMiniCard({
       }
 
       if (!current) return null;
-      if (!neuralEntryMatchesReading(current.state, data)) return null;
       if (neuralEntryResultMatchesState(neuralEntryLastResult, current.state)) return null;
       if (isHeldNeuralEntryExpired(current)) return null;
       return current;
     });
-  }, [activeEntryMatchesReading, activeEntryState, neuralEntryLastResult, readingEntryKey]);
+  }, [activeEntryState, neuralEntryLastResult]);
 
   useEffect(() => {
     const result = displayResultFromOfficialEntry(neuralEntryLastResult, rounds);
@@ -429,7 +421,7 @@ export function LeituraNeuralMiniCard({
                     : `Janela: ${data.paganteWindow} rodadas`}
                 </div>
               ) : null}
-              {data.paganteStatus && data.paganteStatus !== "VALIDO" ? (
+              {liveEntry && data.paganteStatus && data.paganteStatus !== "VALIDO" ? (
                 <div
                   className={cn(
                     "mt-1 truncate rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em]",
@@ -1262,6 +1254,40 @@ function activeNumberDisplayLabel(reading: NeuralReading, losingKey: string) {
   if (reading.origemTipo === "OPOSTO" && losingKey) return losingKey;
   if (reading.origem === "TIE") return `${reading.numero}x${reading.numero}`;
   return typeof reading.numero === "number" ? String(reading.numero) : "--";
+}
+
+function neuralReadingForVisibleEntry(
+  fallback: NeuralReading,
+  entryState: NeuralEntryState | null | undefined,
+): NeuralReading {
+  if (!entryState) return fallback;
+
+  const snapshot = entryState.readingSnapshot ?? null;
+  const expectedSide = normalizeNeuralSideKey(
+    entryState.expectedSide ??
+      entryState.entry_side ??
+      snapshot?.direcao ??
+      snapshot?.pullingSide ??
+      snapshot?.origem,
+  );
+
+  return {
+    ...fallback,
+    ...(snapshot ?? {}),
+    mode: "ACTIVE",
+    numero:
+      typeof entryState.numero === "number"
+        ? entryState.numero
+        : typeof snapshot?.numero === "number"
+          ? snapshot.numero
+          : fallback.numero,
+    origem: entryState.origem ?? snapshot?.origem ?? fallback.origem,
+    origemTipo: entryState.origemTipo ?? snapshot?.origemTipo ?? fallback.origemTipo,
+    direcao: expectedSide ?? snapshot?.direcao ?? fallback.direcao,
+    pullingSide: expectedSide ?? snapshot?.pullingSide ?? fallback.pullingSide ?? null,
+    validade: snapshot?.validade ?? fallback.validade ?? "G1",
+    paganteStatus: "ENTRADA_ATIVA",
+  };
 }
 
 function neuralOriginKind(reading: NeuralReading) {
