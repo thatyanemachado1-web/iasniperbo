@@ -23,12 +23,18 @@ type NeuralEntryDisplayKind = "green" | "red" | "tie";
 interface NeuralEntryDisplayResult {
   kind: NeuralEntryDisplayKind;
   side: NeuralSide;
+  stage: "SG" | "G1" | "FINAL";
   multiplier?: number | null;
   minute: string;
 }
 
 interface NeuralEntryHistoryItem extends NeuralEntryDisplayResult {
   id: string;
+}
+
+interface HeldNeuralEntry {
+  state: NeuralEntryState;
+  heldAt: number;
 }
 
 interface NeuralScoreSummary {
@@ -54,9 +60,9 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
   neuralEntryLastResult?: NeuralEntryLastResult | null;
 };
 
-const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
 const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
+const HELD_NEURAL_ENTRY_MAX_MS = 90_000;
 
 const SCANNING_READING: NeuralReading = {
   mode: "SCANNING",
@@ -96,11 +102,31 @@ export function LeituraNeuralMiniCard({
   const postTie = Boolean(data.postTie);
   const originKind = neuralOriginKind(data);
   const originBadge = originBadgeFor(originKind);
-  const pullingSide = data.direcao ?? data.origem;
+  const pullingSide = data.pullingSide ?? data.direcao ?? data.origem;
+  const lastRoundLabel = lastRoundRealLabel(data);
+  const losingKey = losingNumberKey(data);
+  const losingLabel = losingNumberLabel(data, losingKey);
+  const activeNumberLabel = activeNumberDisplayLabel(data, losingKey);
+  const activeEntryState = liveNeuralEntryState(neuralEntryState);
+  const [heldEntry, setHeldEntry] = useState<HeldNeuralEntry | null>(() =>
+    activeEntryState ? { state: activeEntryState, heldAt: Date.now() } : null,
+  );
+  const visibleHeldEntry =
+    heldEntry &&
+    !neuralEntryResultMatchesState(neuralEntryLastResult, heldEntry.state) &&
+    !isHeldNeuralEntryExpired(heldEntry)
+      ? heldEntry.state
+      : null;
+  const visibleActiveEntry =
+    activeEntryState && !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
+      ? activeEntryState
+      : null;
+  const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
+  const confirmedEntrySide = liveNeuralEntrySide(visibleEntryState);
+  const liveEntry = Boolean(confirmedEntrySide);
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
-  const tieMultipliers = tieMultiplierStats(rounds);
   const generalScoreState = neuralScoreState(generalScore);
   const sequenceCopy = neuralSequenceCopy(
     numberFrom(generalScore.currentGreenSequence),
@@ -113,32 +139,59 @@ export function LeituraNeuralMiniCard({
     "numero",
   );
   const numberStage = numberPaymentStage(sg, g1, red);
-  const confirmedEntrySide = mode === "ACTIVE" ? pullingSide : null;
-  const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
+  const [entryResult, setEntryResult] = useState<NeuralEntryHistoryItem | null>(null);
   const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
   const lastOfficialResultRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
   const mountedAtRef = useRef(Date.now());
 
   useEffect(() => {
-    const result = displayResultFromOfficialEntry(neuralEntryLastResult);
-    if (!result || lastOfficialResultRef.current === result.id) return;
+    setHeldEntry((current) => {
+      if (activeEntryState) {
+        if (neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)) return null;
+        return {
+          state: activeEntryState,
+          heldAt:
+            current && isSameNeuralEntryState(current.state, activeEntryState)
+              ? current.heldAt
+              : Date.now(),
+        };
+      }
+
+      if (!current) return null;
+      if (neuralEntryResultMatchesState(neuralEntryLastResult, current.state)) return null;
+      if (isHeldNeuralEntryExpired(current)) return null;
+      return current;
+    });
+  }, [activeEntryState, neuralEntryLastResult]);
+
+  useEffect(() => {
+    const result = displayResultFromOfficialEntry(neuralEntryLastResult, rounds);
+    if (!result) return;
+    if (lastOfficialResultRef.current === result.id) {
+      if (result.kind === "tie" || result.multiplier) {
+        setEntryResult((current) =>
+          current && current.id === result.id && neuralEntryDisplayChanged(current, result)
+            ? result
+            : current,
+        );
+        setEntryHistory((items) => mergeNeuralEntryHistory(items, result));
+      }
+      return;
+    }
 
     lastOfficialResultRef.current = result.id;
     if (isOfficialEntryOlderThanSession(neuralEntryLastResult, mountedAtRef.current)) return;
 
     setEntryResult(result);
-    setEntryHistory((items) => {
-      if (items.some((item) => item.id === result.id)) return items;
-      return [result, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
-    });
+    setEntryHistory((items) => mergeNeuralEntryHistory(items, result));
 
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
     entryResultTimeoutRef.current = window.setTimeout(
       () => setEntryResult(null),
-      result.kind === "red" ? 1600 : 3200,
+      1000,
     );
-  }, [neuralEntryLastResult]);
+  }, [neuralEntryLastResult, rounds]);
 
   useEffect(() => {
     writeNeuralEntryHistory(entryHistory);
@@ -180,7 +233,7 @@ export function LeituraNeuralMiniCard({
             Leitura Neural
           </div>
           <div className="truncate text-[7px] font-bold uppercase tracking-[0.1em] text-neon-cyan/75 sm:text-[8px]">
-            {originKind === "OPOSTO" ? "numero oposto" : postTie ? "cor pos-empate" : "numero pagante"}
+            {originKind === "OPOSTO" ? "numero pagante oposto" : postTie ? "cor pos-empate" : "numero pagante"}
           </div>
         </div>
       </div>
@@ -200,10 +253,11 @@ export function LeituraNeuralMiniCard({
           >
             <span className="max-w-full whitespace-normal break-words">{sequenceCopy.label}</span>
           </div>
-          <TieMultiplierMiniLine multipliers={tieMultipliers} />
           <div className="mt-1.5">
             <NeuralEntryStatusCard
-              confirmedSide={null}
+              confirmedSide={confirmedEntrySide}
+              entryState={visibleEntryState}
+              sourceLabel={entrySourceLabel(visibleEntryState, originKind)}
               result={entryResult}
               history={entryHistory}
             />
@@ -213,17 +267,20 @@ export function LeituraNeuralMiniCard({
         <div className="relative mt-2 space-y-1">
           <NeuralEntryStatusCard
             confirmedSide={confirmedEntrySide}
+            entryState={visibleEntryState}
+            sourceLabel={entrySourceLabel(visibleEntryState, originKind)}
             result={entryResult}
             history={entryHistory}
           />
 
           <div className="flex flex-wrap items-center gap-1">
-            <span className="flex min-w-0 items-baseline gap-1">
-              <span className="text-lg font-black leading-none text-foreground sm:text-xl">
-                {data.origem === "TIE" ? `${data.numero}x${data.numero}` : data.numero}
-              </span>
+            <span className="flex min-w-0 items-center gap-1">
+              <NeuralNumberToken
+                label={activeNumberLabel}
+                side={originKind === "OPOSTO" ? data.losingSide ?? data.origem : data.origem}
+              />
               <span className={cn("truncate text-[11px] font-extrabold", sideClass(data.origem))}>
-                {sideLabel(data.origem)}
+                {originKind === "OPOSTO" ? "perdido" : sideLabel(data.origem)}
               </span>
             </span>
             <span
@@ -237,12 +294,23 @@ export function LeituraNeuralMiniCard({
           </div>
 
           {pullingSide ? (
-            <div className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]">
+            <div
+              className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]"
+              title={data.paganteAlert ?? undefined}
+            >
               <span className="text-neon-cyan">
-                {originKind === "OPOSTO" ? "Numero oposto puxando" : postTie ? "Cor pos-empate" : "Puxando"}
+                {liveEntry
+                  ? originKind === "OPOSTO"
+                    ? "Puxando"
+                    : postTie
+                      ? "Cor pos-empate"
+                      : "Puxando"
+                  : "Ultima leitura"}
               </span>{" "}
               <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>{" "}
-              <span className="text-[9px] text-muted-foreground/85">até {data.validade ?? "G1"}</span>
+              <span className="text-[9px] text-muted-foreground/85">
+                {liveEntry ? `ate ${data.validade ?? "G1"}` : "sem entrada"}
+              </span>
             </div>
           ) : (
             <div className="truncate text-[10px] font-semibold text-muted-foreground">
@@ -253,12 +321,24 @@ export function LeituraNeuralMiniCard({
           {showPayingStats ? (
             <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
               <div className="truncate text-[7px] font-black uppercase tracking-[0.1em] text-neon-cyan/85">
-                Numero atual
+                {originKind === "OPOSTO" ? "Numero Pagante Oposto" : postTie ? "Numero pos-empate" : "Numero pagante"}
               </div>
+              {lastRoundLabel ? (
+                <MiniInfoLine label="Ultima rodada real" value={lastRoundLabel} />
+              ) : null}
+              {originKind === "OPOSTO" && losingLabel ? (
+                <MiniInfoLine label="Numero perdedor" value={losingLabel} valueClassName={sideClass(data.losingSide ?? data.origem)} />
+              ) : null}
+              {originKind === "OPOSTO" && losingKey ? (
+                <MiniInfoLine label="Numero Pagante Oposto" value={losingKey} valueClassName={sideClass(data.losingSide ?? data.origem)} />
+              ) : null}
+              {pullingSide ? (
+                <MiniInfoLine label="Puxando" value={sideLabel(pullingSide)} valueClassName={sideClass(pullingSide)} />
+              ) : null}
               <div className="flex items-baseline justify-between gap-1">
                 <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
                   {originKind === "OPOSTO"
-                    ? "Oposto"
+                    ? losingKey || "Oposto"
                     : postTie
                       ? "Pos-empate"
                       : typeof data.numero === "number"
@@ -318,7 +398,6 @@ export function LeituraNeuralMiniCard({
                     : `Janela: ${data.paganteWindow} rodadas`}
                 </div>
               ) : null}
-              <TieMultiplierMiniLine multipliers={tieMultipliers} />
               {data.paganteStatus && data.paganteStatus !== "VALIDO" ? (
                 <div
                   className={cn(
@@ -339,7 +418,6 @@ export function LeituraNeuralMiniCard({
                 <Sparkles className="size-2.5" />
                 Observando
               </div>
-              <TieMultiplierMiniLine multipliers={tieMultipliers} />
             </div>
           )}
         </div>
@@ -393,29 +471,96 @@ function normalizeNeuralEntryHistoryItem(value: unknown): NeuralEntryHistoryItem
     id: typeof record.id === "string" && record.id ? record.id : `restored:${Date.now()}:${Math.random()}`,
     kind: record.kind,
     side: record.side,
+    stage: isNeuralEntryStage(record.stage) ? record.stage : record.kind === "red" ? "FINAL" : "SG",
     multiplier,
     minute: typeof record.minute === "string" && record.minute ? record.minute : "--",
   };
 }
 
-function displayResultFromOfficialEntry(result: NeuralEntryLastResult | null | undefined): NeuralEntryHistoryItem | null {
+function mergeNeuralEntryHistory(
+  items: NeuralEntryHistoryItem[],
+  result: NeuralEntryHistoryItem,
+) {
+  const existingIndex = items.findIndex((item) => item.id === result.id);
+  if (existingIndex < 0) return [result, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
+  if (!neuralEntryDisplayChanged(items[existingIndex], result)) return items;
+
+  const next = [...items];
+  next[existingIndex] = result;
+  return next.slice(0, MAX_NEURAL_ENTRY_HISTORY);
+}
+
+function neuralEntryDisplayChanged(
+  current: NeuralEntryDisplayResult,
+  next: NeuralEntryDisplayResult,
+) {
+  return (
+    current.kind !== next.kind ||
+    current.side !== next.side ||
+    current.stage !== next.stage ||
+    current.multiplier !== next.multiplier ||
+    current.minute !== next.minute
+  );
+}
+
+function displayResultFromOfficialEntry(
+  result: NeuralEntryLastResult | null | undefined,
+  rounds?: Round[],
+): NeuralEntryHistoryItem | null {
   if (!result?.id) return null;
 
   const side = normalizeEntrySide(result.expectedSide ?? result.origem);
+  const resultRound = roundFromResult(result, rounds);
+  const resultRoundIsTie = resultRound?.result === "T";
   const kind: NeuralEntryDisplayKind =
-    result.outcome === "TIE" || result.kind === "tie_sg" || result.kind === "tie_g1"
+    resultRoundIsTie || result.outcome === "TIE" || result.kind === "tie_sg" || result.kind === "tie_g1"
       ? "tie"
       : result.outcome === "RED" || result.kind === "red"
         ? "red"
         : "green";
+  const tieMultiplier =
+    kind === "tie"
+      ? normalizeTieMultiplier(result.tieMultiplier) ??
+        tieMultiplierFromResultRound(result, rounds) ??
+        tieMultiplierFromResultText(result)
+      : null;
 
   return {
     id: result.id,
     kind,
     side: kind === "tie" ? "TIE" : side,
-    multiplier: kind === "tie" ? result.tieMultiplier ?? null : null,
+    stage: resultStageFromOfficialEntry(result),
+    multiplier: tieMultiplier,
     minute: minuteLabelFromOfficialResult(result),
   };
+}
+
+function resultStageFromOfficialEntry(result: NeuralEntryLastResult): NeuralEntryDisplayResult["stage"] {
+  if (result.result_stage === "SG" || result.result_stage === "G1" || result.result_stage === "FINAL") {
+    return result.result_stage;
+  }
+  if (result.kind === "g1" || result.kind === "tie_g1") return "G1";
+  if (result.kind === "red") return "FINAL";
+  return "SG";
+}
+
+function tieMultiplierFromResultRound(
+  result: NeuralEntryLastResult,
+  rounds: Round[] | undefined,
+) {
+  const round = roundFromResult(result, rounds);
+  return round ? multiplierForTieRound(round) : null;
+}
+
+function roundFromResult(result: NeuralEntryLastResult, rounds: Round[] | undefined) {
+  if (!rounds?.length) return null;
+  return rounds.find((item) => roundHistoryKey(item) === result.resultRoundKey) ?? null;
+}
+
+function tieMultiplierFromResultText(result: NeuralEntryLastResult) {
+  return normalizeTieMultiplier(
+    result.readingSnapshot?.paganteAlert ?? result.readingSnapshot?.paganteStatus ?? result.id,
+  );
 }
 
 function isOfficialEntryOlderThanSession(
@@ -460,8 +605,22 @@ function isNeuralEntryResultKind(value: unknown): value is NeuralEntryDisplayKin
   return value === "green" || value === "red" || value === "tie";
 }
 
+function isNeuralEntryStage(value: unknown): value is NeuralEntryDisplayResult["stage"] {
+  return value === "SG" || value === "G1" || value === "FINAL";
+}
+
 function isNeuralSide(value: unknown): value is NeuralSide {
   return value === "BANKER" || value === "PLAYER" || value === "TIE";
+}
+
+function entrySourceLabel(
+  entryState: NeuralEntryState | null | undefined,
+  fallbackKind: NonNullable<NeuralReading["origemTipo"]>,
+) {
+  const kind = entryState?.origemTipo ?? entryState?.readingSnapshot?.origemTipo ?? fallbackKind;
+  if (kind === "OPOSTO") return "Numero Pagante Oposto";
+  if (kind === "TIE") return "Tie / Empate";
+  return "Numero Pagante";
 }
 
 function neuralSequenceCopy(
@@ -496,14 +655,18 @@ function neuralSequenceCopy(
 
 function NeuralEntryStatusCard({
   confirmedSide,
+  entryState,
+  sourceLabel,
   result,
   history,
 }: {
   confirmedSide?: NeuralSide | null;
+  entryState?: NeuralEntryState | null;
+  sourceLabel?: string;
   result: NeuralEntryDisplayResult | null;
   history: NeuralEntryHistoryItem[];
 }) {
-  const state = neuralEntryStatusState(confirmedSide, result);
+  const state = neuralEntryStatusState(confirmedSide, result, entryState, sourceLabel);
 
   return (
     <div
@@ -558,14 +721,73 @@ function NeuralEntryStatusCard({
   );
 }
 
+function MiniInfoLine({
+  label,
+  value,
+  valueClassName,
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-1 text-[7px] font-black uppercase tracking-[0.05em] sm:text-[7.5px]">
+      <span className="min-w-0 truncate text-muted-foreground">{label}</span>
+      <span className={cn("shrink-0 truncate text-foreground", valueClassName)}>{value}</span>
+    </div>
+  );
+}
+
+function NeuralNumberToken({
+  label,
+  side,
+}: {
+  label: string;
+  side?: NeuralSide | null;
+}) {
+  const compactLabel = compactNumberTokenLabel(label);
+  return (
+    <span
+      className={cn(
+        "inline-grid size-5 shrink-0 place-items-center rounded-full border font-black leading-none tabular-nums shadow-[0_0_10px_-7px_currentColor] [-webkit-text-stroke:0.2px_currentColor]",
+        compactLabel.length > 1 ? "text-[10px]" : "text-[12px]",
+        numberTokenClass(side),
+      )}
+      title={label}
+      aria-label={label}
+    >
+      {compactLabel}
+    </span>
+  );
+}
+
+function compactNumberTokenLabel(label: string) {
+  const text = String(label || "--").trim();
+  const sideNumber = text.match(/^[BP]\s*(\d+)$/i);
+  if (sideNumber?.[1]) return sideNumber[1];
+  const tieNumber = text.match(/^(\d+)\s*x\s*\d+$/i);
+  if (tieNumber?.[1]) return tieNumber[1];
+  const onlyNumber = text.match(/\d+/)?.[0];
+  return onlyNumber || text || "--";
+}
+
+function numberTokenClass(side?: NeuralSide | null) {
+  if (side === "BANKER") return "border-banker/70 bg-banker text-white";
+  if (side === "PLAYER") return "border-player/70 bg-player text-white";
+  if (side === "TIE") return "border-warning/70 bg-warning text-background";
+  return "border-white/20 bg-white/10 text-foreground";
+}
+
 function neuralEntryStatusState(
   confirmedSide?: NeuralSide | null,
   result?: NeuralEntryDisplayResult | null,
+  entryState?: NeuralEntryState | null,
+  sourceLabel?: string,
 ) {
   if (result?.kind === "red") {
     return {
       kicker: "Resultado",
-      label: "RED",
+      label: result.stage === "G1" ? "RED G1" : "RED FINAL",
       description: null,
       sideClass: "text-destructive",
       className: "neural-entry-flash-red border-destructive/35 bg-destructive/10 text-destructive",
@@ -575,7 +797,7 @@ function neuralEntryStatusState(
   if (result?.kind === "tie") {
     return {
       kicker: "Resultado",
-      label: `GREEN EMPATE ${result.multiplier ? `${result.multiplier}X` : ""}`.trim(),
+      label: `GREEN EMPATE ${result.multiplier ? `${result.multiplier}X` : ""} ${result.stage}`.trim(),
       description: null,
       sideClass: "text-tie",
       className: "neural-entry-flash-tie border-tie/40 bg-tie/10 text-tie",
@@ -585,7 +807,7 @@ function neuralEntryStatusState(
   if (result?.kind === "green") {
     return {
       kicker: "Resultado",
-      label: `GREEN ${sideLabel(result.side)}`,
+      label: `GREEN ${result.stage}`,
       description: null,
       sideClass: sideClass(result.side),
       className: "neural-entry-flash-green border-success/35 bg-success/10 text-success",
@@ -593,10 +815,13 @@ function neuralEntryStatusState(
   }
 
   if (confirmedSide) {
+    const needsGale = entryState?.status === "awaiting_g1" || entryState?.gale_status === "GALE_1_REQUIRED";
+    const sourceText = sourceLabel ? `Fonte: ${sourceLabel}` : "";
+    const galeText = needsGale ? "Fazer Gale 1" : "Protecao ate G1";
     return {
       kicker: "Entrada confirmada",
       label: sideLabel(confirmedSide).toUpperCase(),
-      description: null,
+      description: [sourceText, galeText].filter(Boolean).join(" | "),
       sideClass: sideClass(confirmedSide),
       className:
         confirmedSide === "BANKER"
@@ -628,8 +853,8 @@ function entrySideHistoryLabel(item: NeuralEntryHistoryItem) {
 }
 
 function entryResultHistoryLabel(item: NeuralEntryHistoryItem) {
-  if (item.kind === "red") return "RED";
-  return "GREEN";
+  if (item.kind === "red") return item.stage === "G1" ? "RED G1" : "RED FINAL";
+  return `GREEN ${item.stage}`;
 }
 
 function NeuralGeneralScorePopover({
@@ -722,34 +947,6 @@ function NeuralGeneralScorePopover({
   );
 }
 
-function TieMultiplierMiniLine({
-  multipliers,
-}: {
-  multipliers: Array<{ label: (typeof TIE_MULTIPLIER_LABELS)[number]; value: number }>;
-}) {
-  return (
-    <div
-      className="mt-1 rounded-lg border border-warning/15 bg-warning/5 px-1.5 py-1"
-      title="Empates pegos no historico real carregado hoje"
-    >
-      <div className="mb-0.5 truncate text-[6.5px] font-black uppercase tracking-[0.1em] text-warning/90">
-        Empates do dia
-      </div>
-      <div className="flex flex-wrap items-end gap-x-1.5 gap-y-1">
-        {multipliers.map((item) => (
-          <span key={item.label} className="inline-flex items-end gap-0.5 leading-none">
-            <span className="grid place-items-center">
-              <span className="text-[6px] font-black text-warning">{item.label}</span>
-              <span className="size-2 rounded-full border border-warning/45 bg-warning shadow-[0_0_8px_-3px_var(--warning)]" />
-            </span>
-            <span className="text-[7.5px] font-black text-foreground">{item.value}</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function neuralToolInsight(reading: NeuralReading) {
   const side = reading.direcao ?? reading.origem;
   const validity = reading.validade ?? "G1";
@@ -772,7 +969,7 @@ function neuralToolInsight(reading: NeuralReading) {
 
   const prefix =
     originKind === "OPOSTO"
-      ? `${trigger} em numero oposto.`
+      ? `${trigger} como numero pagante oposto.`
       : reading.postTie
         ? `${trigger} pós-empate.`
         : `${trigger} pagante.`;
@@ -919,25 +1116,6 @@ function buildGeneralScore(
   };
 }
 
-function tieMultiplierStats(rounds: Round[] | undefined) {
-  const counts = new Map<(typeof TIE_MULTIPLIER_LABELS)[number], number>(
-    TIE_MULTIPLIER_LABELS.map((label) => [label, 0]),
-  );
-
-  for (const round of rounds ?? []) {
-    if (round.result !== "T") continue;
-    const multiplier = multiplierForTieRound(round);
-    if (!multiplier) continue;
-    const label = `${multiplier}x` as (typeof TIE_MULTIPLIER_LABELS)[number];
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-
-  return TIE_MULTIPLIER_LABELS.map((label) => ({
-    label,
-    value: counts.get(label) ?? 0,
-  }));
-}
-
 function multiplierForTieRound(round: Round) {
   const explicit = normalizeTieMultiplier(round.tieMultiplier);
   if (explicit) return explicit;
@@ -954,20 +1132,26 @@ function multiplierForTieRound(round: Round) {
 }
 
 function normalizeTieMultiplier(value: unknown) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  const rounded = Math.round(numeric);
+  const text = String(value ?? "").trim().replace(",", ".");
+  const numeric = Number(text);
+  const parsed = Number.isFinite(numeric) ? numeric : Number(text.match(/\b(4|6|10|25|88)\s*x?\b/i)?.[1]);
+  if (!Number.isFinite(parsed)) return null;
+  const rounded = Math.round(parsed);
   return [4, 6, 10, 25, 88].includes(rounded) ? rounded : null;
+}
+
+function roundHistoryKey(round: Round) {
+  return `${round.time}:${round.id}:${round.result}:${round.bankerScore}:${round.playerScore}`;
 }
 
 function numberPaymentStage(sg: number | null, g1: number | null, red: number | null) {
   const greens = numberFrom(sg) + numberFrom(g1);
   const losses = numberFrom(red);
 
-  if (losses >= 2) {
+  if (losses > 2) {
     return {
       label: "Bloqueado",
-      title: "Esse nÃºmero tomou 2 reds e saiu da linha.",
+      title: "Esse numero tomou mais de 2 reds e saiu da linha.",
       className: "border-destructive/35 bg-destructive/10 text-destructive",
     };
   }
@@ -1015,6 +1199,40 @@ function numberFrom(value?: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function lastRoundRealLabel(reading: NeuralReading) {
+  const round = reading.lastRoundReal;
+  if (!round || typeof round.bankerTotal !== "number" || typeof round.playerTotal !== "number") {
+    return "";
+  }
+  return `BANKER ${round.bankerTotal} x PLAYER ${round.playerTotal}`;
+}
+
+function losingNumberKey(reading: NeuralReading) {
+  if (reading.oppositeKey) return reading.oppositeKey;
+  const side = reading.losingSide ?? (reading.origemTipo === "OPOSTO" ? reading.origem : null);
+  const number =
+    typeof reading.losingNumber === "number"
+      ? reading.losingNumber
+      : reading.origemTipo === "OPOSTO" && typeof reading.numero === "number"
+        ? reading.numero
+        : null;
+  if ((side !== "BANKER" && side !== "PLAYER") || typeof number !== "number") return "";
+  return `${side === "BANKER" ? "B" : "P"}${number}`;
+}
+
+function losingNumberLabel(reading: NeuralReading, key: string) {
+  if (!key) return "";
+  const side = reading.losingSide ?? (reading.origemTipo === "OPOSTO" ? reading.origem : null);
+  const sideText = side === "BANKER" ? "Banker" : side === "PLAYER" ? "Player" : "";
+  return sideText ? `${key} ${sideText}` : key;
+}
+
+function activeNumberDisplayLabel(reading: NeuralReading, losingKey: string) {
+  if (reading.origemTipo === "OPOSTO" && losingKey) return losingKey;
+  if (reading.origem === "TIE") return `${reading.numero}x${reading.numero}`;
+  return typeof reading.numero === "number" ? String(reading.numero) : "--";
+}
+
 function neuralOriginKind(reading: NeuralReading) {
   if (reading.postTie || reading.origem === "TIE") return "TIE";
   return reading.origemTipo ?? "PAGANTE";
@@ -1030,7 +1248,7 @@ function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
   if (kind === "TIE") {
     return {
       label: "Tie",
-      className: "border-tie/35 bg-tie/10 text-tie",
+      className: "border-warning/35 bg-warning/10 text-warning",
     };
   }
   return {
@@ -1089,6 +1307,51 @@ function neuralStatusKind(reading: NeuralReading): "green" | "amber" | "red" | "
   return "amber";
 }
 
+function liveNeuralEntrySide(entryState: NeuralEntryState | null | undefined): NeuralSide | null {
+  if (!entryState) return null;
+  const side = entryState.expectedSide ?? entryState.origem;
+  return isNeuralSide(side) ? side : null;
+}
+
+function liveNeuralEntryState(entryState: NeuralEntryState | null | undefined): NeuralEntryState | null {
+  if (!entryState || (entryState.status !== "awaiting_sg" && entryState.status !== "awaiting_g1")) {
+    return null;
+  }
+
+  return liveNeuralEntrySide(entryState) ? entryState : null;
+}
+
+function neuralEntryResultMatchesState(
+  result: NeuralEntryLastResult | null | undefined,
+  state: NeuralEntryState | null | undefined,
+) {
+  if (!result || !state) return false;
+
+  const resultMatchesKey =
+    Boolean(result.key && state.key && result.key === state.key) ||
+    Boolean(result.id && state.key && result.id.startsWith(`${state.key}:`));
+  if (!resultMatchesKey) return false;
+
+  const resultFinishedAt = dateMs(result.finishedAt);
+  const stateStartedAt = dateMs(state.startedAt);
+  if (!resultFinishedAt || !stateStartedAt) return true;
+  return resultFinishedAt >= stateStartedAt - 1000;
+}
+
+function isSameNeuralEntryState(left: NeuralEntryState, right: NeuralEntryState) {
+  return left.key === right.key && left.triggerRoundKey === right.triggerRoundKey;
+}
+
+function isHeldNeuralEntryExpired(entry: HeldNeuralEntry) {
+  return Date.now() - entry.heldAt > HELD_NEURAL_ENTRY_MAX_MS;
+}
+
+function dateMs(value: unknown) {
+  if (typeof value !== "string" || !value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 function statusLabel(reading: NeuralReading) {
   if (typeof reading.numero !== "number") return "Procurando pagante";
   const status = reading.paganteStatus?.trim();
@@ -1143,6 +1406,6 @@ function sideLabel(side?: NeuralSide | null) {
 function sideClass(side?: NeuralSide | null) {
   if (side === "BANKER") return "text-banker";
   if (side === "PLAYER") return "text-player";
-  if (side === "TIE") return "text-tie";
+  if (side === "TIE") return "text-warning";
   return "text-muted-foreground";
 }
