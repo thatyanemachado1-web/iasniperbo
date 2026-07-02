@@ -14,6 +14,7 @@ import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { DEFAULT_PATTERN_MINER_CONFIG, PatternMinerEngine } from "./patternMiner/PatternMinerEngine";
+import { SurfAnalyzerEngine } from "./surf/SurfAnalyzerEngine";
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
@@ -12593,6 +12594,33 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   if (generatedNeural) {
     pickedSections.neuralReading = generatedNeural.reading;
     pickedSections.neuralScoreboard = generatedNeural.scoreboard;
+  }
+
+  const surfRoundSource = liveValidatorRoundHistory.length
+    ? liveValidatorRoundHistory
+    : incomingRounds.length
+      ? incomingRounds
+      : currentDashboard.rounds;
+  if (acceptsCurrentCycle && surfRoundSource.length >= 2) {
+    const computedSurf = SurfAnalyzerEngine.analyze(surfRoundSource, cycleDate);
+    const incomingSurf = (pickedSections.currentSurfAlert ??
+      incoming.currentSurfAlert ??
+      incoming.surfAlert) as DashboardData["currentSurfAlert"] | undefined;
+    pickedSections.currentSurfAlert = SurfAnalyzerEngine.mergeWithIncoming(computedSurf, incomingSurf);
+  }
+
+  const patternRoundSource = surfRoundSource;
+  if (acceptsCurrentCycle && patternRoundSource.length >= 6) {
+    const computedPattern = PatternMinerEngine.analyzeFromHistory(
+      patternRoundSource.slice(-DEFAULT_PATTERN_MINER_CONFIG.historyLimit),
+    );
+    const incomingPattern = (pickedSections.patternMinerSnapshot ??
+      incoming.patternMinerSnapshot ??
+      incoming.patternMiner) as PatternMinerSnapshot | undefined;
+    pickedSections.patternMinerSnapshot = PatternMinerEngine.mergeWithIncoming(
+      computedPattern,
+      incomingPattern,
+    );
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;

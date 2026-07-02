@@ -9,6 +9,7 @@ export type PatternMinerStrategyStatus =
   | "WEAK"
   | "INACTIVE";
 export type PatternMinerAlertKind = "forming" | "validated";
+export type PatternMinerSource = "engine" | "publisher" | "merged";
 
 export interface PatternMinerConfig {
   historyLimit: PatternMinerHistoryLimit;
@@ -84,6 +85,7 @@ export interface PatternMinerSnapshot {
   analyzedRounds: number;
   historyLimit: PatternMinerHistoryLimit;
   updatedAt: string;
+  source?: PatternMinerSource;
 }
 
 export interface PatternMinerStoredBank {
