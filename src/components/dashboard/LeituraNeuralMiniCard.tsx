@@ -129,6 +129,8 @@ export function LeituraNeuralMiniCard({
   const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
   const confirmedEntrySide = liveNeuralEntrySide(visibleEntryState);
   const liveEntry = Boolean(confirmedEntrySide);
+  const waitingFreshReading = hasNumber && !liveEntry && isBlockedWaitingNeuralReading(data);
+  const showNumberSnapshot = hasNumber && !waitingFreshReading;
   const numberDisplayTone = neuralNumberDisplayTone(liveEntry, originBadge);
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
@@ -250,12 +252,17 @@ export function LeituraNeuralMiniCard({
         </div>
       </div>
 
-      {!hasNumber ? (
+      {!showNumberSnapshot ? (
         <div className="relative mt-2">
           <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
-            IA procurando números pagantes...
+            {waitingFreshReading ? "Aguardando nova leitura..." : "IA procurando números pagantes..."}
           </div>
           <TypingDots />
+          {waitingFreshReading ? (
+            <div className="mt-1.5 rounded-lg border border-neon-cyan/15 bg-background/35 px-2 py-1.5 text-[7.5px] font-semibold leading-tight text-muted-foreground sm:text-[8px]">
+              Numero antigo passou do limite de reds. Esperando outro numero da vez.
+            </div>
+          ) : null}
           <div
             className={cn(
               "mt-1.5 inline-flex max-w-full rounded-full border px-1.5 py-0.5 text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[7px]",
@@ -1287,6 +1294,12 @@ function neuralNumberDisplayTone(liveEntry: boolean, originBadge: ReturnType<typ
     label: "Analise",
     className: "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
   };
+}
+
+function isBlockedWaitingNeuralReading(reading: NeuralReading) {
+  const status = normalizeStatus(reading.paganteStatus);
+  const redCount = numberFrom(reading.reds ?? reading.erros);
+  return status.includes("BLOQUEADO MAIS DE 2 REDS") || redCount > 2;
 }
 
 function formatPercent(value: number | null) {
