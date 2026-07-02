@@ -1,6 +1,7 @@
 import type { Round, RoundResult, SurfAlert, SurfPhase, SurfSide } from "@/types/dashboard";
 
 const ANALYSIS_WINDOW = 40;
+const TIME_ZONE = "America/Sao_Paulo";
 
 export type SurfAnalyzerSource = "engine" | "publisher" | "merged";
 
@@ -30,9 +31,17 @@ export class SurfAnalyzerEngine {
     };
   }
 
-  static analyze(rounds: Round[]): SurfAnalyzerResult {
-    const window = normalizeWindow(rounds);
-    if (window.length < 2) return SurfAnalyzerEngine.empty();
+  static analyze(rounds: Round[], cycleDate = surfBrasiliaDateKey()): SurfAnalyzerResult {
+    const window = normalizeWindow(filterRoundsForCycleDate(rounds, cycleDate));
+    if (window.length < 2) {
+      return {
+        ...SurfAnalyzerEngine.empty(),
+        reason:
+          window.length === 0
+            ? "Novo ciclo diario iniciado. Aguardando rodadas de hoje para analisar o Surf."
+            : "Aguardando rodadas suficientes para analisar o Surf.",
+      };
+    }
 
     const streak = readSurfStreak(window);
     const alternation = readAlternationRate(window.slice(-15));
@@ -99,6 +108,32 @@ export class SurfAnalyzerEngine {
       source: "merged",
     };
   }
+}
+
+export function surfBrasiliaDateKey(value: string | Date = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const safeDate = Number.isFinite(date.getTime()) ? date : new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(safeDate);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+export function filterRoundsForCycleDate(rounds: Round[], cycleDate = surfBrasiliaDateKey()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cycleDate)) return rounds;
+  return rounds.filter((round) => roundCycleDate(round) === cycleDate);
+}
+
+function roundCycleDate(round: Round) {
+  const day = (round as Round & { day?: string }).day;
+  if (typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
+  if (round.time && Number.isFinite(Date.parse(round.time))) return surfBrasiliaDateKey(round.time);
+  return "";
 }
 
 function normalizeWindow(rounds: Round[]) {

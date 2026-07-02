@@ -12616,7 +12616,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       ? incomingRounds
       : currentDashboard.rounds;
   if (acceptsCurrentCycle && surfRoundSource.length >= 2) {
-    const computedSurf = SurfAnalyzerEngine.analyze(surfRoundSource);
+    const computedSurf = SurfAnalyzerEngine.analyze(surfRoundSource, cycleDate);
     const incomingSurf = (pickedSections.currentSurfAlert ??
       incoming.currentSurfAlert ??
       incoming.surfAlert) as DashboardData["currentSurfAlert"] | undefined;

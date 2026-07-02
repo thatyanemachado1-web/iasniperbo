@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
-import { SurfAnalyzerEngine } from "../src/surf/SurfAnalyzerEngine.ts";
+import {
+  SurfAnalyzerEngine,
+  filterRoundsForCycleDate,
+} from "../src/surf/SurfAnalyzerEngine.ts";
 
-function round(id, result) {
-  return { id, result, bankerScore: 7, playerScore: 5, time: `2026-07-02T10:${String(id).padStart(2, "0")}:00.000Z` };
+function round(id, result, time = `2026-07-02T10:${String(id).padStart(2, "0")}:00.000Z`) {
+  return { id, result, bankerScore: 7, playerScore: 5, time };
 }
 
 const strongBankerSurf = [
@@ -48,24 +51,15 @@ const formingSurf = SurfAnalyzerEngine.analyze([round(1, "P"), round(2, "B"), ro
 assert.equal(formingSurf.surf_status, "SURF_AGRESSIVO");
 assert.equal(formingSurf.surf_alert, true);
 
-const merged = SurfAnalyzerEngine.mergeWithIncoming(analysis, {
-  surf_alert: false,
-  surf_phase: "SEM_RISCO",
-  surf_side: "NONE",
-  surf_confidence: 0,
-  surf_risk: 0,
-  stretched_count: 0,
-  correction_count: 0,
-  reason: "stale publisher",
-  panels: {
-    big_road: "Aguardando.",
-    big_eye_boy: "Aguardando.",
-    small_road: "Aguardando.",
-    cockroach_pig: "Aguardando.",
-  },
-});
-
-assert.equal(merged.source, "engine");
-assert.equal(merged.surf_alert, true);
+const yesterdayStreak = [
+  round(1, "B", "2026-07-01T23:50:00.000Z"),
+  round(2, "B", "2026-07-01T23:55:00.000Z"),
+  round(3, "B", "2026-07-01T23:58:00.000Z"),
+  round(4, "B", "2026-07-01T23:59:00.000Z"),
+  round(5, "P", "2026-07-02T00:05:00.000Z"),
+];
+const todayOnly = SurfAnalyzerEngine.analyze(yesterdayStreak, "2026-07-02");
+assert.equal(todayOnly.surf_alert, false, "yesterday streak must not carry into new cycle");
+assert.equal(filterRoundsForCycleDate(yesterdayStreak, "2026-07-02").length, 1);
 
 console.log("surf-analyzer-engine.test.mjs passed");

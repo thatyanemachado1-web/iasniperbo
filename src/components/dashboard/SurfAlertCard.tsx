@@ -199,9 +199,13 @@ function SurfMaximaPanel({ snapshot, compact = false }: { snapshot: DailySurfMax
   if (compact) {
     return (
       <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-        <span className="font-black uppercase tracking-[0.08em] text-neon-cyan/80">Máxima hoje: </span>
-        P {maxima.player} · E {maxima.tie} · B {maxima.banker}
-        {best.value > 0 ? ` · Maior ${best.label} (${best.value})` : ""}
+        <div className="font-black uppercase tracking-[0.08em] text-neon-cyan/80">
+          Máxima hoje · reseta 00:00 (BR)
+        </div>
+        <div className="mt-0.5">
+          P {maxima.player} · E {maxima.tie} · B {maxima.banker}
+          {best.value > 0 ? ` · Maior ${best.label} (${best.value})` : ""}
+        </div>
       </div>
     );
   }
