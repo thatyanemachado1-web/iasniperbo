@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Clock, Crown } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData } from "@/hooks/useDashboardData";
-import { SignalCard } from "@/components/dashboard/SignalCard";
 import { ModuleMiniScoreboard } from "@/components/dashboard/ModuleMiniScoreboard";
 import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
 import { AIReadingCard } from "@/components/dashboard/AIReadingCard";
@@ -24,7 +23,6 @@ import {
   calculatePlayerFrequency,
   calculateTieFrequency,
 } from "@/utils/statistics";
-import { buildSurfEntrySummary } from "@/utils/surf";
 import {
   calculateMainResult,
   calculateNeuralResult,
@@ -32,7 +30,6 @@ import {
   calculateTieResult,
 } from "@/utils/moduleResults";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
-import { buildSignalCopy } from "@/lib/operationalCopy";
 import { usePatternMiner } from "@/hooks/usePatternMiner";
 import { useRoundHistory } from "@/hooks/useRoundHistory";
 import { useDailySurfMax } from "@/hooks/useDailySurfMax";
@@ -66,8 +63,6 @@ function DashboardPage() {
     enabled: mode === "live" && !d.mockMode,
   });
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
-  const tieAlertEnabled = d.moduleToggles?.tieAlert !== false;
-  const surfAnalyzerEnabled = d.moduleToggles?.surfAnalyzer !== false;
   const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;
   const mainResult = calculateMainResult(d.mainScoreboard);
   const tieResult = calculateTieResult(d.tieAlertScoreboard);
@@ -76,15 +71,6 @@ function DashboardPage() {
   const tableTieCount = d.rounds.filter((round) => round.result === "T").length;
   const tableTieLabel = formatCompactCount(tableTieCount);
   const tieHitLabel = formatCompactCount(tieResult.greens);
-  const signalHasActiveEntry =
-    (d.currentSignal.status === "pending" || d.currentSignal.status === "g1") &&
-    (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER");
-  const surfSummary =
-    surfAnalyzerEnabled &&
-    signalHasActiveEntry &&
-    (d.currentSignal.side === "BANKER" || d.currentSignal.side === "PLAYER")
-      ? buildSurfEntrySummary(surfAlert, d.currentSignal.side)
-      : undefined;
   const sequence = calculateCurrentStreak(d.rounds);
   const stats = {
     banker: calculateBankerFrequency(d.rounds),
@@ -148,26 +134,6 @@ function DashboardPage() {
 
       <div className="dashboard-command-grid grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)] xl:items-start">
         <div className="space-y-4 xl:rounded-2xl xl:border xl:border-neon-cyan/10 xl:bg-background/10 xl:p-2">
-          <PremiumFeature
-            title="Entrada principal VIP"
-            description="A entrada confirmada completa só aparece para clientes liberados."
-          >
-            <SignalCard
-              signal={d.currentSignal}
-              neuralReading={d.neuralReading}
-              neuralScoreboard={d.neuralScoreboard}
-              rounds={d.rounds}
-              mainSequencePositive={mainResult.sequencePositive}
-              mainSequenceNegative={mainResult.sequenceNegative}
-              surfSummary={surfSummary}
-              tieAlert={tieAlertEnabled ? d.currentTieAlert : undefined}
-              operationalMessage={buildSignalCopy(d)}
-              enableResultFlash={mode === "live"}
-              priority
-              showNeuralReading={false}
-            />
-          </PremiumFeature>
-
           <RoundHistoryAuditCard history={roundHistory} onReset={resetHistory} />
 
           <PremiumFeature
