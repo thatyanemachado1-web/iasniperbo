@@ -77,16 +77,14 @@ export function StrategyConclusion({
 }
 
 function pulledSideLabel(side: RoundResult) {
-  if (side === "B") return "🔴 BANKER";
+  if (side === "B") return "BANKER";
   if (side === "P") return "PLAYER";
   return "TIE";
 }
 
 function patternTokenValue(token: string) {
-  const side = token[0];
   const value = token.slice(1);
-  if (side === "T" && value) return `${value}x`;
-  return value || side;
+  return value || token[0];
 }
 
 function patternTokenTitle(token: string) {

@@ -42,16 +42,22 @@ function DashboardPage() {
   const { data: d, dashboardUrl, mode, setModuleToggles } = useDashboardData();
   const userSession = readUserSession();
   const fullAccess = hasFullAccess(userSession);
-  const patternMiner = usePatternMiner({
-    rounds: d.rounds,
-    historyLimit: 15000,
-    enabled: mode === "live" && !d.mockMode,
-    serverSnapshot: d.patternMinerSnapshot,
-  });
   const { history: roundHistory, resetHistory } = useRoundHistory(
     d,
     mode === "live" && !d.mockMode,
   );
+  const patternMinerSourceRounds = useMemo(
+    () => [...roundHistory.todayRounds, ...d.rounds],
+    [roundHistory.todayRounds, d.rounds],
+  );
+  const patternMiner = usePatternMiner({
+    rounds: patternMinerSourceRounds.length ? patternMinerSourceRounds : d.rounds,
+    historyLimit: 15000,
+    enabled: mode === "live" && !d.mockMode,
+    serverSnapshot: d.patternMinerSnapshot,
+    feedStatus: d.feedStatus,
+    dashboardUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
+  });
   const dailySurfSourceRounds = useMemo(
     () => [...roundHistory.todayRounds, ...d.rounds],
     [roundHistory.todayRounds, d.rounds],
