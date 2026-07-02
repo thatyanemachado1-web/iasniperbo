@@ -18476,11 +18476,16 @@ async function loadLiveState(env: unknown) {
 }
 
 async function syncDashboardReadState(env: unknown) {
-  const durableState = await loadDurableLiveState(env);
-  const durableDashboard = readRecord(durableState?.dashboard);
-  if (!hasRecordFields(durableDashboard)) return;
-  if (compareDashboardStateFreshness(durableDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
-    liveDashboardData = restoreDashboardData(durableDashboard);
+  const [durableState, cacheState] = await withTimeout(
+    Promise.all([loadDurableLiveState(env), loadLiveStateCache()]),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "sincronizar dashboard",
+    [null, null] as [Record<string, unknown> | null, Record<string, unknown> | null],
+  );
+  const mergedDashboard = readRecord(mergeLiveStates(durableState, cacheState)?.dashboard);
+  if (!hasRecordFields(mergedDashboard)) return;
+  if (compareDashboardStateFreshness(mergedDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
+    liveDashboardData = restoreDashboardData(mergedDashboard);
   }
 }
 async function loadLiveStateFresh(env: unknown) {
@@ -18893,7 +18898,15 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
   const second = readRecord(secondary);
   if (!hasRecordFields(first)) return second;
   if (!hasRecordFields(second)) return first;
+  const firstRoundCount = dashboardRoundCount(first);
+  const secondRoundCount = dashboardRoundCount(second);
+  if (firstRoundCount > 0 && secondRoundCount === 0) return first;
+  if (secondRoundCount > 0 && firstRoundCount === 0) return second;
   return compareDashboardStateFreshness(first, second) >= 0 ? first : second;
+}
+
+function dashboardRoundCount(state: Record<string, unknown>) {
+  return Array.isArray(state.rounds) ? state.rounds.length : 0;
 }
 
 function compareDashboardStateFreshness(left: Record<string, unknown>, right: Record<string, unknown>) {
