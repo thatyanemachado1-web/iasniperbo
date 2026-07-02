@@ -80,7 +80,7 @@ export function TieAlertCard({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-1.5 text-center">
+          <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
             <TieStatChip label="Força" value={`${alert.confidence}%`} tone={view.badgeTone === "green" ? "green" : "amber"} />
             <TieStatChip label="Validade" value={`${alert.validityRounds}r`} tone="muted" />
             <TieStatChip label="Nível" value={normalizeRiskLabel(alert.level)} tone={view.badgeTone === "green" ? "green" : "amber"} />

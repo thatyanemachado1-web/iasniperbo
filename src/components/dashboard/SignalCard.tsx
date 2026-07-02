@@ -2,7 +2,7 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
-import { LeituraNeuralMiniCard } from "@/components/dashboard/LeituraNeuralMiniCard";
+import { LeituraNeuralResponsiveCard } from "@/components/dashboard/LeituraNeuralResponsiveCard";
 import { cn } from "@/lib/utils";
 import type {
   MainSignal,
@@ -198,7 +198,7 @@ export function SignalCard({
         </div>
         {showNeuralReading && (
           <div className="justify-self-stretch lg:justify-self-end">
-            <LeituraNeuralMiniCard
+            <LeituraNeuralResponsiveCard
               {...(neuralReading ?? { mode: "SCANNING" })}
               neuralScoreboard={neuralScoreboard}
               rounds={rounds}

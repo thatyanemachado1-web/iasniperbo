@@ -1,4 +1,4 @@
-import { LeituraNeuralMiniCard } from "@/components/dashboard/LeituraNeuralMiniCard";
+import { LeituraNeuralResponsiveCard } from "@/components/dashboard/LeituraNeuralResponsiveCard";
 import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
 import type { DashboardData, NeuralReading } from "@/types/dashboard";
 
@@ -11,7 +11,7 @@ export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
       description="Leitura de número pagante liberada no acesso Premium."
       className="h-full min-w-0"
     >
-      <LeituraNeuralMiniCard
+      <LeituraNeuralResponsiveCard
         {...(data.neuralReading ?? SCANNING_READING)}
         neuralScoreboard={data.neuralScoreboard}
         neuralEntryState={data.neuralEntryState}

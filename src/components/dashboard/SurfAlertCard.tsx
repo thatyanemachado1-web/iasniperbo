@@ -157,7 +157,7 @@ function ActionPanel({ view, large = false }: { view: SurfView; large?: boolean 
 
 function StatsRow({ view, large = false }: { view: SurfView; large?: boolean }) {
   return (
-    <div className={cn("grid grid-cols-4 gap-1.5 text-center", large && "gap-2")}>
+    <div className={cn("grid grid-cols-2 gap-1.5 text-center sm:grid-cols-4", large && "gap-2")}>
       <StatChip label="Lado" value={view.sideLabel} tone={view.sideTone} />
       <StatChip label="Força" value={`${view.confidence}%`} tone={view.strengthTone} />
       <StatChip label="Casas" value={`${view.stretchedCount}`} tone="muted" />

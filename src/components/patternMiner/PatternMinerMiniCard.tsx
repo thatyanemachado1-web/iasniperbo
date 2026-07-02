@@ -51,7 +51,7 @@ export function PatternMinerMiniCard({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-1.5 text-center">
+        <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
           <PatternStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
           <PatternStatChip label="Amostras" value={view.samplesLabel} tone="muted" />
           <PatternStatChip label="Status" value={view.statusChip} tone={view.statusTone} />

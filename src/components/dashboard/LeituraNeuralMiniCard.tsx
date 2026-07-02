@@ -27,7 +27,7 @@ interface NeuralEntryHistoryItem extends NeuralEntryDisplayResult {
   minute: string;
 }
 
-type LeituraNeuralMiniCardProps = NeuralReading & {
+type LeituraNeuralCardProps = NeuralReading & {
   className?: string;
   greenFlash?: boolean;
   neuralScoreboard?: NeuralScoreboard;
@@ -35,6 +35,8 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
   neuralEntryState?: NeuralEntryState | null;
   neuralEntryLastResult?: NeuralEntryLastResult | null;
 };
+
+export type { LeituraNeuralCardProps };
 
 const SCANNING_READING: NeuralReading = { mode: "SCANNING" };
 const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
@@ -49,7 +51,7 @@ export function LeituraNeuralMiniCard({
   neuralEntryState,
   neuralEntryLastResult,
   ...reading
-}: LeituraNeuralMiniCardProps) {
+}: LeituraNeuralCardProps) {
   const data = { ...SCANNING_READING, ...reading };
   const mode = data.mode ?? "SCANNING";
   const hasNumber = typeof data.numero === "number" && Boolean(data.origem);
@@ -147,7 +149,7 @@ export function LeituraNeuralMiniCard({
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-1.5 text-center">
+        <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
           <NeuralStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
           <NeuralStatChip
             label="Número"

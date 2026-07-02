@@ -24,26 +24,34 @@ export function DashboardMainCardsGrid({
 }) {
   return (
     <div className="space-y-3">
-      <section className="main-cards-grid grid w-full grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <NeuralPayingDashboardCard data={data} />
-        <SurfAnalyzerDashboardCard
-          alert={surfAlert}
-          dailySurfMax={dailySurfMax}
-          toggles={data.moduleToggles}
-          onModuleTogglesChange={onModuleTogglesChange}
-        />
-        <TieRadarDashboardCard
-          alert={data.currentTieAlert}
-          scoreboard={data.tieAlertScoreboard}
-          rounds={data.rounds}
-          patternMinerSnapshot={patternMinerSnapshot}
-          toggles={data.moduleToggles}
-          onModuleTogglesChange={onModuleTogglesChange}
-        />
-        <HotPatternDashboardCard
-          snapshot={patternMinerSnapshot}
-          isUsingRealData={patternMinerIsUsingRealData}
-        />
+      <section className="main-cards-grid grid w-full grid-cols-2 items-start gap-2 min-w-0 sm:gap-3 md:grid-cols-2 xl:grid-cols-4 xl:gap-4">
+        <div className="min-w-0">
+          <NeuralPayingDashboardCard data={data} />
+        </div>
+        <div className="min-w-0">
+          <SurfAnalyzerDashboardCard
+            alert={surfAlert}
+            dailySurfMax={dailySurfMax}
+            toggles={data.moduleToggles}
+            onModuleTogglesChange={onModuleTogglesChange}
+          />
+        </div>
+        <div className="min-w-0">
+          <TieRadarDashboardCard
+            alert={data.currentTieAlert}
+            scoreboard={data.tieAlertScoreboard}
+            rounds={data.rounds}
+            patternMinerSnapshot={patternMinerSnapshot}
+            toggles={data.moduleToggles}
+            onModuleTogglesChange={onModuleTogglesChange}
+          />
+        </div>
+        <div className="min-w-0">
+          <HotPatternDashboardCard
+            snapshot={patternMinerSnapshot}
+            isUsingRealData={patternMinerIsUsingRealData}
+          />
+        </div>
       </section>
       <SurfRoadPanelsStrip alert={surfAlert} />
     </div>
