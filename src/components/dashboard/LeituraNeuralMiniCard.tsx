@@ -124,7 +124,6 @@ export function LeituraNeuralMiniCard({
   const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
   const confirmedEntrySide = liveNeuralEntrySide(visibleEntryState);
   const liveEntry = Boolean(confirmedEntrySide);
-  const showLiveNumberSnapshot = hasNumber && liveEntry;
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
@@ -239,10 +238,10 @@ export function LeituraNeuralMiniCard({
         </div>
       </div>
 
-      {!showLiveNumberSnapshot ? (
+      {!hasNumber ? (
         <div className="relative mt-2">
           <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
-            {hasNumber ? "Aguardando entrada confirmada..." : "IA procurando números pagantes..."}
+            IA procurando números pagantes...
           </div>
           <TypingDots />
           <div
