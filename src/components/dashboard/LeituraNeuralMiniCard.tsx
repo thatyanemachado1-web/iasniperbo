@@ -21,6 +21,11 @@ interface NeuralEntryDisplayResult {
   multiplier?: number | null;
 }
 
+interface NeuralEntryHistoryItem extends NeuralEntryDisplayResult {
+  id: string;
+  minute: string;
+}
+
 type LeituraNeuralMiniCardProps = NeuralReading & {
   className?: string;
   greenFlash?: boolean;
@@ -31,6 +36,9 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
 };
 
 const SCANNING_READING: NeuralReading = { mode: "SCANNING" };
+const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
+const MAX_NEURAL_ENTRY_HISTORY = 100;
+const VISIBLE_ENTRY_HISTORY = 6;
 
 export function LeituraNeuralMiniCard({
   className,
@@ -48,9 +56,10 @@ export function LeituraNeuralMiniCard({
   const confirmedSide = mode === "ACTIVE" ? pullingSide : null;
   const generalScore = buildGeneralScore(neuralScoreboard, data);
   const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
-  const view = buildNeuralView(data, hasNumber, confirmedSide, accuracy, generalScore);
+  const view = buildNeuralView(data, hasNumber, confirmedSide, accuracy, generalScore, mode);
 
   const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
+  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
   const lastOfficialResultRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
   const mountedAtRef = useRef(Date.now());
@@ -63,12 +72,21 @@ export function LeituraNeuralMiniCard({
     if (isOfficialEntryOlderThanSession(neuralEntryLastResult, mountedAtRef.current)) return;
 
     setEntryResult(result);
+    setEntryHistory((items) => {
+      const historyItem = displayHistoryFromOfficialEntry(neuralEntryLastResult);
+      if (!historyItem || items.some((item) => item.id === historyItem.id)) return items;
+      return [historyItem, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
+    });
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
     entryResultTimeoutRef.current = window.setTimeout(
       () => setEntryResult(null),
       result.kind === "red" ? 1600 : 3200,
     );
   }, [neuralEntryLastResult]);
+
+  useEffect(() => {
+    writeNeuralEntryHistory(entryHistory);
+  }, [entryHistory]);
 
   useEffect(() => {
     return () => {
@@ -168,6 +186,8 @@ export function LeituraNeuralMiniCard({
             </span>
           </div>
         ) : null}
+
+        <NeuralEntryHistoryList history={entryHistory} />
       </div>
     </GlassCard>
   );
@@ -179,6 +199,7 @@ function buildNeuralView(
   confirmedSide: NeuralSide | null | undefined,
   accuracy: number | null,
   generalScore: ReturnType<typeof buildGeneralScore>,
+  mode: NeuralReading["mode"],
 ) {
   const strengthLabel = accuracy !== null ? `${Math.round(accuracy)}%` : formatPercent(generalScore.accuracy);
   const validity = data.validade ?? "G1";
@@ -263,6 +284,150 @@ function buildNeuralView(
     strengthTone: "muted" as const,
     numberTone: "muted" as const,
   };
+}
+
+function NeuralEntryHistoryList({ history }: { history: NeuralEntryHistoryItem[] }) {
+  const visible = history.slice(0, VISIBLE_ENTRY_HISTORY);
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[8px] font-black uppercase tracking-[0.08em] text-neon-purple/85">
+          Últimas entradas
+        </span>
+        <span className="text-[8px] font-semibold text-muted-foreground">
+          {history.length ? `${history.length} no ciclo` : "coletando"}
+        </span>
+      </div>
+      {visible.length ? (
+        <div className="max-h-24 space-y-0.5 overflow-y-auto pr-0.5">
+          {visible.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/10 px-1.5 py-0.5 text-[8px] font-semibold leading-tight"
+            >
+              <span className="min-w-0 truncate">
+                <span className={sideClass(item.side)}>{entrySideHistoryLabel(item)}</span>{" "}
+                <span className={entryResultClass(item.kind)}>{entryResultLabel(item.kind)}</span>
+              </span>
+              <span className="shrink-0 text-[7px] text-muted-foreground/80">:{item.minute}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[8px] font-semibold text-muted-foreground/80">Sem greens, reds ou ties recentes.</div>
+      )}
+    </div>
+  );
+}
+
+function readNeuralEntryHistory(): NeuralEntryHistoryItem[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(NEURAL_ENTRY_HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map(normalizeNeuralEntryHistoryItem)
+      .filter((item): item is NeuralEntryHistoryItem => Boolean(item))
+      .slice(0, MAX_NEURAL_ENTRY_HISTORY);
+  } catch {
+    return [];
+  }
+}
+
+function writeNeuralEntryHistory(history: NeuralEntryHistoryItem[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      NEURAL_ENTRY_HISTORY_STORAGE_KEY,
+      JSON.stringify(history.slice(0, MAX_NEURAL_ENTRY_HISTORY)),
+    );
+  } catch {
+    // Local persistence is only a visual convenience.
+  }
+}
+
+function normalizeNeuralEntryHistoryItem(value: unknown): NeuralEntryHistoryItem | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<NeuralEntryHistoryItem>;
+  if (!isNeuralEntryResultKind(record.kind) || !isNeuralSide(record.side)) return null;
+
+  return {
+    id: typeof record.id === "string" && record.id ? record.id : `restored:${Date.now()}:${Math.random()}`,
+    kind: record.kind,
+    side: record.side,
+    multiplier:
+      typeof record.multiplier === "number" && Number.isFinite(record.multiplier) ? record.multiplier : null,
+    minute: typeof record.minute === "string" && record.minute ? record.minute : "--",
+  };
+}
+
+function displayHistoryFromOfficialEntry(result: NeuralEntryLastResult | null | undefined) {
+  const base = displayResultFromOfficialEntry(result);
+  if (!base) return null;
+
+  return {
+    ...base,
+    minute: minuteLabelFromOfficialResult(result),
+  };
+}
+
+function minuteLabelFromOfficialResult(result: NeuralEntryLastResult | null | undefined) {
+  const roundKeyMinute = minuteLabelFromTimeText(result?.resultRoundKey);
+  if (roundKeyMinute) return roundKeyMinute;
+
+  const finishedMinute = minuteLabelFromIso(result?.finishedAt);
+  return finishedMinute ?? "--";
+}
+
+function minuteLabelFromTimeText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const match = value.match(/\b\d{1,2}:(\d{2})(?::\d{2})?\b/);
+  return match?.[1] ?? null;
+}
+
+function minuteLabelFromIso(value: unknown) {
+  if (typeof value !== "string" || !value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    minute: "2-digit",
+  });
+}
+
+function isNeuralEntryResultKind(value: unknown): value is NeuralEntryDisplayKind {
+  return value === "green" || value === "red" || value === "tie";
+}
+
+function isNeuralSide(value: unknown): value is NeuralSide {
+  return value === "BANKER" || value === "PLAYER" || value === "TIE";
+}
+
+function entrySideHistoryLabel(item: NeuralEntryHistoryItem) {
+  if (item.kind === "tie") {
+    return `EMPATE${item.multiplier ? ` ${item.multiplier}X` : ""}`.trim();
+  }
+  if (item.side === "BANKER") return "BANKER";
+  if (item.side === "PLAYER") return "PLAYER";
+  return "TIE";
+}
+
+function entryResultLabel(kind: NeuralEntryDisplayKind) {
+  if (kind === "red") return "RED";
+  if (kind === "tie") return "GREEN TIE";
+  return "GREEN";
+}
+
+function entryResultClass(kind: NeuralEntryDisplayKind) {
+  if (kind === "red") return "text-destructive";
+  if (kind === "tie") return "text-warning";
+  return "text-success";
 }
 
 function buildEntryResultView(result: NeuralEntryDisplayResult) {
