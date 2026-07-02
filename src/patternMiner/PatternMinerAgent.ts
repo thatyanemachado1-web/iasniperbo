@@ -1,6 +1,6 @@
 import type { Round } from "@/types/dashboard";
 import type { PatternMinerConfig, PatternMinerSnapshot } from "@/types/patternMiner";
-import { PatternMinerEngine } from "@/patternMiner/PatternMinerEngine";
+import { PatternMinerEngine, type PatternMinerRuntimeContext } from "@/patternMiner/PatternMinerEngine";
 import { PatternMinerStorage } from "@/patternMiner/PatternMinerStorage";
 
 export class PatternMinerAgent {
@@ -12,21 +12,21 @@ export class PatternMinerAgent {
     this.storage = new PatternMinerStorage();
   }
 
-  scan(latestRounds: Round[]): PatternMinerSnapshot {
+  scan(latestRounds: Round[], context: PatternMinerRuntimeContext = {}): PatternMinerSnapshot {
     const bank = this.storage.ingest(latestRounds);
-    return this.engine.analyze(bank.rounds);
+    return this.engine.analyze(bank.rounds, context);
   }
 
-  findPatterns(rounds: Round[]) {
-    return this.engine.analyze(rounds).strategies;
+  findPatterns(rounds: Round[], context: PatternMinerRuntimeContext = {}) {
+    return this.engine.analyze(rounds, context).strategies;
   }
 
-  updateRanking(rounds: Round[]) {
-    return this.engine.analyze(rounds).ranking;
+  updateRanking(rounds: Round[], context: PatternMinerRuntimeContext = {}) {
+    return this.engine.analyze(rounds, context).ranking;
   }
 
-  detectPatternsInFormation(rounds: Round[]) {
-    const snapshot = this.engine.analyze(rounds);
+  detectPatternsInFormation(rounds: Round[], context: PatternMinerRuntimeContext = {}) {
+    const snapshot = this.engine.analyze(rounds, context);
     return [...snapshot.entryAlerts, ...snapshot.formingAlerts];
   }
 }

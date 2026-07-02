@@ -1,8 +1,24 @@
 import assert from "node:assert/strict";
-import { PatternMinerEngine } from "../src/patternMiner/PatternMinerEngine.ts";
+import {
+  PatternMinerEngine,
+  parsePatternSequenceText,
+  parsePatternToken,
+  resolvePatternStatusFromMetrics,
+} from "../src/patternMiner/PatternMinerEngine.ts";
+import {
+  resetPatternIaLifecycleForTests,
+  resolvePatternIaLifecycle,
+} from "../src/patternMiner/PatternMinerLifecycle.ts";
+import { formatPatternToken } from "../src/patternMiner/PatternMinerDisplay.ts";
 
-function round(id, result) {
-  return { id, result, bankerScore: 7, playerScore: 5, time: `2026-07-02T10:${String(id).padStart(2, "0")}:00.000Z` };
+function round(id, result, bankerScore = 7, playerScore = 5) {
+  return {
+    id,
+    result,
+    bankerScore,
+    playerScore,
+    time: `2026-07-02T10:${String(id).padStart(2, "0")}:00.000Z`,
+  };
 }
 
 const sampleRounds = [
@@ -33,8 +49,16 @@ const incoming = {
       strategy: {
         id: "pm-test",
         sequence: ["B", "P"],
-        occurrences: 4,
+        module: "PADROES_IA",
+        pattern_signature: "B-P",
+        occurrences: 40,
         expectedResult: "B",
+        next_side: "B",
+        accuracy: 100,
+        sg_count: 3,
+        g1_count: 1,
+        red_count: 0,
+        tie_after_count: 0,
         sg: 3,
         g1: 1,
         red: 0,
@@ -44,27 +68,68 @@ const incoming = {
         sequenceNegative: 0,
         maxSequencePositive: 2,
         maxSequenceNegative: 0,
-        assertiveness: 88,
+        assertiveness: 100,
         createdAt: computed.updatedAt,
-        status: "HOT",
+        status: "ENTRADA CONFIRMADA",
         insufficientSample: false,
         updatedAt: computed.updatedAt,
         rank: 1,
+        signal_id: "pattern-ai:pm-test:10:B:1",
+        event_id: "validated-pm-test-10",
+        round_id: 10,
+        generated_at: computed.updatedAt,
       },
       matchedRounds: sampleRounds.slice(-2),
       progress: 1,
       missingTokens: [],
-      title: "PADRAO VALIDADO",
+      title: "ENTRADA CONFIRMADA",
     },
   ],
 };
 
 const merged = PatternMinerEngine.mergeWithIncoming(computed, incoming);
-assert.equal(merged.source, "merged");
+assert.ok(["merged", "publisher"].includes(merged.source));
 assert.ok(merged.entryAlerts.length >= 1);
 assert.equal(merged.entryAlerts[0].strategy.expectedResult, "B");
 
 const engineOnly = PatternMinerEngine.mergeWithIncoming(computed, undefined);
 assert.equal(engineOnly.source, "engine");
+
+assert.equal(parsePatternToken("T8")?.normalized, "T8");
+assert.equal(formatPatternToken("T8"), "🟡 Empate 8");
+assert.deepEqual(parsePatternSequenceText("P10 T8 B P B"), ["P10", "T8", "B", "P", "B"]);
+assert.equal(formatPatternToken("T"), "🟡 Empate");
+
+const allowed = resolvePatternStatusFromMetrics({ occurrences: 40, accuracy: 100, redCount: 2 });
+assert.equal(allowed.status, "PADRAO 100%");
+
+const blocked = resolvePatternStatusFromMetrics({ occurrences: 40, accuracy: 100, redCount: 3 });
+assert.equal(blocked.status, "BLOQUEADO POR MAIS DE 2 REDS");
+
+resetPatternIaLifecycleForTests();
+const lifecycleSnapshot = {
+  ...incoming,
+  entryAlerts: incoming.entryAlerts,
+};
+const lifecycleRound1 = resolvePatternIaLifecycle(lifecycleSnapshot, sampleRounds);
+assert.equal(lifecycleRound1.status, "ENTRADA CONFIRMADA");
+assert.ok(lifecycleRound1.active?.signal_id);
+
+const afterSgWin = resolvePatternIaLifecycle(lifecycleSnapshot, [...sampleRounds, round(11, "B")]);
+assert.equal(afterSgWin.status, "GREEN SG");
+assert.equal(afterSgWin.resultFlash, "green");
+
+resetPatternIaLifecycleForTests();
+const lifecycleSnapshot2 = { ...incoming };
+resolvePatternIaLifecycle(lifecycleSnapshot2, sampleRounds);
+const afterSgLoss = resolvePatternIaLifecycle(lifecycleSnapshot2, [...sampleRounds, round(11, "P")]);
+assert.equal(afterSgLoss.status, "FAZER GALE 1");
+
+resetPatternIaLifecycleForTests();
+resolvePatternIaLifecycle(lifecycleSnapshot2, sampleRounds);
+resolvePatternIaLifecycle(lifecycleSnapshot2, [...sampleRounds, round(11, "P")]);
+const afterRed = resolvePatternIaLifecycle(lifecycleSnapshot2, [...sampleRounds, round(11, "P"), round(12, "P")]);
+assert.equal(afterRed.status, "RED FINAL");
+assert.equal(afterRed.resultFlash, "red");
 
 console.log("pattern-miner-engine.test.mjs passed");

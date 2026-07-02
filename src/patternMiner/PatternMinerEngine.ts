@@ -3,6 +3,7 @@ import type {
   PatternMinerAlert,
   PatternMinerConfig,
   PatternMinerHistoryLimit,
+  PatternMinerOperationalStatus,
   PatternMinerScoreboard,
   PatternMinerSnapshot,
   PatternMinerSource,
@@ -21,6 +22,26 @@ export const DEFAULT_PATTERN_MINER_CONFIG: PatternMinerConfig = {
   minValidated: 2,
   patternLengths: [3, 4, 5],
 };
+
+const DEFAULT_PATTERN_MINER_RULES = {
+  minOccurrences: 30,
+  minAccuracy: 70,
+  hotAccuracy: 90,
+  perfectAccuracy: 100,
+  maxRecentRedsAllowed: 1,
+  maxSignalAgeMs: 120_000,
+  allowTieEntry: false,
+} as const;
+
+const MIN_PATTERN_SCORE = 0;
+const MAX_PATTERN_SCORE = 12;
+
+export interface PatternMinerRuntimeContext {
+  feedStatus?: string | null;
+  dashboardUpdatedAt?: string | null;
+  serverSnapshotUpdatedAt?: string | null;
+  nowMs?: number;
+}
 
 type ValidationKind = "sg" | "g1" | "red" | "tie" | "pending";
 
@@ -47,6 +68,14 @@ interface CandidateBucket {
   byExpected: Record<RoundResult, ExpectedStats>;
 }
 
+interface PatternEvaluationResult {
+  status: PatternMinerOperationalStatus;
+  blocked_reason: string;
+  confirmed: boolean;
+  signal_id?: string;
+  title: string;
+}
+
 const EMPTY_EXPECTED_STATS: ExpectedStats = {
   sg: 0,
   g1: 0,
@@ -59,6 +88,9 @@ const EMPTY_EXPECTED_STATS: ExpectedStats = {
   maxSequenceNegative: 0,
 };
 
+const patternMinerLogDedupe = new Map<string, number>();
+const PATTERN_MINER_LOG_TTL_MS = 30_000;
+
 export class PatternMinerEngine {
   private config: PatternMinerConfig;
 
@@ -66,14 +98,14 @@ export class PatternMinerEngine {
     this.config = { ...DEFAULT_PATTERN_MINER_CONFIG, ...config };
   }
 
-  analyze(rounds: Round[]): PatternMinerSnapshot {
+  analyze(rounds: Round[], context: PatternMinerRuntimeContext = {}): PatternMinerSnapshot {
     const updatedAt = new Date().toISOString();
     const analyzedRounds = rounds.slice(-this.config.historyLimit);
     const catalog = this.catalogStrategies(analyzedRounds, updatedAt);
     const ranked = this.rankStrategies(catalog);
     const ranking = ranked.map((strategy, index) => ({ ...strategy, rank: index + 1 }));
     const strictHotStrategies = ranking.filter(
-      (strategy) => strategy.status === "VERY_HOT" || strategy.status === "HOT",
+      (strategy) => strategy.heatStatus === "VERY_HOT" || strategy.heatStatus === "HOT",
     );
     const hotStrategies =
       strictHotStrategies.length >= 20
@@ -81,8 +113,10 @@ export class PatternMinerEngine {
         : ranking
             .filter((strategy) => !strategy.insufficientSample)
             .slice(0, PATTERN_MINER_TOP_STRATEGIES_LIMIT);
-    const alerts = this.detectRealtimeAlerts(analyzedRounds, ranking);
+    const alerts = this.detectRealtimeAlerts(analyzedRounds, ranking, context, updatedAt);
     const scoreboard = this.buildScoreboard(ranking);
+    const primaryAlert = alerts.find((alert) => alert.kind === "validated") ?? alerts[0];
+    const runtimeStatus = resolveSnapshotRuntimeStatus(primaryAlert, context, updatedAt);
 
     return {
       strategies: ranking,
@@ -94,12 +128,14 @@ export class PatternMinerEngine {
       agent: {
         catalogedStrategies: ranking.length,
         hotStrategies: hotStrategies.length,
-        observedStrategies: ranking.filter((strategy) => strategy.status === "OBSERVATION").length,
+        observedStrategies: ranking.filter((strategy) => strategy.heatStatus === "OBSERVATION").length,
         lastDiscovery: ranking.find((strategy) => !strategy.insufficientSample),
         updatedAt,
       },
       analyzedRounds: analyzedRounds.length,
       historyLimit: this.config.historyLimit,
+      runtimeStatus: runtimeStatus.status,
+      runtimeBlockedReason: runtimeStatus.blocked_reason,
       updatedAt,
     };
   }
@@ -153,6 +189,8 @@ export class PatternMinerEngine {
       },
       analyzedRounds: Math.max(incomingAnalyzed, computedAnalyzed),
       historyLimit: base.historyLimit ?? supplement.historyLimit,
+      runtimeStatus: base.runtimeStatus ?? supplement.runtimeStatus,
+      runtimeBlockedReason: base.runtimeBlockedReason ?? supplement.runtimeBlockedReason,
       updatedAt: new Date().toISOString(),
       source,
     };
@@ -220,12 +258,35 @@ export class PatternMinerEngine {
       best.stats.totalValidated >= this.config.minValidated &&
       best.stats.sg + best.stats.g1 > 0;
     const assertiveness = hasSample ? best.assertiveness : undefined;
+    const signature = bucket.sequence.join("-");
+    const normalizedSignature = normalizePatternSignature(bucket.sequence);
+    const includesTie = bucket.sequence.some((token) => token.startsWith("T"));
+    const tieCountInPattern = bucket.sequence.filter((token) => token.startsWith("T")).length;
+    const heatStatus = statusFromStats(best.stats, assertiveness, hasSample);
+    const operational = baseOperationalStatus(bucket.occurrences, assertiveness, best.stats.red);
 
     return {
       id: stableStrategyId(bucket.sequence),
       sequence: bucket.sequence,
+      module: "PADROES_IA",
+      pattern_signature: signature,
+      pattern_signature_normalized: normalizedSignature,
+      includes_tie: includesTie,
+      tie_count_in_pattern: tieCountInPattern,
+      next_side: best.expected,
+      next_side_probability: best.assertiveness,
+      signal_id: "",
+      round_id: undefined,
+      generated_at: updatedAt,
       occurrences: bucket.occurrences,
-      expectedResult: hasSample ? best.expected : undefined,
+      accuracy: assertiveness,
+      sg_count: best.stats.sg,
+      g1_count: best.stats.g1,
+      red_count: best.stats.red,
+      tie_after_count: best.stats.tie,
+      blocked_reason: operational.blocked_reason,
+      expectedResult: best.expected,
+      heatStatus,
       sg: best.stats.sg,
       g1: best.stats.g1,
       red: best.stats.red,
@@ -240,7 +301,7 @@ export class PatternMinerEngine {
       lastHit: best.stats.lastHit,
       lastRed: best.stats.lastRed,
       createdAt: updatedAt,
-      status: statusFromStats(best.stats, assertiveness, hasSample),
+      status: operational.status,
       insufficientSample: !hasSample,
       updatedAt,
       rank: 0,
@@ -267,23 +328,45 @@ export class PatternMinerEngine {
   private detectRealtimeAlerts(
     rounds: Round[],
     ranking: PatternMinerStrategy[],
+    context: PatternMinerRuntimeContext,
+    generatedAt: string,
   ): PatternMinerAlert[] {
     const alerts: PatternMinerAlert[] = [];
     if (!rounds.length) return alerts;
+    const latestRound = rounds[rounds.length - 1];
 
-    for (const strategy of ranking.filter((item) => !item.insufficientSample).slice(0, 150)) {
+    for (const strategy of ranking.slice(0, 180)) {
       const length = strategy.sequence.length;
       if (rounds.length >= length) {
         const completedRounds = rounds.slice(-length);
         if (matchesSequence(completedRounds, strategy.sequence)) {
+          const evaluation = evaluateLivePattern(strategy, context, latestRound, generatedAt);
+          const eventId = `${evaluation.confirmed ? "validated" : "forming"}-${strategy.id}-${latestRound.id}`;
+          const strategyWithStatus: PatternMinerStrategy = {
+            ...strategy,
+            status: evaluation.confirmed ? "ENTRADA CONFIRMADA" : evaluation.status,
+            blocked_reason: evaluation.blocked_reason,
+            round_id: latestRound.id,
+            generated_at: generatedAt,
+            signal_id: evaluation.signal_id ?? "",
+            event_id: eventId,
+          };
+          logPatternFormed(strategyWithStatus);
+          if (evaluation.blocked_reason) {
+            logPatternBlocked(strategyWithStatus);
+            if (evaluation.status === "BLOQUEADO POR FEED STALE") {
+              logPatternStaleGuard(strategyWithStatus, context.feedStatus ?? "");
+            }
+          }
+          if (evaluation.confirmed) logPatternConfirmed(strategyWithStatus);
           alerts.push({
-            id: `validated-${strategy.id}`,
-            kind: "validated",
-            strategy,
+            id: `${evaluation.confirmed ? "validated" : "forming"}-${strategy.id}-${latestRound.id}`,
+            kind: evaluation.confirmed ? "validated" : "forming",
+            strategy: strategyWithStatus,
             matchedRounds: completedRounds,
             progress: 1,
             missingTokens: [],
-            title: "PADRAO VALIDADO",
+            title: evaluation.title,
           });
           continue;
         }
@@ -294,10 +377,18 @@ export class PatternMinerEngine {
         const partialRounds = rounds.slice(-matched);
         const partialSequence = strategy.sequence.slice(0, matched);
         if (matchesSequence(partialRounds, partialSequence)) {
+          const formingStrategy: PatternMinerStrategy = {
+            ...strategy,
+            status: "PADRAO EM FORMACAO",
+            blocked_reason: "",
+            round_id: latestRound.id,
+            generated_at: generatedAt,
+            signal_id: "",
+          };
           alerts.push({
             id: `forming-${strategy.id}-${matched}`,
             kind: "forming",
-            strategy,
+            strategy: formingStrategy,
             matchedRounds: partialRounds,
             progress: matched / length,
             missingTokens: strategy.sequence.slice(matched),
@@ -352,52 +443,6 @@ export class PatternMinerEngine {
         : undefined,
     };
   }
-}
-
-function hasPatternMinerPayload(snapshot: PatternMinerSnapshot) {
-  return Boolean(
-    snapshot.ranking.length ||
-      snapshot.hotStrategies.length ||
-      snapshot.entryAlerts.length ||
-      snapshot.formingAlerts.length ||
-      snapshot.scoreboard.totalValidated,
-  );
-}
-
-function mergePatternEntryAlerts(
-  computed: PatternMinerSnapshot,
-  incoming: PatternMinerSnapshot,
-): PatternMinerAlert[] {
-  const byStrategy = new Map<string, PatternMinerAlert>();
-  for (const alert of [...computed.entryAlerts, ...incoming.entryAlerts]) {
-    if (alert.kind !== "validated") continue;
-    const existing = byStrategy.get(alert.strategy.id);
-    if (!existing || (alert.strategy.assertiveness ?? 0) > (existing.strategy.assertiveness ?? 0)) {
-      byStrategy.set(alert.strategy.id, alert);
-    }
-  }
-  return [...byStrategy.values()].sort(
-    (left, right) => (right.strategy.assertiveness ?? 0) - (left.strategy.assertiveness ?? 0),
-  );
-}
-
-function mergePatternFormingAlerts(
-  computed: PatternMinerSnapshot,
-  incoming: PatternMinerSnapshot,
-): PatternMinerAlert[] {
-  const byId = new Map<string, PatternMinerAlert>();
-  for (const alert of [...computed.formingAlerts, ...incoming.formingAlerts]) {
-    const existing = byId.get(alert.id);
-    if (!existing || alert.progress > existing.progress) {
-      byId.set(alert.id, alert);
-    }
-  }
-  return [...byId.values()]
-    .sort((left, right) => {
-      if (left.progress !== right.progress) return right.progress - left.progress;
-      return (right.strategy.assertiveness ?? 0) - (left.strategy.assertiveness ?? 0);
-    })
-    .slice(0, 40);
 }
 
 function applyValidation(
@@ -491,8 +536,11 @@ function buildSequenceVariants(rounds: Round[], start: number, length: number) {
 
 function tokenOptionsForRound(round: Round) {
   const score = scoreForResult(round, round.result);
-  if (round.result === "T") return [`T${score}`, "T"];
-  return [`${round.result}${score}`, round.result];
+  const options = [round.result];
+  if (score !== null && score >= MIN_PATTERN_SCORE) {
+    options.unshift(`${round.result}${score}`);
+  }
+  return options;
 }
 
 function matchesSequence(rounds: Round[], sequence: string[]) {
@@ -501,24 +549,59 @@ function matchesSequence(rounds: Round[], sequence: string[]) {
 }
 
 function matchesToken(round: Round, token: string) {
-  const side = token[0] as RoundResult;
-  if (round.result !== side) return false;
-  if (token.length === 1) return true;
-
-  const score = Number(token.slice(1));
-  if (!Number.isFinite(score)) return true;
-  return scoreForResult(round, side) === score;
+  const parsed = parsePatternToken(token);
+  if (!parsed) return false;
+  if (round.result !== parsed.side) return false;
+  if (parsed.number === undefined) return true;
+  return scoreForResult(round, parsed.side) === parsed.number;
 }
 
 function scoreForResult(round: Round, side: RoundResult) {
-  if (side === "B") return round.bankerScore;
-  if (side === "P") return round.playerScore;
-  if (typeof round.tieMultiplier === "number" && Number.isFinite(round.tieMultiplier)) {
-    return Math.round(round.tieMultiplier);
-  }
-  return round.bankerScore === round.playerScore
-    ? round.bankerScore
-    : Math.max(round.bankerScore, round.playerScore);
+  if (side === "B") return normalizePatternScore(round.bankerScore);
+  if (side === "P") return normalizePatternScore(round.playerScore);
+  return normalizePatternScore(round.bankerScore);
+}
+
+function normalizePatternScore(score: unknown) {
+  const text = String(score ?? "").trim();
+  if (!text) return null;
+  const matched = text.match(/-?\d+(?:\.\d+)?/);
+  if (!matched) return null;
+  const parsedScore = Number(matched[0].replace(",", "."));
+  if (!Number.isFinite(parsedScore)) return null;
+  return Math.floor(Math.max(MIN_PATTERN_SCORE, Math.min(MAX_PATTERN_SCORE, parsedScore)));
+}
+
+export function parsePatternToken(token: string): { side: RoundResult; number?: number; normalized: string } | null {
+  const match = String(token || "")
+    .trim()
+    .toUpperCase()
+    .match(/^([PBT])(\d{1,2})?$/);
+  if (!match) return null;
+  const side = match[1] as RoundResult;
+  const rawNumber = match[2];
+  if (!rawNumber) return { side, normalized: side };
+  const number = Number(rawNumber);
+  if (!Number.isFinite(number) || number < MIN_PATTERN_SCORE || number > MAX_PATTERN_SCORE) return null;
+  return { side, number, normalized: `${side}${number}` };
+}
+
+export function parsePatternSequenceText(sequence: string): string[] {
+  return String(sequence || "")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => parsePatternToken(token))
+    .filter((token): token is { side: RoundResult; number?: number; normalized: string } => Boolean(token))
+    .map((token) => token.normalized);
+}
+
+function normalizePatternSignature(sequence: string[]) {
+  return sequence
+    .map((token) => parsePatternToken(token))
+    .map((token) => (token ? token.side : ""))
+    .filter(Boolean)
+    .join("-");
 }
 
 function numericSpecificityScore(sequence: string[]) {
@@ -542,6 +625,278 @@ function statusFromStats(
   if (assertiveness >= 62) return "STABLE";
   if (assertiveness >= 50) return "OBSERVATION";
   return "WEAK";
+}
+
+function baseOperationalStatus(
+  occurrences: number,
+  accuracy: number | undefined,
+  redCount: number,
+): { status: PatternMinerOperationalStatus; blocked_reason: string } {
+  return resolvePatternStatusFromMetrics({ occurrences, accuracy, redCount });
+}
+
+export function resolvePatternStatusFromMetrics({
+  occurrences,
+  accuracy,
+  redCount,
+}: {
+  occurrences: number;
+  accuracy: number | undefined;
+  redCount: number;
+}): { status: PatternMinerOperationalStatus; blocked_reason: string } {
+  if (occurrences < DEFAULT_PATTERN_MINER_RULES.minOccurrences || accuracy === undefined) {
+    return { status: "BLOQUEADO POR AMOSTRA BAIXA", blocked_reason: "amostra_baixa" };
+  }
+  if (redCount > 2) return { status: "BLOQUEADO POR MAIS DE 2 REDS", blocked_reason: "more_than_two_reds" };
+  if (accuracy >= DEFAULT_PATTERN_MINER_RULES.perfectAccuracy) {
+    return { status: "PADRAO 100%", blocked_reason: "" };
+  }
+  if (accuracy >= DEFAULT_PATTERN_MINER_RULES.hotAccuracy) return { status: "PADRAO QUENTE", blocked_reason: "" };
+  if (accuracy >= DEFAULT_PATTERN_MINER_RULES.minAccuracy) return { status: "PADRAO EM FORMACAO", blocked_reason: "" };
+  return { status: "BLOQUEADO POR AMOSTRA BAIXA", blocked_reason: "accuracy_baixa" };
+}
+
+function evaluateLivePattern(
+  strategy: PatternMinerStrategy,
+  context: PatternMinerRuntimeContext,
+  latestRound: Round,
+  generatedAt: string,
+): PatternEvaluationResult {
+  if (isFeedStale(context, generatedAt)) {
+    return {
+      status: "BLOQUEADO POR FEED STALE",
+      blocked_reason: "feed_stale",
+      confirmed: false,
+      title: "PADRAO IA FORMADO",
+    };
+  }
+
+  if (isSnapshotOld(context, generatedAt, latestRound.id)) {
+    return {
+      status: "BLOQUEADO POR SNAPSHOT ANTIGO",
+      blocked_reason: "snapshot_antigo",
+      confirmed: false,
+      title: "PADRAO IA FORMADO",
+    };
+  }
+
+  if ((strategy.red_count ?? strategy.red ?? 0) > 2) {
+    return {
+      status: "BLOQUEADO POR MAIS DE 2 REDS",
+      blocked_reason: "more_than_two_reds",
+      confirmed: false,
+      title: "PADRAO IA FORMADO",
+    };
+  }
+
+  if (
+    strategy.occurrences < DEFAULT_PATTERN_MINER_RULES.minOccurrences ||
+    (strategy.accuracy ?? 0) < DEFAULT_PATTERN_MINER_RULES.minAccuracy
+  ) {
+    return {
+      status: "BLOQUEADO POR AMOSTRA BAIXA",
+      blocked_reason: "amostra_baixa",
+      confirmed: false,
+      title: "PADRAO IA FORMADO",
+    };
+  }
+
+  if (strategy.next_side === "T" && !DEFAULT_PATTERN_MINER_RULES.allowTieEntry) {
+    return {
+      status: "ALERTA DE EMPATE",
+      blocked_reason: "tie_entry_disabled",
+      confirmed: false,
+      title: "ALERTA DE EMPATE",
+    };
+  }
+
+  const signalId = buildPatternSignalId(strategy, latestRound, generatedAt);
+  if ((strategy.accuracy ?? 0) >= DEFAULT_PATTERN_MINER_RULES.perfectAccuracy) {
+    return {
+      status: "ENTRADA CONFIRMADA",
+      blocked_reason: "",
+      confirmed: true,
+      signal_id: signalId,
+      title: "ENTRADA CONFIRMADA",
+    };
+  }
+  if ((strategy.accuracy ?? 0) >= DEFAULT_PATTERN_MINER_RULES.hotAccuracy) {
+    return {
+      status: "PADRAO QUENTE",
+      blocked_reason: "",
+      confirmed: false,
+      title: "PADRAO QUENTE",
+    };
+  }
+  if ((strategy.accuracy ?? 0) >= DEFAULT_PATTERN_MINER_RULES.minAccuracy) {
+    return {
+      status: "PADRAO EM FORMACAO",
+      blocked_reason: "",
+      confirmed: false,
+      title: "PADRAO EM FORMACAO",
+    };
+  }
+  return {
+    status: "BLOQUEADO POR AMOSTRA BAIXA",
+    blocked_reason: "accuracy_baixa",
+    confirmed: false,
+    title: "PADRAO IA FORMADO",
+  };
+}
+
+function resolveSnapshotRuntimeStatus(
+  primaryAlert: PatternMinerAlert | undefined,
+  context: PatternMinerRuntimeContext,
+  generatedAt: string,
+) {
+  if (primaryAlert) {
+    return {
+      status: primaryAlert.strategy.status,
+      blocked_reason: primaryAlert.strategy.blocked_reason ?? "",
+    };
+  }
+  if (isFeedStale(context, generatedAt)) {
+    return { status: "BLOQUEADO POR FEED STALE" as const, blocked_reason: "feed_stale" };
+  }
+  return { status: "AGUARDANDO PADRAO" as const, blocked_reason: "" };
+}
+
+function buildPatternSignalId(strategy: PatternMinerStrategy, latestRound: Round, generatedAt: string) {
+  return `pattern-ai:${strategy.id}:${latestRound.id}:${strategy.next_side || "NONE"}:${Date.parse(generatedAt) || Date.now()}`;
+}
+
+function isFeedStale(context: PatternMinerRuntimeContext, generatedAt: string) {
+  const feedStatus = String(context.feedStatus || "").trim().toLowerCase();
+  if (feedStatus === "stale" || feedStatus === "paused" || feedStatus === "parado") return true;
+  const dashboardUpdatedAtMs = Date.parse(String(context.dashboardUpdatedAt || ""));
+  const generatedAtMs = Date.parse(generatedAt);
+  const referenceMs = Number.isFinite(dashboardUpdatedAtMs) ? dashboardUpdatedAtMs : generatedAtMs;
+  const nowMs = context.nowMs ?? Date.now();
+  if (!Number.isFinite(referenceMs)) return false;
+  return nowMs - referenceMs > DEFAULT_PATTERN_MINER_RULES.maxSignalAgeMs;
+}
+
+function isSnapshotOld(context: PatternMinerRuntimeContext, generatedAt: string, latestRoundId: number) {
+  const snapshotUpdatedAtMs = Date.parse(String(context.serverSnapshotUpdatedAt || ""));
+  if (!Number.isFinite(snapshotUpdatedAtMs)) return false;
+  const generatedAtMs = Date.parse(generatedAt);
+  if (!Number.isFinite(generatedAtMs)) return false;
+  const nowMs = context.nowMs ?? Date.now();
+  const staleByTime = nowMs - snapshotUpdatedAtMs > DEFAULT_PATTERN_MINER_RULES.maxSignalAgeMs;
+  const staleByOrder = snapshotUpdatedAtMs < generatedAtMs && latestRoundId > 0;
+  return staleByTime || staleByOrder;
+}
+
+function logPatternEvent(label: string, key: string, payload: Record<string, unknown>) {
+  const now = Date.now();
+  for (const [cacheKey, cacheAt] of patternMinerLogDedupe.entries()) {
+    if (now - cacheAt > PATTERN_MINER_LOG_TTL_MS) patternMinerLogDedupe.delete(cacheKey);
+  }
+  if (patternMinerLogDedupe.has(key)) return;
+  patternMinerLogDedupe.set(key, now);
+  console.info(JSON.stringify({ event: label, ...payload }));
+}
+
+function hasPatternMinerPayload(snapshot: PatternMinerSnapshot) {
+  return Boolean(
+    snapshot.ranking.length ||
+      snapshot.hotStrategies.length ||
+      snapshot.entryAlerts.length ||
+      snapshot.formingAlerts.length ||
+      snapshot.scoreboard.totalValidated,
+  );
+}
+
+function mergePatternEntryAlerts(
+  computed: PatternMinerSnapshot,
+  incoming: PatternMinerSnapshot,
+): PatternMinerAlert[] {
+  const byStrategy = new Map<string, PatternMinerAlert>();
+  for (const alert of [...computed.entryAlerts, ...incoming.entryAlerts]) {
+    if (alert.kind !== "validated") continue;
+    const existing = byStrategy.get(alert.strategy.id);
+    if (!existing || (alert.strategy.assertiveness ?? 0) > (existing.strategy.assertiveness ?? 0)) {
+      byStrategy.set(alert.strategy.id, alert);
+    }
+  }
+  return [...byStrategy.values()].sort(
+    (left, right) => (right.strategy.assertiveness ?? 0) - (left.strategy.assertiveness ?? 0),
+  );
+}
+
+function mergePatternFormingAlerts(
+  computed: PatternMinerSnapshot,
+  incoming: PatternMinerSnapshot,
+): PatternMinerAlert[] {
+  const byId = new Map<string, PatternMinerAlert>();
+  for (const alert of [...computed.formingAlerts, ...incoming.formingAlerts]) {
+    const existing = byId.get(alert.id);
+    if (!existing || alert.progress > existing.progress) {
+      byId.set(alert.id, alert);
+    }
+  }
+  return [...byId.values()]
+    .sort((left, right) => {
+      if (left.progress !== right.progress) return right.progress - left.progress;
+      return (right.strategy.assertiveness ?? 0) - (left.strategy.assertiveness ?? 0);
+    })
+    .slice(0, 40);
+}
+
+function logPatternFormed(strategy: PatternMinerStrategy) {
+  logPatternEvent("[PATTERN_IA_SIGNAL_AUDIT]", `formed:${strategy.id}:${strategy.round_id}:${strategy.status}`, {
+    card: "Padrões IA",
+    module: "PADROES_IA",
+    pattern_signature: strategy.pattern_signature,
+    signal_id: strategy.signal_id || "",
+    event_id: strategy.event_id || "",
+    round_id: strategy.round_id ?? 0,
+    generated_at: strategy.generated_at,
+    dashboard_received: true,
+    card_rendered: false,
+    blocked_reason: strategy.blocked_reason || "",
+    normalized_signature: strategy.pattern_signature_normalized,
+    includes_tie: strategy.includes_tie,
+    tie_count: strategy.tie_count_in_pattern,
+    next_side: strategy.next_side || "",
+    occurrences: strategy.occurrences,
+    accuracy: strategy.accuracy ?? 0,
+    sg_count: strategy.sg_count,
+    g1_count: strategy.g1_count,
+    red_count: strategy.red_count,
+    tie_after_count: strategy.tie_after_count,
+    status: strategy.status,
+  });
+}
+
+function logPatternBlocked(strategy: PatternMinerStrategy, feedStatus = "") {
+  logPatternEvent("[PATTERN_IA_BLOCKED]", `blocked:${strategy.id}:${strategy.round_id}:${strategy.blocked_reason}`, {
+    pattern_signature: strategy.pattern_signature,
+    round_id: strategy.round_id ?? 0,
+    reason: strategy.blocked_reason || "",
+    red_count: strategy.red_count ?? strategy.red ?? 0,
+    accuracy: strategy.accuracy ?? 0,
+    occurrences: strategy.occurrences,
+    feedStatus,
+  });
+}
+
+function logPatternConfirmed(strategy: PatternMinerStrategy) {
+  logPatternEvent("[PATTERN_IA_CONFIRMED]", `confirmed:${strategy.signal_id}:${strategy.round_id}`, {
+    signal_id: strategy.signal_id || "",
+    event_id: strategy.event_id || "",
+    round_id: strategy.round_id ?? 0,
+    pattern_signature: strategy.pattern_signature,
+    entry_side: strategy.next_side || strategy.expectedResult || "",
+    accuracy: strategy.accuracy ?? 0,
+    red_count: strategy.red_count ?? strategy.red ?? 0,
+    current_gale: 0,
+    max_gale: 1,
+  });
+}
+
+function logPatternStaleGuard(strategy: PatternMinerStrategy, feedStatus: string) {
+  logPatternBlocked(strategy, feedStatus);
 }
 
 function stableStrategyId(sequence: string[]) {
