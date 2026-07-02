@@ -1703,8 +1703,8 @@ async function handleBillingRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "GET" && url.pathname === "/billing/subscription") {
-    refreshExpiredBillingForClient(auth.client);
-    await saveLiveState(env);
+    const changed = refreshExpiredBillingForClient(auth.client);
+    if (changed) void saveLiveState(env);
     return json({
       subscription: buildBillingOverview(auth.client),
       plans: liveSalesSettings.salesClosed ? [] : getBillingPlans(env),
@@ -2401,7 +2401,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      await saveLiveState(env);
+      void saveLiveState(env);
       const token = await issueSessionToken(
         env,
         {
@@ -2538,7 +2538,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     recordAccessEvent(client.enabled ? "client_login" : "client_pending_login", client);
     const access = await clientAccess(env, client, request);
-    await saveLiveState(env);
+    void saveLiveState(env);
     return json({ access });
   }
 
@@ -2690,7 +2690,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     }
 
     const access = await clientAccess(env, client, request, session);
-    await saveLiveState(env);
+    void saveLiveState(env);
     return json({ valid: true, access });
   }
 
