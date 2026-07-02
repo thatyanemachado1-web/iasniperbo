@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
@@ -288,36 +289,49 @@ function buildNeuralView(
 
 function NeuralEntryHistoryList({ history }: { history: NeuralEntryHistoryItem[] }) {
   const visible = history.slice(0, VISIBLE_ENTRY_HISTORY);
+  const latest = history[0];
+  const summaryHint = latest
+    ? `${entrySideHistoryLabel(latest)} ${entryResultLabel(latest.kind)}`
+    : "sem entradas";
 
   return (
-    <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[8px] font-black uppercase tracking-[0.08em] text-neon-purple/85">
-          Últimas entradas
+    <details className="group rounded-lg border border-white/8 bg-background/12 px-2 py-1">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 py-0.5 marker:content-none [&::-webkit-details-marker]:hidden">
+        <span className="flex min-w-0 items-center gap-1 text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/75">
+          <ChevronRight className="size-2.5 shrink-0 transition group-open:rotate-90" />
+          <span className="truncate">Entradas</span>
         </span>
-        <span className="text-[8px] font-semibold text-muted-foreground">
+        <span className="truncate text-[7px] font-semibold text-muted-foreground/60 group-open:hidden">
+          {history.length ? `${history.length} · ${summaryHint}` : summaryHint}
+        </span>
+        <span className="hidden text-[7px] font-semibold text-muted-foreground/60 group-open:inline">
           {history.length ? `${history.length} no ciclo` : "coletando"}
         </span>
+      </summary>
+
+      <div className="mt-1 border-t border-white/5 pt-1">
+        {visible.length ? (
+          <div className="max-h-20 space-y-0.5 overflow-y-auto pr-0.5">
+            {visible.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/8 px-1.5 py-0.5 text-[7.5px] font-semibold leading-tight"
+              >
+                <span className="min-w-0 truncate">
+                  <span className={sideClass(item.side)}>{entrySideHistoryLabel(item)}</span>{" "}
+                  <span className={entryResultClass(item.kind)}>{entryResultLabel(item.kind)}</span>
+                </span>
+                <span className="shrink-0 text-[7px] text-muted-foreground/70">:{item.minute}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="pb-0.5 text-[7.5px] font-semibold text-muted-foreground/70">
+            Sem greens, reds ou ties recentes.
+          </div>
+        )}
       </div>
-      {visible.length ? (
-        <div className="max-h-24 space-y-0.5 overflow-y-auto pr-0.5">
-          {visible.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/10 px-1.5 py-0.5 text-[8px] font-semibold leading-tight"
-            >
-              <span className="min-w-0 truncate">
-                <span className={sideClass(item.side)}>{entrySideHistoryLabel(item)}</span>{" "}
-                <span className={entryResultClass(item.kind)}>{entryResultLabel(item.kind)}</span>
-              </span>
-              <span className="shrink-0 text-[7px] text-muted-foreground/80">:{item.minute}</span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="text-[8px] font-semibold text-muted-foreground/80">Sem greens, reds ou ties recentes.</div>
-      )}
-    </div>
+    </details>
   );
 }
 
