@@ -134,6 +134,7 @@ function DashboardPage() {
         surfAlert={surfAlert}
         dailySurfMax={dailySurfMax}
         patternMinerSnapshot={patternMiner.snapshot}
+        patternMinerLifecycle={patternMiner.lifecycle}
         patternMinerIsUsingRealData={patternMiner.isUsingRealData}
         onModuleTogglesChange={setModuleToggles}
       />

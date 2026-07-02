@@ -1,8 +1,16 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { DashboardData, Round } from "@/types/dashboard";
-import type { PatternMinerHistoryLimit, PatternMinerSnapshot } from "@/types/patternMiner";
-import { DEFAULT_PATTERN_MINER_CONFIG } from "@/patternMiner/PatternMinerEngine";
+import type {
+  PatternIaLifecycleView,
+  PatternMinerHistoryLimit,
+  PatternMinerSnapshot,
+} from "@/types/patternMiner";
+import { DEFAULT_PATTERN_MINER_CONFIG, PatternMinerEngine } from "@/patternMiner/PatternMinerEngine";
 import { PatternMinerAgent } from "@/patternMiner/PatternMinerAgent";
+import {
+  logPatternIaRenderState,
+  resolvePatternIaLifecycle,
+} from "@/patternMiner/PatternMinerLifecycle";
 
 const SERVER_SNAPSHOT_MAX_LAG_MS = 120_000;
 
@@ -29,26 +37,51 @@ export function usePatternMiner({
   feedStatus,
   dashboardUpdatedAt,
 }: UsePatternMinerParams) {
+  const lifecycleRef = useRef<PatternIaLifecycleView | null>(null);
+
   const snapshot = useMemo(() => {
     if (!enabled || typeof window === "undefined") return buildEmptySnapshot(historyLimit);
+    const runtimeContext = {
+      feedStatus,
+      dashboardUpdatedAt,
+      serverSnapshotUpdatedAt: serverSnapshot?.updatedAt,
+    };
     const agent = new PatternMinerAgent({
       ...DEFAULT_PATTERN_MINER_CONFIG,
       historyLimit,
     });
-    const liveSnapshot = agent.scan(rounds);
-    if (serverSnapshot && shouldUseServerSnapshot(serverSnapshot, liveSnapshot, rounds, dashboardUpdatedAt, feedStatus)) {
-      return serverSnapshot;
+    const liveSnapshot = agent.scan(rounds, runtimeContext);
+    const mergedLive = serverSnapshot
+      ? PatternMinerEngine.mergeWithIncoming(liveSnapshot, serverSnapshot)
+      : liveSnapshot;
+
+    if (serverSnapshot && shouldPreferServerSnapshot(serverSnapshot, mergedLive, rounds, dashboardUpdatedAt, feedStatus)) {
+      return PatternMinerEngine.mergeWithIncoming(liveSnapshot, serverSnapshot);
     }
-    return liveSnapshot;
+    return mergedLive;
   }, [dashboardUpdatedAt, enabled, feedStatus, historyLimit, rounds, serverSnapshot]);
+
+  const lifecycle = useMemo(() => {
+    if (!enabled || typeof window === "undefined") {
+      return emptyLifecycle();
+    }
+    return resolvePatternIaLifecycle(snapshot, rounds);
+  }, [enabled, rounds, snapshot]);
+
+  useEffect(() => {
+    lifecycleRef.current = lifecycle;
+    if (!enabled) return;
+    logPatternIaRenderState(lifecycle, snapshot);
+  }, [enabled, lifecycle, snapshot]);
 
   return {
     snapshot,
+    lifecycle,
     isUsingRealData: enabled,
   } as const;
 }
 
-function shouldUseServerSnapshot(
+function shouldPreferServerSnapshot(
   serverSnapshot: PatternMinerSnapshot,
   liveSnapshot: PatternMinerSnapshot,
   rounds: Round[],
@@ -68,6 +101,14 @@ function shouldUseServerSnapshot(
   }
 
   if (rounds.length > 0 && serverSnapshot.analyzedRounds < Math.min(rounds.length, serverSnapshot.historyLimit)) {
+    return false;
+  }
+
+  const latestRound = rounds[rounds.length - 1];
+  const latestAlert = [...serverSnapshot.entryAlerts, ...serverSnapshot.formingAlerts]
+    .map((alert) => alert?.strategy)
+    .find(Boolean);
+  if (latestAlert?.round_id && latestRound && latestAlert.round_id < latestRound.id - 2) {
     return false;
   }
 
@@ -91,6 +132,20 @@ function hasSharedPatternMinerBank(serverSnapshot: PatternMinerSnapshot) {
 
 function snapshotList<T>(value: T[] | undefined) {
   return Array.isArray(value) ? value : [];
+}
+
+function emptyLifecycle(): PatternIaLifecycleView {
+  return {
+    active: null,
+    queueLength: 0,
+    resultStage: "pending_sg",
+    status: "AGUARDANDO PADRAO",
+    resultFlash: "none",
+    current_gale: 0,
+    max_gale: 1,
+    finalized: false,
+    entryHistory: [],
+  };
 }
 
 function buildEmptySnapshot(historyLimit: PatternMinerHistoryLimit): PatternMinerSnapshot {
@@ -120,6 +175,7 @@ function buildEmptySnapshot(historyLimit: PatternMinerHistoryLimit): PatternMine
     },
     analyzedRounds: 0,
     historyLimit,
+    runtimeStatus: "AGUARDANDO PADRAO",
     updatedAt: now,
   };
 }

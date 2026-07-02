@@ -8,7 +8,7 @@ import {
   DASHBOARD_MODULE_CARD_SLOT,
 } from "@/components/dashboard/dashboardModuleCardLayout";
 import type { DashboardData, ModuleToggles, SurfAlert } from "@/types/dashboard";
-import type { PatternMinerSnapshot } from "@/types/patternMiner";
+import type { PatternIaLifecycleView, PatternMinerSnapshot } from "@/types/patternMiner";
 import type { DailySurfMaxSnapshot } from "@/surf/DailySurfMaxEngine";
 
 export function DashboardMainCardsGrid({
@@ -16,6 +16,7 @@ export function DashboardMainCardsGrid({
   surfAlert,
   dailySurfMax,
   patternMinerSnapshot,
+  patternMinerLifecycle,
   patternMinerIsUsingRealData,
   onModuleTogglesChange,
 }: {
@@ -23,6 +24,7 @@ export function DashboardMainCardsGrid({
   surfAlert: SurfAlert;
   dailySurfMax: DailySurfMaxSnapshot;
   patternMinerSnapshot: PatternMinerSnapshot;
+  patternMinerLifecycle: PatternIaLifecycleView;
   patternMinerIsUsingRealData: boolean;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
 }) {
@@ -53,6 +55,7 @@ export function DashboardMainCardsGrid({
         <div className={DASHBOARD_MODULE_CARD_SLOT}>
           <HotPatternDashboardCard
             snapshot={patternMinerSnapshot}
+            lifecycle={patternMinerLifecycle}
             isUsingRealData={patternMinerIsUsingRealData}
           />
         </div>
