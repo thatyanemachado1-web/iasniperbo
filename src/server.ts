@@ -15,6 +15,7 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { DEFAULT_PATTERN_MINER_CONFIG, PatternMinerEngine } from "./patternMiner/PatternMinerEngine";
 import { SurfAnalyzerEngine } from "./surf/SurfAnalyzerEngine";
+import { TieRadarEngine } from "./tieRadar/TieRadarEngine";
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
@@ -12609,6 +12610,28 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     pickedSections.currentSurfAlert = SurfAnalyzerEngine.mergeWithIncoming(computedSurf, incomingSurf);
   }
 
+  const tieRoundSource = surfRoundSource;
+  if (acceptsCurrentCycle && tieRoundSource.length >= 3) {
+    const computedTie = TieRadarEngine.analyze(tieRoundSource, cycleDate);
+    const incomingTie = (pickedSections.currentTieAlert ??
+      incoming.currentTieAlert ??
+      incoming.tieAlert) as DashboardData["currentTieAlert"] | undefined;
+    const mergedTie = TieRadarEngine.mergeWithIncoming(computedTie, incomingTie);
+    pickedSections.currentTieAlert = mergedTie.alert;
+    if (mergedTie.tiePullers.length) {
+      const baseScoreboard = pickedSections.tieAlertScoreboard ?? currentDashboard.tieAlertScoreboard;
+      pickedSections.tieAlertScoreboard = {
+        ...(baseScoreboard ?? {
+          greenTieAlerts: 0,
+          expired: 0,
+          totalAlerts: 0,
+          assertiveness: 0,
+        }),
+        tiePullers: mergedTie.tiePullers,
+      };
+    }
+  }
+
   const patternRoundSource = surfRoundSource;
   if (acceptsCurrentCycle && patternRoundSource.length >= 6) {
     const computedPattern = PatternMinerEngine.analyzeFromHistory(
@@ -12688,7 +12711,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     currentSignal,
     lateSignalHold,
     currentTieAlert: normalizeTieAlert(
-      acceptsCurrentCycle ? incoming.currentTieAlert || incoming.tieAlert : {},
+      acceptsCurrentCycle ? pickedSections.currentTieAlert || incoming.currentTieAlert || incoming.tieAlert : {},
       currentDashboard.currentTieAlert,
     ),
     pressureSeries:
@@ -14348,7 +14371,14 @@ function normalizeTieAlert(value: unknown, fallback: DashboardData["currentTieAl
     status: ["active", "green", "expired"].includes(String(alert.status))
       ? (String(alert.status) as "active" | "green" | "expired")
       : fallback.status,
+    source: normalizeTieSource(alert.source || fallback.source),
   };
+}
+
+function normalizeTieSource(value: unknown) {
+  const source = String(value || "");
+  if (["engine", "publisher", "merged", "stale"].includes(source)) return source;
+  return undefined;
 }
 
 function normalizeRounds(rounds: unknown[], limit = 30) {
