@@ -62,7 +62,7 @@ type LeituraNeuralMiniCardProps = NeuralReading & {
 
 const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
-const HELD_NEURAL_ENTRY_MAX_MS = 180_000;
+const HELD_NEURAL_ENTRY_MAX_MS = 90_000;
 
 const SCANNING_READING: NeuralReading = {
   mode: "SCANNING",
@@ -87,25 +87,7 @@ export function LeituraNeuralMiniCard({
   neuralEntryLastResult,
   ...reading
 }: LeituraNeuralMiniCardProps) {
-  const incomingData = { ...SCANNING_READING, ...reading };
-  const activeEntryState = liveNeuralEntryState(neuralEntryState);
-  const [heldEntry, setHeldEntry] = useState<HeldNeuralEntry | null>(() =>
-    activeEntryState && !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
-      ? { state: activeEntryState, heldAt: Date.now() }
-      : null,
-  );
-  const visibleHeldEntry =
-    heldEntry &&
-    !neuralEntryResultMatchesState(neuralEntryLastResult, heldEntry.state) &&
-    !isHeldNeuralEntryExpired(heldEntry)
-      ? heldEntry.state
-      : null;
-  const visibleActiveEntry =
-    activeEntryState && !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
-      ? activeEntryState
-      : null;
-  const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
-  const data = neuralReadingForVisibleEntry(incomingData, visibleEntryState);
+  const data = { ...SCANNING_READING, ...reading };
   const mode = data.mode ?? "SCANNING";
   const hasNumber = typeof data.numero === "number" && Boolean(data.origem);
   const sg = optionalNumberFrom(data.greenSemGale);
@@ -125,11 +107,23 @@ export function LeituraNeuralMiniCard({
   const losingKey = losingNumberKey(data);
   const losingLabel = losingNumberLabel(data, losingKey);
   const activeNumberLabel = activeNumberDisplayLabel(data, losingKey);
+  const activeEntryState = liveNeuralEntryState(neuralEntryState);
+  const [heldEntry, setHeldEntry] = useState<HeldNeuralEntry | null>(() =>
+    activeEntryState ? { state: activeEntryState, heldAt: Date.now() } : null,
+  );
+  const visibleHeldEntry =
+    heldEntry &&
+    !neuralEntryResultMatchesState(neuralEntryLastResult, heldEntry.state) &&
+    !isHeldNeuralEntryExpired(heldEntry)
+      ? heldEntry.state
+      : null;
+  const visibleActiveEntry =
+    activeEntryState && !neuralEntryResultMatchesState(neuralEntryLastResult, activeEntryState)
+      ? activeEntryState
+      : null;
+  const visibleEntryState = visibleActiveEntry ?? visibleHeldEntry;
   const confirmedEntrySide = liveNeuralEntrySide(visibleEntryState);
   const liveEntry = Boolean(confirmedEntrySide);
-  const waitingFreshReading = hasNumber && !liveEntry && isBlockedWaitingNeuralReading(data);
-  const showNumberSnapshot = hasNumber && !waitingFreshReading;
-  const numberDisplayTone = neuralNumberDisplayTone(liveEntry, originBadge);
   const message = buildNeuralCopy(data);
   const statusKind = neuralStatusKind(data);
   const generalScore = buildGeneralScore(neuralScoreboard, data);
@@ -244,17 +238,12 @@ export function LeituraNeuralMiniCard({
         </div>
       </div>
 
-      {!showNumberSnapshot ? (
+      {!hasNumber ? (
         <div className="relative mt-2">
           <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
-            {waitingFreshReading ? "Aguardando nova leitura..." : "IA procurando números pagantes..."}
+            IA procurando números pagantes...
           </div>
           <TypingDots />
-          {waitingFreshReading ? (
-            <div className="mt-1.5 rounded-lg border border-neon-cyan/15 bg-background/35 px-2 py-1.5 text-[7.5px] font-semibold leading-tight text-muted-foreground sm:text-[8px]">
-              Numero antigo passou do limite de reds. Esperando outro numero da vez.
-            </div>
-          ) : null}
           <div
             className={cn(
               "mt-1.5 inline-flex max-w-full rounded-full border px-1.5 py-0.5 text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[7px]",
@@ -291,16 +280,16 @@ export function LeituraNeuralMiniCard({
                 side={originKind === "OPOSTO" ? data.losingSide ?? data.origem : data.origem}
               />
               <span className={cn("truncate text-[11px] font-extrabold", sideClass(data.origem))}>
-                {liveEntry ? (originKind === "OPOSTO" ? "perdido" : sideLabel(data.origem)) : "numero da vez"}
+                {originKind === "OPOSTO" ? "perdido" : sideLabel(data.origem)}
               </span>
             </span>
             <span
               className={cn(
                 "rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase leading-none tracking-[0.08em]",
-                numberDisplayTone.className,
+                originBadge.className,
               )}
             >
-              {numberDisplayTone.label}
+              {originBadge.label}
             </span>
           </div>
 
@@ -316,11 +305,11 @@ export function LeituraNeuralMiniCard({
                     : postTie
                       ? "Cor pos-empate"
                       : "Puxando"
-                  : "Numero da vez"}
+                  : "Ultima leitura"}
               </span>{" "}
               <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>{" "}
               <span className="text-[9px] text-muted-foreground/85">
-                {liveEntry ? `ate ${data.validade ?? "G1"}` : "em analise"}
+                {liveEntry ? `ate ${data.validade ?? "G1"}` : "sem entrada"}
               </span>
             </div>
           ) : (
@@ -338,25 +327,13 @@ export function LeituraNeuralMiniCard({
                 <MiniInfoLine label="Ultima rodada real" value={lastRoundLabel} />
               ) : null}
               {originKind === "OPOSTO" && losingLabel ? (
-                <MiniInfoLine
-                  label={liveEntry ? "Numero perdedor" : "Numero da vez"}
-                  value={losingLabel}
-                  valueClassName={sideClass(data.losingSide ?? data.origem)}
-                />
+                <MiniInfoLine label="Numero perdedor" value={losingLabel} valueClassName={sideClass(data.losingSide ?? data.origem)} />
               ) : null}
               {originKind === "OPOSTO" && losingKey ? (
-                <MiniInfoLine
-                  label={liveEntry ? "Numero Pagante Oposto" : "Leitura oposto"}
-                  value={losingKey}
-                  valueClassName={sideClass(data.losingSide ?? data.origem)}
-                />
+                <MiniInfoLine label="Numero Pagante Oposto" value={losingKey} valueClassName={sideClass(data.losingSide ?? data.origem)} />
               ) : null}
               {pullingSide ? (
-                <MiniInfoLine
-                  label={liveEntry ? "Puxando" : "Leitura"}
-                  value={sideLabel(pullingSide)}
-                  valueClassName={sideClass(pullingSide)}
-                />
+                <MiniInfoLine label="Puxando" value={sideLabel(pullingSide)} valueClassName={sideClass(pullingSide)} />
               ) : null}
               <div className="flex items-baseline justify-between gap-1">
                 <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
@@ -421,7 +398,7 @@ export function LeituraNeuralMiniCard({
                     : `Janela: ${data.paganteWindow} rodadas`}
                 </div>
               ) : null}
-              {liveEntry && data.paganteStatus && data.paganteStatus !== "VALIDO" ? (
+              {data.paganteStatus && data.paganteStatus !== "VALIDO" ? (
                 <div
                   className={cn(
                     "mt-1 truncate rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em]",
@@ -1256,44 +1233,6 @@ function activeNumberDisplayLabel(reading: NeuralReading, losingKey: string) {
   return typeof reading.numero === "number" ? String(reading.numero) : "--";
 }
 
-function neuralReadingForVisibleEntry(
-  fallback: NeuralReading,
-  entryState: NeuralEntryState | null | undefined,
-): NeuralReading {
-  if (!entryState) return fallback;
-
-  const snapshot = entryState.readingSnapshot ?? null;
-  const baseReading = snapshot ? { ...SCANNING_READING, ...snapshot } : fallback;
-  const expectedSide = normalizeNeuralSideKey(
-    entryState.expectedSide ??
-      entryState.entry_side ??
-      snapshot?.direcao ??
-      snapshot?.pullingSide ??
-      snapshot?.origem,
-  );
-
-  return {
-    ...baseReading,
-    mode: "ACTIVE",
-    numero:
-      typeof entryState.numero === "number"
-        ? entryState.numero
-        : typeof snapshot?.numero === "number"
-          ? snapshot.numero
-          : baseReading.numero,
-    origem: entryState.origem ?? snapshot?.origem ?? baseReading.origem,
-    origemTipo: entryState.origemTipo ?? snapshot?.origemTipo ?? baseReading.origemTipo,
-    direcao: expectedSide ?? snapshot?.direcao ?? baseReading.direcao,
-    pullingSide: expectedSide ?? snapshot?.pullingSide ?? baseReading.pullingSide ?? null,
-    validade: snapshot?.validade ?? baseReading.validade ?? "G1",
-    lastRoundReal: snapshot?.lastRoundReal ?? null,
-    losingSide: snapshot?.losingSide ?? null,
-    losingNumber: snapshot?.losingNumber ?? null,
-    oppositeKey: snapshot?.oppositeKey ?? null,
-    paganteStatus: "ENTRADA_ATIVA",
-  };
-}
-
 function neuralOriginKind(reading: NeuralReading) {
   if (reading.postTie || reading.origem === "TIE") return "TIE";
   return reading.origemTipo ?? "PAGANTE";
@@ -1316,20 +1255,6 @@ function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
     label: "Pagante",
     className: "border-success/35 bg-success/10 text-success",
   };
-}
-
-function neuralNumberDisplayTone(liveEntry: boolean, originBadge: ReturnType<typeof originBadgeFor>) {
-  if (liveEntry) return originBadge;
-  return {
-    label: "Analise",
-    className: "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
-  };
-}
-
-function isBlockedWaitingNeuralReading(reading: NeuralReading) {
-  const status = normalizeStatus(reading.paganteStatus);
-  const redCount = numberFrom(reading.reds ?? reading.erros);
-  return status.includes("BLOQUEADO MAIS DE 2 REDS") || redCount > 2;
 }
 
 function formatPercent(value: number | null) {
@@ -1394,47 +1319,6 @@ function liveNeuralEntryState(entryState: NeuralEntryState | null | undefined): 
   }
 
   return liveNeuralEntrySide(entryState) ? entryState : null;
-}
-
-function neuralEntryMatchesReading(
-  entryState: NeuralEntryState | null | undefined,
-  reading: NeuralReading,
-) {
-  if (!entryState) return false;
-  const readingKey = neuralReadingEntryKey(reading);
-  if (!readingKey) return false;
-
-  if (entryState.key === readingKey) return true;
-
-  const snapshot = entryState.readingSnapshot;
-  const numero =
-    typeof entryState.numero === "number"
-      ? entryState.numero
-      : typeof snapshot?.numero === "number"
-        ? snapshot.numero
-        : null;
-  const origem = normalizeNeuralSideKey(entryState.origem ?? snapshot?.origem);
-  const origemTipo = entryState.origemTipo ?? snapshot?.origemTipo ?? null;
-  const expectedSide = normalizeNeuralSideKey(
-    entryState.expectedSide ?? snapshot?.direcao ?? snapshot?.pullingSide ?? snapshot?.origem,
-  );
-
-  if (typeof numero !== "number" || !origem || !origemTipo || !expectedSide) return false;
-  return `${numero}:${origem}:${origemTipo}:${expectedSide}` === readingKey;
-}
-
-function neuralReadingEntryKey(reading: NeuralReading) {
-  if (typeof reading.numero !== "number") return "";
-  const origem = normalizeNeuralSideKey(reading.origem);
-  const origemTipo = reading.origemTipo ?? (reading.postTie || reading.origem === "TIE" ? "TIE" : null);
-  const expectedSide = normalizeNeuralSideKey(reading.direcao ?? reading.pullingSide ?? reading.origem);
-  if (!origem || !origemTipo || !expectedSide) return "";
-  return `${reading.numero}:${origem}:${origemTipo}:${expectedSide}`;
-}
-
-function normalizeNeuralSideKey(value: unknown): NeuralSide | null {
-  if (value === "BANKER" || value === "PLAYER" || value === "TIE") return value;
-  return null;
 }
 
 function neuralEntryResultMatchesState(
