@@ -255,6 +255,7 @@ function LoginPage() {
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setMode("login");
     setLoading(true);
     setNotice("");
     setPendingAccess(null);
@@ -267,11 +268,11 @@ function LoginPage() {
     try {
       const access = await checkClientAccess(email, password, LOGIN_REQUEST_TIMEOUT_MS);
       if (!access.registered) {
-        if (!salesClosed) setMode("register");
+        setMode("login");
         setNotice(
           salesClosed
             ? "Vagas encerradas no momento. Entre na fila de espera para a próxima abertura."
-            : "E-mail ainda não cadastrado. Faça seu cadastro para continuar.",
+            : "E-mail não encontrado. Confira se digitou corretamente. Se ainda não tem conta, use a aba Cadastro.",
         );
         return;
       }
@@ -296,11 +297,8 @@ function LoginPage() {
 
       window.location.assign("/app");
     } catch (err) {
-      const message = resolveLoginErrorMessage(err);
-      if (!salesClosed && shouldOpenRegisterForPasswordSetup(message)) {
-        setMode("register");
-      }
-      setNotice(message);
+      setMode("login");
+      setNotice(resolveLoginErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -1186,14 +1184,6 @@ function canEnterWhenSalesClosed(access: ClientAccess) {
 
 function isValidCheckoutEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function shouldOpenRegisterForPasswordSetup(message: string) {
-  const normalized = message
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase();
-  return normalized.includes("conta encontrada sem senha") || normalized.includes("crie sua senha");
 }
 
 function resolveLoginErrorMessage(error: unknown) {
