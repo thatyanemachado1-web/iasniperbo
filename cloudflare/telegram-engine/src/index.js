@@ -1,6 +1,7 @@
 const MODULE_KEYS = ["ai_patterns", "paying_numbers", "surf_alert", "ties_only", "validator"];
 const MAX_TELEGRAM_BUTTONS = 4;
 const DEFAULT_BUTTON_LABEL = "Abrir Sniper Bo IA";
+const DEFAULT_BUTTON_URL = "https://sniperbo.com/app";
 const ENGINE_SECRET_NAMES = [
   "ENGINE_API_SECRET",
   "TELEGRAM_ENGINE_SECRET",
@@ -48,7 +49,7 @@ const DEFAULT_MODULE_GREEN_TEMPLATES = {
   surf_alert:
     "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🟡 <b>{{tieResult}}</b>\n🛡️ <b>Proteção:</b> {{gale}}",
   validator:
     "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
@@ -96,7 +97,7 @@ const DEFAULT_MODULE_TIE_TEMPLATES = {
   surf_alert:
     "✅ <b>{{result}}</b>\n\n🌊 <b>Módulo:</b> {{module}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
   ties_only:
-    "✅ <b>{{result}}</b>\n\n🟡 <b>Empate confirmado</b>\n🛡️ <b>Proteção:</b> {{gale}}",
+    "✅ <b>{{result}}</b>\n\n🟡 <b>{{tieResult}}</b>\n🛡️ <b>Proteção:</b> {{gale}}",
   validator:
     "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
@@ -415,7 +416,7 @@ export class TelegramEngine {
         `<b>Canal:</b> ${escapeHtml(channel.name)}`,
       ].join("\n"),
       buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: channel.buttonLink,
+      buttonUrl: channelButtonLink(channel),
       parseMode: "HTML",
     });
     if (!result.ok) return json({ error: result.error }, result.status, this.env);
@@ -431,7 +432,7 @@ export class TelegramEngine {
       .filter((button) => button.enabled)
       .map((button) => ({
         label: String(button.label || DEFAULT_BUTTON_LABEL).trim().slice(0, 64),
-        url: normalizeUrl(String(button.url || channel.buttonLink || "")),
+        url: normalizeUrl(String(button.url || channelButtonLink(channel))),
       }))
       .filter((button) => button.label && button.url)
       .slice(0, MAX_TELEGRAM_BUTTONS);
@@ -439,6 +440,8 @@ export class TelegramEngine {
       botToken: await this.decryptToken(channel.botTokenCipher),
       chatId: channel.chatId,
       message,
+      buttonLabel: DEFAULT_BUTTON_LABEL,
+      buttonUrl: channelButtonLink(channel),
       buttons,
       parseMode: "HTML",
     });
@@ -534,11 +537,34 @@ export class TelegramEngine {
     );
     const signalKind = classifySignalKind(body, signalKey);
     const notificationResult = String(body.result || variables.result || "Aguardando resultado").trim() || "Aguardando resultado";
+    const notificationTieMultiplier = signalKind === "result"
+      ? tieMultiplierFromSignal(body, variables, notificationResult)
+      : "";
+    const displayNotificationResult = signalKind === "result"
+      ? formatTieNotificationResult(moduleKey, entry, notificationResult, notificationTieMultiplier)
+      : notificationResult;
     const notificationProtection = String(body.protection || variables.gale || "").trim();
     const channels = (targetUserId ? await this.channelsForUser(targetUserId) : await this.activeChannels())
       .filter((channel) => !targetChannelId || channel.id === targetChannelId);
     const sent = [];
     const blocked = [];
+
+    if (moduleKey === "validator") {
+      console.warn(JSON.stringify({
+        event: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS",
+        reason: "validator_requires_backend_saved_pattern",
+        user: maskUserId(targetUserId),
+        channelId: targetChannelId,
+        signalKey,
+        roundId,
+        activeChannels: channels.length,
+      }));
+      for (const channel of channels) {
+        console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, false, "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS", "")));
+        blocked.push({ channelId: channel.id, reason: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS" });
+      }
+      return json({ ok: true, sent, blocked }, 200, this.env);
+    }
 
     const sentChatCodes = new Set();
     for (const channel of channels) {
@@ -582,25 +608,34 @@ export class TelegramEngine {
       }
 
       const finalNotificationProtection = notificationProtection || formatGale(config.galeLimit);
-      const template = selectSignalTemplate(config, signalKind, notificationResult);
+      const template =
+        selectSignalTemplate(config, signalKind, displayNotificationResult) ||
+        (signalKind === "entry" ? DEFAULT_MODULE_TEMPLATES[moduleKey] || "" : "");
       const templateVariables = {
         ...variables,
+        channel: String(variables.channel ?? channel.name ?? ""),
+        round: String(variables.round ?? variables.roundNumber ?? roundId ?? ""),
+        roundId: String(variables.roundId ?? roundId ?? ""),
         entry: formatEntry(entry),
         entryLabel: formatEntryLabel(entry),
         entryCompact: formatEntryCompact(entry),
         module: moduleName(moduleKey),
         gale: finalNotificationProtection,
         protection: finalNotificationProtection,
-        result: notificationResult,
+        tieCoverage: String(variables.tieCoverage ?? variables.tie_coverage ?? config.tieCoverage ?? ""),
+        tieMultiplier: notificationTieMultiplier || String(variables.tieMultiplier ?? variables.tie_multiplier ?? ""),
+        tieResult: formatTieConfirmedLabel(displayNotificationResult, notificationTieMultiplier),
+        status: String(variables.status || displayNotificationResult || "CONFIRMADO"),
+        result: displayNotificationResult,
       };
-      const renderedMessage = !forceMessage && shouldRenderSignalTemplate(template, templateVariables)
-        ? renderTemplate(template, templateVariables)
+      const renderedMessage = !forceMessage && template
+        ? decorateTieResultMessage(renderTemplate(template, templateVariables), moduleKey, notificationTieMultiplier)
         : String(body.message || "");
       const message = formatTelegramMessageText(String(renderedMessage || body.message || renderTemplate("{{entry}}", templateVariables))).slice(0, 4096);
       const dedupeKeys = [`sent:${channel.userId}:${channel.id}:${moduleKey}:${signalKey}`];
       const entryDedupeKey = entrySignalDedupeKey(channel, moduleKey, roundId, entry, signalKind);
       if (entryDedupeKey) dedupeKeys.push(entryDedupeKey);
-      const resultDedupeKey = resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, notificationResult);
+      const resultDedupeKey = resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, displayNotificationResult);
       if (resultDedupeKey) dedupeKeys.push(resultDedupeKey);
       const recentDedupeKey = await recentMessageDedupeKey(channel, signalKind, message);
       if (recentDedupeKey) dedupeKeys.push(recentDedupeKey);
@@ -623,7 +658,7 @@ export class TelegramEngine {
         chatId: channel.chatId,
         message,
         buttonLabel: String(body.buttonLabel || DEFAULT_BUTTON_LABEL),
-        buttonUrl: channel.buttonLink,
+        buttonUrl: channelButtonLink(channel),
         buttons,
         parseMode: "HTML",
       });
@@ -647,7 +682,7 @@ export class TelegramEngine {
           galeLimit: config.galeLimit,
           coverTie: config.coverTie,
           tieCoverage: config.tieCoverage,
-          result: notificationResult,
+          result: displayNotificationResult,
           telegramMessageId: result.messageId || null,
           buttonCount: buttons.length,
           cloudflare: true,
@@ -1668,7 +1703,10 @@ function readPayingNumbersOfficialResult(dashboard) {
   const resultRoundKey = dashboardText(result.resultRoundKey || "");
   const resultRoundId = parseRoundIdFromKey(resultRoundKey) || clampInt(result.roundId ?? result.resultRoundId ?? 0, 0, Number.MAX_SAFE_INTEGER);
   const number = dashboardNumber(result.numero ?? snapshot.numero);
-  const tieMultiplier = dashboardNumber(result.tieMultiplier);
+  const tieMultiplier =
+    dashboardNumber(result.tieMultiplier) ||
+    inferTieMultiplierFromRound(result.resultRound || result.round || result) ||
+    inferTieMultiplierFromRound(snapshot);
   if (!entry) return { confirmed: false, reason: "result_missing_entry", status: outcome || kind, signalId: "" };
   if (!outcome && !kind) return { confirmed: false, reason: "result_missing_status", status: "", signalId: "" };
 
@@ -1721,7 +1759,7 @@ function readPayingNumbersOfficialResult(dashboard) {
 
 function payingNumbersResultLabel(outcome, kind, tieMultiplier) {
   if (outcome === "TIE" || kind === "tie_sg" || kind === "tie_g1") {
-    return tieMultiplier ? `Green no empate ${tieMultiplier}x` : "Green no empate";
+    return tieMultiplier ? `Empate ${tieMultiplier}x` : "Empate";
   }
   if (outcome === "RED" || kind === "red") return "Red";
   if (kind === "g1") return "Green G1";
@@ -1769,11 +1807,11 @@ function resolveOfficialNotificationResult(notification, rounds, config) {
     const resultSide = normalizeRoundSide(round.result ?? round.winner);
     if (!resultSide) continue;
     if (resultSide === "TIE") {
-      const tieMultiplier = dashboardNumber(round.tieMultiplier ?? round.tie_multiplier ?? round.multiplier);
+      const tieMultiplier = inferTieMultiplierFromRound(round);
       if (entry === "TIE" || coverTie) {
         return officialResolution({
           status: "green",
-          label: tieMultiplier ? `Green no empate ${tieMultiplier}x` : "Green no empate",
+          label: tieMultiplier ? `Empate ${tieMultiplier}x` : "Empate",
           protection: index === 0 ? "SG" : `G${index}`,
           entry,
           round,
@@ -1895,6 +1933,30 @@ function dashboardNumber(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "";
   return String(Math.trunc(number));
+}
+
+function inferTieMultiplierFromRound(round) {
+  const record = readRecord(round);
+  const explicit = dashboardNumber(record.tieMultiplier ?? record.tie_multiplier ?? record.multiplier ?? record.tiePayout);
+  if (explicit) return explicit;
+  if (normalizeRoundSide(record.result ?? record.winner ?? record.side) !== "TIE") return "";
+  const bankerScore = dashboardRoundScore(record, ["bankerScore", "banker_score", "banker", "bScore", "scoreBanker"]);
+  const playerScore = dashboardRoundScore(record, ["playerScore", "player_score", "player", "pScore", "scorePlayer"]);
+  if (!Number.isFinite(bankerScore) || bankerScore !== playerScore) return "";
+  if (bankerScore === 2 || bankerScore === 12) return "88";
+  if (bankerScore === 3 || bankerScore === 11) return "25";
+  if (bankerScore === 4 || bankerScore === 10) return "10";
+  if (bankerScore === 5 || bankerScore === 9) return "6";
+  if (bankerScore === 6 || bankerScore === 7 || bankerScore === 8) return "4";
+  return "";
+}
+
+function dashboardRoundScore(record, keys) {
+  for (const key of keys) {
+    const value = Number(record[key]);
+    if (Number.isFinite(value)) return Math.trunc(value);
+  }
+  return Number.NaN;
 }
 
 function dashboardText(value) {
@@ -2059,10 +2121,14 @@ function telegramButtonsForSignal(config, channel, body) {
     .filter((button) => button.enabled)
     .map((button) => ({
       label: String(button.label || DEFAULT_BUTTON_LABEL).trim().slice(0, 64),
-      url: normalizeUrl(String(button.url || channel.buttonLink || "")),
+      url: normalizeUrl(String(button.url || channelButtonLink(channel))),
     }))
     .filter((button) => button.label && button.url)
     .slice(0, MAX_TELEGRAM_BUTTONS);
+}
+
+function channelButtonLink(channel) {
+  return normalizeUrl(String(channel?.buttonLink || DEFAULT_BUTTON_URL)) || DEFAULT_BUTTON_URL;
 }
 
 function sanitizeTemplateRecord(value) {
@@ -2276,7 +2342,7 @@ async function handleTelegramEngineDoFallback(request, env, url, error = null) {
       chatId: emergencyChannel.chatId,
       message: String(body.message || "Teste Telegram V2"),
       buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeUrl(emergencyChannel.buttonLink),
+      buttonUrl: channelButtonLink(emergencyChannel),
       buttons: Array.isArray(body.buttons) ? body.buttons : [],
     });
     if (!result.ok) return json({ error: result.error }, result.status || 502, env);
@@ -2305,6 +2371,14 @@ async function handleTelegramEngineDoFallback(request, env, url, error = null) {
 
   if (degraded && request.method === "POST" && url.pathname === "/engine/signal") {
     const body = await readJson(request);
+    if (normalizeModuleKey(body.moduleKey || body.type) === "validator") {
+      console.warn(JSON.stringify({
+        event: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS",
+        reason: "validator_requires_backend_saved_pattern",
+        degraded: true,
+      }));
+      return json({ ok: true, sent: [], blocked: [{ channelId: emergencyChannel.id, reason: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS" }], degraded }, 200, env);
+    }
     const botToken =
       normalizeSecret(env.TELEGRAM_EMERGENCY_BOT_TOKEN) ||
       normalizeSecret(env.TELEGRAM_SMOKE_BOT_TOKEN) ||
@@ -2315,7 +2389,7 @@ async function handleTelegramEngineDoFallback(request, env, url, error = null) {
       chatId: emergencyChannel.chatId,
       message: String(body.message || "Sinal Telegram V2"),
       buttonLabel: "Abrir Sniper Bo IA",
-      buttonUrl: normalizeUrl(emergencyChannel.buttonLink),
+      buttonUrl: channelButtonLink(emergencyChannel),
       buttons: Array.isArray(body.buttons) ? body.buttons : [],
     });
     if (!result.ok) return json({ error: result.error }, result.status || 502, env);
@@ -2407,8 +2481,13 @@ function normalizeChannelCode(value) {
 function normalizeUrl(value) {
   const text = String(value || "").trim();
   if (!text) return "";
+  const normalized = text.startsWith("@")
+    ? `https://t.me/${text.slice(1)}`
+    : /^(t\.me|telegram\.me)\//i.test(text)
+      ? `https://${text}`
+      : text;
   try {
-    const url = new URL(text);
+    const url = new URL(normalized);
     return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
   } catch {
     return "";
@@ -2445,9 +2524,9 @@ function formatEntry(entry) {
 }
 
 function formatEntryLabel(entry) {
-  if (entry === "BANKER") return "Banker";
-  if (entry === "PLAYER") return "Player";
-  if (entry === "TIE") return "Tie";
+  if (entry === "BANKER") return "\u{1F534} BANKER";
+  if (entry === "PLAYER") return "\u{1F535} PLAYER";
+  if (entry === "TIE") return "\u{1F7E1} TIE";
   return "Automatico";
 }
 
@@ -2465,6 +2544,63 @@ function classifySignalKind(body, signalKey) {
   if (key.includes(":result:")) return "result";
   if (result && result !== "aguardando resultado" && result !== "aguardando") return "result";
   return "entry";
+}
+
+function tieMultiplierFromSignal(body, variables, result) {
+  const bodyRecord = readRecord(body);
+  const variableRecord = readRecord(variables);
+  const candidates = [
+    variableRecord.tieMultiplier,
+    variableRecord.tie_multiplier,
+    variableRecord.multiplier,
+    variableRecord.tiePayout,
+    variableRecord.tie_payout,
+    bodyRecord.tieMultiplier,
+    bodyRecord.tie_multiplier,
+    bodyRecord.multiplier,
+    bodyRecord.tiePayout,
+    result,
+    variableRecord.result,
+    bodyRecord.message,
+  ];
+  for (const candidate of candidates) {
+    const multiplier = normalizeTieMultiplierText(candidate);
+    if (multiplier) return multiplier;
+  }
+  return "";
+}
+
+function normalizeTieMultiplierText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const withSuffix = text.match(/\b(88|25|10|6|4)\s*x\b/i);
+  if (withSuffix) return `${withSuffix[1]}x`;
+  const plainNumber = text.match(/^(88|25|10|6|4)$/);
+  return plainNumber ? `${plainNumber[1]}x` : "";
+}
+
+function formatTieNotificationResult(moduleKey, entry, result, tieMultiplier) {
+  const text = String(result || "").trim() || "Empate";
+  if (!tieMultiplier) return text;
+  if (/\b(?:88|25|10|6|4)\s*x\b/i.test(text)) return text.replace(/\b(88|25|10|6|4)\s*x\b/i, "$1x");
+  const normalized = normalizeDedupeText(text);
+  const isTieResult = moduleKey === "ties_only" || entry === "TIE" || normalized.includes("empate") || normalized.includes("tie");
+  if (!isTieResult) return text;
+  if (normalized === "green" || normalized === "green_sg" || normalized === "empate" || normalized === "tie") {
+    return `Empate ${tieMultiplier}`;
+  }
+  if (normalized.includes("empate")) return text.replace(/empate/i, `Empate ${tieMultiplier}`);
+  return `Empate ${tieMultiplier}`;
+}
+
+function formatTieConfirmedLabel(result, tieMultiplier) {
+  const label = formatTieNotificationResult("ties_only", "TIE", result || "Empate", tieMultiplier);
+  return /confirmado/i.test(label) ? label : `${label} confirmado`;
+}
+
+function decorateTieResultMessage(message, moduleKey, tieMultiplier) {
+  if (moduleKey !== "ties_only" || !tieMultiplier) return message;
+  return String(message || "").replace(/\bEmpate confirmado\b/gi, `Empate ${tieMultiplier} confirmado`);
 }
 
 function selectSignalTemplate(config, signalKind, result) {
@@ -2631,6 +2767,9 @@ function restoreTelegramEmojiMarkers(value) {
     .replace(/\?{1,4}\s*(BANKER|Banker)\b/g, red + " $1")
     .replace(/\?{1,4}\s*(PLAYER|Player)\b/g, blue + " $1")
     .replace(/\?{1,4}\s*(TIE|Tie)\b/g, yellow + " $1")
+    .replace(/(<b>\s*Entrada:\s*<\/b>\s*)(BANKER|Banker)\b/g, `$1${red} BANKER`)
+    .replace(/(<b>\s*Entrada:\s*<\/b>\s*)(PLAYER|Player)\b/g, `$1${blue} PLAYER`)
+    .replace(/(<b>\s*Entrada:\s*<\/b>\s*)(TIE|Tie|Empate)\b/g, `$1${yellow} TIE`)
     .replace(/\u{1F534}\s*Banker\b/gu, "\u{1F534} BANKER")
     .replace(/\u{1F535}\s*Player\b/gu, "\u{1F535} PLAYER")
     .replace(/\u{1F7E1}\s*Tie\b/gu, "\u{1F7E1} TIE")

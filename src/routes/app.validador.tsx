@@ -199,7 +199,7 @@ const DEFAULT_TELEGRAM_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, strin
   ai_patterns: `\u2705 <b>{{result}}</b>\n\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   paying_numbers: `\u2705 <b>{{result}}</b>\n\n\u{1F48E} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   surf_alert: `\u2705 <b>{{result}}</b>\n\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
-  ties_only: `\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>Empate confirmado</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
+  ties_only: `\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>{{tieResult}}</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   validator: `\u2705 <b>{{result}}</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
 };
 const DEFAULT_TELEGRAM_ANALYZING_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
@@ -244,6 +244,25 @@ const DEFAULT_TELEGRAM_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string>
   ties_only: DEFAULT_TELEGRAM_GREEN_TEMPLATES.ties_only,
   validator: DEFAULT_TELEGRAM_GREEN_TEMPLATES.validator,
 };
+const VALIDATOR_PAGE_TABS = ["dashboard", "channels", "validator", "ai", "saved"] as const;
+type ValidatorPageTab = (typeof VALIDATOR_PAGE_TABS)[number];
+
+function normalizeValidatorPageTab(value: unknown): ValidatorPageTab {
+  const clean = String(value || "").replace(/^#/, "");
+  if (clean === "telegram") return "channels";
+  return VALIDATOR_PAGE_TABS.includes(clean as ValidatorPageTab) ? (clean as ValidatorPageTab) : "dashboard";
+}
+
+function readValidatorTabFromHash(): ValidatorPageTab {
+  if (typeof window === "undefined") return "dashboard";
+  return normalizeValidatorPageTab(window.location.hash);
+}
+
+function writeValidatorTabHash(tab: ValidatorPageTab) {
+  if (typeof window === "undefined") return;
+  const nextHash = tab === "channels" ? "#telegram" : tab === "dashboard" ? "" : `#${tab}`;
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
+}
 
 function NeuralValidatorPage() {
   const { data, mode } = useDashboardData();
@@ -252,7 +271,7 @@ function NeuralValidatorPage() {
   const hasClientSession = Boolean(session.clientToken);
   const adminAccess = Boolean(adminSession?.token && !hasClientSession);
   const fullAccess = adminAccess || hasFullAccess(session);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState<ValidatorPageTab>(() => readValidatorTabFromHash());
   const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
   const planLimits = adminAccess ? planLimitForSession("vip", true) : planLimitForSession(session.plan, fullAccess);
   const [serverHistory, setServerHistory] = useState<Round[]>([]);
@@ -347,6 +366,24 @@ function NeuralValidatorPage() {
         .join("|"),
     [channels],
   );
+
+  useEffect(() => {
+    const syncTabFromHash = () => {
+      setActiveTab((current) => {
+        const next = readValidatorTabFromHash();
+        return next === current ? current : next;
+      });
+    };
+    syncTabFromHash();
+    window.addEventListener("hashchange", syncTabFromHash);
+    return () => window.removeEventListener("hashchange", syncTabFromHash);
+  }, []);
+
+  function changeActiveTab(value: string) {
+    const next = normalizeValidatorPageTab(value);
+    setActiveTab(next);
+    writeValidatorTabHash(next);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -675,21 +712,21 @@ function NeuralValidatorPage() {
 
   async function sendLiveHitToTelegram(hit: LiveValidatorHit) {
     const patternItem = hit.pattern;
-    if (patternItem.destination === "disabled" || patternItem.destination === "monitor") {
-      showNotice("Padrao detectado no site. Telegram nao enviado porque o destino esta monitorar/desativado.");
+    const shouldForwardToTelegram = patternItem.destination === "telegram" || patternItem.destination === "site_telegram";
+    if (!shouldForwardToTelegram) {
+      showNotice("Padrao detectado no site. Telegram nao enviado porque o destino nao e Telegram.");
       return;
     }
-    const channel = channels.find((item) => item.id === patternItem.telegramChannelId) ||
-      channels.find((item) => item.isActive && item.chatId) ||
-      channels[0];
+    const channel = channels.find((item) => item.id === patternItem.telegramChannelId);
     if (!channel || !channel.isActive) {
       console.info("[VALIDATOR_LIVE_HIT] blocked", {
-        reason: "no_active_channel",
+        reason: patternItem.telegramChannelId ? "pattern_channel_inactive" : "pattern_without_telegram_channel",
         patternId: patternItem.id,
+        channelId: patternItem.telegramChannelId,
         detectedRoundId: hit.detectedRoundId,
         channels: channels.length,
       });
-      showNotice("Padrao detectado no site. Telegram nao enviado: nenhum canal ativo.");
+      showNotice("Padrao detectado no site. Telegram nao enviado: padrao sem canal ativo vinculado.");
       return;
     }
 
@@ -729,7 +766,6 @@ function NeuralValidatorPage() {
       await postValidatorLiveHitTelegram({
         patternId: patternItem.id,
         detectedRoundId: hit.detectedRoundId,
-        pattern: patternItem,
       });
       markTelegramNotificationSent(sendKey);
       console.info("[VALIDATOR_LIVE_HIT] sent", {
@@ -827,7 +863,7 @@ function NeuralValidatorPage() {
     channel: ValidatorNotificationChannel,
     patch: Partial<ValidatorNotificationChannel>,
   ) {
-    const updated = {
+    const updated: ValidatorNotificationChannel = {
       ...channel,
       ...patch,
       templates: {
@@ -837,13 +873,23 @@ function NeuralValidatorPage() {
       },
       updatedAt: new Date().toISOString(),
     };
+    const optimisticChannel = markServerConfirmedChannel(updated);
+    applyChannelUpdate(optimisticChannel);
+    const modulePatchPayload = {
+      signalModules: updated.signalModules,
+      templates: {
+        ...(updated.templates as unknown as Record<string, unknown>),
+        signalModules: updated.signalModules,
+      },
+      isActive: updated.isActive,
+    };
     const savePromise =
       patch.signalModules && telegramChannelCanUpdateModules(channel)
         ? fetch(`/telegram/channels/${encodeURIComponent(channel.id)}`, {
             method: "PATCH",
             cache: "no-store",
             headers: validatorApiHeaders(true),
-            body: JSON.stringify({ channel: { signalModules: updated.signalModules, isActive: updated.isActive } }),
+            body: JSON.stringify({ channel: modulePatchPayload }),
           }).then(async (response) => {
             const data = (await response.json().catch(() => null)) as { channel?: ValidatorNotificationChannel; error?: string } | null;
             if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou a atualizacao.");
@@ -854,6 +900,7 @@ function NeuralValidatorPage() {
     void savePromise
       .then((serverChannel) => setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(serverChannel)))))
       .catch((error) => {
+        applyChannelUpdate(channel);
         showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a atualizacao.");
       });
   }
@@ -1059,7 +1106,7 @@ function NeuralValidatorPage() {
         </GlassCard>
       )}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={changeActiveTab} className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-5">
           <TabsTrigger value="dashboard" className="gap-1.5"><Activity className="size-3.5" /> Dashboard</TabsTrigger>
           <TabsTrigger value="channels" className="gap-1.5"><Send className="size-3.5" /> Central Telegram</TabsTrigger>
@@ -2140,7 +2187,9 @@ function TelegramModuleConfigPanel({
     setValidationError(error);
     setPreviewStatus("");
     if (error) return;
-    onSave(draft);
+    const sanitizedDraft = sanitizeTelegramModuleConfigForSave(draft);
+    setDraft(sanitizedDraft);
+    onSave(sanitizedDraft);
   }
 
   async function sendPreview() {
@@ -2148,11 +2197,17 @@ function TelegramModuleConfigPanel({
     setValidationError(error);
     setPreviewStatus("");
     if (error) return;
+    const buttonError = validateTelegramModuleButtons(draft.buttons);
+    if (buttonError) {
+      setValidationError(buttonError);
+      return;
+    }
     setPreviewing(true);
     try {
+      const previewDraft = sanitizeTelegramModuleConfigForSave(draft);
       await onPreview(
         `[PRÉVIA DE TESTE]\n${telegramModulePreview(moduleKey, { ...draft, template: activeTemplate })}`,
-        normalizeTelegramModuleButtons(draft.buttons),
+        normalizeTelegramModuleButtons(previewDraft.buttons),
       );
       setPreviewStatus("Previa enviada no Telegram.");
     } catch (error) {
@@ -3075,6 +3130,36 @@ function patchTelegramModuleButton(
   ));
 }
 
+function sanitizeTelegramModuleConfigForSave(
+  config: ValidatorTelegramModuleConfig,
+): ValidatorTelegramModuleConfig {
+  return {
+    ...config,
+    buttons: normalizeTelegramModuleButtons(config.buttons).map((button) => ({
+      enabled: Boolean(button.enabled),
+      label: (button.label.trim() || DEFAULT_TELEGRAM_BUTTON_LABEL).slice(0, 64),
+      url: normalizeTelegramButtonUrlForSave(button.url),
+    })),
+  };
+}
+
+function normalizeTelegramButtonUrlForSave(value: string) {
+  const clean = value.trim();
+  if (!clean) return "";
+  const withProtocol = clean.startsWith("@")
+    ? `https://t.me/${clean.slice(1)}`
+    : /^(t\.me|telegram\.me)\//i.test(clean)
+      ? `https://${clean}`
+      : clean;
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
 function telegramTemplateOptionsForModule(config: ValidatorTelegramModuleConfig) {
   const options: Array<{ key: ValidatorTelegramTemplateKey; label: string }> = [
     { key: "entry", label: "Entrada" },
@@ -3136,7 +3221,7 @@ function telegramTemplateVariablesForModule(
   key: ValidatorTelegramModuleKey,
   templateKey: ValidatorTelegramTemplateKey,
 ) {
-  const common = ["module", "table", "entry", "entryLabel", "entryCompact", "gale", "protection", "result", "time", "round", "confidence", "percentage", "channel", "tieCoverage", "tieProtection"];
+  const common = ["module", "table", "entry", "entryLabel", "entryCompact", "gale", "protection", "result", "time", "round", "confidence", "percentage", "channel", "tieCoverage", "tieProtection", "tieResult"];
   const byModule: Record<ValidatorTelegramModuleKey, string[]> = {
     ai_patterns: ["pattern", "score", "side", "status", "risk"],
     paying_numbers: ["numbers", "number", "side", "score", "status", "risk", "level"],
@@ -3152,6 +3237,30 @@ function validateTelegramModuleConfig(key: ValidatorTelegramModuleKey, config: V
   for (const option of telegramTemplateOptionsForModule(config)) {
     const error = validateTelegramTemplate(key, option.key, getTelegramModuleTemplate(config, option.key));
     if (error) return `${option.label}: ${error}`;
+  }
+  const buttonError = validateTelegramModuleButtons(config.buttons);
+  if (buttonError) return buttonError;
+  return "";
+}
+
+function validateTelegramModuleButtons(buttons: ValidatorTelegramButtonConfig[]) {
+  const normalized = normalizeTelegramModuleButtons(buttons);
+  for (const [index, button] of normalized.entries()) {
+    if (!button.enabled) continue;
+    const url = button.url.trim();
+    if (!url) return `Botao ${index + 1}: informe o link do botao.`;
+    const normalizedUrl = normalizeTelegramButtonUrlForSave(url);
+    if (!normalizedUrl) {
+      return `Botao ${index + 1}: link invalido. Use http, https, t.me ou @canal.`;
+    }
+    try {
+      const parsed = new URL(normalizedUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return `Botao ${index + 1}: link invalido. Use http, https, t.me ou @canal.`;
+      }
+    } catch {
+      return `Botao ${index + 1}: link invalido. Use http, https, t.me ou @canal.`;
+    }
   }
   return "";
 }
@@ -3259,8 +3368,9 @@ function telegramModulePreview(key: ValidatorTelegramModuleKey, config: Validato
     time: "14:32",
     round: "123456",
     module: moduleDisplayName(key),
-    result: "Green G1",
+    result: key === "ties_only" ? "Empate 4x" : "Green G1",
     tieMultiplier: "4x",
+    tieResult: "Empate 4x confirmado",
   };
   const message = config.template.replace(/{{\s*([a-zA-Z_]+)\s*}}/g, (_, variable: string) => variables[variable] ?? "");
   const activeButtons = normalizeTelegramModuleButtons(config.buttons).filter((button) => button.enabled);
@@ -3579,7 +3689,6 @@ async function previewServerValidatorChannel(
 async function postValidatorLiveHitTelegram(payload: {
   patternId: string;
   detectedRoundId: number;
-  pattern?: SavedValidatorPattern;
 }) {
   const response = await fetch("/validator/live-hit/send", {
     method: "POST",
