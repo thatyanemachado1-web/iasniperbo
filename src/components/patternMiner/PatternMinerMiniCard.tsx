@@ -48,7 +48,7 @@ export function PatternMinerMiniCard({
             <LivePatternStatusBlock alert={confirmedAlert} />
           ) : monitoringStrategy ? (
             <MonitoringPatternBlock
-              strategy={monitoringStrategy}
+              alert={monitoringAlert}
               isUsingRealData={isUsingRealData}
             />
           ) : (
@@ -137,12 +137,13 @@ function PatternLiveStatusHeader({
 }
 
 function MonitoringPatternBlock({
-  strategy,
+  alert,
   isUsingRealData,
 }: {
-  strategy: PatternMinerStrategy;
+  alert: PatternMinerAlert;
   isUsingRealData: boolean;
 }) {
+  const strategy = alert.strategy;
   const side = strategy.next_side ?? strategy.expectedResult;
   const nextSide = side ? formatPulledSide(side) : "Sem tendencia";
   const accuracy = normalizedPercent(
@@ -150,11 +151,13 @@ function MonitoringPatternBlock({
   );
   const redOk = strategy.red_count <= 2;
   const sampleOk = !strategy.insufficientSample && strategy.occurrences >= 3 && strategy.totalValidated >= 2;
+  const visibleSequence = visibleMonitoringSequence(alert);
+  const isCompleteMatch = isCompleteLivePattern(alert);
 
   return (
     <div className="mt-1 w-full rounded-xl border border-neon-cyan/18 bg-background/25 px-2.5 py-2">
       <div className="min-w-0">
-        <PatternSequence sequence={strategy.sequence} compact showSideLetters={false} />
+        <PatternSequence sequence={visibleSequence} compact showSideLetters={false} />
       </div>
 
       <div className="mt-1 rounded-lg border border-neon-cyan/12 bg-background/20 px-2 py-1 text-[9px]">
@@ -170,7 +173,14 @@ function MonitoringPatternBlock({
           <MiniMeta label="RD" value={strategy.red_count} />
         </div>
         <div className="mt-1 text-[8px] leading-snug text-muted-foreground">
-          {entryReadinessText({ accuracy, redOk, sampleOk, hasSide: Boolean(side), isUsingRealData })}
+          {entryReadinessText({
+            accuracy,
+            redOk,
+            sampleOk,
+            hasSide: Boolean(side),
+            isUsingRealData,
+            isCompleteMatch,
+          })}
         </div>
       </div>
     </div>
@@ -343,19 +353,42 @@ function entryReadinessText({
   sampleOk,
   hasSide,
   isUsingRealData,
+  isCompleteMatch = true,
 }: {
   accuracy: number | undefined;
   redOk: boolean;
   sampleOk: boolean;
   hasSide: boolean;
   isUsingRealData: boolean;
+  isCompleteMatch?: boolean;
 }) {
   if (!isUsingRealData) return "Aguardando feed real para confirmar entrada.";
   if (!hasSide) return "Aguardando puxar PLAYER, BANKER ou TIE.";
   if (!sampleOk) return "Aguardando amostra valida para confirmar.";
   if (!redOk) return "Bloqueia acima de 2 reds.";
+  if (!isCompleteMatch) return "Analisando padroes do momento.";
   if (accuracy === undefined || accuracy < 99.995) return "Aguardando assertividade 100%.";
   return "Pronto para virar Entrada Confirmada no sinal atual.";
+}
+
+function visibleMonitoringSequence(alert: PatternMinerAlert) {
+  const sequence = alert.strategy.sequence;
+  if (!sequence.length) return sequence;
+  if (isCompleteLivePattern(alert)) return sequence;
+
+  const matchedByRounds = Array.isArray(alert.matchedRounds) ? alert.matchedRounds.length : 0;
+  const matchedByMissing = sequence.length - alert.missingTokens.length;
+  const matchedByProgress =
+    typeof alert.progress === "number" && Number.isFinite(alert.progress)
+      ? Math.round(alert.progress * sequence.length)
+      : 0;
+  const visibleCount = Math.max(1, Math.min(sequence.length, matchedByRounds || matchedByMissing || matchedByProgress));
+
+  return sequence.slice(0, visibleCount);
+}
+
+function isCompleteLivePattern(alert: PatternMinerAlert) {
+  return alert.progress >= 1 && alert.missingTokens.length === 0;
 }
 
 function MiniMeta({ label, value }: { label: string; value: string | number }) {
