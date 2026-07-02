@@ -1,3 +1,4 @@
+import { MobileCardDetailsTrigger } from "@/components/dashboard/MobileCardDetailsTrigger";
 import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
 import {
   DASHBOARD_MODULE_CARD_BODY,
@@ -30,6 +31,7 @@ export function TieAlertCard({
   onModuleTogglesChange,
   locked,
   compact = false,
+  essentialOnly = false,
   className,
 }: {
   alert: TieAlert;
@@ -40,6 +42,7 @@ export function TieAlertCard({
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
   locked?: boolean;
   compact?: boolean;
+  essentialOnly?: boolean;
   className?: string;
 }) {
   const enabled = toggles?.tieAlert !== false;
@@ -84,32 +87,66 @@ export function TieAlertCard({
         <div className={cn(DASHBOARD_MODULE_CARD_BODY, "transition duration-200", !enabled && "opacity-45 saturate-50")}>
           <div className={cn("rounded-xl border px-3 py-2.5 text-center", view.panelClass)}>
             <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>{view.action}</div>
-            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              {view.headline}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-            <TieStatChip label="Força" value={`${alert.confidence}%`} tone={view.badgeTone === "green" ? "green" : "amber"} />
-            <TieStatChip label="Validade" value={`${alert.validityRounds}r`} tone="muted" />
-            <TieStatChip label="Nível" value={normalizeRiskLabel(alert.level)} tone={view.badgeTone === "green" ? "green" : "amber"} />
-          </div>
-
-          <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Puxador · reseta 00:00 (BR)</div>
-            <div className="mt-0.5 font-semibold text-foreground">
-              {mainTiePuller ? tiePullerSummary(mainTiePuller) : "Coletando numeros puxadores"}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-5 gap-1">
-            {multipliers.map((item) => (
-              <div key={item.label} className="rounded-md border border-white/10 bg-secondary/20 px-1 py-0.5 text-center">
-                <div className="text-[8px] font-black text-muted-foreground">{item.label}</div>
-                <div className="text-[10px] font-black">{item.value}</div>
+            {!essentialOnly && (
+              <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                {view.headline}
               </div>
-            ))}
+            )}
           </div>
+
+          {essentialOnly ? (
+            <MobileCardDetailsTrigger
+              title="Radar de Empate"
+              description="Força, puxadores, multiplicadores e histórico do Tie."
+            >
+              <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
+                <TieStatChip label="Força" value={`${alert.confidence}%`} tone={view.badgeTone === "green" ? "green" : "amber"} />
+                <TieStatChip label="Validade" value={`${alert.validityRounds}r`} tone="muted" />
+                <TieStatChip label="Nível" value={normalizeRiskLabel(alert.level)} tone={view.badgeTone === "green" ? "green" : "amber"} />
+              </div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                {view.headline}
+              </div>
+              <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+                <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Puxador · reseta 00:00 (BR)</div>
+                <div className="mt-0.5 font-semibold text-foreground">
+                  {mainTiePuller ? tiePullerSummary(mainTiePuller) : "Coletando numeros puxadores"}
+                </div>
+              </div>
+              <div className="grid grid-cols-5 gap-1">
+                {multipliers.map((item) => (
+                  <div key={item.label} className="rounded-md border border-tie/20 bg-tie/8 px-1 py-0.5 text-center">
+                    <div className="text-[8px] font-black text-tie">{item.label}</div>
+                    <div className="text-[10px] font-black">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+            </MobileCardDetailsTrigger>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
+                <TieStatChip label="Força" value={`${alert.confidence}%`} tone={view.badgeTone === "green" ? "green" : "amber"} />
+                <TieStatChip label="Validade" value={`${alert.validityRounds}r`} tone="muted" />
+                <TieStatChip label="Nível" value={normalizeRiskLabel(alert.level)} tone={view.badgeTone === "green" ? "green" : "amber"} />
+              </div>
+
+              <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+                <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Puxador · reseta 00:00 (BR)</div>
+                <div className="mt-0.5 font-semibold text-foreground">
+                  {mainTiePuller ? tiePullerSummary(mainTiePuller) : "Coletando numeros puxadores"}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-5 gap-1">
+                {multipliers.map((item) => (
+                  <div key={item.label} className="rounded-md border border-tie/20 bg-tie/8 px-1 py-0.5 text-center">
+                    <div className="text-[8px] font-black text-tie">{item.label}</div>
+                    <div className="text-[10px] font-black">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
         </div>
 
@@ -441,9 +478,9 @@ function buildTieView(
       headline: mainTiePuller
         ? `${tiePullerSummary(mainTiePuller)} · Validade ${alert.validityRounds}r`
         : `Pressão alta · Validade ${alert.validityRounds} rodadas`,
-      actionClass: "text-warning",
-      panelClass: "border-warning/35 bg-warning/10",
-      borderClass: "border-warning/30",
+      actionClass: "text-tie",
+      panelClass: "border-tie/35 bg-tie/10",
+      borderClass: "border-tie/30",
     };
   }
 
@@ -598,9 +635,9 @@ function sideShortLabel(side: TiePullerStat["side"]) {
 }
 
 function sideTextClass(side: TiePullerStat["side"]) {
-  if (side === "B") return "text-destructive";
-  if (side === "P") return "text-neon-blue";
-  return "text-warning";
+  if (side === "B") return "text-banker";
+  if (side === "P") return "text-player";
+  return "text-tie";
 }
 
 function normalizeRisk(level: TieAlert["level"]) {

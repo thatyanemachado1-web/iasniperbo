@@ -7,8 +7,13 @@ import {
   DASHBOARD_MODULE_CARD_FILL,
   DASHBOARD_MODULE_CARD_ROOT,
 } from "@/components/dashboard/dashboardModuleCardLayout";
+import { MobileCardDetailsTrigger } from "@/components/dashboard/MobileCardDetailsTrigger";
 import { cn } from "@/lib/utils";
-import { dashboardSideTextClass } from "@/lib/sideColors";
+import {
+  dashboardSideBorderClass,
+  dashboardSidePanelClass,
+  dashboardSideTextClass,
+} from "@/lib/sideColors";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import type {
   NeuralEntryLastResult,
@@ -36,6 +41,9 @@ interface NeuralEntryHistoryItem extends NeuralEntryDisplayResult {
 type LeituraNeuralCardProps = NeuralReading & {
   className?: string;
   greenFlash?: boolean;
+  tieFlash?: boolean;
+  redFlash?: boolean;
+  essentialOnly?: boolean;
   neuralScoreboard?: NeuralScoreboard;
   rounds?: Round[];
   neuralEntryState?: NeuralEntryState | null;
@@ -52,6 +60,9 @@ const VISIBLE_ENTRY_HISTORY = 6;
 export function LeituraNeuralMiniCard({
   className,
   greenFlash = false,
+  tieFlash = false,
+  redFlash = false,
+  essentialOnly = false,
   neuralScoreboard,
   rounds,
   neuralEntryState,
@@ -112,6 +123,8 @@ export function LeituraNeuralMiniCard({
         DASHBOARD_MODULE_CARD_ROOT,
         view.borderClass,
         greenFlash && "result-green-flash",
+        tieFlash && "result-tie-flash",
+        redFlash && "result-red-flash",
         className,
       )}
       aria-label="Leitura neural de números pagantes"
@@ -150,54 +163,107 @@ export function LeituraNeuralMiniCard({
         ) : (
           <div className={cn("rounded-xl border px-3 py-2.5 text-center", view.panelClass)}>
             <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>{view.action}</div>
-            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              {view.headline}
-            </div>
+            {!essentialOnly && (
+              <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                {view.headline}
+              </div>
+            )}
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-          <NeuralStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
-          <NeuralStatChip
-            label="Número"
-            value={hasNumber ? formatNeuralNumber(data) : "--"}
-            tone={hasNumber ? view.numberTone : "muted"}
-          />
-          <NeuralStatChip label="Validade" value={data.validade ?? "G1"} tone="muted" />
-        </div>
-
-        <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-          <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
-            Placar geral · reseta 00:00 (BR)
-          </div>
-          <div className="mt-0.5 font-semibold text-foreground">
-            SG {formatCount(generalScore.sg)} · G1 {formatCount(generalScore.g1)} · RD{" "}
-            {formatCount(generalScore.reds)} · {formatPercent(generalScore.accuracy)}
-          </div>
-        </div>
-
-        {hasNumber && pullingSide ? (
-          <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px]">
-            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Leitura ativa</div>
-            <div className="mt-0.5 font-semibold text-foreground">
-              <span className={sideClass(data.origem)}>{formatNeuralNumber(data)}</span>
-              {" · puxando "}
-              <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>
-              {data.origemTipo === "OPOSTO" ? " · gatilho oposto" : data.postTie ? " · pós-empate" : ""}
+        {essentialOnly ? (
+          <MobileCardDetailsTrigger
+            title="Leitura Neural"
+            description="Placar, histórico e leitura ativa do módulo neural."
+          >
+            <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
+              <NeuralStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
+              <NeuralStatChip
+                label="Número"
+                value={hasNumber ? formatNeuralNumber(data) : "--"}
+                tone={hasNumber ? view.numberTone : "muted"}
+              />
+              <NeuralStatChip label="Validade" value={data.validade ?? "G1"} tone="muted" />
             </div>
-          </div>
-        ) : null}
+            <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+              <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
+                Placar geral · reseta 00:00 (BR)
+              </div>
+              <div className="mt-0.5 font-semibold text-foreground">
+                SG {formatCount(generalScore.sg)} · G1 {formatCount(generalScore.g1)} · RD{" "}
+                {formatCount(generalScore.reds)} · {formatPercent(generalScore.accuracy)}
+              </div>
+            </div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              {view.headline}
+            </div>
+            {hasNumber && pullingSide ? (
+              <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px]">
+                <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Leitura ativa</div>
+                <div className="mt-0.5 font-semibold text-foreground">
+                  <span className={sideClass(data.origem)}>{formatNeuralNumber(data)}</span>
+                  {" · puxando "}
+                  <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>
+                  {data.origemTipo === "OPOSTO" ? " · gatilho oposto" : data.postTie ? " · pós-empate" : ""}
+                </div>
+              </div>
+            ) : null}
+            {neuralEntryState?.expectedSide && !entryResult ? (
+              <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1 text-[9px] text-muted-foreground">
+                Entrada oficial:{" "}
+                <span className={sideClass(neuralEntryState.expectedSide)}>
+                  {sideLabel(neuralEntryState.expectedSide)}
+                </span>
+              </div>
+            ) : null}
+            <NeuralEntryHistoryList history={entryHistory} expanded />
+          </MobileCardDetailsTrigger>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
+              <NeuralStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
+              <NeuralStatChip
+                label="Número"
+                value={hasNumber ? formatNeuralNumber(data) : "--"}
+                tone={hasNumber ? view.numberTone : "muted"}
+              />
+              <NeuralStatChip label="Validade" value={data.validade ?? "G1"} tone="muted" />
+            </div>
 
-        {neuralEntryState?.expectedSide && !entryResult ? (
-          <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1 text-[9px] text-muted-foreground">
-            Entrada oficial:{" "}
-            <span className={sideClass(neuralEntryState.expectedSide)}>
-              {sideLabel(neuralEntryState.expectedSide)}
-            </span>
-          </div>
-        ) : null}
+            <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+              <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
+                Placar geral · reseta 00:00 (BR)
+              </div>
+              <div className="mt-0.5 font-semibold text-foreground">
+                SG {formatCount(generalScore.sg)} · G1 {formatCount(generalScore.g1)} · RD{" "}
+                {formatCount(generalScore.reds)} · {formatPercent(generalScore.accuracy)}
+              </div>
+            </div>
 
-        <NeuralEntryHistoryList history={entryHistory} />
+            {hasNumber && pullingSide ? (
+              <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px]">
+                <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Leitura ativa</div>
+                <div className="mt-0.5 font-semibold text-foreground">
+                  <span className={sideClass(data.origem)}>{formatNeuralNumber(data)}</span>
+                  {" · puxando "}
+                  <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>
+                  {data.origemTipo === "OPOSTO" ? " · gatilho oposto" : data.postTie ? " · pós-empate" : ""}
+                </div>
+              </div>
+            ) : null}
+
+            {neuralEntryState?.expectedSide && !entryResult ? (
+              <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1 text-[9px] text-muted-foreground">
+                Entrada oficial:{" "}
+                <span className={sideClass(neuralEntryState.expectedSide)}>
+                  {sideLabel(neuralEntryState.expectedSide)}
+                </span>
+              </div>
+            ) : null}
+
+            <NeuralEntryHistoryList history={entryHistory} />
+          </>
+        )}
         <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
       </div>
     </GlassCard>
@@ -240,10 +306,10 @@ function buildNeuralView(
       action: `Entrar ${sideLabel(confirmedSide).toUpperCase()}`,
       headline: `${formatNeuralNumber(data)} · até ${validity} · ${strengthLabel}`,
       actionClass: sideActionClass(confirmedSide),
-      panelClass: "border-success/35 bg-success/10",
-      borderClass: "border-success/30",
+      panelClass: dashboardSidePanelClass(confirmedSide),
+      borderClass: dashboardSideBorderClass(confirmedSide),
       strengthLabel,
-      strengthTone: "green" as const,
+      strengthTone: sideStatTone(confirmedSide),
       numberTone: sideNumberTone(data.origem),
     };
   }
@@ -297,12 +363,50 @@ function buildNeuralView(
   };
 }
 
-function NeuralEntryHistoryList({ history }: { history: NeuralEntryHistoryItem[] }) {
+function NeuralEntryHistoryList({
+  history,
+  expanded = false,
+}: {
+  history: NeuralEntryHistoryItem[];
+  expanded?: boolean;
+}) {
   const visible = history.slice(0, VISIBLE_ENTRY_HISTORY);
   const latest = history[0];
   const summaryHint = latest
     ? `${entrySideHistoryLabel(latest)} ${entryResultLabel(latest.kind)}`
     : "sem entradas";
+
+  if (expanded) {
+    return (
+      <div className="rounded-lg border border-white/8 bg-background/12 px-2 py-1.5">
+        <div className="text-[8px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/75">
+          Entradas recentes
+        </div>
+        <div className="mt-1">
+          {visible.length ? (
+            <div className="max-h-32 space-y-0.5 overflow-y-auto pr-0.5">
+              {visible.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/8 px-1.5 py-0.5 text-[7.5px] font-semibold leading-tight"
+                >
+                  <span className="min-w-0 truncate">
+                    <span className={sideClass(item.side)}>{entrySideHistoryLabel(item)}</span>{" "}
+                    <span className={entryResultClass(item.kind)}>{entryResultLabel(item.kind)}</span>
+                  </span>
+                  <span className="shrink-0 text-[7px] text-muted-foreground/70">:{item.minute}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-[7.5px] font-semibold text-muted-foreground/70">
+              Sem greens, reds ou ties recentes.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <details className="group rounded-lg border border-white/8 bg-background/12 px-2 py-1">
@@ -450,7 +554,7 @@ function entryResultLabel(kind: NeuralEntryDisplayKind) {
 
 function entryResultClass(kind: NeuralEntryDisplayKind) {
   if (kind === "red") return "text-destructive";
-  if (kind === "tie") return "text-warning";
+  if (kind === "tie") return "text-tie";
   return "text-success";
 }
 
@@ -460,7 +564,7 @@ function buildEntryResultView(result: NeuralEntryDisplayResult) {
       action: "RED",
       headline: "Entrada neural não bateu",
       actionClass: "text-destructive",
-      panelClass: "border-destructive/35 bg-destructive/10",
+      panelClass: "neural-entry-flash-red border-destructive/35 bg-destructive/10",
     };
   }
 
@@ -468,8 +572,8 @@ function buildEntryResultView(result: NeuralEntryDisplayResult) {
     return {
       action: `GREEN EMPATE ${result.multiplier ? `${result.multiplier}X` : ""}`.trim(),
       headline: "Empate confirmado na validade",
-      actionClass: "text-warning",
-      panelClass: "border-warning/35 bg-warning/10",
+      actionClass: "text-tie",
+      panelClass: "neural-entry-flash-tie border-tie/40 bg-tie/10",
     };
   }
 
@@ -477,7 +581,7 @@ function buildEntryResultView(result: NeuralEntryDisplayResult) {
     action: `GREEN ${sideLabel(result.side).toUpperCase()}`,
     headline: "Entrada neural confirmada",
     actionClass: sideActionClass(result.side),
-    panelClass: "border-success/35 bg-success/10",
+    panelClass: "neural-entry-flash-green border-success/35 bg-success/10",
   };
 }
 
@@ -497,8 +601,8 @@ function NeuralStatChip({
     red: "border-destructive/30 bg-destructive/8 text-destructive",
     muted: "border-border/60 bg-secondary/25 text-foreground",
     banker: "border-banker/30 bg-banker/8 text-banker",
-    player: "border-border/60 bg-secondary/25 text-foreground",
-    tie: "border-border/60 bg-secondary/25 text-foreground",
+    player: "border-player/30 bg-player/8 text-player",
+    tie: "border-tie/30 bg-tie/8 text-tie",
   }[tone];
 
   return (
@@ -592,6 +696,15 @@ function sideActionClass(side: NeuralSide) {
 
 function sideNumberTone(side: NeuralReading["origem"]) {
   if (side === "BANKER") return "banker" as const;
+  if (side === "PLAYER") return "player" as const;
+  if (side === "TIE") return "tie" as const;
+  return "muted" as const;
+}
+
+function sideStatTone(side: NeuralSide) {
+  if (side === "BANKER") return "banker" as const;
+  if (side === "PLAYER") return "player" as const;
+  if (side === "TIE") return "tie" as const;
   return "muted" as const;
 }
 

@@ -10,6 +10,8 @@ const SCANNING_READING: NeuralReading = { mode: "SCANNING" };
 export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
   const { mode } = useDashboardData();
   const [greenFlash, setGreenFlash] = useState(false);
+  const [tieFlash, setTieFlash] = useState(false);
+  const [redFlash, setRedFlash] = useState(false);
   const previousResultKeyRef = useRef("");
 
   useEffect(() => {
@@ -18,12 +20,33 @@ export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
     const key = result?.id ? `${result.id}:${result.outcome}:${result.finishedAt ?? ""}` : "";
     if (!key || key === previousResultKeyRef.current) return;
     previousResultKeyRef.current = key;
-    if (result?.outcome !== "GREEN" && result?.outcome !== "TIE") return;
+
     setGreenFlash(false);
-    window.requestAnimationFrame(() => {
-      setGreenFlash(true);
-      window.setTimeout(() => setGreenFlash(false), 2100);
-    });
+    setTieFlash(false);
+    setRedFlash(false);
+
+    if (result?.outcome === "GREEN") {
+      window.requestAnimationFrame(() => {
+        setGreenFlash(true);
+        window.setTimeout(() => setGreenFlash(false), 2100);
+      });
+      return;
+    }
+
+    if (result?.outcome === "TIE") {
+      window.requestAnimationFrame(() => {
+        setTieFlash(true);
+        window.setTimeout(() => setTieFlash(false), 2100);
+      });
+      return;
+    }
+
+    if (result?.outcome === "RED") {
+      window.requestAnimationFrame(() => {
+        setRedFlash(true);
+        window.setTimeout(() => setRedFlash(false), 1500);
+      });
+    }
   }, [data.mockMode, data.neuralEntryLastResult, mode]);
 
   return (
@@ -39,6 +62,8 @@ export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
         neuralEntryLastResult={data.neuralEntryLastResult}
         rounds={data.rounds}
         greenFlash={greenFlash}
+        tieFlash={tieFlash}
+        redFlash={redFlash}
         className="h-full w-full"
       />
     </PremiumFeature>

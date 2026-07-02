@@ -78,8 +78,8 @@ export function StrategyConclusion({
 
 function pulledSideLabel(side: RoundResult) {
   if (side === "B") return "🔴 BANKER";
-  if (side === "P") return "PLAYER";
-  return "TIE";
+  if (side === "P") return "🔵 PLAYER";
+  return "🟡 TIE";
 }
 
 function patternTokenValue(token: string) {

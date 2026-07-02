@@ -418,7 +418,12 @@ function readChipNumber(value: string | number | undefined) {
   return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
 }
 
-function chipClass(_variant: ScoreChipVariant) {
+function chipClass(variant: ScoreChipVariant) {
+  if (variant === "green") return "border-success/25 bg-success/10 text-success";
+  if (variant === "red") return "border-destructive/30 bg-destructive/10 text-destructive";
+  if (variant === "purple") return "border-tie/25 bg-tie/10 text-tie";
+  if (variant === "yellow") return "border-warning/25 bg-warning/10 text-warning";
+  if (variant === "cyan") return "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan";
   return "border-white/10 bg-white/5 text-muted-foreground";
 }
 

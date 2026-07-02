@@ -7,26 +7,19 @@ import {
   DASHBOARD_MODULE_CARD_FILL,
   DASHBOARD_MODULE_CARD_ROOT,
 } from "@/components/dashboard/dashboardModuleCardLayout";
-import { MobileCardDetailsTrigger } from "@/components/dashboard/MobileCardDetailsTrigger";
 import { PatternSequence } from "@/components/patternMiner/PatternSequence";
 import { cn } from "@/lib/utils";
-import {
-  dashboardSideBorderClass,
-  dashboardSidePanelClass,
-  dashboardSideTextClass,
-} from "@/lib/sideColors";
+import { dashboardSidePanelClass, dashboardSideTextClass, dashboardSideBorderClass } from "@/lib/sideColors";
 import { formatPulledSide, statusLabel } from "@/patternMiner/PatternMinerDisplay";
 import type { PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
 
-export function PatternMinerMiniCard({
+export function PatternMinerClassicCard({
   snapshot,
   isUsingRealData,
-  essentialOnly = false,
   className,
 }: {
   snapshot: PatternMinerSnapshot;
   isUsingRealData: boolean;
-  essentialOnly?: boolean;
   className?: string;
 }) {
   const confirmedAlert = snapshot.entryAlerts[0];
@@ -38,7 +31,7 @@ export function PatternMinerMiniCard({
   return (
     <GlassCard
       className={cn(
-        "digital-risk-card border-white/10 p-2 sm:p-2",
+        "digital-risk-card border-white/10 p-3 sm:p-3",
         DASHBOARD_MODULE_CARD_ROOT,
         view.borderClass,
         className,
@@ -48,97 +41,85 @@ export function PatternMinerMiniCard({
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
       <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-          Padrões IA
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Padrões IA
+          </div>
+          <div className="text-[8px] font-bold uppercase tracking-[0.1em] text-muted-foreground">
+            Mineração em tempo real
+          </div>
         </div>
-        <AppBadge
-          tone={view.badgeTone}
-          pulse={view.pulse}
-          className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
-        >
+        <AppBadge tone={view.badgeTone} pulse={view.pulse} className="max-w-full truncate px-1.5 py-0 text-[8px]">
           {view.badge}
         </AppBadge>
       </div>
 
       <div className={DASHBOARD_MODULE_CARD_BODY}>
         <div className={cn("rounded-xl border px-3 py-2.5 text-center", view.panelClass)}>
-          <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>{view.action}</div>
-          {!essentialOnly && (
-            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              {view.headline}
-            </div>
-          )}
+          <div className={cn("text-2xl font-black uppercase leading-none", view.actionClass)}>{view.action}</div>
+          <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            {view.headline}
+          </div>
         </div>
 
-        {essentialOnly ? (
-          <MobileCardDetailsTrigger
-            title="Padrões IA"
-            description="Força, sequência, ranking e histórico de padrões."
-          >
-            <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-              <PatternStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
-              <PatternStatChip label="Amostras" value={view.samplesLabel} tone="muted" />
-              <PatternStatChip label="Status" value={view.statusChip} tone={view.statusTone} />
+        <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-4">
+          <PatternStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
+          <PatternStatChip label="Amostras" value={view.samplesLabel} tone="muted" />
+          <PatternStatChip label="Status" value={view.statusChip} tone={view.statusTone} />
+          <PatternStatChip
+            label="Catalogados"
+            value={String(snapshot.agent.catalogedStrategies)}
+            tone="cyan"
+          />
+        </div>
+
+        {activeStrategy ? (
+          <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5">
+            <div className="text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan/85">
+              Sequência · banco {formatAnalyzedRounds(snapshot.analyzedRounds)}
             </div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              {view.headline}
+            <div className="mt-1 min-w-0 overflow-hidden">
+              <PatternSequence sequence={activeStrategy.sequence} />
             </div>
-            {activeStrategy ? (
-              <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5">
-                <div className="text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan/85">
-                  Sequência · banco {formatAnalyzedRounds(snapshot.analyzedRounds)}
-                </div>
-                <div className="mt-1 min-w-0 overflow-hidden">
-                  <PatternSequence sequence={activeStrategy.sequence} compact />
-                </div>
+            {formingAlert && !confirmedAlert ? (
+              <div className="mt-1 text-[9px] font-semibold text-warning">
+                Formação {Math.round(formingAlert.progress * 100)}%
+                {formingAlert.missingTokens.length
+                  ? ` · falta ${formingAlert.missingTokens.join(" → ")}`
+                  : ""}
               </div>
             ) : null}
-            <Link
-              to="/app/padroes"
-              className="inline-flex items-center gap-1 text-[10px] font-semibold text-neon-cyan hover:text-neon-blue"
-            >
-              Ver ranking completo <ChevronRight className="size-3" />
-            </Link>
-          </MobileCardDetailsTrigger>
+          </div>
         ) : (
-          <>
-            <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-              <PatternStatChip label="Força" value={view.strengthLabel} tone={view.strengthTone} />
-              <PatternStatChip label="Amostras" value={view.samplesLabel} tone="muted" />
-              <PatternStatChip label="Status" value={view.statusChip} tone={view.statusTone} />
-            </div>
-
-            {activeStrategy ? (
-              <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5">
-                <div className="text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan/85">
-                  Sequência · banco {formatAnalyzedRounds(snapshot.analyzedRounds)}
-                </div>
-                <div className="mt-1 min-w-0 overflow-hidden">
-                  <PatternSequence sequence={activeStrategy.sequence} compact />
-                </div>
-                {formingAlert && !confirmedAlert ? (
-                  <div className="mt-1 text-[9px] font-semibold text-warning">
-                    Formação {Math.round(formingAlert.progress * 100)}%
-                    {formingAlert.missingTokens.length
-                      ? ` · falta ${formingAlert.missingTokens.join(" → ")}`
-                      : ""}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-border/50 bg-secondary/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-                Coletando histórico para mineração de padrões.
-              </div>
-            )}
-
-            <Link
-              to="/app/padroes"
-              className="inline-flex items-center gap-1 text-[10px] font-semibold text-neon-cyan hover:text-neon-blue"
-            >
-              Ver ranking completo <ChevronRight className="size-3" />
-            </Link>
-          </>
+          <div className="rounded-lg border border-border/50 bg-secondary/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+            Coletando histórico para mineração de padrões.
+          </div>
         )}
+
+        {snapshot.hotStrategies.length ? (
+          <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px]">
+            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Ranking quente</div>
+            <div className="mt-1 space-y-1">
+              {snapshot.hotStrategies.slice(0, 3).map((strategy) => (
+                <div key={strategy.id} className="flex items-center justify-between gap-2">
+                  <span className={dashboardSideTextClass(strategy.expectedResult)}>
+                    {formatPulledSide(strategy.expectedResult ?? "T")}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {Math.round(strategy.assertiveness ?? 0)}% · {strategy.totalValidated} amostras
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <Link
+          to="/app/padroes"
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-neon-cyan hover:text-neon-blue"
+        >
+          Ver ranking completo <ChevronRight className="size-3" />
+        </Link>
         <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
       </div>
     </GlassCard>
@@ -153,21 +134,7 @@ function buildPatternView(
   activeStrategy: PatternMinerStrategy | undefined,
 ) {
   if (!isUsingRealData) {
-    return {
-      badge: "Coletando",
-      badgeTone: "muted" as const,
-      pulse: false,
-      action: "Aguardar",
-      headline: "Histórico real ainda não disponível",
-      actionClass: "text-muted-foreground",
-      panelClass: "border-border/60 bg-secondary/20",
-      borderClass: "border-border/50",
-      strengthLabel: "--",
-      strengthTone: "muted" as const,
-      samplesLabel: "0",
-      statusChip: "OFF",
-      statusTone: "muted" as const,
-    };
+    return idleView("Coletando histórico real");
   }
 
   const strategy = confirmedAlert?.strategy ?? formingAlert?.strategy ?? activeStrategy;
@@ -234,23 +201,29 @@ function buildPatternView(
     };
   }
 
+  return idleView(
+    snapshot.analyzedRounds > 0
+      ? `${snapshot.agent.catalogedStrategies} padrões catalogados · sem entrada agora`
+      : "Sem padrão validado no momento",
+    snapshot,
+  );
+}
+
+function idleView(headline: string, snapshot?: PatternMinerSnapshot) {
   return {
     badge: "Observando",
     badgeTone: "muted" as const,
     pulse: false,
     action: "Aguardar",
-    headline:
-      snapshot.analyzedRounds > 0
-        ? `${snapshot.agent.catalogedStrategies} padrões catalogados · sem entrada agora`
-        : "Sem padrão validado no momento",
+    headline,
     actionClass: "text-muted-foreground",
     panelClass: "border-border/60 bg-secondary/20",
     borderClass: "border-border/50",
-    strengthLabel: snapshot.scoreboard.assertiveness
+    strengthLabel: snapshot?.scoreboard.assertiveness
       ? `${Math.round(snapshot.scoreboard.assertiveness)}%`
       : "--",
     strengthTone: "muted" as const,
-    samplesLabel: snapshot.scoreboard.totalValidated ? String(snapshot.scoreboard.totalValidated) : "0",
+    samplesLabel: snapshot?.scoreboard.totalValidated ? String(snapshot.scoreboard.totalValidated) : "0",
     statusChip: "OFF",
     statusTone: "muted" as const,
   };

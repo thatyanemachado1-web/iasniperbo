@@ -50,6 +50,8 @@ interface NeuralScoreSummary {
 type LeituraNeuralClassicCardProps = NeuralReading & {
   className?: string;
   greenFlash?: boolean;
+  tieFlash?: boolean;
+  redFlash?: boolean;
   neuralScoreboard?: NeuralScoreboard;
   rounds?: Round[];
   neuralEntryState?: NeuralEntryState | null;
@@ -79,6 +81,8 @@ const SCANNING_READING: NeuralReading = {
 export function LeituraNeuralClassicCard({
   className,
   greenFlash = false,
+  tieFlash = false,
+  redFlash = false,
   neuralScoreboard,
   rounds,
   neuralEntryState,
@@ -161,6 +165,8 @@ export function LeituraNeuralClassicCard({
         DASHBOARD_MODULE_CARD_ROOT,
         mode === "ACTIVE" && "border-neon-purple/35 shadow-[0_0_28px_-18px_var(--neon-purple)]",
         greenFlash && "result-green-flash",
+        tieFlash && "result-tie-flash",
+        redFlash && "result-red-flash",
         className,
       )}
       aria-label="Leitura neural de números pagantes"
