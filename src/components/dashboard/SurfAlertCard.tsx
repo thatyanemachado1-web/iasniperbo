@@ -169,7 +169,7 @@ function StatsRow({ view, large = false }: { view: SurfView; large?: boolean }) 
   return (
     <div className={cn("grid grid-cols-2 gap-1.5 text-center sm:grid-cols-4", large && "gap-2")}>
       <StatChip label="Lado" value={view.sideLabel} tone={view.sideTone} />
-      <StatChip label="Força" value={`${view.confidence}%`} tone={view.strengthTone} />
+      <StatChip label="Forca" value={`${view.confidence}%`} tone={view.strengthTone} />
       <StatChip label="Casas" value={`${view.stretchedCount}`} tone="muted" />
       <StatChip label="Quebra" value={`${view.breakRisk}%`} tone={view.riskTone} />
     </div>
@@ -187,7 +187,7 @@ function StatChip({
 }) {
   const toneClass = {
     banker: "border-banker/30 bg-banker/8 text-banker",
-    player: "border-border/60 bg-secondary/25 text-foreground",
+    player: "border-player/35 bg-player/10 text-player",
     green: "border-success/30 bg-success/8 text-success",
     red: "border-destructive/30 bg-destructive/8 text-destructive",
     amber: "border-warning/30 bg-warning/8 text-warning",
@@ -210,11 +210,11 @@ function SurfMaximaPanel({ snapshot, compact = false }: { snapshot: DailySurfMax
     return (
       <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
         <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
-          Máxima hoje · reseta 00:00 (BR)
+          Maxima hoje - reseta 00:00 (BR)
         </div>
         <div className="mt-0.5">
-          P {maxima.player} · E {maxima.tie} · B {maxima.banker}
-          {best.value > 0 ? ` · Maior ${best.label} (${best.value})` : ""}
+          P {maxima.player} - E {maxima.tie} - B {maxima.banker}
+          {best.value > 0 ? ` - Maior ${best.label} (${best.value})` : ""}
         </div>
       </div>
     );
@@ -222,7 +222,7 @@ function SurfMaximaPanel({ snapshot, compact = false }: { snapshot: DailySurfMax
 
   return (
     <div className="rounded-xl border border-neon-cyan/12 bg-background/24 p-2">
-      <div className="text-[9px] font-black uppercase tracking-[0.16em] text-neon-cyan">Máxima do Surf Hoje</div>
+      <div className="text-[9px] font-black uppercase tracking-[0.16em] text-neon-cyan">Maxima do Surf Hoje</div>
       <div className="mt-2 grid grid-cols-3 gap-1.5">
         <SurfMaxMiniCard label="Player" value={maxima.player} tone="player" />
         <SurfMaxMiniCard label="Empate" value={maxima.tie} tone="tie" />
@@ -243,8 +243,8 @@ function SurfMaxMiniCard({
 }) {
   const toneClass = {
     banker: "border-banker/35 bg-banker/8 text-banker",
-    player: "border-border/60 bg-secondary/25 text-foreground",
-    tie: "border-border/60 bg-secondary/25 text-foreground",
+    player: "border-player/35 bg-player/10 text-player",
+    tie: "border-tie/35 bg-tie/10 text-tie",
     muted: "border-border/60 bg-secondary/25 text-foreground",
   }[tone];
 
@@ -310,7 +310,7 @@ function buildSurfView(alert: SurfAlert): SurfView {
   return {
     side: side === "BANKER" || side === "PLAYER" ? side : "NONE",
     sideLabel,
-    sideTone: side === "BANKER" ? "banker" : "muted",
+    sideTone: side === "BANKER" ? "banker" : side === "PLAYER" ? "player" : "muted",
     confidence,
     breakRisk,
     stretchedCount: alert.stretched_count ?? 0,
@@ -338,17 +338,17 @@ function buildSurfDecision(
   if (isActive && sideLabel !== "AGUARDAR") {
     return {
       action: `Seguir ${sideLabel}`,
-      headline: `${statusLabel} · Força ${confidence}% · Quebra ${breakRisk}%`,
-      actionClass: "text-success",
-      panelClass: "border-success/35 bg-success/10",
-      borderClass: "border-success/30",
+      headline: `${statusLabel} - Forca ${confidence}% - Quebra ${breakRisk}%`,
+      actionClass: surfSideTextClass(sideLabel),
+      panelClass: surfSidePanelClass(sideLabel),
+      borderClass: surfSideBorderClass(sideLabel),
     };
   }
 
   if (breakRisk >= 66) {
     return {
-      action: "Não seguir",
-      headline: `Risco de quebra alto · ${statusLabel}`,
+      action: "Nao seguir",
+      headline: `Risco de quebra alto - ${statusLabel}`,
       actionClass: "text-destructive",
       panelClass: "border-destructive/35 bg-destructive/10",
       borderClass: "border-destructive/30",
@@ -358,7 +358,7 @@ function buildSurfDecision(
   if (confidence >= 50 && sideLabel !== "AGUARDAR") {
     return {
       action: "Aguardar",
-      headline: `${statusLabel} · Confirmar mais uma casa`,
+      headline: `${statusLabel} - Confirmar mais uma casa`,
       actionClass: "text-warning",
       panelClass: "border-warning/35 bg-warning/10",
       borderClass: "border-warning/30",
@@ -376,6 +376,24 @@ function buildSurfDecision(
 
 function formatSurfStatus(status: string | null | undefined) {
   return String(status ?? "ANALISANDO").replaceAll("_", " ");
+}
+
+function surfSideTextClass(sideLabel: string) {
+  if (sideLabel === "BANKER") return "text-banker";
+  if (sideLabel === "PLAYER") return "text-player";
+  return "text-muted-foreground";
+}
+
+function surfSidePanelClass(sideLabel: string) {
+  if (sideLabel === "BANKER") return "border-banker/35 bg-banker/10";
+  if (sideLabel === "PLAYER") return "border-player/35 bg-player/10";
+  return "border-success/35 bg-success/10";
+}
+
+function surfSideBorderClass(sideLabel: string) {
+  if (sideLabel === "BANKER") return "border-banker/35";
+  if (sideLabel === "PLAYER") return "border-player/35";
+  return "border-success/30";
 }
 
 function bestDailySurf(maxima: DailySurfMaxSnapshot["dailyMaxSurf"]): { label: DailySurfSide; value: number } {
