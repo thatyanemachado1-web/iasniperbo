@@ -1,4 +1,9 @@
 import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
+import {
+  DASHBOARD_MODULE_CARD_BODY,
+  DASHBOARD_MODULE_CARD_FILL,
+  DASHBOARD_MODULE_CARD_ROOT,
+} from "@/components/dashboard/dashboardModuleCardLayout";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
@@ -17,6 +22,7 @@ export function SurfAlertCard({
   locked,
   compact = false,
   showRoadPanels = true,
+  className,
 }: {
   alert: SurfAlert;
   dailySurfMax: DailySurfMaxSnapshot;
@@ -25,6 +31,7 @@ export function SurfAlertCard({
   locked?: boolean;
   compact?: boolean;
   showRoadPanels?: boolean;
+  className?: string;
 }) {
   const view = buildSurfView(alert);
   const enabled = toggles?.surfAnalyzer !== false;
@@ -33,9 +40,11 @@ export function SurfAlertCard({
     return (
       <GlassCard
         className={cn(
-          "h-full min-h-[220px] p-3 sm:p-3",
+          DASHBOARD_MODULE_CARD_ROOT,
+          "p-3 sm:p-3",
           view.borderClass,
           !enabled && "border-muted-foreground/20",
+          className,
         )}
       >
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/35 to-transparent" />
@@ -45,13 +54,14 @@ export function SurfAlertCard({
           toggles={toggles}
           onModuleTogglesChange={onModuleTogglesChange}
         />
-        <div className={cn("mt-2 space-y-2 transition duration-200", !enabled && "opacity-45 saturate-50")}>
+        <div className={cn(DASHBOARD_MODULE_CARD_BODY, "mt-2 transition duration-200", !enabled && "opacity-45 saturate-50")}>
           <ActionPanel view={view} />
           <StatsRow view={view} />
           <SurfMaximaPanel snapshot={dailySurfMax} compact />
           {view.reason && (
             <div className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">{view.reason}</div>
           )}
+          <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
         </div>
         {!enabled && <DisabledNote />}
         {locked && (

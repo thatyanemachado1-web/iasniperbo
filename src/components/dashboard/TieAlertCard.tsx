@@ -1,4 +1,9 @@
 import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
+import {
+  DASHBOARD_MODULE_CARD_BODY,
+  DASHBOARD_MODULE_CARD_FILL,
+  DASHBOARD_MODULE_CARD_ROOT,
+} from "@/components/dashboard/dashboardModuleCardLayout";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
@@ -25,6 +30,7 @@ export function TieAlertCard({
   onModuleTogglesChange,
   locked,
   compact = false,
+  className,
 }: {
   alert: TieAlert;
   scoreboard?: TieAlertScoreboard;
@@ -34,6 +40,7 @@ export function TieAlertCard({
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
   locked?: boolean;
   compact?: boolean;
+  className?: string;
 }) {
   const enabled = toggles?.tieAlert !== false;
   const multipliers = tieMultiplierStats(rounds, scoreboard);
@@ -49,9 +56,11 @@ export function TieAlertCard({
     return (
       <GlassCard
         className={cn(
-          "digital-risk-card h-full min-h-[220px] border-warning/18 p-2 sm:p-2",
+          "digital-risk-card border-warning/18 p-2 sm:p-2",
+          DASHBOARD_MODULE_CARD_ROOT,
           view.borderClass,
           !enabled && "border-muted-foreground/20",
+          className,
         )}
       >
         <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
@@ -72,7 +81,7 @@ export function TieAlertCard({
           </div>
         </div>
 
-        <div className={cn("space-y-2 transition duration-200", !enabled && "opacity-45 saturate-50")}>
+        <div className={cn(DASHBOARD_MODULE_CARD_BODY, "transition duration-200", !enabled && "opacity-45 saturate-50")}>
           <div className={cn("rounded-xl border px-3 py-2.5 text-center", view.panelClass)}>
             <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>{view.action}</div>
             <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
@@ -101,6 +110,7 @@ export function TieAlertCard({
               </div>
             ))}
           </div>
+          <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
         </div>
 
         {!enabled && <DisabledTieNote />}

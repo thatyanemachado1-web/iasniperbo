@@ -2,6 +2,11 @@ import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
+import {
+  DASHBOARD_MODULE_CARD_BODY,
+  DASHBOARD_MODULE_CARD_FILL,
+  DASHBOARD_MODULE_CARD_ROOT,
+} from "@/components/dashboard/dashboardModuleCardLayout";
 import { cn } from "@/lib/utils";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import type {
@@ -102,7 +107,8 @@ export function LeituraNeuralMiniCard({
   return (
     <GlassCard
       className={cn(
-        "digital-risk-card h-full min-h-[220px] border-neon-purple/18 p-2 sm:p-2",
+        "digital-risk-card border-neon-purple/18 p-2 sm:p-2",
+        DASHBOARD_MODULE_CARD_ROOT,
         view.borderClass,
         greenFlash && "result-green-flash",
         className,
@@ -130,7 +136,7 @@ export function LeituraNeuralMiniCard({
         </AppBadge>
       </div>
 
-      <div className="space-y-2">
+      <div className={DASHBOARD_MODULE_CARD_BODY}>
         {resultView ? (
           <div className={cn("rounded-xl border px-3 py-2.5 text-center", resultView.panelClass)}>
             <div className={cn("text-lg font-black uppercase leading-none", resultView.actionClass)}>
@@ -191,6 +197,7 @@ export function LeituraNeuralMiniCard({
         ) : null}
 
         <NeuralEntryHistoryList history={entryHistory} />
+        <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
       </div>
     </GlassCard>
   );

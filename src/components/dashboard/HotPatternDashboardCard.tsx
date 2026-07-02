@@ -9,8 +9,6 @@ export function HotPatternDashboardCard({
   isUsingRealData: boolean;
 }) {
   return (
-    <div className="h-full min-w-0">
-      <PatternMinerMiniCard snapshot={snapshot} isUsingRealData={isUsingRealData} />
-    </div>
+    <PatternMinerMiniCard snapshot={snapshot} isUsingRealData={isUsingRealData} className="h-full w-full" />
   );
 }

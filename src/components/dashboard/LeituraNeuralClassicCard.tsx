@@ -1,6 +1,7 @@
 import { CircleHelp, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { DASHBOARD_MODULE_CARD_ROOT } from "@/components/dashboard/dashboardModuleCardLayout";
 import { buildNeuralCopy } from "@/lib/operationalCopy";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import {
@@ -155,7 +156,8 @@ export function LeituraNeuralClassicCard({
   return (
     <aside
       className={cn(
-        "neural-mini-card relative z-10 w-full shrink-0 overflow-visible rounded-xl border border-neon-cyan/25 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_24px_-18px_var(--neon-cyan)] backdrop-blur-xl sm:w-[170px] lg:w-[180px]",
+        "neural-mini-card relative z-10 flex w-full shrink-0 flex-col overflow-visible rounded-xl border border-neon-cyan/25 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_24px_-18px_var(--neon-cyan)] backdrop-blur-xl",
+        DASHBOARD_MODULE_CARD_ROOT,
         mode === "ACTIVE" && "border-neon-purple/35 shadow-[0_0_28px_-18px_var(--neon-purple)]",
         greenFlash && "result-green-flash",
         className,

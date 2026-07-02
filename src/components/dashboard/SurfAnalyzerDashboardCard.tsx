@@ -1,4 +1,5 @@
 import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
+import { DASHBOARD_MODULE_CARD_ROOT } from "@/components/dashboard/dashboardModuleCardLayout";
 import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
 import type { ModuleToggles, SurfAlert } from "@/types/dashboard";
 import type { DailySurfMaxSnapshot } from "@/surf/DailySurfMaxEngine";
@@ -18,7 +19,7 @@ export function SurfAnalyzerDashboardCard({
     <PremiumFeature
       title="Surf Analyzer VIP"
       description="Leitura completa de surf fica bloqueada no demo."
-      className="h-full min-w-0"
+      className={`${DASHBOARD_MODULE_CARD_ROOT} min-w-0`}
     >
       <SurfAlertCard
         alert={alert}
@@ -27,6 +28,7 @@ export function SurfAnalyzerDashboardCard({
         onModuleTogglesChange={onModuleTogglesChange}
         compact
         showRoadPanels={false}
+        className="h-full w-full"
       />
     </PremiumFeature>
   );

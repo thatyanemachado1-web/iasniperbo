@@ -1,4 +1,5 @@
 import { TieAlertCard } from "@/components/dashboard/TieAlertCard";
+import { DASHBOARD_MODULE_CARD_ROOT } from "@/components/dashboard/dashboardModuleCardLayout";
 import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
 import type { ModuleToggles, Round, TieAlert, TieAlertScoreboard } from "@/types/dashboard";
 import type { PatternMinerSnapshot } from "@/types/patternMiner";
@@ -22,7 +23,7 @@ export function TieRadarDashboardCard({
     <PremiumFeature
       title="Tie Alert VIP"
       description="Alerta de pressão e risco de empate fica completo apenas no acesso liberado."
-      className="h-full min-w-0"
+      className={`${DASHBOARD_MODULE_CARD_ROOT} min-w-0`}
     >
       <TieAlertCard
         alert={alert}
@@ -32,6 +33,7 @@ export function TieRadarDashboardCard({
         toggles={toggles}
         onModuleTogglesChange={onModuleTogglesChange}
         compact
+        className="h-full w-full"
       />
     </PremiumFeature>
   );

@@ -1,4 +1,5 @@
 import { LeituraNeuralResponsiveCard } from "@/components/dashboard/LeituraNeuralResponsiveCard";
+import { DASHBOARD_MODULE_CARD_ROOT } from "@/components/dashboard/dashboardModuleCardLayout";
 import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
 import type { DashboardData, NeuralReading } from "@/types/dashboard";
 
@@ -9,7 +10,7 @@ export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
     <PremiumFeature
       title="Leitura Neural VIP"
       description="Leitura de número pagante liberada no acesso Premium."
-      className="h-full min-w-0"
+      className={`${DASHBOARD_MODULE_CARD_ROOT} min-w-0`}
     >
       <LeituraNeuralResponsiveCard
         {...(data.neuralReading ?? SCANNING_READING)}
@@ -18,7 +19,7 @@ export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
         neuralEntryLastResult={data.neuralEntryLastResult}
         rounds={data.rounds}
         greenFlash={false}
-        className="h-full min-h-[220px] w-full sm:w-full lg:w-full"
+        className="h-full w-full"
       />
     </PremiumFeature>
   );

@@ -3,6 +3,10 @@ import { NeuralPayingDashboardCard } from "@/components/dashboard/NeuralPayingDa
 import { SurfAnalyzerDashboardCard } from "@/components/dashboard/SurfAnalyzerDashboardCard";
 import { TieRadarDashboardCard } from "@/components/dashboard/TieRadarDashboardCard";
 import { SurfRoadPanelsStrip } from "@/components/dashboard/SurfRoadPanelsStrip";
+import {
+  DASHBOARD_MAIN_CARDS_GRID,
+  DASHBOARD_MODULE_CARD_SLOT,
+} from "@/components/dashboard/dashboardModuleCardLayout";
 import type { DashboardData, ModuleToggles, SurfAlert } from "@/types/dashboard";
 import type { PatternMinerSnapshot } from "@/types/patternMiner";
 import type { DailySurfMaxSnapshot } from "@/surf/DailySurfMaxEngine";
@@ -24,11 +28,11 @@ export function DashboardMainCardsGrid({
 }) {
   return (
     <div className="space-y-3">
-      <section className="main-cards-grid grid w-full grid-cols-2 items-start gap-2 min-w-0 sm:gap-3 md:grid-cols-2 xl:grid-cols-4 xl:gap-4">
-        <div className="min-w-0">
+      <section className={DASHBOARD_MAIN_CARDS_GRID}>
+        <div className={DASHBOARD_MODULE_CARD_SLOT}>
           <NeuralPayingDashboardCard data={data} />
         </div>
-        <div className="min-w-0">
+        <div className={DASHBOARD_MODULE_CARD_SLOT}>
           <SurfAnalyzerDashboardCard
             alert={surfAlert}
             dailySurfMax={dailySurfMax}
@@ -36,7 +40,7 @@ export function DashboardMainCardsGrid({
             onModuleTogglesChange={onModuleTogglesChange}
           />
         </div>
-        <div className="min-w-0">
+        <div className={DASHBOARD_MODULE_CARD_SLOT}>
           <TieRadarDashboardCard
             alert={data.currentTieAlert}
             scoreboard={data.tieAlertScoreboard}
@@ -46,7 +50,7 @@ export function DashboardMainCardsGrid({
             onModuleTogglesChange={onModuleTogglesChange}
           />
         </div>
-        <div className="min-w-0">
+        <div className={DASHBOARD_MODULE_CARD_SLOT}>
           <HotPatternDashboardCard
             snapshot={patternMinerSnapshot}
             isUsingRealData={patternMinerIsUsingRealData}
