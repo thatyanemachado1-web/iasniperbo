@@ -1739,7 +1739,7 @@ async function requireClientBillingSession(
     return { ok: false, status: 403, error: "Use uma conta de cliente para assinar." };
   }
 
-  const client = findClientByEmail(session.email) || (await hydrateClientFromBilling(env, session.email));
+  const client = await resolveClientForAuth(env, session.email, "billing_session");
   if (!client) return { ok: false, status: 404, error: "Cliente nao encontrado." };
 
   const sessionCheck = await validateClientSessionBinding(env, request, session, client);
@@ -2464,18 +2464,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       );
     }
 
-    let client =
-      findClientByEmail(email) ||
-      (await hydrateClientFromBilling(env, email)) ||
-      syncClientFromRecipientEmail(email) ||
-      syncClientFromAdminUserEmail(env, email);
+    let client = await resolveClientForAuth(env, email, "auth_check");
     if (!client) {
       await recoverClientRegistryForAuth(env, email, "auth_check");
-      client =
-        findClientByEmail(email) ||
-        (await hydrateClientFromBilling(env, email)) ||
-        syncClientFromRecipientEmail(email) ||
-        syncClientFromAdminUserEmail(env, email);
+      client = await resolveClientForAuth(env, email, "auth_check_recovered");
     }
     if (!client && password) {
       client = await ensureBlockedTrialClientForLogin(env, request, email, password);
@@ -2669,18 +2661,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       return json({ valid: true, access: await approverAccess(env, session.email, request) });
     }
 
-    let client =
-      findClientByEmail(session.email) ||
-      (await hydrateClientFromBilling(env, session.email)) ||
-      syncClientFromRecipientEmail(session.email) ||
-      syncClientFromAdminUserEmail(env, session.email);
+    let client = await resolveClientForAuth(env, session.email, "auth_verify");
     if (!client) {
       await recoverClientRegistryForAuth(env, session.email, "auth_verify");
-      client =
-        findClientByEmail(session.email) ||
-        (await hydrateClientFromBilling(env, session.email)) ||
-        syncClientFromRecipientEmail(session.email) ||
-        syncClientFromAdminUserEmail(env, session.email);
+      client = await resolveClientForAuth(env, session.email, "auth_verify_recovered");
     }
     if (!client && session.scope === "client") {
       client = await ensureSessionClientForExpiredTrial(env, request, session);
@@ -15724,10 +15708,10 @@ async function hydrateClientsFromBillingUsers(env: unknown) {
   return changed;
 }
 
-async function recoverClientRegistryForAuth(env: unknown, email: string, reason: string) {
+async function recoverClientRegistryForAuth(env: unknown, email: string, reason: string, force = false) {
   const cleanEmail = email.trim().toLowerCase();
   if (!cleanEmail || !getSupabasePersistenceConfig(env)) return false;
-  if (findClientByEmail(cleanEmail) || findRecipientByEmail(cleanEmail)) return true;
+  if (!force && (findClientByEmail(cleanEmail) || findRecipientByEmail(cleanEmail))) return true;
 
   let recovered = false;
   const dailyId = clientRegistryDailySnapshotId();
@@ -16412,6 +16396,67 @@ function syncClientFromAdminUserEmail(env: unknown, email: string) {
   if (!adminUser) return null;
   applyAdminManagedUserToClient(adminUser);
   return findClientByEmail(cleanEmail);
+}
+
+async function resolveClientForAuth(env: unknown, email: string, reason: string) {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) return null;
+
+  let client = bestClientForAuth([
+    findClientByEmail(cleanEmail),
+    syncClientFromRecipientEmail(cleanEmail),
+    syncClientFromAdminUserEmail(env, cleanEmail),
+  ]);
+  if (clientHasPaidLiveAccess(client)) return client;
+
+  const billingClient = await hydrateClientFromBilling(env, cleanEmail);
+  client = bestClientForAuth([
+    client,
+    billingClient,
+    findClientByEmail(cleanEmail),
+    syncClientFromRecipientEmail(cleanEmail),
+    syncClientFromAdminUserEmail(env, cleanEmail),
+  ]);
+  if (clientHasPaidLiveAccess(client)) return client;
+
+  await recoverClientRegistryForAuth(env, cleanEmail, `${reason}_premium_registry`, true);
+  client = bestClientForAuth([
+    client,
+    findClientByEmail(cleanEmail),
+    syncClientFromRecipientEmail(cleanEmail),
+    syncClientFromAdminUserEmail(env, cleanEmail),
+  ]);
+
+  return client;
+}
+
+function bestClientForAuth(candidates: Array<Record<string, unknown> | null | undefined>) {
+  const clients = candidates.filter((client): client is Record<string, unknown> => Boolean(client));
+  if (!clients.length) return null;
+
+  return [...clients].sort((left, right) => clientAuthScore(right) - clientAuthScore(left))[0] || null;
+}
+
+function clientAuthScore(client: Record<string, unknown>) {
+  const plan = readString(client, "plan").toLowerCase();
+  const paidPlan = plan === "premium" || plan === "vip";
+  const liveAccess = clientHasLiveAccess(client);
+  const status = readString(client, "access_status").toLowerCase();
+  const blocked = Boolean(client.isBlocked) || Boolean(client.is_blocked) || status === "blocked";
+  const updatedAt = stateEntityUpdatedAtMs(client) / 1_000_000_000_000;
+
+  if (blocked) return 0 + updatedAt;
+  if (paidPlan && liveAccess) return 500 + updatedAt;
+  if (liveAccess) return 400 + updatedAt;
+  if (paidPlan && status !== "expired" && !isExpiredIso(readString(client, "expires_at"))) return 300 + updatedAt;
+  if (status === "pending") return 200 + updatedAt;
+  return 100 + updatedAt;
+}
+
+function clientHasPaidLiveAccess(client: Record<string, unknown> | null | undefined) {
+  if (!client) return false;
+  const plan = readString(client, "plan").toLowerCase();
+  return (plan === "premium" || plan === "vip") && clientHasLiveAccess(client);
 }
 
 function clientHasLiveAccess(client: Record<string, unknown>) {
