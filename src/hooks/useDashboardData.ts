@@ -165,6 +165,30 @@ async function fetchDashboardData(): Promise<DashboardData> {
   return normalizeDashboardData(await response.json());
 }
 
+function isLiveDashboardPayload(data: DashboardData | undefined | null) {
+  if (!data || data.mockMode === true) return false;
+  if (data.updatedAt) return true;
+  return Array.isArray(data.rounds) && data.rounds.length > 0;
+}
+
+function resolveDashboardMode(
+  dashboardUrl: string,
+  query: {
+    data: DashboardData | undefined;
+    isPlaceholderData: boolean;
+    isPending: boolean;
+    isFetching: boolean;
+    isError: boolean;
+  },
+) {
+  if (!dashboardUrl) return "mock" as const;
+  const hasLivePayload = isLiveDashboardPayload(query.data) && !query.isPlaceholderData;
+  if (hasLivePayload) return "live" as const;
+  if (query.isPending || (query.isFetching && !hasLivePayload)) return "connecting" as const;
+  if (query.isError) return "fallback" as const;
+  return "fallback" as const;
+}
+
 export function useDashboardData() {
   const dashboardUrl = configuredDashboardUrl();
   const [moduleToggles, setModuleTogglesState] = useState<ModuleToggles>(() =>
@@ -174,21 +198,23 @@ export function useDashboardData() {
     queryKey: ["dashboard-data", dashboardUrl],
     queryFn: fetchDashboardData,
     enabled: Boolean(dashboardUrl) && typeof window !== "undefined",
-    initialData: mockDashboardData,
+    placeholderData: mockDashboardData,
     refetchInterval: dashboardUrl ? LIVE_REFETCH_INTERVAL_MS : false,
     refetchIntervalInBackground: true,
     retry: 1,
     staleTime: 0,
   });
+  const hasLivePayload = isLiveDashboardPayload(query.data) && !query.isPlaceholderData;
   const data = useMemo(() => {
-    const rawData = query.data ?? mockDashboardData;
+    const rawData = hasLivePayload ? (query.data as DashboardData) : (query.data ?? mockDashboardData);
     return {
       ...rawData,
+      mockMode: hasLivePayload ? false : Boolean(rawData.mockMode),
       moduleToggles,
       entryMode: "off" as const,
       entryModeFilter: undefined,
     };
-  }, [query.data, moduleToggles]);
+  }, [hasLivePayload, query.data, moduleToggles]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -208,13 +234,7 @@ export function useDashboardData() {
   return {
     data,
     dashboardUrl,
-    mode: !dashboardUrl
-      ? "mock"
-      : query.isError
-        ? "fallback"
-        : query.isLoading
-          ? "connecting"
-          : "live",
+    mode: resolveDashboardMode(dashboardUrl, query),
     error: query.error,
     setModuleToggles,
   } as const;
@@ -268,6 +288,7 @@ function normalizeDashboardData(payload: unknown): DashboardData {
 
   return {
     ...data,
+    mockMode: data.mockMode === true,
     ...applyNeuralScoreBaseline(
       normalizedNeuralReading,
       normalizeNeuralScoreboard(neuralScoreboard, data.neuralScoreboard),
