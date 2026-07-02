@@ -12,8 +12,8 @@ const SIDE_LABEL: Record<RoundResult, string> = {
 
 const SIDE_ICON: Record<RoundResult, string> = {
   B: "🔴",
-  P: "",
-  T: "",
+  P: "🔵",
+  T: "🟡",
 };
 
 export function formatPatternToken(token: string) {

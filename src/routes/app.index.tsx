@@ -171,7 +171,7 @@ function DashboardPage() {
                 <Metric
                   label="Pressão P"
                   value={`${stats.player.toFixed(0)}%`}
-                  tone="text-muted-foreground"
+                  tone="text-player"
                 />
                 <Metric label="Pressão T" value={`${stats.tie.toFixed(0)}%`} tone="text-tie" />
                 <Metric label="Sequência" value={`${sequence.side ?? "-"} x${sequence.count}`} />

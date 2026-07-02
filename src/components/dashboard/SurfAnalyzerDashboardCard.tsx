@@ -21,15 +21,31 @@ export function SurfAnalyzerDashboardCard({
       description="Leitura completa de surf fica bloqueada no demo."
       className={`${DASHBOARD_MODULE_CARD_ROOT} min-w-0`}
     >
-      <SurfAlertCard
-        alert={alert}
-        dailySurfMax={dailySurfMax}
-        toggles={toggles}
-        onModuleTogglesChange={onModuleTogglesChange}
-        compact
-        showRoadPanels={false}
-        className="h-full w-full"
-      />
+      <div className="flex h-full min-h-0 flex-1 flex-col">
+        <div className="flex h-full flex-1 flex-col md:hidden">
+          <SurfAlertCard
+            alert={alert}
+            dailySurfMax={dailySurfMax}
+            toggles={toggles}
+            onModuleTogglesChange={onModuleTogglesChange}
+            compact
+            essentialOnly
+            showRoadPanels={false}
+            className="h-full w-full"
+          />
+        </div>
+        <div className="hidden h-full flex-1 flex-col md:flex">
+          <SurfAlertCard
+            alert={alert}
+            dailySurfMax={dailySurfMax}
+            toggles={toggles}
+            onModuleTogglesChange={onModuleTogglesChange}
+            compact={false}
+            showRoadPanels
+            className="h-full w-full"
+          />
+        </div>
+      </div>
     </PremiumFeature>
   );
 }

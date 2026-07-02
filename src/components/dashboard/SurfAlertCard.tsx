@@ -1,3 +1,4 @@
+import { MobileCardDetailsTrigger } from "@/components/dashboard/MobileCardDetailsTrigger";
 import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
 import {
   DASHBOARD_MODULE_CARD_BODY,
@@ -9,6 +10,7 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { cn } from "@/lib/utils";
+import { dashboardSidePanelClass, dashboardSideTextClass, dashboardSideBorderClass } from "@/lib/sideColors";
 import type { DailySurfMaxSnapshot, DailySurfSide } from "@/surf/DailySurfMaxEngine";
 import type { ModuleToggles, SurfAlert } from "@/types/dashboard";
 import { clampPercent, surfRiskBand, surfStrengthBand } from "@/utils/surf";
@@ -21,6 +23,7 @@ export function SurfAlertCard({
   onModuleTogglesChange,
   locked,
   compact = false,
+  essentialOnly = false,
   showRoadPanels = true,
   className,
 }: {
@@ -30,6 +33,7 @@ export function SurfAlertCard({
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
   locked?: boolean;
   compact?: boolean;
+  essentialOnly?: boolean;
   showRoadPanels?: boolean;
   className?: string;
 }) {
@@ -55,11 +59,24 @@ export function SurfAlertCard({
           onModuleTogglesChange={onModuleTogglesChange}
         />
         <div className={cn(DASHBOARD_MODULE_CARD_BODY, "mt-2 transition duration-200", !enabled && "opacity-45 saturate-50")}>
-          <ActionPanel view={view} />
-          <StatsRow view={view} />
-          <SurfMaximaPanel snapshot={dailySurfMax} compact />
-          {view.reason && (
-            <div className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">{view.reason}</div>
+          <ActionPanel view={view} essentialOnly={essentialOnly} />
+          {essentialOnly ? (
+            <MobileCardDetailsTrigger
+              title="Surf Analyzer"
+              description="Força, máxima do dia e leitura detalhada do surf."
+            >
+              <StatsRow view={view} />
+              <SurfMaximaPanel snapshot={dailySurfMax} compact />
+              {view.reason ? <div className="text-[10px] leading-snug text-muted-foreground">{view.reason}</div> : null}
+            </MobileCardDetailsTrigger>
+          ) : (
+            <>
+              <StatsRow view={view} />
+              <SurfMaximaPanel snapshot={dailySurfMax} compact />
+              {view.reason && (
+                <div className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">{view.reason}</div>
+              )}
+            </>
           )}
           <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
         </div>
@@ -146,7 +163,15 @@ function CompactHeader({
   );
 }
 
-function ActionPanel({ view, large = false }: { view: SurfView; large?: boolean }) {
+function ActionPanel({
+  view,
+  large = false,
+  essentialOnly = false,
+}: {
+  view: SurfView;
+  large?: boolean;
+  essentialOnly?: boolean;
+}) {
   return (
     <div
       className={cn(
@@ -158,9 +183,11 @@ function ActionPanel({ view, large = false }: { view: SurfView; large?: boolean 
       <div className={cn("font-black uppercase leading-none", large ? "text-2xl" : "text-lg", view.actionClass)}>
         {view.action}
       </div>
-      <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-        {view.headline}
-      </div>
+      {!essentialOnly && (
+        <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          {view.headline}
+        </div>
+      )}
     </div>
   );
 }
@@ -187,7 +214,7 @@ function StatChip({
 }) {
   const toneClass = {
     banker: "border-banker/30 bg-banker/8 text-banker",
-    player: "border-border/60 bg-secondary/25 text-foreground",
+    player: "border-player/30 bg-player/8 text-player",
     green: "border-success/30 bg-success/8 text-success",
     red: "border-destructive/30 bg-destructive/8 text-destructive",
     amber: "border-warning/30 bg-warning/8 text-warning",
@@ -243,8 +270,8 @@ function SurfMaxMiniCard({
 }) {
   const toneClass = {
     banker: "border-banker/35 bg-banker/8 text-banker",
-    player: "border-border/60 bg-secondary/25 text-foreground",
-    tie: "border-border/60 bg-secondary/25 text-foreground",
+    player: "border-player/35 bg-player/8 text-player",
+    tie: "border-tie/35 bg-tie/8 text-tie",
     muted: "border-border/60 bg-secondary/25 text-foreground",
   }[tone];
 
@@ -310,7 +337,7 @@ function buildSurfView(alert: SurfAlert): SurfView {
   return {
     side: side === "BANKER" || side === "PLAYER" ? side : "NONE",
     sideLabel,
-    sideTone: side === "BANKER" ? "banker" : "muted",
+    sideTone: side === "BANKER" ? "banker" : side === "PLAYER" ? "player" : "muted",
     confidence,
     breakRisk,
     stretchedCount: alert.stretched_count ?? 0,
@@ -336,12 +363,13 @@ function buildSurfDecision(
   statusLabel: string,
 ) {
   if (isActive && sideLabel !== "AGUARDAR") {
+    const sideKey = sideLabel === "BANKER" ? "BANKER" : "PLAYER";
     return {
       action: `Seguir ${sideLabel}`,
       headline: `${statusLabel} · Força ${confidence}% · Quebra ${breakRisk}%`,
-      actionClass: "text-success",
-      panelClass: "border-success/35 bg-success/10",
-      borderClass: "border-success/30",
+      actionClass: dashboardSideTextClass(sideKey),
+      panelClass: dashboardSidePanelClass(sideKey),
+      borderClass: dashboardSideBorderClass(sideKey),
     };
   }
 

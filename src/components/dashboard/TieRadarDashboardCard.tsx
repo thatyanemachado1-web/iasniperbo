@@ -25,16 +25,33 @@ export function TieRadarDashboardCard({
       description="Alerta de pressão e risco de empate fica completo apenas no acesso liberado."
       className={`${DASHBOARD_MODULE_CARD_ROOT} min-w-0`}
     >
-      <TieAlertCard
-        alert={alert}
-        scoreboard={scoreboard}
-        rounds={rounds}
-        patternMinerSnapshot={patternMinerSnapshot}
-        toggles={toggles}
-        onModuleTogglesChange={onModuleTogglesChange}
-        compact
-        className="h-full w-full"
-      />
+      <div className="flex h-full min-h-0 flex-1 flex-col">
+        <div className="flex h-full flex-1 flex-col md:hidden">
+          <TieAlertCard
+            alert={alert}
+            scoreboard={scoreboard}
+            rounds={rounds}
+            patternMinerSnapshot={patternMinerSnapshot}
+            toggles={toggles}
+            onModuleTogglesChange={onModuleTogglesChange}
+            compact
+            essentialOnly
+            className="h-full w-full"
+          />
+        </div>
+        <div className="hidden h-full flex-1 flex-col md:flex">
+          <TieAlertCard
+            alert={alert}
+            scoreboard={scoreboard}
+            rounds={rounds}
+            patternMinerSnapshot={patternMinerSnapshot}
+            toggles={toggles}
+            onModuleTogglesChange={onModuleTogglesChange}
+            compact={false}
+            className="h-full w-full"
+          />
+        </div>
+      </div>
     </PremiumFeature>
   );
 }
