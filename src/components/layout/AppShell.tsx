@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   Brain,
   BrainCircuit,
-  Mic,
   Crown,
   User,
   Bell,
@@ -25,7 +24,6 @@ import { useEffect, useState, type ReactNode } from "react";
 const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/agentes", label: "Agentes IA", icon: Network },
-  { to: "/app/voz", label: "Voz", icon: Mic },
   { to: "/app/ia", label: "Aprendizado IA", icon: Brain },
   { to: "/app/padroes", label: "Padrões IA", icon: BrainCircuit },
   { to: "/app/validador", label: "Validador", icon: ShieldCheck },
