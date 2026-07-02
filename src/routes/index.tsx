@@ -1191,6 +1191,9 @@ function resolveLoginErrorMessage(error: unknown) {
     return error.message;
   }
   if (error instanceof AccessApiError) {
+    if (error.status === 401) {
+      return error.message || "E-mail ou senha incorretos.";
+    }
     if (error.status === 503) {
       return error.message || "Servidor de login indisponível no momento. Tente novamente em instantes.";
     }

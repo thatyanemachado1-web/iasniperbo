@@ -785,9 +785,6 @@ function isAppShellRequest(pathname: string) {
 
 function isLightweightApiRequest(pathname: string) {
   return (
-    pathname === "/auth/check" ||
-    pathname === "/auth/register" ||
-    pathname === "/auth/verify" ||
     pathname === "/admin/login" ||
     pathname === "/sales/settings" ||
     pathname === "/billing/plans" ||
@@ -2510,24 +2507,26 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         delete (client as Record<string, unknown>).password;
         await saveLiveState(env);
       }
-    } else if (clientCanBindPasswordDuringMigration(client)) {
+    } else if (!storedHash && !legacyPassword && password) {
+      if (Boolean(client.isBlocked) || Boolean(client.is_blocked)) {
+        return json({ error: "Conta bloqueada. Fale com o suporte." }, 403);
+      }
       client.password_hash = await hashPassword(password);
       client.updated_at = new Date().toISOString();
       upsertLiveClient(client);
       upsertRecipientFromClient(client);
       const persisted = await persistClientRegistryAfterClientChange(env, client, "auth_check_password_bind");
       if (!persisted.ok) return clientRegistryDurableSaveError();
-      recordAccessEvent("client_password_bound_after_migration", {
+      recordAccessEvent("client_password_bound_on_login", {
         ...client,
         risk: "medium",
-        detail: "Senha vinculada automaticamente para cliente premium migrado sem password_hash.",
+        detail: "Senha vinculada automaticamente para cliente existente sem password_hash.",
       });
       ok = true;
     } else {
       return json(
         {
-          error:
-            "Conta encontrada sem senha. Abra a aba Cadastro e crie sua senha para entrar ou finalizar o checkout.",
+          error: "Informe sua senha para entrar. Se ainda nao criou senha, use a aba Cadastro.",
         },
         401,
       );
@@ -2538,7 +2537,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     recordAccessEvent(client.enabled ? "client_login" : "client_pending_login", client);
     const access = await clientAccess(env, client, request);
-    void saveLiveState(env);
+    await saveLiveState(env);
     return json({ access });
   }
 
@@ -2636,6 +2635,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     );
     if (!persisted.ok) return clientRegistryDurableSaveError();
     const access = await clientAccess(env, client, request);
+    await saveLiveState(env);
     return json({ access }, existingIndex >= 0 ? 200 : 201);
   }
 
@@ -2680,21 +2680,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       client = await restoreClientFromApprovedSession(env, request, session);
     }
     if (!client) {
-      return json({
-        valid: true,
-        access: {
-          registered: false,
-          approved: false,
-          access_mode: "none",
-          access_status: "none",
-          plan: "free",
-          email: session.email,
-          full_name: "",
-          expires_at: "",
-          reason: "E-mail ainda nao cadastrado.",
-          client_token: "",
-        },
-      });
+      return json({ valid: false, reason: "Cliente nao encontrado." }, 401);
     }
 
     const sessionCheck = await validateClientSessionBinding(env, request, session, client);

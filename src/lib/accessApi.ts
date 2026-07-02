@@ -168,16 +168,25 @@ export async function refreshAccessSession() {
   const session = readUserSession();
   if (!session.clientToken) return null;
 
-  const data = await apiRequest<{ valid: boolean; access?: ClientAccess }>("/auth/verify", {
-    method: "POST",
-    authenticated: true,
-    body: { email: session.email },
-  });
-  if (!data.valid || !data.access) return null;
+  try {
+    const data = await apiRequest<{ valid: boolean; access?: ClientAccess }>("/auth/verify", {
+      method: "POST",
+      authenticated: true,
+      body: { email: session.email },
+    });
+    if (!data.valid || !data.access) return null;
 
-  const access = normalizeClientAccess(data.access, session.email);
-  saveAccessSession(access, session.email);
-  return access;
+    const access = normalizeClientAccess(data.access, session.email);
+    if (!access.registered || !access.client_token) return null;
+
+    saveAccessSession(access, session.email);
+    return access;
+  } catch (error) {
+    if (error instanceof AccessApiError && (error.status === 401 || error.status === 403)) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function getBillingPlans() {
