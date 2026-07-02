@@ -30,31 +30,31 @@ export interface ModuleMiniScoreboardProps {
 
 const moduleTone = {
   MAIN: {
-    border: "border-neon-cyan/20",
-    title: "text-neon-cyan",
-    glow: "shadow-[0_0_34px_-26px_var(--neon-cyan)]",
-    progress: "var(--neon-cyan)",
+    border: "border-white/10",
+    title: "text-muted-foreground",
+    glow: "",
+    progress: "rgba(255,255,255,0.42)",
     description: "Entradas Banker/Player, com SG, G1 e RED separados.",
   },
   TIE: {
-    border: "border-tie/20",
-    title: "text-tie",
-    glow: "shadow-[0_0_34px_-26px_var(--tie)]",
-    progress: "var(--tie)",
+    border: "border-white/10",
+    title: "text-muted-foreground",
+    glow: "",
+    progress: "rgba(255,255,255,0.42)",
     description: "Tie Alert estatístico, com expirados separados de RED.",
   },
   NEURAL: {
-    border: "border-neon-purple/20",
-    title: "text-gradient-brand",
-    glow: "shadow-[0_0_34px_-26px_var(--neon-purple)]",
-    progress: "var(--neon-purple)",
+    border: "border-white/10",
+    title: "text-muted-foreground",
+    glow: "",
+    progress: "rgba(255,255,255,0.42)",
     description: "Leitura neural de números pagantes, separada da entrada principal.",
   },
   SURF: {
-    border: "border-neon-blue/20",
-    title: "text-neon-blue",
-    glow: "shadow-[0_0_34px_-26px_var(--neon-blue)]",
-    progress: "var(--neon-blue)",
+    border: "border-white/10",
+    title: "text-muted-foreground",
+    glow: "",
+    progress: "rgba(255,255,255,0.42)",
     description: "Surf Analyzer separado dos outros módulos.",
   },
 } as const;
@@ -318,7 +318,7 @@ function ScoreboardDetailsModal({
           <MiniCircularProgress value={assertiveness} color={color} />
           <div>
             <div className="text-xs text-muted-foreground">Assertividade</div>
-            <div className="text-3xl font-black text-neon-cyan">{formatPercent(assertiveness)}</div>
+            <div className="text-3xl font-black text-foreground">{formatPercent(assertiveness)}</div>
             <div className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{dataStateLabel}</div>
           </div>
         </div>
@@ -355,7 +355,7 @@ function moduleToolInfo(moduleType: ModuleMiniScoreboardProps["moduleType"]) {
       purpose: "mostra se a entrada oficial está pagando.",
       how: "conta SG, G1 e RED reais do card principal.",
       entry: "Entrada a seguir: a do card principal.",
-      entryClassName: "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
+      entryClassName: "border-white/10 bg-secondary/20 text-muted-foreground",
     };
   }
 
@@ -364,7 +364,7 @@ function moduleToolInfo(moduleType: ModuleMiniScoreboardProps["moduleType"]) {
       purpose: "mostra se número pagante está puxando lado.",
       how: "conta SG, G1 e RED reais da Neural.",
       entry: "Entrada pela Neural: o lado mostrado no ? da Leitura Neural.",
-      entryClassName: "border-neon-purple/25 bg-neon-purple/10 text-neon-purple",
+      entryClassName: "border-white/10 bg-secondary/20 text-muted-foreground",
     };
   }
 
@@ -373,7 +373,7 @@ function moduleToolInfo(moduleType: ModuleMiniScoreboardProps["moduleType"]) {
       purpose: "avisa quando existe pressão de empate.",
       how: "conta Green se o Tie aparece dentro da validade.",
       entry: "Entrada pelo Tie: só com alerta ativo e validade aberta.",
-      entryClassName: "border-tie/25 bg-tie/10 text-tie",
+      entryClassName: "border-white/10 bg-secondary/20 text-muted-foreground",
     };
   }
 
@@ -381,7 +381,7 @@ function moduleToolInfo(moduleType: ModuleMiniScoreboardProps["moduleType"]) {
     purpose: "mostra quando a mesa está puxando tendência.",
     how: "mede força do lado e risco de quebra.",
     entry: "Entrada pelo Surf: seguir o lado do surf com risco controlado.",
-    entryClassName: "border-neon-blue/25 bg-neon-blue/10 text-neon-blue",
+    entryClassName: "border-white/10 bg-secondary/20 text-muted-foreground",
   };
 }
 

@@ -1,6 +1,7 @@
 import { CircleHelp, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { dashboardSideChipClass, dashboardSideTextClass } from "@/lib/sideColors";
 import { DASHBOARD_MODULE_CARD_ROOT } from "@/components/dashboard/dashboardModuleCardLayout";
 import { buildNeuralCopy } from "@/lib/operationalCopy";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
@@ -602,12 +603,7 @@ function neuralEntryStatusState(
       label: sideLabel(confirmedSide).toUpperCase(),
       description: null,
       sideClass: sideClass(confirmedSide),
-      className:
-        confirmedSide === "BANKER"
-          ? "border-banker/30 bg-banker/10 text-banker"
-          : confirmedSide === "PLAYER"
-            ? "border-player/30 bg-player/10 text-player"
-            : "border-tie/35 bg-tie/10 text-tie",
+      className: dashboardSideChipClass(confirmedSide),
     };
   }
 
@@ -783,12 +779,7 @@ function neuralToolInsight(reading: NeuralReading) {
 
   return {
     text: `${prefix} Pela Neural agora: ${sideLabel(side)} até ${validity}.`,
-    className:
-      side === "BANKER"
-        ? "border-banker/35 bg-banker/10 text-banker"
-        : side === "PLAYER"
-          ? "border-player/35 bg-player/10 text-player"
-          : "border-tie/35 bg-tie/10 text-tie",
+    className: dashboardSideChipClass(side),
   };
 }
 
@@ -1145,8 +1136,5 @@ function sideLabel(side?: NeuralSide | null) {
 }
 
 function sideClass(side?: NeuralSide | null) {
-  if (side === "BANKER") return "text-banker";
-  if (side === "PLAYER") return "text-player";
-  if (side === "TIE") return "text-tie";
-  return "text-muted-foreground";
+  return dashboardSideTextClass(side);
 }

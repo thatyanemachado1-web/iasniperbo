@@ -1,5 +1,8 @@
 import type { RoundResult } from "@/types/dashboard";
 import type { PatternMinerStrategy, PatternMinerStrategyStatus } from "@/types/patternMiner";
+import { sideBgClass, sideTextClass } from "@/lib/sideColors";
+
+export { sideBgClass, sideTextClass };
 
 const SIDE_LABEL: Record<RoundResult, string> = {
   B: "BANKER",
@@ -9,25 +12,14 @@ const SIDE_LABEL: Record<RoundResult, string> = {
 
 const SIDE_ICON: Record<RoundResult, string> = {
   B: "🔴",
-  P: "🔵",
-  T: "🟡",
-};
-
-export const sideTextClass: Record<RoundResult, string> = {
-  B: "text-banker",
-  P: "text-player",
-  T: "text-warning",
-};
-
-export const sideBgClass: Record<RoundResult, string> = {
-  B: "bg-banker/15 border-banker/35 text-banker",
-  P: "bg-player/15 border-player/35 text-player",
-  T: "bg-warning/15 border-warning/35 text-warning",
+  P: "",
+  T: "",
 };
 
 export function formatPatternToken(token: string) {
   const side = token[0] as RoundResult;
-  return `${SIDE_ICON[side]} ${token}`;
+  const icon = SIDE_ICON[side];
+  return icon ? `${icon} ${token}` : token;
 }
 
 export function formatPatternSequence(sequence: string[]) {
@@ -35,7 +27,8 @@ export function formatPatternSequence(sequence: string[]) {
 }
 
 export function formatPulledSide(side: RoundResult) {
-  return `${SIDE_ICON[side]} ${SIDE_LABEL[side]}`;
+  const icon = SIDE_ICON[side];
+  return icon ? `${icon} ${SIDE_LABEL[side]}` : SIDE_LABEL[side];
 }
 
 export function formatStrategyConclusion(strategy: PatternMinerStrategy) {

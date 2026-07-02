@@ -8,6 +8,7 @@ import {
   DASHBOARD_MODULE_CARD_ROOT,
 } from "@/components/dashboard/dashboardModuleCardLayout";
 import { cn } from "@/lib/utils";
+import { dashboardSideTextClass } from "@/lib/sideColors";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import type {
   NeuralEntryLastResult,
@@ -120,7 +121,7 @@ export function LeituraNeuralMiniCard({
 
       <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Leitura Neural
           </div>
           <div className="text-[8px] font-bold uppercase tracking-[0.1em] text-neon-purple/75">
@@ -496,8 +497,8 @@ function NeuralStatChip({
     red: "border-destructive/30 bg-destructive/8 text-destructive",
     muted: "border-border/60 bg-secondary/25 text-foreground",
     banker: "border-banker/30 bg-banker/8 text-banker",
-    player: "border-player/30 bg-player/8 text-player",
-    tie: "border-warning/30 bg-warning/8 text-warning",
+    player: "border-border/60 bg-secondary/25 text-foreground",
+    tie: "border-border/60 bg-secondary/25 text-foreground",
   }[tone];
 
   return (
@@ -586,15 +587,11 @@ function neuralStatusKind(reading: NeuralReading): "green" | "amber" | "red" | "
 }
 
 function sideActionClass(side: NeuralSide) {
-  if (side === "BANKER") return "text-banker";
-  if (side === "PLAYER") return "text-player";
-  return "text-warning";
+  return dashboardSideTextClass(side);
 }
 
 function sideNumberTone(side: NeuralReading["origem"]) {
   if (side === "BANKER") return "banker" as const;
-  if (side === "PLAYER") return "player" as const;
-  if (side === "TIE") return "tie" as const;
   return "muted" as const;
 }
 
@@ -632,8 +629,5 @@ function sideLabel(side?: NeuralSide | null) {
 }
 
 function sideClass(side?: NeuralSide | null) {
-  if (side === "BANKER") return "text-banker";
-  if (side === "PLAYER") return "text-player";
-  if (side === "TIE") return "text-tie";
-  return "text-muted-foreground";
+  return dashboardSideTextClass(side);
 }

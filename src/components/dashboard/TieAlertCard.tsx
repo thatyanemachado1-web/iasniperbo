@@ -66,7 +66,7 @@ export function TieAlertCard({
         <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-warning/22 to-transparent" />
         <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Radar de Empate
           </div>
           <div className="flex max-w-[58%] shrink-0 flex-wrap items-center justify-end gap-1">

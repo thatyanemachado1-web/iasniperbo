@@ -128,7 +128,7 @@ function CompactHeader({
   return (
     <div className="flex min-w-0 items-start justify-between gap-2">
       <div className="min-w-0">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
           Surf Analyzer
         </div>
       </div>
@@ -187,7 +187,7 @@ function StatChip({
 }) {
   const toneClass = {
     banker: "border-banker/30 bg-banker/8 text-banker",
-    player: "border-player/30 bg-player/8 text-player",
+    player: "border-border/60 bg-secondary/25 text-foreground",
     green: "border-success/30 bg-success/8 text-success",
     red: "border-destructive/30 bg-destructive/8 text-destructive",
     amber: "border-warning/30 bg-warning/8 text-warning",
@@ -209,7 +209,7 @@ function SurfMaximaPanel({ snapshot, compact = false }: { snapshot: DailySurfMax
   if (compact) {
     return (
       <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-        <div className="font-black uppercase tracking-[0.08em] text-neon-cyan/80">
+        <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
           Máxima hoje · reseta 00:00 (BR)
         </div>
         <div className="mt-0.5">
@@ -239,12 +239,13 @@ function SurfMaxMiniCard({
 }: {
   label: string;
   value: number;
-  tone: "banker" | "player" | "tie";
+  tone: "banker" | "player" | "tie" | "muted";
 }) {
   const toneClass = {
     banker: "border-banker/35 bg-banker/8 text-banker",
-    player: "border-player/35 bg-player/8 text-player",
-    tie: "border-tie/35 bg-tie/10 text-tie",
+    player: "border-border/60 bg-secondary/25 text-foreground",
+    tie: "border-border/60 bg-secondary/25 text-foreground",
+    muted: "border-border/60 bg-secondary/25 text-foreground",
   }[tone];
 
   return (
@@ -309,7 +310,7 @@ function buildSurfView(alert: SurfAlert): SurfView {
   return {
     side: side === "BANKER" || side === "PLAYER" ? side : "NONE",
     sideLabel,
-    sideTone: side === "BANKER" ? "banker" : side === "PLAYER" ? "player" : "muted",
+    sideTone: side === "BANKER" ? "banker" : "muted",
     confidence,
     breakRisk,
     stretchedCount: alert.stretched_count ?? 0,

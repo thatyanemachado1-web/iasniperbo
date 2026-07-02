@@ -73,7 +73,7 @@ function DaySummaryCard({ label, summary }: { label: string; summary: DayRoundSu
 
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
         <Metric label="Banker" value={summary.banker} percent={summary.bankerPercent} tone="text-banker" />
-        <Metric label="Player" value={summary.player} percent={summary.playerPercent} tone="text-player" />
+        <Metric label="Player" value={summary.player} percent={summary.playerPercent} tone="text-muted-foreground" />
         <Metric label="Tie" value={summary.tie} percent={summary.tiePercent} tone="text-tie" />
       </div>
 

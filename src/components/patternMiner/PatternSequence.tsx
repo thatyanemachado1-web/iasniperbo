@@ -1,13 +1,10 @@
 import type { RoundResult } from "@/types/dashboard";
 import type { PatternMinerStrategy } from "@/types/patternMiner";
 import { cn } from "@/lib/utils";
+import { sideDotClass } from "@/lib/sideColors";
 import { sideTextClass } from "@/patternMiner/PatternMinerDisplay";
 
-const SIDE_DOT_CLASS: Record<RoundResult, string> = {
-  B: "border-banker/60 bg-banker text-white shadow-[0_0_14px_-6px_var(--banker)]",
-  P: "border-player/60 bg-player text-white shadow-[0_0_14px_-6px_var(--player)]",
-  T: "border-warning/70 bg-warning text-background shadow-[0_0_14px_-6px_var(--warning)]",
-};
+const SIDE_DOT_CLASS = sideDotClass;
 
 export function PatternSequence({
   sequence,
@@ -81,8 +78,8 @@ export function StrategyConclusion({
 
 function pulledSideLabel(side: RoundResult) {
   if (side === "B") return "🔴 BANKER";
-  if (side === "P") return "🔵 PLAYER";
-  return "🟡 TIE";
+  if (side === "P") return "PLAYER";
+  return "TIE";
 }
 
 function patternTokenValue(token: string) {

@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { buildDecisionFallbackCopy, buildEngineDecisionCopy } from "@/lib/operationalCopy";
+import { dashboardSideChipClass } from "@/lib/sideColors";
 import type { DashboardData, EngineDecision } from "@/types/dashboard";
 import { Cpu, ChevronRight } from "lucide-react";
 
@@ -109,12 +110,7 @@ function engineDetailsCopy(decision: EngineDecision, data?: DashboardData) {
   if (decision.state === "ENTRADA" && (side === "BANKER" || side === "PLAYER" || side === "TIE")) {
     return {
       entry: `Agora pela engine: ${side}.`,
-      className:
-        side === "BANKER"
-          ? "border-banker/35 bg-banker/10 text-banker"
-          : side === "PLAYER"
-            ? "border-player/35 bg-player/10 text-player"
-            : "border-tie/35 bg-tie/10 text-tie",
+      className: dashboardSideChipClass(side === "TIE" ? "TIE" : side),
     };
   }
 

@@ -9,6 +9,7 @@ import {
 } from "@/components/dashboard/dashboardModuleCardLayout";
 import { PatternSequence } from "@/components/patternMiner/PatternSequence";
 import { cn } from "@/lib/utils";
+import { dashboardSideTextClass } from "@/lib/sideColors";
 import { formatPulledSide, statusLabel } from "@/patternMiner/PatternMinerDisplay";
 import type { PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
 
@@ -40,7 +41,7 @@ export function PatternMinerMiniCard({
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/22 to-transparent" />
 
       <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neon-cyan/80">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
           Padrões IA
         </div>
         <AppBadge
@@ -140,7 +141,7 @@ function buildPatternView(
       pulse: true,
       action: `Entrar ${sideLabel(side)}`,
       headline: `${formatPulledSide(side)} · assertividade ${strengthLabel}`,
-      actionClass: side === "B" ? "text-banker" : side === "P" ? "text-player" : "text-warning",
+      actionClass: dashboardSideTextClass(side === "B" ? "BANKER" : side === "P" ? "PLAYER" : "TIE"),
       panelClass: "border-success/35 bg-success/10",
       borderClass: "border-success/30",
       strengthLabel,
