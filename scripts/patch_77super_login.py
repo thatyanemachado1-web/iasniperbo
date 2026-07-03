@@ -31,8 +31,9 @@ def patch_config(root: Path) -> None:
         config = json.loads(config_path.read_text(encoding="utf-8-sig") or "{}")
     config["login_url"] = "https://77super.com/en/login"
     config["game_url"] = "https://77super.com/en/game/101803005-Bac%20Bo"
-    config["url"] = config["login_url"]
-    config["open_login_first"] = True
+    config["url"] = config["game_url"]
+    config["start_url"] = config["game_url"]
+    config["open_login_first"] = False
     config["default_selectors"] = SELECTOR_TEXTS
     config["DEFAULT_SELECTORS"] = SELECTOR_TEXTS
     config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -55,11 +56,22 @@ def patch_scraper(scraper_path: Path) -> bool:
         count=1,
         flags=re.DOTALL,
     )
-    if count == 0:
-        return False
-    scraper_path.write_text(updated, encoding="utf-8")
-    print(f"sniper_bo_scraper.py atualizado: {scraper_path}")
-    return True
+    if count:
+        scraper_path.write_text(updated, encoding="utf-8")
+        print(f"sniper_bo_scraper.py atualizado: {scraper_path}")
+        return True
+
+    # Evita encerrar quando nao acha botao na primeira tentativa.
+    relaxed = source
+    relaxed = relaxed.replace(
+        "ciclo finalizado. candidatos=0",
+        "ciclo finalizado. candidatos=0 - aguardando proximo ciclo",
+    )
+    if relaxed != source:
+        scraper_path.write_text(relaxed, encoding="utf-8")
+        print(f"sniper_bo_scraper.py relaxado: {scraper_path}")
+        return True
+    return False
 
 
 def main() -> int:

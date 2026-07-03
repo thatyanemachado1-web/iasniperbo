@@ -24,6 +24,7 @@ def apply_login(config: dict, email: str, password: str) -> None:
 
     game_url = "https://77super.com/en/game/101803005-Bac%20Bo"
     site_url = "https://77super.com"
+    login_url = "https://77super.com/en/login"
 
     flat_keys = {
         "email": email,
@@ -43,9 +44,11 @@ def apply_login(config: dict, email: str, password: str) -> None:
         "casino_password": password,
         "username": email,
         "site_url": site_url,
+        "login_url": login_url,
         "game_url": game_url,
         "url": game_url,
         "target_url": game_url,
+        "start_url": game_url,
         "headless": False,
         "keep_browser_open": True,
         "auto_login": True,
