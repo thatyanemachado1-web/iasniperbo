@@ -12737,12 +12737,34 @@ function syncServerNeuralReadingFromIncomingLifecycle(dashboard: LiveDashboardDa
 
   const result = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
   if (!result) return dashboard;
+  if (!isRecentServerNeuralEntryResult(result, dashboard)) {
+    return {
+      ...dashboard,
+      neuralEntryState: null,
+      neuralEntryLastResult: null,
+    };
+  }
   return {
     ...dashboard,
     neuralEntryState: null,
     neuralEntryLastResult: result,
     neuralReading: neuralReadingForEntryResult(result),
   };
+}
+
+function isRecentServerNeuralEntryResult(
+  result: NeuralEntryLastResult,
+  dashboard: LiveDashboardData,
+) {
+  const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
+  if (!rounds.length) return true;
+  const recentRoundKeys = new Set(
+    rounds.slice(-4).map((round) => roundHistoryKey(round)),
+  );
+  if (recentRoundKeys.has(result.resultRoundKey)) return true;
+  const finishedAtMs = Date.parse(result.finishedAt);
+  if (!Number.isFinite(finishedAtMs)) return false;
+  return Date.now() - finishedAtMs <= LIVE_FEED_STALE_MS;
 }
 
 function trackServerNeuralEntryLifecycle(
