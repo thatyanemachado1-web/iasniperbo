@@ -4,7 +4,10 @@ param(
 
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-if (-not $ProjectRoot) { $ProjectRoot = Split-Path -Parent $ScriptDir }
+$ProjectRoot = ($ProjectRoot -replace '"', '').Trim().TrimEnd('\')
+if (-not $ProjectRoot) {
+  $ProjectRoot = Split-Path -Parent $ScriptDir
+}
 $LocalEnv = Join-Path $ScriptDir "official_publisher.local.env"
 $PubLog = Join-Path $ProjectRoot "official_dashboard_publisher.log"
 $ColLog = Join-Path $ProjectRoot "official_legacy_collector.log"
