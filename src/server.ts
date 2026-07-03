@@ -3207,7 +3207,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     const body = await request.json().catch(() => ({}));
     const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
     const incomingState = readRecord(body);
-    if (incomingRounds.length && shouldIgnoreStaleDashboardPost(liveDashboardData, incomingState)) {
+    if (incomingRounds.length && shouldIgnoreStaleDashboardPost(liveDashboardData, incomingState, request)) {
       return json({
         ok: true,
         ignored: "stale",
@@ -18134,7 +18134,17 @@ async function syncDashboardReadState(env: unknown) {
   const merged = mergeLiveStates(durableState, cacheState);
   const dashboard = readRecord(merged?.dashboard);
   if (!hasRecordFields(dashboard)) return;
-  if (compareDashboardStateFreshness(dashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
+
+  const inMemory = liveDashboardData as unknown as Record<string, unknown>;
+  const inMemoryUpdatedAt = Date.parse(readString(inMemory, "updatedAt") || "");
+  const persistedUpdatedAt = Date.parse(readString(dashboard, "updatedAt") || "");
+
+  // High-frequency /dashboard reads must not roll back a fresher in-memory feed.
+  if (Number.isFinite(inMemoryUpdatedAt)) {
+    if (!Number.isFinite(persistedUpdatedAt) || inMemoryUpdatedAt >= persistedUpdatedAt - 500) return;
+  }
+
+  if (compareDashboardStateFreshness(dashboard, inMemory) > 0) {
     liveDashboardData = restoreDashboardData(dashboard);
   }
 }
@@ -18551,7 +18561,13 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
   return compareDashboardStateFreshness(first, second) >= 0 ? first : second;
 }
 
-function shouldIgnoreStaleDashboardPost(current: LiveDashboardData, incoming: Record<string, unknown>) {
+function shouldIgnoreStaleDashboardPost(
+  current: LiveDashboardData,
+  incoming: Record<string, unknown>,
+  request?: Request,
+) {
+  if (request && isOfficialDashboardPublisherRequest(request)) return false;
+
   const currentState = current as unknown as Record<string, unknown>;
   if (compareDashboardStateFreshness(currentState, incoming) <= 0) return false;
 
