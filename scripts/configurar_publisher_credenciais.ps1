@@ -34,6 +34,7 @@ FRONTEND_PORT=5175
 SIGNALS_API_PORT=8787
 SIGNALS_API_HOST=127.0.0.1
 SNIPER_LOCAL_DASHBOARD_URL=$LocalDashboardUrl
+SNIPER_REMOTE_PUBLISH_URL=https://sniperbo.com/dashboard/publish
 "@
 
 Set-Content -LiteralPath $LocalEnv -Value $envContent -Encoding UTF8

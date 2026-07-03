@@ -115,7 +115,8 @@ if (-not $remoteDashboardToken) {
 $interval = Read-EnvValue $localEnv "PUBLISHER_INTERVAL" "0.7"
 $frontendPort = [int](Read-EnvValue $localEnv "FRONTEND_PORT" "5175")
 $signalsApiPort = [int](Read-EnvValue $localEnv "SIGNALS_API_PORT" "8787")
-$localDashboardUrl = Read-EnvValue $localEnv "SNIPER_LOCAL_DASHBOARD_URL" "http://127.0.0.1:$signalsApiPort/dashboard"
+$localDashboardUrl = Read-EnvValue $localEnv "SNIPER_LOCAL_DASHBOARD_URL" "http://127.0.0.1:8791/dashboard"
+$remotePublishUrl = Read-EnvValue $localEnv "SNIPER_REMOTE_PUBLISH_URL" "https://sniperbo.com/dashboard/publish"
 
 if (-not $adminToken) {
   $adminToken = Read-TokenFromEnvFile $sourceEnvFile "SNIPER_ADMIN_TOKEN"
@@ -153,7 +154,7 @@ if (-not $adminEmail -or -not $adminPassword -or -not $adminToken) {
 
 $startInfo = New-Object System.Diagnostics.ProcessStartInfo
 $startInfo.FileName = $pythonExe
-$startInfo.Arguments = "scripts\official_dashboard_publisher.py --env-file `"$sourceEnvFile`" --local-url `"$localDashboardUrl`" --interval $interval --log-file official_dashboard_publisher.log"
+$startInfo.Arguments = "scripts\official_dashboard_publisher.py --env-file `"$sourceEnvFile`" --local-url `"$localDashboardUrl`" --remote-url `"$remotePublishUrl`" --interval $interval --log-file official_dashboard_publisher.log"
 $startInfo.WorkingDirectory = $ProjectRoot
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true

@@ -35,8 +35,18 @@ function Resolve-LegacyCollectorRoot($Root) {
 $LegacyRoot = Resolve-LegacyCollectorRoot $ProjectRoot
 $LegacyScript = Join-Path $LegacyRoot "sniper_bo_scraper.py"
 $LegacyEnvPath = Join-Path $LegacyRoot ".env"
+if (-not (Test-Path -LiteralPath $LegacyEnvPath) -and (Test-Path -LiteralPath (Join-Path $ProjectRoot ".env"))) {
+  $LegacyEnvPath = Join-Path $ProjectRoot ".env"
+}
 $LegacyPython = Join-Path $LegacyRoot ".venv\Scripts\python.exe"
-$LegacyLog = Join-Path $LegacyRoot "official_legacy_collector.log"
+if (-not (Test-Path -LiteralPath $LegacyPython)) {
+  $LegacyPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+}
+$LegacyLog = Join-Path $ProjectRoot "official_legacy_collector.log"
+$LegacyConfig = Join-Path $ProjectRoot "config.json"
+if (-not (Test-Path -LiteralPath $LegacyConfig)) {
+  $LegacyConfig = Join-Path $LegacyRoot "config.json"
+}
 $LegacyBrowserProfileMarker = "browser_profile_77super"
 $StaleStatePath = Join-Path $LogDir "legacy_collector_watch_state.json"
 
@@ -314,11 +324,18 @@ if ($collectorProcesses.Count -gt 1 -and $legacyListenerPid) {
 }
 $legacyDashboardReady = Test-Url "http://127.0.0.1:$LegacyApiPort/dashboard" $legacyToken
 if ($collectorProcesses.Count -eq 0 -and -not $legacyListenerPid -and -not $legacyDashboardReady) {
-  Write-StartupLog "starting legacy collector isolated port=$LegacyApiPort"
+  Write-StartupLog "starting legacy collector isolated port=$LegacyApiPort root=$LegacyRoot"
+  $configArgs = ""
+  if (Test-Path -LiteralPath $LegacyConfig) {
+    $configArgs = "--config `"$LegacyConfig`""
+    Write-StartupLog "collector config=$LegacyConfig"
+  } else {
+    Write-StartupLog "collector config missing path=$LegacyConfig starting without --config"
+  }
   $collectorInfo = New-Object System.Diagnostics.ProcessStartInfo
   $collectorInfo.FileName = $LegacyPython
-  $collectorInfo.Arguments = "`"$LegacyScript`" --config `"config.json`" --interval 0.5 --admin-api-enabled --no-telegram --log-file `"official_legacy_collector.log`""
-  $collectorInfo.WorkingDirectory = $LegacyRoot
+  $collectorInfo.Arguments = "`"$LegacyScript`" $configArgs --interval 0.5 --admin-api-enabled --no-telegram --log-file `"$LegacyLog`""
+  $collectorInfo.WorkingDirectory = $ProjectRoot
   $collectorInfo.UseShellExecute = $false
   $collectorInfo.CreateNoWindow = $true
   Set-ProcessEnv $collectorInfo "SNIPER_ADMIN_API_ENABLED" "1"
