@@ -363,6 +363,7 @@ const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
 const DEFAULT_OLLAMA_MODEL = "qwen2.5:7b";
 const DEFAULT_EDGE_TTS_VOICE = "pt-BR-AntonioNeural";
 const MAX_SERVER_ROUND_HISTORY = 50_000;
+const DASHBOARD_READ_ROUND_LIMIT = 30;
 const MAX_MONITOR_ROUND_HISTORY = 300;
 const MAX_VALIDATOR_ROUND_WRITE_BATCH = 500;
 const MAX_VALIDATOR_DETAIL_RESPONSE = 200;
@@ -3126,20 +3127,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     }
 
     const limit = clampRoundHistoryLimit(url.searchParams.get("limit"));
-    const storedRounds = await withTimeout(
-      fetchStoredValidatorRounds(
-        env,
-        limit,
-        validatorTableId(url.searchParams.get("tableId") || url.searchParams.get("table")),
-      ),
-      LIVE_STATE_IO_TIMEOUT_MS,
-      "carregar historico do Validador",
-      [] as Round[],
-    );
-    if (storedRounds.length) {
-      liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, storedRounds);
-    }
-    const rounds = mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, limit);
+    const tableId = validatorTableId(url.searchParams.get("tableId") || url.searchParams.get("table"));
+    await loadLiveState(env);
+    const rounds = await loadDashboardReadRounds(env, limit, tableId);
     return json({
       rounds,
       total: rounds.length,
@@ -3195,13 +3185,8 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       return json({ error: "Nao autorizado." }, 401);
     }
 
-    await syncDashboardReadState(env);
-    const cycle = ensureDashboardDailyCycle(liveDashboardData);
-    if (cycle.changed) {
-      liveDashboardData = cycle.dashboard;
-      runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
-    }
-    return json(publicDashboardSnapshot(liveDashboardData));
+    const snapshot = await buildAuthenticatedDashboardSnapshot(env, ctx);
+    return json(snapshot);
   }
 
   if (
@@ -12262,18 +12247,170 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
   return {
     ...publicDashboard,
     currentSignal: signal,
+    mockMode: false,
   } as LiveDashboardData;
+}
+
+async function buildAuthenticatedDashboardSnapshot(env: unknown, ctx?: unknown) {
+  await loadLiveState(env);
+  await syncDashboardReadState(env);
+
+  const [persistedRounds, mergedSnapshot] = await Promise.all([
+    loadDashboardReadRounds(env, DASHBOARD_READ_ROUND_LIMIT),
+    loadMergedDashboardSnapshot(env),
+  ]);
+
+  let dashboard =
+    mergedSnapshot && dashboardSignalStateScore(mergedSnapshot) >= dashboardSignalStateScore(liveDashboardData)
+      ? mergedSnapshot
+      : liveDashboardData;
+
+  if (persistedRounds.length && dashboardNeedsPersistedHistoryRepair(dashboard, persistedRounds)) {
+    dashboard = rebuildDashboardSnapshotFromPersistedSources(dashboard, mergedSnapshot, persistedRounds);
+    liveDashboardData = dashboard;
+    runBackgroundTask(ctx, saveLiveState(env), "salvar dashboard reparado");
+  }
+
+  const cycle = ensureDashboardDailyCycle(dashboard);
+  dashboard = cycle.dashboard;
+  liveDashboardData = dashboard;
+  if (cycle.changed) {
+    runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
+  }
+
+  dashboard = await enforceDashboardRoundParity(env, dashboard, persistedRounds, mergedSnapshot);
+  liveDashboardData = dashboard;
+  return enrichPublicDashboardSnapshot(dashboard);
+}
+
+function rebuildDashboardSnapshotFromPersistedSources(
+  baseDashboard: LiveDashboardData,
+  mergedSnapshot: LiveDashboardData | null,
+  persistedRounds: Round[],
+) {
+  const signalSource =
+    mergedSnapshot && dashboardSignalStateScore(mergedSnapshot) > dashboardSignalStateScore(baseDashboard)
+      ? mergedSnapshot
+      : baseDashboard;
+  const mergedRecord = signalSource as unknown as Record<string, unknown>;
+  const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
+  const cycleDate = currentDashboardCycleDate();
+  const repaired = updateDashboardData(baseDashboard, {
+    ...pickDashboardSections(mergedRecord),
+    currentSignal: readMainSignal(mergedRecord),
+    neuralEntryState: mergedRecord.neuralEntryState,
+    neuralEntryLastResult: mergedRecord.neuralEntryLastResult,
+    rounds: persistedRounds.slice(-DASHBOARD_READ_ROUND_LIMIT),
+    cycleDate,
+    dailyCycleDate: cycleDate,
+    updatedAt:
+      readString(mergedRecord, "updatedAt") ||
+      (latestPersistedRound ? getRoundRecordedAt(latestPersistedRound) : "") ||
+      baseDashboard.updatedAt ||
+      new Date().toISOString(),
+  });
+  return { ...exposeServerNeuralEntryAsCurrentSignal(repaired), mockMode: false };
+}
+
+async function enforceDashboardRoundParity(
+  env: unknown,
+  dashboard: LiveDashboardData,
+  cachedPersistedRounds?: Round[],
+  mergedSnapshot?: LiveDashboardData | null,
+) {
+  const persistedRounds = cachedPersistedRounds?.length
+    ? cachedPersistedRounds
+    : await loadDashboardReadRounds(env, DASHBOARD_READ_ROUND_LIMIT);
+  if (!persistedRounds.length) return { ...exposeServerNeuralEntryAsCurrentSignal(dashboard), mockMode: false };
+
+  liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, persistedRounds);
+  const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
+  const latestDashboardRound = latestRoundFromRoundList(dashboard.rounds);
+  const roundsMissing = !Array.isArray(dashboard.rounds) || dashboard.rounds.length === 0;
+  const roundsMismatch = Boolean(
+    latestPersistedRound &&
+      (!latestDashboardRound ||
+        latestPersistedRound.id !== latestDashboardRound.id ||
+        roundHistoryKey(latestPersistedRound) !== roundHistoryKey(latestDashboardRound)),
+  );
+  if (!roundsMissing && !roundsMismatch) {
+    return { ...exposeServerNeuralEntryAsCurrentSignal(dashboard), mockMode: false };
+  }
+
+  const signalSource =
+    mergedSnapshot && dashboardSignalStateScore(mergedSnapshot) > dashboardSignalStateScore(dashboard)
+      ? mergedSnapshot
+      : dashboard;
+  return rebuildDashboardSnapshotFromPersistedSources(dashboard, signalSource, persistedRounds);
+}
+
+function enrichPublicDashboardSnapshot(dashboard: LiveDashboardData) {
+  const snapshot = publicDashboardSnapshot(dashboard);
+  return {
+    ...snapshot,
+    ...buildDashboardReadMetadata(snapshot),
+  };
+}
+
+function buildDashboardReadMetadata(dashboard: LiveDashboardData) {
+  const latestRound = latestRoundFromRoundList(dashboard.rounds);
+  const signal = dashboard.currentSignal;
+  const side = signal?.side ?? "NONE";
+  const entryState = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
+  const entryResult = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
+  let displayState = "analyzing";
+
+  if (entryResult?.kind === "red" || signal?.status === "red") {
+    displayState = "red";
+  } else if (entryResult?.kind === "tie_sg" || entryResult?.kind === "tie_g1" || signal?.status === "tie") {
+    displayState = "tie";
+  } else if (
+    entryResult?.kind === "sg" ||
+    entryResult?.kind === "g1" ||
+    signal?.status === "green" ||
+    signal?.status === "green_g1"
+  ) {
+    displayState = "green";
+  } else if (
+    entryState ||
+    (isServerEntrySide(side) && (signal?.status === "pending" || signal?.status === "g1"))
+  ) {
+    displayState = "confirmed";
+  } else if (dashboard.neuralReading?.mode === "ACTIVE" || dashboard.neuralReading?.mode === "OBSERVING") {
+    displayState = "active";
+  }
+
+  return {
+    latestRoundId: latestRound?.id ?? null,
+    revision: computeDashboardRevision(dashboard, latestRound),
+    displayState,
+    side,
+  };
+}
+
+function computeDashboardRevision(dashboard: LiveDashboardData, latestRound: Round | null) {
+  if (!latestRound) return 2;
+  let revision = 3;
+  const signal = dashboard.currentSignal;
+  if (normalizeServerNeuralEntryState(dashboard.neuralEntryState)) revision += 2;
+  else if (isServerEntrySide(signal?.side) && (signal?.status === "pending" || signal?.status === "g1")) {
+    revision += 2;
+  } else if (signal?.status === "green" || signal?.status === "green_g1") {
+    revision += 1;
+  } else if (dashboard.neuralReading?.mode === "ACTIVE") {
+    revision += 1;
+  }
+  const updatedAtMs = Date.parse(dashboard.updatedAt || "");
+  if (Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs <= 120_000) revision += 1;
+  return revision;
 }
 
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
   const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
-  // Hotfix produção: não transformar um dashboard com rodada/dados reais em
-  // FEED_PAUSADO apenas porque o timestamp do publicador ficou preso. Isso era
-  // exatamente o que deixava o site em "SEM ENTRADA" mesmo com leitura neural
-  // e mesa online. Só pausa quando realmente não existe histórico para exibir.
   if (rounds.length > 0) return false;
+  if (liveValidatorRoundHistory.length > 0) return false;
 
-  const updatedAt = Date.parse(readString(dashboard, "updatedAt"));
+  const updatedAt = Date.parse(readString(dashboard as unknown as Record<string, unknown>, "updatedAt"));
   if (!Number.isFinite(updatedAt)) return true;
   return Date.now() - updatedAt > LIVE_FEED_STALE_MS;
 }
@@ -13214,21 +13351,50 @@ function roundsFromNeuralCycleReset(rounds: Round[], resetRoundKey: string) {
 function ensureDashboardDailyCycle(
   dashboard: DashboardData & { updatedAt?: string; cycleDate?: string; dailyCycleDate?: string },
 ) {
+  let workingDashboard = dashboard;
+  const dashboardRounds = Array.isArray(workingDashboard.rounds) ? workingDashboard.rounds : [];
+  if (!dashboardRounds.length && liveValidatorRoundHistory.length) {
+    workingDashboard = {
+      ...workingDashboard,
+      rounds: liveValidatorRoundHistory.slice(-DASHBOARD_READ_ROUND_LIMIT),
+    };
+  }
+
   const cycleDate = currentDashboardCycleDate();
-  if (readDashboardCycleDate(dashboard) === cycleDate) {
+  if (readDashboardCycleDate(workingDashboard) === cycleDate) {
     return {
       dashboard: {
-        ...dashboard,
+        ...workingDashboard,
         cycleDate,
         dailyCycleDate: cycleDate,
-        strictDailyCounters: (dashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
+        strictDailyCounters: (workingDashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
       },
-      changed: false,
+      changed: workingDashboard !== dashboard,
+    };
+  }
+
+  const persistedLatestRound = latestRoundFromRoundList(liveValidatorRoundHistory);
+  const dashboardLatestRound = latestRoundFromRoundList(workingDashboard.rounds);
+  const hasPersistedCurrentRound = Boolean(
+    persistedLatestRound &&
+      dashboardLatestRound &&
+      persistedLatestRound.id === dashboardLatestRound.id &&
+      roundHistoryKey(persistedLatestRound) === roundHistoryKey(dashboardLatestRound),
+  );
+  if (hasPersistedCurrentRound || persistedLatestRound) {
+    return {
+      dashboard: {
+        ...workingDashboard,
+        cycleDate,
+        dailyCycleDate: cycleDate,
+        strictDailyCounters: (workingDashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
+      },
+      changed: true,
     };
   }
 
   return {
-    dashboard: resetDashboardDailyCycle(dashboard, cycleDate),
+    dashboard: resetDashboardDailyCycle(workingDashboard, cycleDate),
     changed: true,
   };
 }
@@ -18439,12 +18605,69 @@ async function loadLiveState(env: unknown) {
 }
 
 async function syncDashboardReadState(env: unknown) {
-  const durableState = await loadDurableLiveState(env);
-  const durableDashboard = readRecord(durableState?.dashboard);
-  if (!hasRecordFields(durableDashboard)) return;
-  if (compareDashboardStateFreshness(durableDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
-    liveDashboardData = restoreDashboardData(durableDashboard);
+  const [durableState, cacheState] = await withTimeout(
+    Promise.all([loadDurableLiveState(env), loadLiveStateCache()]),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "sincronizar dashboard",
+    [null, null] as [Record<string, unknown> | null, Record<string, unknown> | null],
+  );
+  const mergedState = mergeLiveStates(durableState, cacheState);
+  if (!mergedState) return;
+
+  const mergedDashboard = readRecord(mergedState.dashboard);
+  if (hasRecordFields(mergedDashboard)) {
+    liveDashboardData = restoreDashboardData(mergedDashboard);
   }
+
+  if (Array.isArray(mergedState.validatorRoundHistory)) {
+    liveValidatorRoundHistory = mergeMonitorRoundHistory(
+      liveValidatorRoundHistory,
+      normalizeStoredRoundHistory(mergedState.validatorRoundHistory),
+    );
+  }
+}
+
+async function loadDashboardReadRounds(env: unknown, limit: number, tableId = "bac-bo") {
+  const storedRounds = await withTimeout(
+    fetchStoredValidatorRounds(env, limit, tableId),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar rodadas persistidas do dashboard",
+    [] as Round[],
+  );
+  if (storedRounds.length) {
+    liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, storedRounds);
+  }
+  return mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, limit);
+}
+
+function dashboardHasMockLikeRounds(dashboard: LiveDashboardData) {
+  if (dashboard.mockMode) return true;
+  if (isDefaultMockDashboardState(dashboard as unknown as Record<string, unknown>)) return true;
+  const latestRound = latestRoundFromRoundList(dashboard.rounds);
+  return Boolean(latestRound && latestRound.id > 0 && latestRound.id <= 2_000);
+}
+
+function dashboardNeedsPersistedHistoryRepair(dashboard: LiveDashboardData, persistedRounds: Round[]) {
+  const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
+  if (!latestPersistedRound) return false;
+  if (dashboardHasMockLikeRounds(dashboard)) return true;
+
+  const dashboardRounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
+  if (!dashboardRounds.length) return true;
+
+  const latestDashboardRound = latestRoundFromRoundList(dashboardRounds);
+  if (!latestDashboardRound) return true;
+  if (latestPersistedRound.id > latestDashboardRound.id) return true;
+  if (roundHistoryKey(latestPersistedRound) !== roundHistoryKey(latestDashboardRound)) return true;
+  if (latestDashboardRound.id <= 2_000 && latestPersistedRound.id > latestDashboardRound.id) return true;
+
+  const dashboardUpdatedAtMs = Date.parse(readString(dashboard as unknown as Record<string, unknown>, "updatedAt") || "");
+  const persistedUpdatedAtMs = Date.parse(getRoundRecordedAt(latestPersistedRound) || "");
+  if (Number.isFinite(persistedUpdatedAtMs) && Number.isFinite(dashboardUpdatedAtMs)) {
+    return persistedUpdatedAtMs > dashboardUpdatedAtMs + 1_000;
+  }
+
+  return false;
 }
 async function loadLiveStateFresh(env: unknown) {
   const currentSalesSettings = liveSalesSettings;
@@ -18856,7 +19079,87 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
   const second = readRecord(secondary);
   if (!hasRecordFields(first)) return second;
   if (!hasRecordFields(second)) return first;
-  return compareDashboardStateFreshness(first, second) >= 0 ? first : second;
+  const firstRoundCount = dashboardRoundCount(first);
+  const secondRoundCount = dashboardRoundCount(second);
+  let picked = compareDashboardStateFreshness(first, second) >= 0 ? first : second;
+  if (firstRoundCount > 0 && secondRoundCount === 0) picked = first;
+  else if (secondRoundCount > 0 && firstRoundCount === 0) picked = second;
+  return mergeDashboardStateRecords(picked, picked === first ? second : first);
+}
+
+function mergeDashboardStateRecords(
+  primary: Record<string, unknown>,
+  secondary: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...primary };
+  if (dashboardRoundCount(primary) === 0 && dashboardRoundCount(secondary) > 0) {
+    merged.rounds = secondary.rounds;
+  }
+
+  const primarySignal = readMainSignal(primary);
+  const secondarySignal = readMainSignal(secondary);
+  if (
+    !isServerEntrySide(primarySignal.side) &&
+    isServerEntrySide(secondarySignal.side) &&
+    (secondarySignal.status === "pending" || secondarySignal.status === "g1")
+  ) {
+    merged.currentSignal = secondarySignal;
+  }
+
+  const primaryNeural = readRecord(primary.neuralReading || primary.neural_reading);
+  const secondaryNeural = readRecord(secondary.neuralReading || secondary.neural_reading);
+  if (String(primaryNeural.mode || "").toUpperCase() !== "ACTIVE" && String(secondaryNeural.mode || "").toUpperCase() === "ACTIVE") {
+    merged.neuralReading = secondaryNeural;
+  }
+
+  const primaryEntryState = readRecord(primary.neuralEntryState);
+  const secondaryEntryState = readRecord(secondary.neuralEntryState);
+  if (!readString(primaryEntryState, "key") && readString(secondaryEntryState, "key")) {
+    merged.neuralEntryState = secondaryEntryState;
+  }
+
+  const primaryEntryResult = readRecord(primary.neuralEntryLastResult);
+  const secondaryEntryResult = readRecord(secondary.neuralEntryLastResult);
+  if (!readString(primaryEntryResult, "id") && readString(secondaryEntryResult, "id")) {
+    merged.neuralEntryLastResult = secondaryEntryResult;
+  }
+
+  if (!readRecord(primary.currentTieAlert).id && readRecord(secondary.currentTieAlert).id) {
+    merged.currentTieAlert = secondary.currentTieAlert;
+  }
+  if (!readRecord(primary.currentSurfAlert).surf_alert && readRecord(secondary.currentSurfAlert).surf_alert) {
+    merged.currentSurfAlert = secondary.currentSurfAlert ?? secondary.surfAlert;
+  }
+  if (!readRecord(primary.patternMinerSnapshot).entryAlerts && readRecord(secondary.patternMinerSnapshot).entryAlerts) {
+    merged.patternMinerSnapshot = secondary.patternMinerSnapshot ?? secondary.patternMiner;
+  }
+
+  return merged;
+}
+
+function dashboardSignalStateScore(dashboard: LiveDashboardData) {
+  let score = 0;
+  if (isServerEntrySide(dashboard.currentSignal?.side)) score += 10;
+  if (normalizeServerNeuralEntryState(dashboard.neuralEntryState)) score += 20;
+  if (String(dashboard.neuralReading?.mode || "").toUpperCase() === "ACTIVE") score += 15;
+  if (Array.isArray(dashboard.rounds) && dashboard.rounds.length > 0) score += 5;
+  return score;
+}
+
+async function loadMergedDashboardSnapshot(env: unknown) {
+  const [durableState, cacheState] = await withTimeout(
+    Promise.all([loadDurableLiveState(env), loadLiveStateCache()]),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar snapshot mergeado do dashboard",
+    [null, null] as [Record<string, unknown> | null, Record<string, unknown> | null],
+  );
+  const mergedDashboard = readRecord(mergeLiveStates(durableState, cacheState)?.dashboard);
+  if (!hasRecordFields(mergedDashboard)) return null;
+  return restoreDashboardData(mergedDashboard);
+}
+
+function dashboardRoundCount(state: Record<string, unknown>) {
+  return Array.isArray(state.rounds) ? state.rounds.length : 0;
 }
 
 function compareDashboardStateFreshness(left: Record<string, unknown>, right: Record<string, unknown>) {
@@ -19741,26 +20044,24 @@ function supabasePersistenceHeaders(key: string) {
 
 function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData {
   if (isDefaultMockDashboardState(value)) {
-    return resetDashboardDailyCycle(liveDashboardData);
+    return ensureDashboardDailyCycle(liveDashboardData).dashboard;
   }
 
   if (compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, value) > 0) {
     return ensureDashboardDailyCycle(liveDashboardData).dashboard;
   }
 
-  const incomingCycleDate = readDashboardCycleDate(value);
   const currentCycleDate = currentDashboardCycleDate();
-  if (incomingCycleDate && incomingCycleDate !== currentCycleDate) {
-    return ensureDashboardDailyCycle(liveDashboardData).dashboard;
-  }
-
-  const restored = updateDashboardData(liveDashboardData, value);
-  const cycleDate = incomingCycleDate || restored.cycleDate || currentCycleDate;
+  const restored = updateDashboardData(liveDashboardData, {
+    ...value,
+    cycleDate: currentCycleDate,
+    dailyCycleDate: currentCycleDate,
+  });
   const restoredWithMetadata = {
     ...restored,
     updatedAt: readString(value, "updatedAt") || restored.updatedAt,
-    cycleDate,
-    dailyCycleDate: cycleDate,
+    cycleDate: currentCycleDate,
+    dailyCycleDate: currentCycleDate,
   };
   return ensureDashboardDailyCycle(restoredWithMetadata).dashboard;
 }
