@@ -1,0 +1,20 @@
+[Unit]
+Description=SniperBO Signals API (wrangler dev :8787)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sniper
+Group=sniper
+WorkingDirectory=/opt/iasniperbo
+EnvironmentFile=/opt/iasniperbo/scripts/official_publisher.local.env
+Environment=SIGNALS_API_PORT=8787
+ExecStart=/usr/bin/npx wrangler dev --port 8787 --ip 127.0.0.1 --local-protocol http
+Restart=always
+RestartSec=5
+StandardOutput=append:/opt/iasniperbo/logs/signals-api.log
+StandardError=append:/opt/iasniperbo/logs/signals-api.log
+
+[Install]
+WantedBy=multi-user.target
