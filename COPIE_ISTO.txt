@@ -1,0 +1,18 @@
+COPIE ESTE ARQUIVO PARA C:\SNIPERBO\INSTALAR_TUDO.bat
+===============================================
+
+Se voce so tem LIGAR_SINAIS.bat e nada mais funciona:
+
+OPCAO MAIS FACIL - 1 clique no navegador:
+1. Abra: https://github.com/thatyanemachado1-web/iasniperbo/raw/main/INSTALAR_TUDO.bat
+2. Salve o arquivo em C:\SNIPERBO\INSTALAR_TUDO.bat
+3. Duplo clique em INSTALAR_TUDO.bat
+
+Ele faz SOZINHO:
+- Baixa o projeto completo do GitHub
+- Copia para C:\SNIPERBO
+- Procura o coletor da mesa no PC
+- Configura login
+- Tenta ligar os sinais
+
+Depois abra: https://sniperbo.com/app
