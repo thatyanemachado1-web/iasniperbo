@@ -151,13 +151,6 @@ def load_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-def env_flag(env: dict[str, str], name: str, default: bool = False) -> bool:
-    raw = os.getenv(name) or env.get(name, "")
-    text = str(raw or "").strip().casefold()
-    if not text:
-        return default
-    return text in {"1", "true", "yes", "on"}
-
 
 def password_only_publish_enabled(env: dict[str, str], direct_publisher_endpoint: bool) -> bool:
     raw = os.getenv("SNIPER_PUBLISH_PASSWORD_ONLY") or env.get("SNIPER_PUBLISH_PASSWORD_ONLY", "")
