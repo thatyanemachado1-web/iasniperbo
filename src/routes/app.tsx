@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessApiError, getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
+import { isLocalDevPreviewSession } from "@/lib/localDevSession";
 import { clearUserSession, hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app")({
@@ -20,7 +21,8 @@ function ProtectedAppRoute() {
     pathname.startsWith("/app/assinatura") ||
     pathname.startsWith("/app/pagamentos");
   const isOwner = isAdminOwnerEmail(session.email);
-  const hasBackendSession = Boolean(session.clientToken);
+  const isLocalPreview = isLocalDevPreviewSession(session);
+  const hasBackendSession = Boolean(session.clientToken) || isLocalPreview;
   const isAdminUser = hasBackendSession && (session.role === "admin" || session.role === "owner" || isOwner);
   const fullAccess = hasBackendSession && hasFullAccess(session);
   const canOpenApp = hasBackendSession && session.registered;
@@ -73,7 +75,7 @@ function ProtectedAppRoute() {
   ]);
 
   useEffect(() => {
-    if (isAdminRoute || isOwner) return;
+    if (isAdminRoute || isOwner || isLocalPreview) return;
 
     let stopped = false;
     let refreshing = false;
@@ -123,7 +125,7 @@ function ProtectedAppRoute() {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshSession);
     };
-  }, [isAdminRoute, isOwner]);
+  }, [isAdminRoute, isLocalPreview, isOwner]);
 
   if (!isAdminRoute && salesClosed && !fullAccess && !isAdminUser) return null;
   if (!isAdminRoute && (!session.email || !canOpenApp)) return null;
