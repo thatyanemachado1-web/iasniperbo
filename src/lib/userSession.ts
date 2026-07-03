@@ -1,3 +1,5 @@
+import { isLocalOpenAccess } from "@/lib/localDevSession";
+
 export interface UserSession {
   email: string;
   name: string;
@@ -151,10 +153,12 @@ export function hasOwnerRole(session: Pick<UserSession, "role" | "email"> | null
 }
 
 export function hasFullAccess(session: UserSession = readUserSession()) {
+  if (isLocalOpenAccess()) return true;
   return session.approved || session.accessMode === "full" || isAdminOwnerEmail(session.email);
 }
 
 export function hasSignalAccess(session: UserSession = readUserSession()) {
+  if (isLocalOpenAccess()) return true;
   return hasFullAccess(session) || session.accessMode === "demo";
 }
 

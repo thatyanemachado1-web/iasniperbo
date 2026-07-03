@@ -14,6 +14,16 @@ export function isLocalFrontend() {
   );
 }
 
+/** Local preview opens /app without login or stored session. */
+export function isLocalOpenAccess() {
+  return isLocalFrontend();
+}
+
+export function ensureLocalDashboardApi() {
+  if (!isLocalOpenAccess()) return;
+  window.localStorage.setItem(DASHBOARD_SOURCE_STORAGE_KEY, LOCAL_DEV_DASHBOARD_API);
+}
+
 export function isLocalDevPreviewSession(session: Pick<UserSession, "accessStatus">) {
   return isLocalFrontend() && session.accessStatus === LOCAL_DEV_ACCESS_STATUS;
 }

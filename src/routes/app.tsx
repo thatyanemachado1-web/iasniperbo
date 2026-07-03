@@ -2,7 +2,7 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessApiError, getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
-import { isLocalDevPreviewSession } from "@/lib/localDevSession";
+import { ensureLocalDashboardApi, isLocalDevPreviewSession, isLocalOpenAccess } from "@/lib/localDevSession";
 import { clearUserSession, hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app")({
@@ -21,17 +21,23 @@ function ProtectedAppRoute() {
     pathname.startsWith("/app/assinatura") ||
     pathname.startsWith("/app/pagamentos");
   const isOwner = isAdminOwnerEmail(session.email);
+  const isOpenLocal = isLocalOpenAccess();
   const isLocalPreview = isLocalDevPreviewSession(session);
-  const hasBackendSession = Boolean(session.clientToken) || isLocalPreview;
+  const hasBackendSession = Boolean(session.clientToken) || isLocalPreview || isOpenLocal;
   const isAdminUser = hasBackendSession && (session.role === "admin" || session.role === "owner" || isOwner);
-  const fullAccess = hasBackendSession && hasFullAccess(session);
-  const canOpenApp = hasBackendSession && session.registered;
+  const fullAccess = isOpenLocal || (hasBackendSession && hasFullAccess(session));
+  const canOpenApp = isOpenLocal || (hasBackendSession && session.registered);
   const demoExpired = session.accessMode === "demo" && isExpiredAt(session.expiresAt);
   const canOpenDashboard =
-    hasBackendSession &&
-    (fullAccess ||
-      (session.accessMode === "demo" && !demoExpired) ||
-      (session.registered && session.accessMode === "pending"));
+    isOpenLocal ||
+    (hasBackendSession &&
+      (fullAccess ||
+        (session.accessMode === "demo" && !demoExpired) ||
+        (session.registered && session.accessMode === "pending")));
+
+  useEffect(() => {
+    if (isOpenLocal) ensureLocalDashboardApi();
+  }, [isOpenLocal]);
 
   useEffect(() => {
     let active = true;
@@ -48,7 +54,7 @@ function ProtectedAppRoute() {
   }, []);
 
   useEffect(() => {
-    if (isAdminRoute) return;
+    if (isAdminRoute || isOpenLocal) return;
     if (salesClosed && !fullAccess && !isAdminUser) {
       navigate({ to: "/" });
       return;
@@ -65,6 +71,7 @@ function ProtectedAppRoute() {
     canOpenDashboard,
     demoExpired,
     fullAccess,
+    isOpenLocal,
     isAccountRoute,
     isAdminUser,
     isAdminRoute,
@@ -75,7 +82,7 @@ function ProtectedAppRoute() {
   ]);
 
   useEffect(() => {
-    if (isAdminRoute || isOwner || isLocalPreview) return;
+    if (isAdminRoute || isOwner || isLocalPreview || isOpenLocal) return;
 
     let stopped = false;
     let refreshing = false;
@@ -125,11 +132,11 @@ function ProtectedAppRoute() {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshSession);
     };
-  }, [isAdminRoute, isLocalPreview, isOwner]);
+  }, [isAdminRoute, isLocalPreview, isOpenLocal, isOwner]);
 
-  if (!isAdminRoute && salesClosed && !fullAccess && !isAdminUser) return null;
-  if (!isAdminRoute && (!session.email || !canOpenApp)) return null;
-  if (!isAdminRoute && !canOpenDashboard && !isCheckoutRoute && !isAccountRoute) return null;
+  if (!isAdminRoute && !isOpenLocal && salesClosed && !fullAccess && !isAdminUser) return null;
+  if (!isAdminRoute && !isOpenLocal && (!session.email || !canOpenApp)) return null;
+  if (!isAdminRoute && !isOpenLocal && !canOpenDashboard && !isCheckoutRoute && !isAccountRoute) return null;
 
   return (
     <AppShell>
