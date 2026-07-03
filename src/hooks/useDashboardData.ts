@@ -114,6 +114,9 @@ function defaultDashboardUrl() {
   if (isLocalFrontend()) {
     return ensureDashboardPath(LOCAL_SIGNALS_API_BASE_URL);
   }
+  if (ALLOWED_REMOTE_API_HOSTS.has(window.location.hostname)) {
+    return ensureDashboardPath(`${window.location.protocol}//${window.location.host}`);
+  }
   return ensureDashboardPath(PUBLIC_LIVE_API_BASE_URL);
 }
 

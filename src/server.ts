@@ -14384,6 +14384,9 @@ function isLocalDevelopmentRequest(request: Request) {
 }
 
 async function isDashboardReadAuthorized(request: Request, url: URL, env: unknown) {
+  // Live dashboard feed is public read so /app cards work without fragile session binding.
+  if (request.method === "GET" && url.pathname === "/dashboard") return true;
+
   if (await isDashboardAuthorized(request, url, env)) return true;
 
   const publisherToken = request.headers.get("x-sniper-publisher-token")?.trim() || "";
