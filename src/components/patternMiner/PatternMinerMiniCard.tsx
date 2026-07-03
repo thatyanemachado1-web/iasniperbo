@@ -36,10 +36,11 @@ export function PatternMinerMiniCard({
   className?: string;
 }) {
   const [flashPulse, setFlashPulse] = useState(false);
-  const confirmedAlert = lifecycle.active?.alert ?? snapshot.entryAlerts[0];
+  const confirmedAlert = lifecycle.activeSignal?.alert ?? snapshot.entryAlerts[0];
   const formingAlert = snapshot.formingAlerts[0];
   const activeStrategy =
-    lifecycle.active?.strategy ??
+    lifecycle.activeSignal?.strategy ??
+    lifecycle.lastSignalResult?.strategy ??
     confirmedAlert?.strategy ??
     formingAlert?.strategy ??
     snapshot.hotStrategies[0] ??
@@ -49,9 +50,9 @@ export function PatternMinerMiniCard({
   useEffect(() => {
     if (lifecycle.resultFlash === "none") return;
     setFlashPulse(true);
-    const timer = window.setTimeout(() => setFlashPulse(false), 2200);
+    const timer = window.setTimeout(() => setFlashPulse(false), 1200);
     return () => window.clearTimeout(timer);
-  }, [lifecycle.resultFlash, lifecycle.active?.signal_id, lifecycle.status]);
+  }, [lifecycle.displayState, lifecycle.lastSignalResult?.signal_id, lifecycle.resultFlash]);
 
   return (
     <GlassCard
@@ -108,7 +109,7 @@ export function PatternMinerMiniCard({
             <div className="mt-1 min-w-0 overflow-hidden">
               <PatternSequence sequence={activeStrategy.sequence} compact />
             </div>
-            {formingAlert && !confirmedAlert && lifecycle.status === "AGUARDANDO PADRAO" ? (
+            {formingAlert && lifecycle.displayState === "monitoring" ? (
               <div className="mt-1 text-[9px] font-semibold text-warning">
                 Formação {Math.round(formingAlert.progress * 100)}%
                 {formingAlert.missingTokens.length
@@ -149,19 +150,12 @@ function buildPatternView(
     return idleView("Coletando", "Aguardar", "Histórico real ainda não disponível");
   }
 
-  if (lifecycle.resultFlash === "green" && flashLabel(lifecycle.status)) {
-    return flashView(lifecycle.status, "Resultado confirmado na mesa", "green");
-  }
-
-  if (lifecycle.resultFlash === "tie") {
-    return flashView(lifecycle.status, "Empate após entrada", "amber");
-  }
-
-  if (lifecycle.resultFlash === "red") {
-    return flashView("RED FINAL", "Perdeu SG e G1", "red");
-  }
-
-  const strategy = lifecycle.active?.strategy ?? confirmedAlert?.strategy ?? formingAlert?.strategy ?? activeStrategy;
+  const strategy =
+    lifecycle.activeSignal?.strategy ??
+    lifecycle.lastSignalResult?.strategy ??
+    confirmedAlert?.strategy ??
+    formingAlert?.strategy ??
+    activeStrategy;
   const assertiveness = strategy?.accuracy ?? strategy?.assertiveness;
   const strengthLabel = assertiveness !== undefined ? `${Math.round(assertiveness)}%` : "--";
   const samplesLabel = strategy?.occurrences
@@ -171,53 +165,64 @@ function buildPatternView(
       : "0";
   const statusChip = strategy ? compactStatus(lifecycle.status || String(strategy.status)) : "OFF";
 
-  if (lifecycle.status === "FAZER GALE 1" && lifecycle.active) {
-    const side = lifecycle.active.entry_side;
-    return {
-      badge: "Fazer Gale 1",
-      badgeTone: "amber" as const,
-      pulse: true,
-      action: `G1 ${sideLabel(side)}`,
-      headline: `Perdeu SG · aguardando G1 em ${formatPulledSide(side)}`,
-      actionClass: "text-warning",
-      panelClass: "border-warning/35 bg-warning/10",
-      borderClass: "border-warning/25",
-      strengthLabel,
-      strengthTone: "amber" as const,
-      samplesLabel,
-      statusChip,
-      statusTone: "amber" as const,
-    };
-  }
-
-  if (lifecycle.active && lifecycle.status === "ENTRADA CONFIRMADA") {
-    const side = lifecycle.active.entry_side;
-    return confirmedView(side, strengthLabel, samplesLabel, statusChip);
-  }
-
-  if (confirmedAlert?.strategy?.status === "ENTRADA CONFIRMADA") {
-    const side = confirmedAlert.strategy.next_side ?? confirmedAlert.strategy.expectedResult;
-    if (side) return confirmedView(side, strengthLabel, samplesLabel, statusChip);
-  }
-
-  if (formingAlert?.strategy || snapshot.runtimeStatus === "PADRAO EM FORMACAO") {
-    const side = formingAlert?.strategy?.expectedResult ?? formingAlert?.strategy?.next_side;
-    const progress = Math.round((formingAlert?.progress ?? 0) * 100);
-    return {
-      badge: "Formando",
-      badgeTone: "amber" as const,
-      pulse: true,
-      action: side ? `Monitorar ${sideLabel(side)}` : "Monitorar",
-      headline: `Padrão ${progress || 0}% formado · aguardar confirmação`,
-      actionClass: "text-warning",
-      panelClass: "border-warning/30 bg-warning/10",
-      borderClass: "border-warning/25",
-      strengthLabel,
-      strengthTone: "amber" as const,
-      samplesLabel,
-      statusChip,
-      statusTone: "amber" as const,
-    };
+  switch (lifecycle.displayState) {
+    case "result_green": {
+      const label = lifecycle.lastSignalResult?.display_label || lifecycle.status;
+      return flashView(label, "Resultado confirmado · voltando a analisar", "green", strengthLabel, samplesLabel, statusChip);
+    }
+    case "result_red":
+      return flashView("RED", "Entrada encerrada · voltando a analisar", "red", strengthLabel, samplesLabel, statusChip);
+    case "result_tie": {
+      const tieLabel = lifecycle.lastSignalResult?.tie_multiplier
+        ? `EMPATE ${lifecycle.lastSignalResult.tie_multiplier}X`
+        : "EMPATE";
+      return flashView(tieLabel, "Proteção de empate · voltando a analisar", "amber", strengthLabel, samplesLabel, statusChip);
+    }
+    case "entry_confirmed":
+    case "waiting_result": {
+      const side = lifecycle.activeSignal?.entry_side;
+      if (!side) break;
+      if (lifecycle.status === "FAZER GALE 1") {
+        return {
+          badge: "Fazer Gale 1",
+          badgeTone: "amber" as const,
+          pulse: true,
+          action: `G1 ${sideLabel(side)}`,
+          headline: `Aguardando resultado · ${formatPulledSide(side)}`,
+          actionClass: "text-warning",
+          panelClass: "border-warning/35 bg-warning/10",
+          borderClass: "border-warning/25",
+          strengthLabel,
+          strengthTone: "amber" as const,
+          samplesLabel,
+          statusChip,
+          statusTone: "amber" as const,
+        };
+      }
+      return confirmedView(side, strengthLabel, samplesLabel, statusChip);
+    }
+    case "monitoring": {
+      const side = formingAlert?.strategy?.expectedResult ?? formingAlert?.strategy?.next_side;
+      const progress = Math.round((formingAlert?.progress ?? 0) * 100);
+      return {
+        badge: "Formando",
+        badgeTone: "amber" as const,
+        pulse: true,
+        action: side ? `Monitorar ${sideLabel(side)}` : "Monitorar",
+        headline: `Padrão ${progress || 0}% formado · aguardar confirmação`,
+        actionClass: "text-warning",
+        panelClass: "border-warning/30 bg-warning/10",
+        borderClass: "border-warning/25",
+        strengthLabel,
+        strengthTone: "amber" as const,
+        samplesLabel,
+        statusChip,
+        statusTone: "amber" as const,
+      };
+    }
+    case "analyzing":
+    default:
+      break;
   }
 
   const blockedStatus = snapshot.runtimeStatus || strategy?.status;
@@ -245,8 +250,8 @@ function buildPatternView(
       badge: "Observando",
       badgeTone: "blue" as const,
       pulse: false,
-      action: "Aguardar",
-      headline: `Hot ${formatPulledSide(side)} · sem sequência ativa agora`,
+      action: "Analisando",
+      headline: `Hot ${formatPulledSide(side)} · sem entrada ativa`,
       actionClass: "text-muted-foreground",
       panelClass: "border-border/60 bg-secondary/20",
       borderClass: "border-neon-cyan/20",
@@ -259,14 +264,14 @@ function buildPatternView(
   }
 
   return {
-    badge: "Observando",
+    badge: "Analisando",
     badgeTone: "muted" as const,
     pulse: false,
-    action: "Aguardar",
+    action: "Analisando",
     headline:
       snapshot.analyzedRounds > 0
-        ? `${snapshot.agent.catalogedStrategies} padrões catalogados · sem entrada agora`
-        : "Sem padrão validado no momento",
+        ? `${snapshot.agent.catalogedStrategies} padrões catalogados · aguardando sinal`
+        : "Aguardando padrão validado",
     actionClass: "text-muted-foreground",
     panelClass: "border-border/60 bg-secondary/20",
     borderClass: "border-border/50",
@@ -303,7 +308,14 @@ function confirmedView(
   };
 }
 
-function flashView(action: string, headline: string, tone: "green" | "amber" | "red") {
+function flashView(
+  action: string,
+  headline: string,
+  tone: "green" | "amber" | "red",
+  strengthLabel: string,
+  samplesLabel: string,
+  statusChip: string,
+) {
   const map = {
     green: {
       badgeTone: "green" as const,
@@ -311,7 +323,6 @@ function flashView(action: string, headline: string, tone: "green" | "amber" | "
       panelClass: "border-success/50 bg-success/15",
       borderClass: "border-success/40",
       statusTone: "green" as const,
-      statusChip: "WIN",
       strengthTone: "green" as const,
     },
     amber: {
@@ -320,7 +331,6 @@ function flashView(action: string, headline: string, tone: "green" | "amber" | "
       panelClass: "border-warning/50 bg-warning/15",
       borderClass: "border-warning/40",
       statusTone: "amber" as const,
-      statusChip: "TIE",
       strengthTone: "amber" as const,
     },
     red: {
@@ -329,7 +339,6 @@ function flashView(action: string, headline: string, tone: "green" | "amber" | "
       panelClass: "border-destructive/50 bg-destructive/15",
       borderClass: "border-destructive/40",
       statusTone: "red" as const,
-      statusChip: "RED",
       strengthTone: "red" as const,
     },
   }[tone];
@@ -339,8 +348,9 @@ function flashView(action: string, headline: string, tone: "green" | "amber" | "
     pulse: true,
     action,
     headline,
-    strengthLabel: "--",
-    samplesLabel: "0",
+    strengthLabel,
+    samplesLabel,
+    statusChip,
     ...map,
   };
 }
@@ -361,10 +371,6 @@ function idleView(badge: string, action: string, headline: string) {
     statusChip: "OFF",
     statusTone: "muted" as const,
   };
-}
-
-function flashLabel(status: string) {
-  return status === "GREEN SG" || status === "GREEN G1";
 }
 
 function PatternStatChip({

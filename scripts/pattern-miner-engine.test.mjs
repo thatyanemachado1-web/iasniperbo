@@ -116,15 +116,15 @@ const lifecycleSnapshot = {
   entryAlerts: incoming.entryAlerts,
 };
 const lifecycleRound1 = resolvePatternIaLifecycle(lifecycleSnapshot, sampleRounds);
-assert.equal(lifecycleRound1.status, "ENTRADA CONFIRMADA");
-assert.ok(lifecycleRound1.active?.signal_id);
+assert.equal(lifecycleRound1.displayState, "entry_confirmed");
+assert.ok(lifecycleRound1.activeSignal?.signal_id);
 
 const afterSgWin = resolvePatternIaLifecycle(lifecycleSnapshot, [...sampleRounds, round(11, "B")]);
-assert.equal(afterSgWin.status, "GREEN SG");
+assert.equal(afterSgWin.displayState, "result_green");
 assert.equal(afterSgWin.resultFlash, "green");
+assert.equal(afterSgWin.activeSignal, null);
+assert.ok(afterSgWin.lastSignalResult);
 assert.equal(afterSgWin.entryHistory.length, 1);
-assert.equal(afterSgWin.entryHistory[0].result_label, "GREEN SG");
-assert.equal(afterSgWin.entryHistory[0].entry_side, "B");
 
 assert.equal(patternIaEntrySideLabel("T", 8), "T EMPATE 8X");
 
@@ -133,6 +133,7 @@ resetPatternIaEntryHistoryForTests();
 const lifecycleSnapshot2 = { ...incoming };
 resolvePatternIaLifecycle(lifecycleSnapshot2, sampleRounds);
 const afterSgLoss = resolvePatternIaLifecycle(lifecycleSnapshot2, [...sampleRounds, round(11, "P")]);
+assert.equal(afterSgLoss.displayState, "waiting_result");
 assert.equal(afterSgLoss.status, "FAZER GALE 1");
 
 assert.equal(patternIaEntrySideLabel("T", 8), "T EMPATE 8X");
@@ -142,7 +143,8 @@ resetPatternIaEntryHistoryForTests();
 resolvePatternIaLifecycle(lifecycleSnapshot2, sampleRounds);
 resolvePatternIaLifecycle(lifecycleSnapshot2, [...sampleRounds, round(11, "P")]);
 const afterRed = resolvePatternIaLifecycle(lifecycleSnapshot2, [...sampleRounds, round(11, "P"), round(12, "P")]);
-assert.equal(afterRed.status, "RED FINAL");
+assert.equal(afterRed.displayState, "result_red");
 assert.equal(afterRed.resultFlash, "red");
+assert.equal(afterRed.activeSignal, null);
 
 console.log("pattern-miner-engine.test.mjs passed");

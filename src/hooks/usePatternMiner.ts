@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardData, Round } from "@/types/dashboard";
 import type {
   PatternIaLifecycleView,
@@ -38,6 +38,13 @@ export function usePatternMiner({
   dashboardUpdatedAt,
 }: UsePatternMinerParams) {
   const lifecycleRef = useRef<PatternIaLifecycleView | null>(null);
+  const [clock, setClock] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = window.setInterval(() => setClock((value) => value + 1), 300);
+    return () => window.clearInterval(timer);
+  }, [enabled]);
 
   const snapshot = useMemo(() => {
     if (!enabled || typeof window === "undefined") return buildEmptySnapshot(historyLimit);
@@ -65,8 +72,8 @@ export function usePatternMiner({
     if (!enabled || typeof window === "undefined") {
       return emptyLifecycle();
     }
-    return resolvePatternIaLifecycle(snapshot, rounds);
-  }, [enabled, rounds, snapshot]);
+    return resolvePatternIaLifecycle(snapshot, rounds, Date.now());
+  }, [clock, enabled, rounds, snapshot]);
 
   useEffect(() => {
     lifecycleRef.current = lifecycle;
@@ -136,7 +143,10 @@ function snapshotList<T>(value: T[] | undefined) {
 
 function emptyLifecycle(): PatternIaLifecycleView {
   return {
+    activeSignal: null,
     active: null,
+    lastSignalResult: null,
+    displayState: "analyzing",
     queueLength: 0,
     resultStage: "pending_sg",
     status: "AGUARDANDO PADRAO",

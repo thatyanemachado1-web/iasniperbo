@@ -1,12 +1,13 @@
 import type { Round, RoundResult } from "@/types/dashboard";
 import type {
   PatternIaActiveSignal,
+  PatternIaDisplayState,
   PatternIaEntryHistoryItem,
   PatternIaEntryResultLabel,
+  PatternIaLastSignalResult,
   PatternIaLifecycleView,
   PatternIaResultStage,
   PatternMinerAlert,
-  PatternMinerOperationalStatus,
   PatternMinerSnapshot,
 } from "@/types/patternMiner";
 import {
@@ -15,43 +16,43 @@ import {
   readPatternIaEntryHistory,
 } from "./PatternMinerEntryHistory.ts";
 
-const RESULT_FLASH_MS = 2_500;
+const RESULT_FLASH_MS = 1_200;
 
 interface LifecycleStore {
-  active: PatternIaActiveSignal | null;
+  activeSignal: PatternIaActiveSignal | null;
+  lastSignalResult: PatternIaLastSignalResult | null;
   queue: PatternIaActiveSignal[];
+  displayState: PatternIaDisplayState;
   resultStage: PatternIaResultStage;
-  status: PatternMinerOperationalStatus;
-  resultFlash: "none" | "green" | "tie" | "red";
-  flashUntilMs: number;
+  resultFlashUntilMs: number;
   lastProcessedRoundId: number;
-  seenSignalIds: Set<string>;
+  completedSignalKeys: Set<string>;
   entryHistory: PatternIaEntryHistoryItem[];
   historyBootstrapped: boolean;
 }
 
 const store: LifecycleStore = {
-  active: null,
+  activeSignal: null,
+  lastSignalResult: null,
   queue: [],
+  displayState: "analyzing",
   resultStage: "pending_sg",
-  status: "AGUARDANDO PADRAO",
-  resultFlash: "none",
-  flashUntilMs: 0,
+  resultFlashUntilMs: 0,
   lastProcessedRoundId: 0,
-  seenSignalIds: new Set(),
+  completedSignalKeys: new Set(),
   entryHistory: [],
   historyBootstrapped: false,
 };
 
 export function resetPatternIaLifecycleForTests() {
-  store.active = null;
+  store.activeSignal = null;
+  store.lastSignalResult = null;
   store.queue = [];
+  store.displayState = "analyzing";
   store.resultStage = "pending_sg";
-  store.status = "AGUARDANDO PADRAO";
-  store.resultFlash = "none";
-  store.flashUntilMs = 0;
+  store.resultFlashUntilMs = 0;
   store.lastProcessedRoundId = 0;
-  store.seenSignalIds.clear();
+  store.completedSignalKeys.clear();
   store.entryHistory = [];
   store.historyBootstrapped = false;
 }
@@ -60,6 +61,10 @@ function ensureEntryHistoryLoaded() {
   if (store.historyBootstrapped) return;
   store.entryHistory = readPatternIaEntryHistory();
   store.historyBootstrapped = true;
+}
+
+function signalKey(signal: PatternIaActiveSignal) {
+  return signal.event_id || `${signal.signal_id}:${signal.entry_after_round_id}`;
 }
 
 function recordEntryHistory(
@@ -105,21 +110,27 @@ function buildActiveSignal(alert: PatternMinerAlert): PatternIaActiveSignal {
   };
 }
 
+function activateSignal(signal: PatternIaActiveSignal) {
+  store.activeSignal = signal;
+  store.lastSignalResult = null;
+  store.resultStage = "pending_sg";
+  store.lastProcessedRoundId = signal.entry_after_round_id;
+  store.displayState = "entry_confirmed";
+}
+
 function enqueueConfirmedSignals(snapshot: PatternMinerSnapshot) {
+  if (store.activeSignal || store.lastSignalResult) return;
+
   for (const alert of snapshot.entryAlerts) {
     if (!isConfirmedEntryAlert(alert)) continue;
     const signal = buildActiveSignal(alert);
-    if (store.seenSignalIds.has(signal.signal_id)) continue;
-    store.seenSignalIds.add(signal.signal_id);
-    if (store.active?.signal_id === signal.signal_id) continue;
-    if (store.queue.some((item) => item.signal_id === signal.signal_id)) continue;
-    if (!store.active) {
-      store.active = signal;
-      store.resultStage = "pending_sg";
-      store.status = "ENTRADA CONFIRMADA";
-      store.resultFlash = "none";
-    } else {
+    const key = signalKey(signal);
+    if (store.completedSignalKeys.has(key)) continue;
+    if (store.queue.some((item) => signalKey(item) === key)) continue;
+    if (store.activeSignal) {
       store.queue.push(signal);
+    } else {
+      activateSignal(signal);
     }
   }
 }
@@ -134,81 +145,119 @@ function resolveRoundOutcome(round: Round, entrySide: RoundResult): "win" | "los
   return "loss";
 }
 
-function advanceLifecycle(rounds: Round[], nowMs = Date.now()) {
-  if (store.resultFlash !== "none" && nowMs < store.flashUntilMs) {
+function tieMultiplierFromRound(round: Round) {
+  if (round.result !== "T") return undefined;
+  if (typeof round.tieMultiplier === "number" && Number.isFinite(round.tieMultiplier)) {
+    return Math.round(round.tieMultiplier);
+  }
+  return undefined;
+}
+
+function finalizeResult(
+  active: PatternIaActiveSignal,
+  resultLabel: PatternIaEntryResultLabel,
+  resultRound: Round,
+  resultStage: PatternIaResultStage,
+  nowMs: number,
+) {
+  recordEntryHistory(active, resultLabel, resultRound);
+  const isTieProtected =
+    resultRound.result === "T" && active.entry_side !== "T" && (resultLabel === "GREEN SG" || resultLabel === "GREEN G1");
+  const displayState: PatternIaDisplayState = isTieProtected
+    ? "result_tie"
+    : resultLabel === "RED G1"
+      ? "result_red"
+      : "result_green";
+
+  store.lastSignalResult = {
+    signal_id: active.signal_id,
+    event_id: active.event_id,
+    entry_side: active.entry_side,
+    result_label: resultLabel,
+    display_label: isTieProtected ? "EMPATE" : resultLabel === "RED G1" ? "RED" : resultLabel,
+    tie_multiplier: tieMultiplierFromRound(resultRound),
+    strategy: active.strategy,
+    finalized_at: new Date(nowMs).toISOString(),
+  };
+  store.activeSignal = null;
+  store.resultStage = resultStage;
+  store.displayState = displayState;
+  store.resultFlashUntilMs = nowMs + RESULT_FLASH_MS;
+  store.completedSignalKeys.add(signalKey(active));
+
+  logPatternResult(
+    active,
+    active.entry_side,
+    store.lastSignalResult.display_label,
+    resultStage,
+    resultLabel === "RED G1" ? 1 : 0,
+    true,
+  );
+}
+
+function expireResultFlash(nowMs: number) {
+  if (!store.lastSignalResult) return;
+  if (nowMs < store.resultFlashUntilMs) return;
+
+  store.lastSignalResult = null;
+  store.displayState = "analyzing";
+  store.resultStage = "pending_sg";
+  store.resultFlashUntilMs = 0;
+
+  const next = store.queue.shift();
+  if (next) activateSignal(next);
+}
+
+function advanceActiveSignal(rounds: Round[], nowMs: number) {
+  if (!store.activeSignal) return;
+
+  const pendingRounds = roundsAfterEntry(rounds, store.activeSignal.entry_after_round_id);
+  if (!pendingRounds.length) {
+    store.displayState = "entry_confirmed";
     return;
   }
-  if (store.resultFlash !== "none" && nowMs >= store.flashUntilMs) {
-    store.resultFlash = "none";
-    if (store.resultStage === "green_sg" || store.resultStage === "green_g1" || store.resultStage === "red_final" || store.resultStage === "tie_hit") {
-      store.active = store.queue.shift() ?? null;
-      store.resultStage = store.active ? "pending_sg" : "pending_sg";
-      store.status = store.active ? "ENTRADA CONFIRMADA" : "AGUARDANDO PADRAO";
-    }
-  }
 
-  if (!store.active) return;
-  const pendingRounds = roundsAfterEntry(rounds, store.active.entry_after_round_id);
-  if (!pendingRounds.length) return;
+  store.displayState = "waiting_result";
 
   const latestPending = pendingRounds[pendingRounds.length - 1];
   if (latestPending.id <= store.lastProcessedRoundId) return;
   store.lastProcessedRoundId = latestPending.id;
 
-  const entrySide = store.active.entry_side;
+  const active = store.activeSignal;
+  const entrySide = active.entry_side;
   const outcome = resolveRoundOutcome(latestPending, entrySide);
 
   if (store.resultStage === "pending_sg") {
     if (outcome === "win") {
-      store.resultStage = "green_sg";
-      store.status = "GREEN SG";
-      store.resultFlash = entrySide === "T" ? "tie" : "green";
-      store.flashUntilMs = nowMs + RESULT_FLASH_MS;
-      recordEntryHistory(store.active, "GREEN SG", latestPending);
-      logPatternResult(store.active, entrySide, entrySide === "T" ? "TIE" : "GREEN", "green_sg", 0, true);
+      finalizeResult(active, "GREEN SG", latestPending, "green_sg", nowMs);
       return;
     }
     if (outcome === "tie" && entrySide !== "T") {
-      store.resultStage = "tie_hit";
-      store.status = "GREEN SG";
-      store.resultFlash = "tie";
-      store.flashUntilMs = nowMs + RESULT_FLASH_MS;
-      recordEntryHistory(store.active, "GREEN SG", latestPending);
-      logPatternResult(store.active, entrySide, "TIE", "green_sg", 0, true);
+      finalizeResult(active, "GREEN SG", latestPending, "tie_hit", nowMs);
       return;
     }
     store.resultStage = "pending_g1";
-    store.status = "FAZER GALE 1";
-    logPatternResult(store.active, entrySide, "LOSS_SG", "pending_g1", 1, false);
+    store.displayState = "waiting_result";
+    logPatternResult(active, entrySide, "LOSS_SG", "pending_g1", 0, false);
     return;
   }
 
   if (store.resultStage === "pending_g1") {
     if (outcome === "win") {
-      store.resultStage = "green_g1";
-      store.status = "GREEN G1";
-      store.resultFlash = entrySide === "T" ? "tie" : "green";
-      store.flashUntilMs = nowMs + RESULT_FLASH_MS;
-      recordEntryHistory(store.active, "GREEN G1", latestPending);
-      logPatternResult(store.active, entrySide, entrySide === "T" ? "TIE" : "GREEN", "green_g1", 1, true);
+      finalizeResult(active, "GREEN G1", latestPending, "green_g1", nowMs);
       return;
     }
     if (outcome === "tie" && entrySide !== "T") {
-      store.resultStage = "tie_hit";
-      store.status = "GREEN G1";
-      store.resultFlash = "tie";
-      store.flashUntilMs = nowMs + RESULT_FLASH_MS;
-      recordEntryHistory(store.active, "GREEN G1", latestPending);
-      logPatternResult(store.active, entrySide, "TIE", "green_g1", 1, true);
+      finalizeResult(active, "GREEN G1", latestPending, "tie_hit", nowMs);
       return;
     }
-    store.resultStage = "red_final";
-    store.status = "RED FINAL";
-    store.resultFlash = "red";
-    store.flashUntilMs = nowMs + RESULT_FLASH_MS;
-    recordEntryHistory(store.active, "RED G1", latestPending);
-    logPatternResult(store.active, entrySide, "RED", "red_final", 1, true);
+    finalizeResult(active, "RED G1", latestPending, "red_final", nowMs);
   }
+}
+
+function resolveMonitoringState(snapshot: PatternMinerSnapshot): PatternIaDisplayState {
+  if (snapshot.formingAlerts.length > 0) return "monitoring";
+  return "analyzing";
 }
 
 const lifecycleLogDedupe = new Map<string, number>();
@@ -244,46 +293,79 @@ export function resolvePatternIaLifecycle(
   nowMs = Date.now(),
 ): PatternIaLifecycleView {
   ensureEntryHistoryLoaded();
-  enqueueConfirmedSignals(snapshot);
-  advanceLifecycle(rounds, nowMs);
 
-  const strategy = store.active?.strategy;
-  const flashActive = store.resultFlash !== "none" && nowMs < store.flashUntilMs;
+  expireResultFlash(nowMs);
+
+  if (!store.lastSignalResult) {
+    advanceActiveSignal(rounds, nowMs);
+    if (!store.activeSignal) {
+      enqueueConfirmedSignals(snapshot);
+      if (!store.activeSignal && !store.lastSignalResult) {
+        store.displayState = resolveMonitoringState(snapshot);
+      }
+    }
+  }
+
+  const resultFlash =
+    store.lastSignalResult && nowMs < store.resultFlashUntilMs
+      ? store.displayState === "result_red"
+        ? "red"
+        : store.displayState === "result_tie"
+          ? "tie"
+          : "green"
+      : "none";
+
+  const status = resolveLifecycleStatus(store.displayState, store.resultStage);
 
   return {
-    active: store.active,
+    activeSignal: store.activeSignal,
+    active: store.activeSignal,
+    lastSignalResult: store.lastSignalResult,
+    displayState: store.displayState,
     queueLength: store.queue.length,
     resultStage: store.resultStage,
-    status: store.status,
-    resultFlash: flashActive ? store.resultFlash : "none",
-    current_gale: store.resultStage === "pending_g1" ? 1 : 0,
+    status,
+    resultFlash,
+    current_gale: store.resultStage === "pending_g1" && store.activeSignal ? 1 : 0,
     max_gale: 1,
-    finalized:
-      store.resultStage === "green_sg" ||
-      store.resultStage === "green_g1" ||
-      store.resultStage === "red_final" ||
-      store.resultStage === "tie_hit",
-    blocked_reason: strategy?.blocked_reason,
+    finalized: Boolean(store.lastSignalResult) || store.resultStage === "red_final",
     entryHistory: store.entryHistory,
   };
+}
+
+function resolveLifecycleStatus(displayState: PatternIaDisplayState, resultStage: PatternIaResultStage) {
+  if (displayState === "result_green") return resultStage === "green_g1" ? "GREEN G1" : "GREEN SG";
+  if (displayState === "result_red") return "RED FINAL";
+  if (displayState === "result_tie") return "GREEN SG";
+  if (displayState === "entry_confirmed") return "ENTRADA CONFIRMADA";
+  if (displayState === "waiting_result" && resultStage === "pending_g1") return "FAZER GALE 1";
+  if (displayState === "waiting_result") return "ENTRADA CONFIRMADA";
+  if (displayState === "monitoring") return "PADRAO EM FORMACAO";
+  return "AGUARDANDO PADRAO";
 }
 
 export function logPatternIaRenderState(
   lifecycle: PatternIaLifecycleView,
   snapshot: PatternMinerSnapshot,
 ) {
-  const strategy = lifecycle.active?.strategy ?? snapshot.entryAlerts[0]?.strategy;
+  const strategy =
+    lifecycle.activeSignal?.strategy ??
+    lifecycle.lastSignalResult?.strategy ??
+    snapshot.entryAlerts[0]?.strategy;
   if (!strategy) return;
-  const key = `render:${strategy.signal_id || strategy.id}:${lifecycle.status}:${lifecycle.resultStage}`;
+
+  const key = `render:${lifecycle.displayState}:${strategy.signal_id || strategy.id}:${lifecycle.lastSignalResult?.signal_id || ""}`;
   const now = Date.now();
   if (lifecycleLogDedupe.get(key) && now - (lifecycleLogDedupe.get(key) || 0) < 8_000) return;
   lifecycleLogDedupe.set(key, now);
+
   console.info(
     JSON.stringify({
       event: "[PATTERN_IA_RENDER_STATE]",
       card: "Padrões IA",
-      signal_id: strategy.signal_id || lifecycle.active?.signal_id || "",
-      event_id: strategy.event_id || lifecycle.active?.event_id || "",
+      displayState: lifecycle.displayState,
+      signal_id: lifecycle.activeSignal?.signal_id || lifecycle.lastSignalResult?.signal_id || strategy.signal_id || "",
+      event_id: lifecycle.activeSignal?.event_id || strategy.event_id || "",
       pattern_signature: strategy.pattern_signature || strategy.sequence.join("-"),
       status: lifecycle.status,
       next_side: strategy.next_side || strategy.expectedResult || "",
@@ -294,6 +376,8 @@ export function logPatternIaRenderState(
       red_count: strategy.red_count ?? strategy.red,
       tie_after_count: strategy.tie_after_count ?? strategy.tie,
       rendered_at: new Date(now).toISOString(),
+      has_active_signal: Boolean(lifecycle.activeSignal),
+      has_last_result: Boolean(lifecycle.lastSignalResult),
     }),
   );
 }

@@ -28,6 +28,16 @@ export type PatternMinerOperationalStatus =
 
 export type PatternIaResultStage = "pending_sg" | "pending_g1" | "green_sg" | "green_g1" | "red_final" | "tie_hit";
 
+export type PatternIaDisplayState =
+  | "analyzing"
+  | "monitoring"
+  | "entry_confirmed"
+  | "waiting_result"
+  | "result_green"
+  | "result_red"
+  | "result_tie"
+  | "expired";
+
 export interface PatternMinerConfig {
   historyLimit: PatternMinerHistoryLimit;
   minOccurrences: number;
@@ -136,8 +146,23 @@ export interface PatternIaActiveSignal {
   alert: PatternMinerAlert;
 }
 
+export interface PatternIaLastSignalResult {
+  signal_id: string;
+  event_id?: string;
+  entry_side: RoundResult;
+  result_label: PatternIaEntryResultLabel;
+  display_label: string;
+  tie_multiplier?: number;
+  strategy: PatternMinerStrategy;
+  finalized_at: string;
+}
+
 export interface PatternIaLifecycleView {
+  activeSignal: PatternIaActiveSignal | null;
+  /** @deprecated use activeSignal */
   active: PatternIaActiveSignal | null;
+  lastSignalResult: PatternIaLastSignalResult | null;
+  displayState: PatternIaDisplayState;
   queueLength: number;
   resultStage: PatternIaResultStage;
   status: PatternMinerOperationalStatus;
