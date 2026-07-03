@@ -780,6 +780,15 @@ function handleRateLimit(request: Request) {
   if (isOfficialDashboardPublisherRequest(request)) return null;
 
   const url = new URL(request.url);
+  if (
+    isLocalDevelopmentRequest(request) &&
+    (url.pathname === "/dashboard" ||
+      url.pathname === "/dashboard/publish" ||
+      url.pathname === "/dashboard/signal")
+  ) {
+    return null;
+  }
+
   const limit = rateLimitForRequest(request.method, url.pathname);
   if (!limit) return null;
 
