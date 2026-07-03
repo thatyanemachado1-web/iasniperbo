@@ -14392,10 +14392,13 @@ function isOfficialDashboardPublisherRequest(request: Request) {
 
 function isLocalDevelopmentRequest(request: Request) {
   const host = new URL(request.url).hostname;
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  const headerHost = (request.headers.get("host") || "").split(":")[0].trim();
+  const localHosts = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+  return localHosts.has(host) || localHosts.has(headerHost);
 }
 
 async function isDashboardReadAuthorized(request: Request, url: URL, env: unknown) {
+  if (isLocalDevelopmentRequest(request)) return true;
   if (await isDashboardAuthorized(request, url, env)) return true;
 
   const publisherToken = request.headers.get("x-sniper-publisher-token")?.trim() || "";

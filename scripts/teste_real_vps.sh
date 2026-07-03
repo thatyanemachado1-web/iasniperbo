@@ -78,6 +78,13 @@ echo "[4] Reiniciando signals-api local (8787)..."
 pkill -f "official_dashboard_publisher.py" 2>/dev/null || true
 pkill -f "wrangler dev" 2>/dev/null || true
 sleep 3
+# credenciais para wrangler dev (.dev.vars)
+cat > "$ROOT/.dev.vars" <<EOF
+SNIPER_ADMIN_EMAIL=$EMAIL
+SNIPER_ADMIN_PASSWORD=$PASS
+EOF
+chmod 600 "$ROOT/.dev.vars"
+pass ".dev.vars criado para wrangler"
 python3 -m venv .venv 2>/dev/null || true
 .venv/bin/pip install -q -r scripts/requirements-publisher.txt 2>/dev/null || true
 [[ -d node_modules ]] || npm install --silent 2>/dev/null

@@ -16,6 +16,15 @@ read_local_env "$LOCAL_ENV"
 SIGNALS_API_PORT="${SIGNALS_API_PORT:-8787}"
 SIGNALS_API_HOST="${SIGNALS_API_HOST:-127.0.0.1}"
 
+# wrangler dev le credenciais admin de .dev.vars
+if [[ -n "${SNIPER_ADMIN_EMAIL:-}" && -n "${SNIPER_ADMIN_PASSWORD:-}" ]]; then
+  cat > "$PROJECT_ROOT/.dev.vars" <<EOF
+SNIPER_ADMIN_EMAIL=$SNIPER_ADMIN_EMAIL
+SNIPER_ADMIN_PASSWORD=$SNIPER_ADMIN_PASSWORD
+EOF
+  chmod 600 "$PROJECT_ROOT/.dev.vars"
+fi
+
 mkdir -p "$LOG_DIR"
 
 if [[ -f "$PID_FILE" ]]; then
