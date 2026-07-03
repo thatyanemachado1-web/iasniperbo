@@ -1833,13 +1833,43 @@ def main() -> int:
     direct_pattern_bank_last_save = 0.0
     logging.info("Pattern miner bank loaded: rounds=%s path=%s", len(direct_pattern_round_bank), direct_pattern_bank_file)
     logging.info("Official dashboard publisher started: %s -> %s", args.local_url, args.remote_url)
+    logging.info(
+        "Publisher auth: email=%s password_len=%s token_len=%s",
+        admin_email or "(empty)",
+        len(admin_password or ""),
+        len(direct_publisher_token or ""),
+    )
+
+    def refresh_publish_token(reason: str) -> str:
+        nonlocal direct_publisher_token, local_token
+        if not admin_email or not admin_password:
+            logging.error("Cannot refresh publish token (%s): missing admin email/password.", reason)
+            return ""
+        try:
+            refreshed = admin_login(args.remote_base_url, admin_email, admin_password, args.remote_timeout)
+        except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
+            logging.warning("Admin login refresh failed (%s): %s", reason, exc)
+            return ""
+        direct_publisher_token = refreshed
+        if not env_value(env, "SNIPER_LOCAL_DASHBOARD_TOKEN"):
+            local_token = refreshed
+        logging.info("Admin publish token refreshed (%s).", reason)
+        return refreshed
+
+    if direct_publisher_endpoint and admin_email and admin_password:
+        startup_token = refresh_publish_token("startup")
+        if startup_token:
+            token = startup_token
+            using_admin_session = True
+
     while True:
         try:
             if rate_limit_sleep > 0:
                 time.sleep(rate_limit_sleep)
             if direct_publisher_endpoint:
-                token = direct_publisher_token
-                using_admin_session = False
+                if not token:
+                    token = direct_publisher_token
+                using_admin_session = bool(token)
             elif not token:
                 if token_index < len(remote_tokens):
                     token = remote_tokens[token_index]
@@ -2173,10 +2203,15 @@ def main() -> int:
                     full_backoff_seconds,
                 )
             if status_code in {401, 403}:
-                if using_admin_session:
-                    token_index = 0
-                token = ""
-                using_admin_session = False
+                refreshed = refresh_publish_token(f"http_{status_code}")
+                if refreshed:
+                    token = refreshed
+                    using_admin_session = True
+                else:
+                    if using_admin_session:
+                        token_index = 0
+                    token = ""
+                    using_admin_session = False
         except (URLError, TimeoutError, OSError, RuntimeError) as exc:
             logging.warning("Publish failed: %s", exc)
             full_publish_failures += 1
