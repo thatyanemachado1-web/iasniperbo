@@ -3196,6 +3196,11 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     }
 
     await syncDashboardReadState(env);
+    const repair = await repairDashboardSnapshotFromPersistedHistory(env);
+    if (repair.changed) {
+      liveDashboardData = repair.dashboard;
+      runBackgroundTask(ctx, saveLiveState(env), "salvar dashboard reparado");
+    }
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
     if (cycle.changed) {
       liveDashboardData = cycle.dashboard;
@@ -13227,6 +13232,26 @@ function ensureDashboardDailyCycle(
     };
   }
 
+  const persistedLatestRound = latestRoundFromRoundList(liveValidatorRoundHistory);
+  const dashboardLatestRound = latestRoundFromRoundList(dashboard.rounds);
+  const hasPersistedCurrentRound = Boolean(
+    persistedLatestRound &&
+      dashboardLatestRound &&
+      persistedLatestRound.id === dashboardLatestRound.id &&
+      roundHistoryKey(persistedLatestRound) === roundHistoryKey(dashboardLatestRound),
+  );
+  if (hasPersistedCurrentRound) {
+    return {
+      dashboard: {
+        ...dashboard,
+        cycleDate,
+        dailyCycleDate: cycleDate,
+        strictDailyCounters: (dashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
+      },
+      changed: true,
+    };
+  }
+
   return {
     dashboard: resetDashboardDailyCycle(dashboard, cycleDate),
     changed: true,
@@ -18439,12 +18464,84 @@ async function loadLiveState(env: unknown) {
 }
 
 async function syncDashboardReadState(env: unknown) {
-  const durableState = await loadDurableLiveState(env);
-  const durableDashboard = readRecord(durableState?.dashboard);
-  if (!hasRecordFields(durableDashboard)) return;
-  if (compareDashboardStateFreshness(durableDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
-    liveDashboardData = restoreDashboardData(durableDashboard);
+  const [durableState, cacheState] = await withTimeout(
+    Promise.all([loadDurableLiveState(env), loadLiveStateCache()]),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "sincronizar dashboard",
+    [null, null] as [Record<string, unknown> | null, Record<string, unknown> | null],
+  );
+  const mergedState = mergeLiveStates(durableState, cacheState);
+  if (!mergedState) return;
+
+  const mergedDashboard = readRecord(mergedState.dashboard);
+  if (hasRecordFields(mergedDashboard)) {
+    if (compareDashboardStateFreshness(mergedDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
+      liveDashboardData = restoreDashboardData(mergedDashboard);
+    }
   }
+
+  if (Array.isArray(mergedState.validatorRoundHistory)) {
+    liveValidatorRoundHistory = mergeMonitorRoundHistory(
+      liveValidatorRoundHistory,
+      normalizeStoredRoundHistory(mergedState.validatorRoundHistory),
+    );
+  }
+}
+
+async function repairDashboardSnapshotFromPersistedHistory(env: unknown) {
+  const persistedRounds = await fetchPersistedDashboardRounds(env);
+  if (!persistedRounds.length) {
+    return { changed: false, dashboard: liveDashboardData };
+  }
+
+  liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, persistedRounds);
+  if (!dashboardNeedsPersistedHistoryRepair(liveDashboardData, persistedRounds)) {
+    return { changed: false, dashboard: liveDashboardData };
+  }
+
+  const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
+  const cycleDate = currentDashboardCycleDate();
+  const repaired = updateDashboardData(liveDashboardData, {
+    rounds: persistedRounds.slice(-30),
+    cycleDate,
+    dailyCycleDate: cycleDate,
+    updatedAt:
+      (latestPersistedRound ? getRoundRecordedAt(latestPersistedRound) : "") ||
+      liveDashboardData.updatedAt ||
+      new Date().toISOString(),
+  });
+  return { changed: true, dashboard: repaired };
+}
+
+async function fetchPersistedDashboardRounds(env: unknown) {
+  const storedRounds = await withTimeout(
+    fetchStoredValidatorRounds(env, MAX_SERVER_ROUND_HISTORY),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar historico persistido do dashboard",
+    [] as Round[],
+  );
+  return mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, MAX_SERVER_ROUND_HISTORY);
+}
+
+function dashboardNeedsPersistedHistoryRepair(dashboard: LiveDashboardData, persistedRounds: Round[]) {
+  const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
+  if (!latestPersistedRound) return false;
+
+  const dashboardRounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
+  if (!dashboardRounds.length) return true;
+
+  const latestDashboardRound = latestRoundFromRoundList(dashboardRounds);
+  if (!latestDashboardRound) return true;
+  if (latestPersistedRound.id > latestDashboardRound.id) return true;
+  if (roundHistoryKey(latestPersistedRound) !== roundHistoryKey(latestDashboardRound)) return true;
+
+  const dashboardUpdatedAtMs = Date.parse(readString(dashboard, "updatedAt") || "");
+  const persistedUpdatedAtMs = Date.parse(getRoundRecordedAt(latestPersistedRound) || "");
+  if (Number.isFinite(persistedUpdatedAtMs) && Number.isFinite(dashboardUpdatedAtMs)) {
+    return persistedUpdatedAtMs > dashboardUpdatedAtMs + 1_000;
+  }
+
+  return false;
 }
 async function loadLiveStateFresh(env: unknown) {
   const currentSalesSettings = liveSalesSettings;
@@ -18856,7 +18953,15 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
   const second = readRecord(secondary);
   if (!hasRecordFields(first)) return second;
   if (!hasRecordFields(second)) return first;
+  const firstRoundCount = dashboardRoundCount(first);
+  const secondRoundCount = dashboardRoundCount(second);
+  if (firstRoundCount > 0 && secondRoundCount === 0) return first;
+  if (secondRoundCount > 0 && firstRoundCount === 0) return second;
   return compareDashboardStateFreshness(first, second) >= 0 ? first : second;
+}
+
+function dashboardRoundCount(state: Record<string, unknown>) {
+  return Array.isArray(state.rounds) ? state.rounds.length : 0;
 }
 
 function compareDashboardStateFreshness(left: Record<string, unknown>, right: Record<string, unknown>) {
@@ -19741,26 +19846,24 @@ function supabasePersistenceHeaders(key: string) {
 
 function restoreDashboardData(value: Record<string, unknown>): LiveDashboardData {
   if (isDefaultMockDashboardState(value)) {
-    return resetDashboardDailyCycle(liveDashboardData);
+    return ensureDashboardDailyCycle(liveDashboardData).dashboard;
   }
 
   if (compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, value) > 0) {
     return ensureDashboardDailyCycle(liveDashboardData).dashboard;
   }
 
-  const incomingCycleDate = readDashboardCycleDate(value);
   const currentCycleDate = currentDashboardCycleDate();
-  if (incomingCycleDate && incomingCycleDate !== currentCycleDate) {
-    return ensureDashboardDailyCycle(liveDashboardData).dashboard;
-  }
-
-  const restored = updateDashboardData(liveDashboardData, value);
-  const cycleDate = incomingCycleDate || restored.cycleDate || currentCycleDate;
+  const restored = updateDashboardData(liveDashboardData, {
+    ...value,
+    cycleDate: currentCycleDate,
+    dailyCycleDate: currentCycleDate,
+  });
   const restoredWithMetadata = {
     ...restored,
     updatedAt: readString(value, "updatedAt") || restored.updatedAt,
-    cycleDate,
-    dailyCycleDate: cycleDate,
+    cycleDate: currentCycleDate,
+    dailyCycleDate: currentCycleDate,
   };
   return ensureDashboardDailyCycle(restoredWithMetadata).dashboard;
 }
