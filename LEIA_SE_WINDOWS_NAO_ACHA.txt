@@ -1,0 +1,70 @@
+SNIPERBO - WINDOWS NAO LOCALIZA? LEIA ISTO
+============================================
+
+PROBLEMA: "O Windows nao pode localizar..." ou arquivo nao encontrado
+
+PASSO 1 - ACHAR A PASTA CERTA
+-----------------------------
+1. Abra o Explorador de Arquivos (icone de pasta na barra)
+2. Clique na barra de endereco no topo
+3. Apague tudo e digite exatamente:
+
+   C:\SNIPERBO
+
+4. Enter
+
+Se der erro "nao encontrado", a pasta nao existe nesse caminho.
+Procure no PC:
+- Pesquisa do Windows: digite SNIPERBO
+- Ou: Este PC > Disco Local (C:) > procure pasta SNIPERBO
+
+
+PASSO 2 - VER O QUE FALTA
+-------------------------
+Dentro de C:\SNIPERBO, procure o arquivo:
+
+   VERIFICAR_SINAIS.bat
+
+Clique DUAS VEZES nele.
+Ele mostra o que existe e o que falta.
+
+
+PASSO 3 - SE VERIFICAR_SINAIS.bat TAMBEM NAO EXISTE
+---------------------------------------------------
+A pasta esta desatualizada ou e a pasta errada.
+
+Opcao A - Se tem Git instalado:
+  Abra PowerShell, cole:
+
+  cd C:\
+  git clone https://github.com/thatyanemachado1-web/iasniperbo.git SNIPERBO
+  cd SNIPERBO
+
+Opcao B - Baixar ZIP:
+  1. Abra no navegador: https://github.com/thatyanemachado1-web/iasniperbo
+  2. Botao verde "Code" > Download ZIP
+  3. Extraia para C:\SNIPERBO
+
+
+PASSO 4 - ARQUIVO MAIS IMPORTANTE QUE FALTA
+-------------------------------------------
+sniper_bo_scraper.py
+
+Esse arquivo NAO vem no GitHub. E o coletor da mesa Bac Bo.
+Procure no PC:
+  Pesquisa Windows > sniper_bo_scraper.py
+
+Quando achar, COPIE para C:\SNIPERBO\
+
+
+PASSO 5 - LIGAR
+---------------
+Duplo clique em LIGAR_SINAIS.bat dentro de C:\SNIPERBO
+
+
+RESUMO
+------
+Pasta certa: C:\SNIPERBO (tem subpasta "scripts")
+Primeiro rode: VERIFICAR_SINAIS.bat
+Depois rode: LIGAR_SINAIS.bat
+Sem sniper_bo_scraper.py = site nao recebe sinais reais
