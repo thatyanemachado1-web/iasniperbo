@@ -1,10 +1,11 @@
 @echo off
-setlocal EnableDelayedExpansion
 chcp 65001 >nul
 title SNIPERBO - Instalador automatico
 set "DEST=C:\SNIPERBO"
 set "ZIP=%TEMP%\sniperbo-main.zip"
 set "EXTRACT=%TEMP%\sniperbo-extract"
+set "ADMIN_EMAIL=gabrielmendespromove@gmail.com"
+set "ADMIN_PASS=AdminSniper2026!"
 
 echo.
 echo ================================================
@@ -65,8 +66,7 @@ if defined SCRAPER (
   ) else (
     echo   Ja esta em %DEST%
   )
-  for %%D in ("%SCRAPER%\..") do set "SCRAPER_DIR=%%~fD"
-  if exist "!SCRAPER_DIR!\config.json" copy /Y "!SCRAPER_DIR!\config.json" "%DEST%\config.json" >nul 2>nul
+  if exist "%SCRAPER%\..\config.json" copy /Y "%SCRAPER%\..\config.json" "%DEST%\config.json" >nul 2>nul
 ) else (
   echo.
   echo   *** ATENCAO ***
@@ -82,12 +82,14 @@ if not errorlevel 1 (
   python -m pip install -q requests truststore 2>nul
 )
 
-echo [6/6] Configurando credenciais e ligando...
-if exist "%DEST%\scripts\configurar_publisher_credenciais.ps1" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%DEST%\scripts\configurar_publisher_credenciais.ps1" -AdminEmail "gabrielmendespromove@gmail.com" -AdminPassword "AdminSniper2026!"
-)
+echo [6/6] Ligando sinais (credenciais via ligar_sinais.ps1)...
 if exist "%DEST%\scripts\ligar_sinais.ps1" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%DEST%\scripts\ligar_sinais.ps1"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$env:SNIPER_SETUP_EMAIL='%ADMIN_EMAIL%';" ^
+    "$env:SNIPER_SETUP_PASS='%ADMIN_PASS%';" ^
+    "& '%DEST%\scripts\configurar_publisher_credenciais.ps1' -AdminEmail $env:SNIPER_SETUP_EMAIL -AdminPassword $env:SNIPER_SETUP_PASS;" ^
+    "& '%DEST%\scripts\ligar_sinais.ps1'"
+) else (
 )
 
 echo.
