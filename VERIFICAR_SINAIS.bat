@@ -49,6 +49,26 @@ if exist "%~dp0config.json" (
   echo [FALTA] config.json  ^(config do coletor^)
 )
 
+if exist "%~dp0node_modules\" (
+  echo [OK] node_modules
+) else (
+  echo [FALTA] node_modules  ^(rode: npm install^)
+)
+
+if exist "%~dp0.output\server\index.mjs" (
+  echo [OK] .output\server  ^(Signals API compilada^)
+) else if exist "%~dp0dist\server\server.js" (
+  echo [OK] dist\server  ^(Signals API compilada^)
+) else (
+  echo [FALTA] build da API  ^(rode: npm run build^)
+)
+
+if exist "%~dp0scripts\official_publisher.local.env" (
+  echo [OK] scripts\official_publisher.local.env
+) else (
+  echo [FALTA] credenciais  ^(rode LIGAR_SINAIS.bat uma vez^)
+)
+
 echo --------------------------------------------
 echo.
 echo Programas no PC:

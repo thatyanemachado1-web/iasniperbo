@@ -23,7 +23,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [1/6] Baixando projeto do GitHub...
+echo [1/8] Baixando projeto do GitHub...
 powershell -NoProfile -Command ^
   "$ProgressPreference='SilentlyContinue';" ^
   "Invoke-WebRequest -Uri 'https://github.com/thatyanemachado1-web/iasniperbo/archive/refs/heads/main.zip' -OutFile '%ZIP%' -UseBasicParsing"
@@ -33,7 +33,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [2/6] Extraindo arquivos...
+echo [2/8] Extraindo arquivos...
 if exist "%EXTRACT%" rmdir /s /q "%EXTRACT%" 2>nul
 powershell -NoProfile -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%EXTRACT%' -Force"
 if not exist "%EXTRACT%\iasniperbo-main" (
@@ -42,10 +42,10 @@ if not exist "%EXTRACT%\iasniperbo-main" (
   exit /b 1
 )
 
-echo [3/6] Copiando para %DEST%...
+echo [3/8] Copiando para %DEST%...
 xcopy "%EXTRACT%\iasniperbo-main\*" "%DEST%\" /E /Y /I /Q >nul
 
-echo [4/6] Procurando coletor da mesa (sniper_bo_scraper.py)...
+echo [4/8] Procurando coletor da mesa (sniper_bo_scraper.py)...
 set "SCRAPER="
 for %%P in (
   "%DEST%\sniper_bo_scraper.py"
@@ -76,13 +76,32 @@ if defined SCRAPER (
   echo.
 )
 
-echo [5/6] Instalando Python requests...
+echo [5/8] Instalando Python requests...
 where python >nul 2>&1
 if not errorlevel 1 (
   python -m pip install -q requests truststore 2>nul
+) else (
+  echo   AVISO: Python nao encontrado. Instale de python.org
 )
 
-echo [6/6] Ligando sinais (credenciais via ligar_sinais.ps1)...
+echo [6/8] Instalando Node.js dependencias...
+where node >nul 2>&1
+if errorlevel 1 (
+  echo   AVISO: Node.js nao encontrado. Instale de nodejs.org
+) else (
+  call npm install --silent
+)
+
+echo [7/8] Compilando Signals API (pode demorar 2-5 min)...
+where node >nul 2>&1
+if not errorlevel 1 (
+  call npm run build
+  if errorlevel 1 (
+    echo   AVISO: build falhou. Rode "npm run build" manualmente depois.
+  )
+)
+
+echo [8/8] Ligando sinais (credenciais via ligar_sinais.ps1)...
 if exist "%DEST%\scripts\ligar_sinais.ps1" (
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$env:SNIPER_SETUP_EMAIL='%ADMIN_EMAIL%';" ^
