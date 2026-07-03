@@ -59,7 +59,7 @@ export function LiveTableView({
           <div className="font-semibold">
             <span className="text-banker">Banker {lastRound?.bankerScore ?? "--"}</span>
             <span className="text-muted-foreground"> x </span>
-            <span className="text-muted-foreground">Player {lastRound?.playerScore ?? "--"}</span>
+            <span className="text-player">Player {lastRound?.playerScore ?? "--"}</span>
           </div>
           <div className="font-mono text-muted-foreground hidden sm:block">{lastRound?.time ?? "--:--"}</div>
         </div>

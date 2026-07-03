@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { canSeeAdminUi } from "@/lib/adminSession";
 import { hasSignalAccess, readUserSession } from "@/lib/userSession";
-import { cn } from "@/lib/utils";
 
 interface PremiumFeatureProps {
   children: ReactNode;
@@ -18,9 +17,7 @@ export function PremiumFeature({
   className = "",
 }: PremiumFeatureProps) {
   const allowed = hasSignalAccess(readUserSession()) || canSeeAdminUi();
-  if (allowed) {
-    return className ? <div className={cn("flex min-h-0 flex-col", className)}>{children}</div> : <>{children}</>;
-  }
+  if (allowed) return className ? <div className={className}>{children}</div> : <>{children}</>;
 
   return (
     <div className={`relative overflow-hidden rounded-2xl ${className}`}>

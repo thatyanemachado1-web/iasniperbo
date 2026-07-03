@@ -316,8 +316,8 @@ export class TelegramEngine {
   }
 
   async validateChannel(userId, body) {
-    const botToken = normalizeSecret(readFirstString(body, ["botToken", "bot_token", "telegram_bot_token"]));
-    const chatId = readFirstString(body, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]);
+    const botToken = normalizeSecret(body.botToken);
+    const chatId = String(body.chatId || "").trim();
     if (!botToken) return json({ error: "Bot Token obrigatorio." }, 400, this.env);
     if (!chatId) return json({ error: "Chat ID obrigatorio." }, 400, this.env);
     const channelId = String(body.channelId || body.id || "").trim();
@@ -349,19 +349,15 @@ export class TelegramEngine {
 
     const channelId = String(incoming.id || crypto.randomUUID());
     const existing = await this.getChannel(userId, channelId);
-    const incomingToken = normalizeSecret(readFirstString(incoming, ["botToken", "bot_token", "telegram_bot_token"]));
-    const botToken = incomingToken || (existing ? await this.decryptToken(existing.botTokenCipher) : "");
-    const chatId =
-      readFirstString(incoming, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]) ||
-      existing?.chatId ||
-      "";
+    const botToken = normalizeSecret(incoming.botToken) || (existing ? await this.decryptToken(existing.botTokenCipher) : "");
+    const chatId = String(incoming.chatId || existing?.chatId || "").trim();
     if (!botToken || !chatId) return json({ error: "Bot Token e Chat ID sao obrigatorios." }, 400, this.env);
 
     const duplicate = await this.findAnyChannelByChatId(chatId);
     if (duplicate && (duplicate.userId !== userId || duplicate.id !== channelId)) {
       return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409, this.env);
     }
-    if (!existing || incomingToken) {
+    if (!existing || normalizeSecret(incoming.botToken)) {
       const ok = await this.verifyValidationCode(userId, botToken, chatId, String(validationCode || incoming.validationCode || ""));
       if (!ok) return json({ error: "Valide o grupo primeiro para salvar na nuvem." }, 400, this.env);
     }
@@ -380,15 +376,12 @@ export class TelegramEngine {
       botTokenCipher: await this.encryptToken(botToken),
       chatId,
       chatCode: normalizeChannelCode(chatId),
-      buttonLink: normalizeUrl(readFirstString(incoming, ["buttonLink", "button_link", "buttonUrl", "button_url"]) || existing?.buttonLink || ""),
+      buttonLink: normalizeUrl(String(incoming.buttonLink || existing?.buttonLink || "")),
       isActive: incoming.isActive !== false,
       analyzingEnabled: Boolean(incoming.analyzingEnabled ?? existing?.analyzingEnabled ?? false),
       analyzingCooldownRounds: clampInt(incoming.analyzingCooldownRounds ?? existing?.analyzingCooldownRounds ?? 3, 1, 20),
       templates: sanitizeTemplateRecord(incoming.templates || existing?.templates || {}),
       signalModules: normalizeModuleConfigs(incoming.signalModules || incoming.templates?.signalModules || existing?.signalModules || {}),
-      connectionStatus: "connected",
-      lastTestedAt: existing?.lastTestedAt || now,
-      lastTestMessageId: existing?.lastTestMessageId || null,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
@@ -465,8 +458,6 @@ export class TelegramEngine {
   async patchChannel(userId, channelId, patch) {
     const current = await this.getChannel(userId, channelId);
     if (!current) return json({ error: "Canal nao encontrado." }, 404, this.env);
-    const incomingChatId = readFirstString(patch, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]);
-    const nextChatId = incomingChatId || current.chatId;
     const merged = {
       ...current,
       ...readRecord(patch),
@@ -474,17 +465,15 @@ export class TelegramEngine {
       userId,
       botTokenCipher: current.botTokenCipher,
       botTokenMasked: current.botTokenMasked,
-      chatId: nextChatId,
-      chatCode: normalizeChannelCode(nextChatId),
+      chatId: String(patch.chatId || current.chatId).trim(),
+      chatCode: normalizeChannelCode(patch.chatId || current.chatId),
       templates: sanitizeTemplateRecord(patch.templates || current.templates || {}),
       signalModules: normalizeModuleConfigs(patch.signalModules || patch.templates?.signalModules || current.signalModules || {}),
       updatedAt: new Date().toISOString(),
     };
-    if (normalizeChannelCode(nextChatId) !== normalizeChannelCode(current.chatId)) {
-      const duplicate = await this.findAnyChannelByChatId(merged.chatId);
-      if (duplicate && (duplicate.userId !== userId || duplicate.id !== channelId)) {
-        return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409, this.env);
-      }
+    const duplicate = await this.findAnyChannelByChatId(merged.chatId);
+    if (duplicate && (duplicate.userId !== userId || duplicate.id !== channelId)) {
+      return json({ error: "Ja existe um canal com este Chat ID/codigo." }, 409, this.env);
     }
     await this.state.storage.put(channelKey(userId, channelId), merged);
     return json({ channel: publicChannel(merged) }, 200, this.env);
@@ -492,9 +481,7 @@ export class TelegramEngine {
 
   async deleteChannel(userId, channelId, body = {}) {
     const channel = await this.getChannel(userId, channelId);
-    const chatId = String(
-      channel?.chatId || readFirstString(body, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]),
-    ).trim();
+    const chatId = String(channel?.chatId || body.chatId || "").trim();
     const chatCode = normalizeChannelCode(chatId);
     const rows = await this.state.storage.list({ prefix: `channel:${userId}:` });
     let deleted = 0;
@@ -544,28 +531,23 @@ export class TelegramEngine {
     for (const channel of channels) {
       const chatCode = normalizeChannelCode(channel.chatId);
       if (chatCode && sentChatCodes.has(chatCode)) {
-        console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, false, "duplicate_chat_id", "")));
         blocked.push({ channelId: channel.id, reason: "duplicate_chat_id" });
         continue;
       }
       if (!channel.isActive) {
-        console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, false, "channel_inactive", "")));
         blocked.push({ channelId: channel.id, reason: "channel_inactive" });
         continue;
       }
       const config = normalizeModuleConfigs(channel.signalModules || {})[moduleKey];
       if (moduleKey === "ai_patterns" && entry === "TIE") {
-        console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, config.enabled, "entry_not_allowed", "")));
         blocked.push({ channelId: channel.id, reason: "entry_not_allowed" });
         continue;
       }
       if (!config.enabled) {
-        console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, false, "module_inactive", "")));
         blocked.push({ channelId: channel.id, reason: "module_inactive" });
         continue;
       }
       if (signalKind === "entry" && entry && !moduleAllowsEntry(config, entry)) {
-        console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, config.enabled, "entry_not_allowed", "")));
         blocked.push({ channelId: channel.id, reason: "entry_not_allowed" });
         continue;
       }
@@ -575,7 +557,6 @@ export class TelegramEngine {
         const lastSentAt = Number(await this.state.storage.get(cooldownKey) || 0);
         const cooldownMs = Math.max(0, Number(config.cooldownSeconds) || 0) * 1000;
         if (lastSentAt && cooldownMs && Date.now() - lastSentAt < cooldownMs) {
-          console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, config.enabled, "cooldown_active", "")));
           blocked.push({ channelId: channel.id, reason: "cooldown_active" });
           continue;
         }
@@ -612,12 +593,10 @@ export class TelegramEngine {
         }
       }
       if (duplicateKey) {
-        console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, config.enabled, "duplicate_signal", "")));
         blocked.push({ channelId: channel.id, reason: "duplicate_signal" });
         continue;
       }
       const buttons = telegramButtonsForSignal(config, channel, body);
-      console.info(JSON.stringify(telegramWorkerLog("enviando", channel, moduleKey, config.enabled, "", message)));
       const result = await sendTelegramMessage({
         botToken: await this.decryptToken(channel.botTokenCipher),
         chatId: channel.chatId,
@@ -663,9 +642,6 @@ export class TelegramEngine {
       }
       if (result.ok && cooldownKey) await this.state.storage.put(cooldownKey, Date.now());
       if (result.ok && chatCode) sentChatCodes.add(chatCode);
-      console[result.ok ? "info" : "warn"](
-        JSON.stringify(telegramWorkerLog(result.ok ? "enviado" : "erro", channel, moduleKey, config.enabled, result.error || "", message, result)),
-      );
       (result.ok ? sent : blocked).push({
         channelId: channel.id,
         notificationId: notification.id,
@@ -1141,8 +1117,8 @@ export class TelegramEngine {
 
   async sendAdHocTelegram(body) {
     const result = await sendTelegramMessage({
-      botToken: normalizeSecret(readFirstString(body, ["botToken", "bot_token", "telegram_bot_token"])),
-      chatId: readFirstString(body, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]),
+      botToken: normalizeSecret(body.botToken),
+      chatId: String(body.chatId || "").trim(),
       message: String(body.message || "").slice(0, 4096),
       buttonLabel: String(body.buttonLabel || ""),
       buttonUrl: normalizeUrl(String(body.buttonLink || body.buttonUrl || "")),
@@ -2089,8 +2065,6 @@ function publicChannel(channel) {
     analyzingCooldownRounds: channel.analyzingCooldownRounds,
     templates: sanitizeTemplateRecord(channel.templates || {}),
     signalModules: normalizeModuleConfigs(channel.signalModules || {}),
-    connectionStatus: "connected",
-    lastTestMessageId: channel.lastTestMessageId || null,
     createdAt: channel.createdAt,
     updatedAt: channel.updatedAt,
   };
@@ -2343,17 +2317,6 @@ async function readJson(request) {
 
 function readRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function readFirstString(record, keys) {
-  const source = readRecord(record);
-  for (const key of keys) {
-    const value = source[key];
-    if (value === undefined || value === null) continue;
-    const text = String(value).trim();
-    if (text) return text;
-  }
-  return "";
 }
 
 function channelKey(userId, channelId) {
@@ -2804,31 +2767,6 @@ function moduleName(key) {
   if (key === "surf_alert") return "Aviso de Surf";
   if (key === "ties_only") return "Somente Empates";
   return "Validador";
-}
-
-function telegramWorkerLog(event, channel, moduleKey, active, reason = "", message = "", result = {}) {
-  return {
-    event: `[TELEGRAM_ENGINE] ${event}`,
-    client_id: maskUserId(channel?.userId || ""),
-    module: moduleKey,
-    active: Boolean(active),
-    group_found: Boolean(channel?.chatId),
-    chat_id: channel?.chatId || "",
-    channelId: channel?.id || "",
-    reason,
-    telegram_result: result.ok ? "success" : result.ok === false ? "error" : "not_called",
-    telegramMessageId: result.messageId || null,
-    status: result.status || "",
-    message_sent: String(message || "").slice(0, 240),
-    error: result.error || "",
-  };
-}
-
-function maskUserId(userId) {
-  const clean = String(userId || "").trim().toLowerCase();
-  const [name, domain] = clean.split("@");
-  if (!name || !domain) return clean ? "***" : "";
-  return `${name.slice(0, 1)}***@${domain}`;
 }
 
 function renderTemplate(template, variables) {

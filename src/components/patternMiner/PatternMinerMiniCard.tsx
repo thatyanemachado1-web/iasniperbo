@@ -1,298 +1,343 @@
 import { Link } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
-import { AppBadge } from "@/components/ui-app/AppBadge";
+import { BrainCircuit, ChevronRight, Flame } from "lucide-react";
 import { GlassCard } from "@/components/ui-app/GlassCard";
-import {
-  DASHBOARD_MODULE_CARD_BODY,
-  DASHBOARD_MODULE_CARD_FILL,
-  DASHBOARD_MODULE_CARD_ROOT,
-} from "@/components/dashboard/dashboardModuleCardLayout";
+import { AppBadge } from "@/components/ui-app/AppBadge";
 import { PatternSequence } from "@/components/patternMiner/PatternSequence";
 import { cn } from "@/lib/utils";
-import { sideBgClass, sideTextClass } from "@/lib/sideColors";
-import { formatPulledSide, statusLabel } from "@/patternMiner/PatternMinerDisplay";
-import type { RoundResult } from "@/types/dashboard";
-import type { PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
+import {
+  formatPercent,
+  formatPulledSide,
+  statusLabel,
+  statusTone,
+} from "@/patternMiner/PatternMinerDisplay";
+import type {
+  PatternMinerAlert,
+  PatternMinerScoreboard,
+  PatternMinerSnapshot,
+  PatternMinerStrategy,
+} from "@/types/patternMiner";
 
 export function PatternMinerMiniCard({
   snapshot,
   isUsingRealData,
-  latestRoundId,
-  className,
 }: {
   snapshot: PatternMinerSnapshot;
   isUsingRealData: boolean;
-  latestRoundId?: number;
-  className?: string;
 }) {
-  const confirmedAlert = pickLatestAlert(snapshot.entryAlerts, latestRoundId);
-  const formingAlert = pickLatestAlert(snapshot.formingAlerts, latestRoundId);
-  const activeStrategy =
-    confirmedAlert?.strategy ?? formingAlert?.strategy ?? snapshot.hotStrategies[0] ?? snapshot.ranking[0];
-  const view = buildPatternView(snapshot, isUsingRealData, confirmedAlert, formingAlert, activeStrategy);
+  const confirmedAlert = snapshot.entryAlerts[0];
+  const confirmedPattern = confirmedAlert?.strategy;
+  const fallbackPattern = snapshot.hotStrategies[0] ?? snapshot.ranking[0];
+  const currentPattern = confirmedPattern ?? fallbackPattern;
+  const hasGeneralData = isUsingRealData && snapshot.scoreboard.totalValidated > 0;
+  const hasPatternData =
+    isUsingRealData && Boolean(currentPattern) && (currentPattern?.totalValidated ?? 0) > 0;
+  const formingAlerts = snapshot.formingAlerts.slice(0, 2);
+  const leadingFormingAlert = formingAlerts[0];
 
   return (
-    <GlassCard
-      className={cn(
-        "digital-risk-card border-white/10 p-2 sm:p-2",
-        DASHBOARD_MODULE_CARD_ROOT,
-        view.borderClass,
-        className,
-      )}
-    >
-      <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
-
-      <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-          Padroes IA
-        </div>
-        <AppBadge
-          tone={view.badgeTone}
-          pulse={view.pulse}
-          className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
-        >
-          {view.badge}
-        </AppBadge>
-      </div>
-
-      <div className={DASHBOARD_MODULE_CARD_BODY}>
-        <div className={cn("rounded-xl border px-3 py-2.5 text-center", view.panelClass)}>
-          <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>{view.action}</div>
-          <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            {view.headline}
+    <GlassCard className="h-full rounded-xl border-neon-cyan/35 p-3">
+      <div className="flex h-full min-w-0 flex-col gap-2.5">
+        <div className="flex items-start gap-2.5">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-xl btn-primary-grad glow-blue">
+            <BrainCircuit className="size-4" />
           </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-          <PatternStatChip label="Forca" value={view.strengthLabel} tone={view.strengthTone} />
-          <PatternStatChip label="Amostras" value={view.samplesLabel} tone="muted" />
-          <PatternStatChip label="Status" value={view.statusChip} tone={view.statusTone} />
-        </div>
-
-        {activeStrategy ? (
-          <div className="rounded-lg border border-neon-cyan/10 bg-background/20 px-2 py-1.5">
-            <div className="text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan/85">
-              Sequencia - banco {formatAnalyzedRounds(snapshot.analyzedRounds)}
-            </div>
-            <div className="mt-1 min-w-0 overflow-hidden">
-              <PatternSequence sequence={activeStrategy.sequence} compact />
-            </div>
-            {formingAlert && !confirmedAlert ? (
-              <div className="mt-1 text-[9px] font-semibold text-warning">
-                Formacao {Math.round(formingAlert.progress * 100)}%
-                {formingAlert.missingTokens.length
-                  ? ` - falta ${formingAlert.missingTokens.join(" -> ")}`
-                  : ""}
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-black">Padrões IA</div>
+            {!isUsingRealData ? (
+              <div className="mt-1 text-[10px] leading-snug text-warning">
+                Aguardando histórico real da plataforma.
               </div>
-            ) : null}
+            ) : confirmedPattern ? (
+              <ConfirmedPatternBlock alert={confirmedAlert} />
+            ) : leadingFormingAlert ? (
+              <FormingPreviewBlock alert={leadingFormingAlert} />
+            ) : (
+              <div className="mt-1 rounded-xl border border-neon-cyan/12 bg-background/25 px-2.5 py-2 text-[10px] leading-snug text-muted-foreground">
+                Aguardando padrão confirmado. Em formação aparece abaixo quando a sequência estiver
+                perto.
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="rounded-lg border border-border/50 bg-secondary/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-            Coletando historico para mineracao de padroes.
+        </div>
+
+        <div className="grid gap-1.5">
+          <PatternScoreLine title="Geral" data={hasGeneralData ? snapshot.scoreboard : null} />
+          <PatternScoreLine
+            title="Atual"
+            data={hasPatternData && currentPattern ? currentPattern : null}
+          />
+        </div>
+
+        <div className="rounded-xl border border-neon-cyan/12 bg-background/20 px-2 py-1.5">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-[9px] font-black uppercase tracking-[0.14em] text-neon-cyan">
+              Em formação
+            </span>
+            <span className="text-[9px] font-semibold text-muted-foreground">
+              {formingAlerts.length ? `${formingAlerts.length} perto` : "coletando"}
+            </span>
           </div>
-        )}
+          {formingAlerts.length ? (
+            <div className="space-y-1">
+              {formingAlerts.map((alert) => (
+                <FormationMiniRow key={alert.id} alert={alert} />
+              ))}
+            </div>
+          ) : (
+            <div className="text-[10px] leading-snug text-muted-foreground">
+              Nenhum padrão IA em formação neste momento.
+            </div>
+          )}
+        </div>
 
         <Link
           to="/app/padroes"
-          className="inline-flex items-center gap-1 text-[10px] font-semibold text-neon-cyan hover:text-neon-blue"
+          className="mt-auto inline-flex items-center gap-1 text-[11px] font-semibold text-neon-cyan hover:text-neon-blue"
         >
-          Ver ranking completo <ChevronRight className="size-3" />
+          Ver detalhes <ChevronRight className="size-3" />
         </Link>
-        <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
       </div>
     </GlassCard>
   );
 }
 
-function buildPatternView(
-  snapshot: PatternMinerSnapshot,
-  isUsingRealData: boolean,
-  confirmedAlert: PatternMinerSnapshot["entryAlerts"][number] | undefined,
-  formingAlert: PatternMinerSnapshot["formingAlerts"][number] | undefined,
-  activeStrategy: PatternMinerStrategy | undefined,
-) {
-  if (!isUsingRealData) {
-    return {
-      badge: "Coletando",
-      badgeTone: "muted" as const,
-      pulse: false,
-      action: "Aguardar",
-      headline: "Historico real ainda nao disponivel",
-      actionClass: "text-muted-foreground",
-      panelClass: "border-border/60 bg-secondary/20",
-      borderClass: "border-border/50",
-      strengthLabel: "--",
-      strengthTone: "muted" as const,
-      samplesLabel: "0",
-      statusChip: "OFF",
-      statusTone: "muted" as const,
-    };
-  }
+function ConfirmedPatternBlock({ alert }: { alert: PatternMinerAlert }) {
+  const strategy = alert.strategy;
 
-  const strategy = confirmedAlert?.strategy ?? formingAlert?.strategy ?? activeStrategy;
-  const assertiveness = strategy?.assertiveness;
-  const strengthLabel = assertiveness !== undefined ? `${Math.round(assertiveness)}%` : "--";
-  const samplesLabel = strategy?.totalValidated ? String(strategy.totalValidated) : "0";
-  const statusChip = strategy ? compactStatus(strategy) : "OFF";
-
-  if (confirmedAlert?.strategy?.expectedResult) {
-    const side = confirmedAlert.strategy.expectedResult;
-    const sideView = patternSideView(side);
-    return {
-      badge: "Confirmado",
-      badgeTone: sideView.badgeTone,
-      pulse: true,
-      action: side === "T" ? "Possivel Tie" : `Entrar ${sideLabel(side)}`,
-      headline: `${formatPulledSide(side)} - assertividade ${strengthLabel}`,
-      actionClass: sideTextClass[side],
-      panelClass: sideView.panelClass,
-      borderClass: sideView.borderClass,
-      strengthLabel,
-      strengthTone: sideView.statTone,
-      samplesLabel,
-      statusChip,
-      statusTone: sideView.statTone,
-    };
-  }
-
-  if (formingAlert?.strategy) {
-    const side = formingAlert.strategy.expectedResult;
-    const progress = Math.round(formingAlert.progress * 100);
-    return {
-      badge: "Formando",
-      badgeTone: "amber" as const,
-      pulse: true,
-      action: side ? `Monitorar ${sideLabel(side)}` : "Monitorar",
-      headline: `Padrao ${progress}% formado - aguardar confirmacao`,
-      actionClass: side ? sideTextClass[side] : "text-warning",
-      panelClass: side ? sideBgClass[side] : "border-warning/30 bg-warning/10",
-      borderClass: side ? patternSideView(side).borderClass : "border-warning/25",
-      strengthLabel,
-      strengthTone: "amber" as const,
-      samplesLabel,
-      statusChip,
-      statusTone: "amber" as const,
-    };
-  }
-
-  if (activeStrategy && !activeStrategy.insufficientSample && activeStrategy.expectedResult) {
-    const side = activeStrategy.expectedResult;
-    return {
-      badge: "Observando",
-      badgeTone: "blue" as const,
-      pulse: false,
-      action: "Aguardar",
-      headline: `Hot ${formatPulledSide(side)} - sem sequencia ativa agora`,
-      actionClass: "text-muted-foreground",
-      panelClass: "border-border/60 bg-secondary/20",
-      borderClass: "border-neon-cyan/20",
-      strengthLabel,
-      strengthTone: "cyan" as const,
-      samplesLabel,
-      statusChip,
-      statusTone: "cyan" as const,
-    };
-  }
-
-  return {
-    badge: "Observando",
-    badgeTone: "muted" as const,
-    pulse: false,
-    action: "Aguardar",
-    headline:
-      snapshot.analyzedRounds > 0
-        ? `${snapshot.agent.catalogedStrategies} padroes catalogados - sem entrada agora`
-        : "Sem padrao validado no momento",
-    actionClass: "text-muted-foreground",
-    panelClass: "border-border/60 bg-secondary/20",
-    borderClass: "border-border/50",
-    strengthLabel: snapshot.scoreboard.assertiveness
-      ? `${Math.round(snapshot.scoreboard.assertiveness)}%`
-      : "--",
-    strengthTone: "muted" as const,
-    samplesLabel: snapshot.scoreboard.totalValidated ? String(snapshot.scoreboard.totalValidated) : "0",
-    statusChip: "OFF",
-    statusTone: "muted" as const,
-  };
+  return (
+    <div className="mt-1 rounded-xl border border-success/20 bg-success/10 px-2.5 py-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.12em] text-success">
+          Padrão confirmado
+        </span>
+        <AppBadge tone={statusTone(strategy.status)} className="px-2 text-[8px]">
+          {statusLabel(strategy.status)}
+        </AppBadge>
+      </div>
+      <div className="min-w-0">
+        <PatternSequence sequence={strategy.sequence} compact />
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+        <span className="text-muted-foreground">Entrada confirmada:</span>
+        {strategy.expectedResult ? (
+          <span className="font-black">{formatPulledSide(strategy.expectedResult)}</span>
+        ) : (
+          <span className="text-warning">amostra insuficiente</span>
+        )}
+        <span className="text-neon-cyan">{formatPercent(strategy.assertiveness)}</span>
+      </div>
+    </div>
+  );
 }
 
-function PatternStatChip({
+function FormingPreviewBlock({ alert }: { alert: PatternMinerAlert }) {
+  const strategy = alert.strategy;
+  const progress = Math.round(alert.progress * 100);
+
+  return (
+    <div className="mt-1 rounded-xl border border-warning/20 bg-warning/5 px-2.5 py-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.12em] text-warning">
+          Padrão quase confirmado
+        </span>
+        <span className="rounded-full border border-success/25 bg-success/10 px-1.5 py-0.5 text-[7px] font-black text-success">
+          {progress}%
+        </span>
+      </div>
+      <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+        <TinyPatternSequence sequence={strategy.sequence} maxItems={5} />
+      </div>
+      {alert.missingTokens.length > 0 && (
+        <div className="mt-1 flex min-w-0 items-center gap-1 text-[8px] text-muted-foreground">
+          <span>Falta:</span>
+          <TinyPatternSequence sequence={alert.missingTokens} maxItems={2} tiny />
+        </div>
+      )}
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 rounded-lg border border-neon-cyan/12 bg-background/24 px-2 py-1 text-[9px]">
+        <span className="text-muted-foreground">Entrada provável:</span>
+        {strategy.expectedResult ? (
+          <span className="font-black">{formatPulledSide(strategy.expectedResult)}</span>
+        ) : (
+          <span className="text-warning">sem amostra</span>
+        )}
+        <span className="font-black text-neon-cyan">
+          {compactPercent(strategy.assertiveness)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function FormationMiniRow({ alert }: { alert: PatternMinerAlert }) {
+  const strategy = alert.strategy;
+  const progress = Math.round(alert.progress * 100);
+
+  return (
+    <div className="rounded-lg border border-white/5 bg-secondary/16 px-2 py-1">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1">
+          <Flame className="size-3 shrink-0 text-warning" />
+          <span className="truncate text-[9px] font-black uppercase text-foreground">
+            Padrão em form.
+          </span>
+        </div>
+        <span className="rounded-full border border-success/25 bg-success/10 px-1.5 py-0.5 text-[7px] font-black text-success">
+          {progress}%
+        </span>
+      </div>
+      <div className="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden">
+        <TinyPatternSequence sequence={strategy.sequence} maxItems={5} />
+        <span className="shrink-0 text-[8px] text-muted-foreground">Entrada</span>
+        {strategy.expectedResult ? (
+          <span className="shrink-0 text-[9px] font-black">
+            {formatPulledSide(strategy.expectedResult)}
+          </span>
+        ) : (
+          <span className="shrink-0 text-[9px] text-warning">sem amostra</span>
+        )}
+      </div>
+      {alert.missingTokens.length > 0 && (
+        <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[8px] text-muted-foreground">
+          <span>Falta:</span>
+          <TinyPatternSequence sequence={alert.missingTokens} maxItems={2} tiny />
+        </div>
+      )}
+      <div className="mt-0.5 flex items-center justify-between gap-2 text-[8px]">
+        <span className="truncate text-muted-foreground">
+          SG {strategy.sg} · G1 {strategy.g1} · RD {strategy.red}
+        </span>
+        <span className="shrink-0 font-black text-neon-cyan">
+          {compactPercent(strategy.assertiveness)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TinyPatternSequence({
+  sequence,
+  maxItems,
+  tiny = false,
+}: {
+  sequence: string[];
+  maxItems: number;
+  tiny?: boolean;
+}) {
+  const visible = sequence.slice(0, maxItems);
+  const hidden = Math.max(0, sequence.length - visible.length);
+
+  return (
+    <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+      {visible.map((token, index) => (
+        <div key={`${token}-${index}`} className="flex shrink-0 items-center gap-1">
+          <TinyToken token={token} tiny={tiny} />
+          {index < visible.length - 1 && (
+            <span className="text-[9px] text-muted-foreground">→</span>
+          )}
+        </div>
+      ))}
+      {hidden > 0 && (
+        <span className="shrink-0 text-[8px] font-bold text-muted-foreground">+{hidden}</span>
+      )}
+    </div>
+  );
+}
+
+function TinyToken({ token, tiny = false }: { token: string; tiny?: boolean }) {
+  const side = token[0];
+  const value = token.slice(1);
+  const label = side === "T" && value ? `${value}x` : value || side;
+
+  return (
+    <span
+      className={cn(
+        "grid shrink-0 place-items-center rounded-full border font-black leading-none text-white",
+        tiny ? "size-4 text-[7px]" : "size-5 text-[8px]",
+        side === "B" && "border-banker/60 bg-banker",
+        side === "P" && "border-player/60 bg-player",
+        side === "T" && "border-warning/70 bg-warning text-background",
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function PatternScoreLine({
+  title,
+  data,
+}: {
+  title: string;
+  data: PatternMinerScoreboard | PatternMinerStrategy | null;
+}) {
+  return (
+    <div className="rounded-xl border border-neon-cyan/10 bg-background/18 px-2 py-1.5">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[9px] font-black uppercase tracking-[0.12em] text-neon-cyan">
+          Placar {title}
+        </span>
+        <span className="truncate text-[9px] font-semibold text-muted-foreground">
+          SQ {currentSequenceLabel(data)}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-0.5">
+        <TinyStat label="SG" value={formatScoreValue(data?.sg ?? null)} tone="green" />
+        <TinyStat label="G1" value={formatScoreValue(data?.g1 ?? null)} tone="cyan" />
+        <TinyStat label="RD" value={formatScoreValue(data?.red ?? null)} tone="red" />
+        <TinyStat label="TIE" value={formatScoreValue(data?.tie ?? null)} tone="amber" />
+        <TinyStat
+          label="SQ+"
+          value={formatScoreValue(data?.maxSequencePositive ?? null)}
+          tone="green"
+        />
+        <TinyStat label="%" value={compactPercent(data?.assertiveness)} tone="cyan" />
+      </div>
+    </div>
+  );
+}
+
+function TinyStat({
   label,
   value,
   tone,
 }: {
   label: string;
   value: string;
-  tone: "green" | "amber" | "cyan" | "muted" | "blue" | "red" | "gold";
+  tone: "green" | "cyan" | "red" | "amber" | "neutral";
 }) {
-  const toneClass = {
-    green: "border-success/30 bg-success/8 text-success",
-    amber: "border-warning/30 bg-warning/8 text-warning",
-    cyan: "border-neon-cyan/30 bg-neon-cyan/8 text-neon-cyan",
-    blue: "border-player/35 bg-player/10 text-player",
-    red: "border-banker/30 bg-banker/8 text-banker",
-    gold: "border-tie/35 bg-tie/10 text-tie",
-    muted: "border-border/60 bg-secondary/25 text-foreground",
-  }[tone];
-
   return (
-    <div className={cn("rounded-lg border px-1 py-1.5", toneClass)}>
-      <div className="text-[8px] font-black uppercase tracking-[0.08em] opacity-75">{label}</div>
-      <div className="mt-0.5 truncate text-[11px] font-black leading-none">{value}</div>
+    <div
+      className={cn(
+        "flex min-w-0 items-center justify-center gap-1 rounded-md border px-1 py-0.5 leading-none",
+        scoreToneClass(tone),
+      )}
+    >
+      <span className="text-[7px] font-bold uppercase opacity-70">{label}</span>
+      <span className="text-[9px] font-black">{value}</span>
     </div>
   );
 }
 
-function sideLabel(side: "B" | "P" | "T") {
-  if (side === "B") return "BANKER";
-  if (side === "P") return "PLAYER";
-  return "TIE";
+function currentSequenceLabel(data: PatternMinerScoreboard | PatternMinerStrategy | null) {
+  if (!data) return "coletando";
+  if (data.sequencePositive > 0) return `${data.sequencePositive}G`;
+  if (data.sequenceNegative > 0) return `${data.sequenceNegative}R`;
+  return "coletando";
 }
 
-function pickLatestAlert<T extends PatternMinerSnapshot["entryAlerts"][number]>(
-  alerts: T[],
-  latestRoundId?: number,
-) {
-  if (latestRoundId === undefined) return alerts[0];
-  return alerts.find((alert) => alert.matchedRounds.at(-1)?.id === latestRoundId);
+function formatScoreValue(value: number | null) {
+  return typeof value === "number" && value > 0 ? String(value) : "0";
 }
 
-function patternSideView(side: RoundResult) {
-  if (side === "B") {
-    return {
-      badgeTone: "red" as const,
-      panelClass: "border-banker/35 bg-banker/10",
-      borderClass: "border-banker/35",
-      statTone: "red" as const,
-    };
-  }
-  if (side === "P") {
-    return {
-      badgeTone: "blue" as const,
-      panelClass: "border-player/35 bg-player/10",
-      borderClass: "border-player/35",
-      statTone: "blue" as const,
-    };
-  }
-  return {
-    badgeTone: "gold" as const,
-    panelClass: "border-tie/40 bg-tie/10",
-    borderClass: "border-tie/35",
-    statTone: "gold" as const,
-  };
+function compactPercent(value: number | undefined) {
+  if (value === undefined || Number.isNaN(value)) return "--";
+  return `${Math.round(value)}%`;
 }
 
-function compactStatus(strategy: PatternMinerStrategy) {
-  const label = statusLabel(strategy.status);
-  if (label.length <= 8) return label.toUpperCase();
-  if (strategy.status === "VERY_HOT") return "M.QUENTE";
-  if (strategy.status === "OBSERVATION") return "OBS";
-  return label.slice(0, 8).toUpperCase();
-}
-
-function formatAnalyzedRounds(value: number) {
-  if (!value) return "0r";
-  if (value >= 1000) return `${Math.round(value / 100) / 10}k`;
-  return `${value}r`;
+function scoreToneClass(tone: "green" | "cyan" | "red" | "amber" | "neutral") {
+  if (tone === "green") return "border-success/20 bg-success/5 text-success";
+  if (tone === "cyan") return "border-neon-cyan/20 bg-neon-cyan/5 text-neon-cyan";
+  if (tone === "red") return "border-destructive/20 bg-destructive/5 text-destructive";
+  if (tone === "amber") return "border-warning/20 bg-warning/5 text-warning";
+  return "border-border/45 bg-secondary/30 text-muted-foreground";
 }

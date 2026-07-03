@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { DashboardData, NeuralReading, Round } from "@/types/dashboard";
 
 export type TelegramAutoV2ModuleKey = "ai_patterns" | "paying_numbers" | "surf_alert" | "ties_only" | "validator";
@@ -305,9 +304,7 @@ export function detectSurfConfirmedCard(
   const round = latestRoundFromDashboard(dashboard, latestRound);
   const roundId = Number(round?.id) || 0;
   const side = normalizeSide(alert.surf_prediction_side || alert.surf_side || alert.side || alert.entry);
-  const statusText = normalizeText(
-    alert.surf_prediction_status || alert.surf_status || alert.status || alert.phase || alert.surf_phase,
-  );
+  const statusText = normalizeText(alert.surf_status || alert.status || alert.phase || alert.surf_phase);
   const signalKey = side && roundId ? `surf:${readString(alert, "id") || roundId}:${side}:round:${roundId}` : "";
 
   if (!Object.keys(alert).length) {

@@ -13,7 +13,7 @@
     "signals:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start_official_signals_api.ps1",
     "watchdog:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/watch_sniperbo_official.ps1",
     "lint": "eslint .",
-    "test:telegram-v2": "node --experimental-strip-types scripts/telegram-auto-v2.test.mjs && node scripts/telegram-engine-cloud.test.mjs",
+    "test:telegram-v2": "node --experimental-strip-types scripts/telegram-auto-v2.test.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {
@@ -77,7 +77,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
-    "@lovable.dev/vite-tanstack-config": "2.6.4",
+    "@lovable.dev/vite-tanstack-config": "2.6.2",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

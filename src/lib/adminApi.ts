@@ -59,7 +59,6 @@ const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
 export const LOCAL_ADMIN_API_URL = LOCAL_SIGNALS_API_BASE_URL;
 export const PUBLIC_ADMIN_API_URL = "https://sniperbo.com";
-const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 15_000;
 const ALLOWED_REMOTE_API_HOSTS = new Set(["sniperbo.com", "www.sniperbo.com"]);
 
 const defaultApiUrl = () =>
@@ -68,11 +67,9 @@ const defaultApiUrl = () =>
     /\/dashboard\/?$/,
     "",
   ) ||
-  (typeof window !== "undefined" && isHostedAppOrigin()
-    ? window.location.origin
-    : typeof window !== "undefined" && !isLocalFrontend()
-      ? PUBLIC_ADMIN_API_URL
-      : LOCAL_ADMIN_API_URL);
+  (typeof window !== "undefined" && !isLocalFrontend()
+    ? PUBLIC_ADMIN_API_URL
+    : LOCAL_ADMIN_API_URL);
 
 export function getInitialApiUrl() {
   if (typeof window === "undefined") return defaultApiUrl();
@@ -83,15 +80,7 @@ export function getInitialApiUrl() {
   }
   if (
     !isLocalFrontend() &&
-    isHostedAppOrigin() &&
-    (!saved || isLocalApiUrl(saved) || !isSameOriginApiUrl(saved) || !isAllowedRemoteApiUrl(saved))
-  ) {
-    window.localStorage.setItem(API_URL_KEY, window.location.origin);
-    return window.location.origin;
-  }
-  if (
-    !isLocalFrontend() &&
-    (!saved || isLocalApiUrl(saved) || !isAllowedRemoteApiUrl(saved))
+    (!saved || isLocalApiUrl(saved) || isSameOriginApiUrl(saved) || !isAllowedRemoteApiUrl(saved))
   ) {
     window.localStorage.setItem(API_URL_KEY, PUBLIC_ADMIN_API_URL);
     return PUBLIC_ADMIN_API_URL;
@@ -128,7 +117,7 @@ export function clearAdminSession() {
 
 export async function adminLogin(apiUrl: string, email: string, password: string) {
   const normalizedApiUrl = normalizeMaybeUrl(apiUrl || getInitialApiUrl());
-  const response = await fetchWithTimeout(`${normalizedApiUrl}/admin/login`, {
+  const response = await fetch(`${normalizedApiUrl}/admin/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -521,7 +510,7 @@ function normalizeAdminRole(role: unknown): NonNullable<AdminSession["role"]> {
 }
 
 async function request<T>(session: AdminSession, path: string, init: RequestInit = {}) {
-  const response = await fetchWithTimeout(`${normalizeMaybeUrl(session.apiUrl)}${path}`, {
+  const response = await fetch(`${normalizeMaybeUrl(session.apiUrl)}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -538,21 +527,6 @@ async function request<T>(session: AdminSession, path: string, init: RequestInit
     throw new Error(text || "Falha ao conversar com a API admin.");
   }
   return (await response.json()) as T;
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = DEFAULT_ADMIN_REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("O servidor demorou para responder. Tente novamente em alguns segundos.");
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
 }
 
 function normalizeBaseUrl(apiUrl: string) {
@@ -579,12 +553,6 @@ function normalizeMaybeUrl(apiUrl: string) {
 function isLocalFrontend() {
   if (typeof window === "undefined") return false;
   return ["127.0.0.1", "localhost"].includes(window.location.hostname);
-}
-
-function isHostedAppOrigin() {
-  if (typeof window === "undefined") return false;
-  const hostname = window.location.hostname.toLowerCase();
-  return hostname === "sniperbo.com" || hostname === "www.sniperbo.com" || hostname.endsWith(".lovable.app");
 }
 
 function isLocalApiUrl(apiUrl: string) {

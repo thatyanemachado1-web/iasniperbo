@@ -13,7 +13,7 @@ export function PatternStrategyCard({
   compact?: boolean;
 }) {
   return (
-    <GlassCard className={compact ? "rounded-xl p-3" : "rounded-xl p-4"}>
+    <GlassCard className={compact ? "p-3 rounded-xl" : "p-4 rounded-xl"}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -34,20 +34,20 @@ export function PatternStrategyCard({
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
-        <Metric label="Ocorrencias" value={strategy.occurrences} />
+      <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+        <Metric label="Ocorrências" value={strategy.occurrences} />
         <Metric label="SG" value={strategy.sg} tone="text-success" />
         <Metric label="G1" value={strategy.g1} tone="text-neon-cyan" />
         <Metric label="RED" value={strategy.red} tone="text-destructive" />
-        <Metric label="TIE" value={strategy.tie} tone="text-tie" />
+        <Metric label="🟡 TIE" value={strategy.tie} tone="text-warning" />
       </div>
 
       {!compact && (
-        <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] text-muted-foreground sm:grid-cols-4">
-          <Info label="Ultima ocorrencia" value={strategy.lastOccurrence ?? "-"} />
-          <Info label="Ultimo acerto" value={strategy.lastHit ?? "-"} />
-          <Info label="Ultimo red" value={strategy.lastRed ?? "-"} />
-          <Info label="Data de criacao" value={strategy.createdAt} />
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-4 gap-2 text-[11px] text-muted-foreground">
+          <Info label="Última ocorrência" value={strategy.lastOccurrence ?? "-"} />
+          <Info label="Último acerto" value={strategy.lastHit ?? "-"} />
+          <Info label="Último red" value={strategy.lastRed ?? "-"} />
+          <Info label="Data de criação" value={strategy.createdAt} />
         </div>
       )}
 
@@ -75,7 +75,7 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: s
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-border/60 bg-background/25 px-2 py-1.5">
-      <div className="text-[9px] uppercase tracking-wider">{label}</div>
+      <div className="uppercase tracking-wider text-[9px]">{label}</div>
       <div className="mt-0.5 truncate text-foreground">{value}</div>
     </div>
   );

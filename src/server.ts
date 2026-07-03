@@ -1,4 +1,3 @@
-// @ts-nocheck
 import "./lib/error-capture";
 
 import {
@@ -14,7 +13,6 @@ import { mockDashboardData } from "./data/mockDashboardData";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { DEFAULT_PATTERN_MINER_CONFIG, PatternMinerEngine } from "./patternMiner/PatternMinerEngine";
-import { SurfAnalyzerEngine } from "./surf/SurfAnalyzerEngine";
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
@@ -379,7 +377,6 @@ const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
 const CLIENT_REGISTRY_PROTECTION_INTERVAL_MS = 60_000;
 const CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS = 5 * 60_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
-const TELEGRAM_ENGINE_TIMEOUT_MS = 8_000;
 const VALIDATOR_TELEGRAM_TARGET_MS = 200;
 const VALIDATOR_TELEGRAM_DEDUPE_RESERVATION_TTL_MS = 30_000;
 const LIVE_FEED_STALE_MS = 150_000;
@@ -770,28 +767,12 @@ function redirectLegacyAdminRoute(request: Request) {
 function shouldLoadLiveStateForRequest(request: Request) {
   if (request.method === "OPTIONS") return false;
   const url = new URL(request.url);
-  if (isLightweightApiRequest(url.pathname)) return false;
-  if (isAppShellRequest(url.pathname)) return false;
   if (url.pathname.startsWith("/assets/")) return false;
   if (url.pathname.startsWith("/favicon")) return false;
   if (url.pathname === "/robots.txt" || url.pathname === "/sitemap.xml" || url.pathname === "/manifest.webmanifest") {
     return false;
   }
   return !/\.(?:avif|css|gif|ico|jpeg|jpg|js|json|map|mp3|png|svg|txt|webm|webp|woff2?)$/i.test(url.pathname);
-}
-
-function isAppShellRequest(pathname: string) {
-  return pathname === "/" || pathname === "/app" || pathname.startsWith("/app/");
-}
-
-function isLightweightApiRequest(pathname: string) {
-  return (
-    pathname === "/admin/login" ||
-    pathname === "/sales/settings" ||
-    pathname === "/billing/plans" ||
-    pathname === "/billing/checkout" ||
-    pathname === "/site-content"
-  );
 }
 
 function handleRateLimit(request: Request) {
@@ -2432,7 +2413,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      void saveLiveState(env);
+      await saveLiveState(env);
       return json({ access: await ownerAccess(env, email, request) });
     }
 
@@ -2443,7 +2424,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         city: "",
         country: "",
       });
-      void saveLiveState(env);
+      await saveLiveState(env);
       return json({ access: await approverAccess(env, email, request) });
     }
 
@@ -2508,26 +2489,24 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         delete (client as Record<string, unknown>).password;
         await saveLiveState(env);
       }
-    } else if (!storedHash && !legacyPassword && password) {
-      if (Boolean(client.isBlocked) || Boolean(client.is_blocked)) {
-        return json({ error: "Conta bloqueada. Fale com o suporte." }, 403);
-      }
+    } else if (clientCanBindPasswordDuringMigration(client)) {
       client.password_hash = await hashPassword(password);
       client.updated_at = new Date().toISOString();
       upsertLiveClient(client);
       upsertRecipientFromClient(client);
       const persisted = await persistClientRegistryAfterClientChange(env, client, "auth_check_password_bind");
       if (!persisted.ok) return clientRegistryDurableSaveError();
-      recordAccessEvent("client_password_bound_on_login", {
+      recordAccessEvent("client_password_bound_after_migration", {
         ...client,
         risk: "medium",
-        detail: "Senha vinculada automaticamente para cliente existente sem password_hash.",
+        detail: "Senha vinculada automaticamente para cliente premium migrado sem password_hash.",
       });
       ok = true;
     } else {
       return json(
         {
-          error: "Informe sua senha para entrar. Se ainda nao criou senha, use a aba Cadastro.",
+          error:
+            "Conta encontrada sem senha. Abra a aba Cadastro e crie sua senha para entrar ou finalizar o checkout.",
         },
         401,
       );
@@ -2636,7 +2615,6 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
     );
     if (!persisted.ok) return clientRegistryDurableSaveError();
     const access = await clientAccess(env, client, request);
-    await saveLiveState(env);
     return json({ access }, existingIndex >= 0 ? 200 : 201);
   }
 
@@ -2681,7 +2659,21 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       client = await restoreClientFromApprovedSession(env, request, session);
     }
     if (!client) {
-      return json({ valid: false, reason: "Cliente nao encontrado." }, 401);
+      return json({
+        valid: true,
+        access: {
+          registered: false,
+          approved: false,
+          access_mode: "none",
+          access_status: "none",
+          plan: "free",
+          email: session.email,
+          full_name: "",
+          expires_at: "",
+          reason: "E-mail ainda nao cadastrado.",
+          client_token: "",
+        },
+      });
     }
 
     const sessionCheck = await validateClientSessionBinding(env, request, session, client);
@@ -3215,7 +3207,10 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     const body = await request.json().catch(() => ({}));
     const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
     const incomingState = readRecord(body);
-    if (incomingRounds.length && shouldIgnoreStaleDashboardPost(liveDashboardData, incomingState)) {
+    if (
+      incomingRounds.length &&
+      compareDashboardStateFreshness(liveDashboardData as unknown as Record<string, unknown>, incomingState) > 0
+    ) {
       return json({
         ok: true,
         ignored: "stale",
@@ -6337,8 +6332,8 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
 
   if (request.method === "POST" && url.pathname === "/telegram/channels/validate") {
     const body = readRecord(await request.json().catch(() => ({})));
-    const botToken = normalizeSecretValue(readFirstString(body, ["botToken", "bot_token", "telegram_bot_token"]));
-    const chatId = readFirstString(body, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]);
+    const botToken = normalizeSecretValue(readString(body, "botToken"));
+    const chatId = readString(body, "chatId");
     if (!botToken) return json({ error: "Token invalido ou revogado." }, 400);
     if (!chatId) return json({ error: "Chat ID invalido." }, 400);
 
@@ -6510,7 +6505,7 @@ async function telegramServiceListPublicChannels(env: unknown, clientId: string)
 
 async function telegramServiceCreateChannel(env: unknown, request: Request, clientId: string, body: Record<string, unknown>) {
   const incoming = readRecord(body.channel || body);
-  const incomingToken = normalizeSecretValue(readFirstString(incoming, ["botToken", "bot_token", "telegram_bot_token"]));
+  const incomingToken = normalizeSecretValue(readString(incoming, "botToken"));
   const validationCode = readString(body, "validationCode") || readString(incoming, "validationCode");
   const channels = await telegramServiceListChannelsRaw(env, clientId);
   const incomingId = readString(incoming, "id");
@@ -6524,22 +6519,14 @@ async function telegramServiceCreateChannel(env: unknown, request: Request, clie
   const channel = normalizeServerNotificationChannel(incoming, clientId, existing);
   if (!channel) return json({ error: "Canal invalido." }, 400);
 
-  const hasSignalModulesPatch = hasRecordFields(readRecord(incoming.signalModules));
-  const cloudExisting = !incomingToken && hasSignalModulesPatch
-    ? await findCloudValidatorChannelForIncoming(env, clientId, channel)
-    : null;
-  const savedModuleChannel = cloudExisting || existing;
-  if (savedModuleChannel && !incomingToken && hasSignalModulesPatch) {
+  if (existing && !incomingToken && hasRecordFields(readRecord(incoming.signalModules))) {
     const saved = await persistTelegramServiceChannelConfig(env, {
-      ...savedModuleChannel,
+      ...existing,
       ...channel,
-      id: savedModuleChannel.id,
+      id: existing.id,
       userId: clientId,
-      chatId: savedModuleChannel.chatId || channel.chatId,
-      botTokenEncoded: isCloudValidatorTelegramChannel(savedModuleChannel)
-        ? "__cloudflare__"
-        : savedModuleChannel.botTokenEncoded,
-      botTokenMasked: savedModuleChannel.botTokenMasked || channel.botTokenMasked,
+      botTokenEncoded: existing.botTokenEncoded,
+      botTokenMasked: existing.botTokenMasked || channel.botTokenMasked,
       signalModules: validatorChannelSignalModules(channel),
       updatedAt: new Date().toISOString(),
     } as ValidatorNotificationChannel);
@@ -6643,40 +6630,11 @@ async function telegramServiceToggleMotor(
     return json({ error: "Motor Telegram invalido." }, 400);
   }
   const channel = await findValidatorChannelForUser(env, clientId, channelId);
-  if (!channel) {
-    console.warn(
-      JSON.stringify({
-        event: "[TELEGRAM_MODULE_TOGGLE] bloqueado",
-        client_id: maskTelemetryUserId(clientId),
-        module: motorKey,
-        active: enabled,
-        group_found: false,
-        chat_id: "",
-        reason: "missing_validated_group",
-      }),
-    );
-    return json({ error: "Nenhum grupo Telegram validado para este cliente." }, 404);
-  }
-  const cloudChannel = isCloudValidatorTelegramChannel(channel)
-    ? channel
-    : await findCloudValidatorChannelForIncoming(env, clientId, channel);
-  const targetChannel = cloudChannel || channel;
-  if (enabled && !telegramServiceChannelIsConnected(targetChannel)) {
-    console.warn(
-      JSON.stringify({
-        event: "[TELEGRAM_MODULE_TOGGLE] bloqueado",
-        client_id: maskTelemetryUserId(clientId),
-        module: motorKey,
-        active: enabled,
-        group_found: Boolean(targetChannel?.chatId),
-        chat_id: targetChannel?.chatId || "",
-        reason: "group_not_connected",
-        connectionStatus: telegramServiceConnectionStatus(targetChannel),
-      }),
-    );
+  if (!channel) return json({ error: "Canal nao encontrado." }, 404);
+  if (enabled && !telegramServiceChannelIsConnected(channel)) {
     return json({ error: "Teste o canal no Telegram antes de ativar o motor." }, 400);
   }
-  const modules = validatorChannelSignalModules(targetChannel);
+  const modules = validatorChannelSignalModules(channel);
   const nextModules = {
     ...modules,
     [motorKey]: {
@@ -6685,24 +6643,12 @@ async function telegramServiceToggleMotor(
     },
   };
   const next = {
-    ...targetChannel,
+    ...channel,
     signalModules: nextModules,
-    isActive: targetChannel.isActive !== false,
+    isActive: channel.isActive !== false,
     updatedAt: new Date().toISOString(),
   } as ValidatorNotificationChannel;
   const saved = await persistTelegramServiceChannelConfig(env, next);
-  console.info(
-    JSON.stringify({
-      event: "[TELEGRAM_MODULE_TOGGLE] salvo",
-      client_id: maskTelemetryUserId(clientId),
-      module: motorKey,
-      active: enabled,
-      group_found: Boolean(saved.chatId),
-      chat_id: saved.chatId || "",
-      channelId: saved.id,
-      cloud: isCloudValidatorTelegramChannel(saved),
-    }),
-  );
   return json({ channel: publicTelegramServiceChannel(saved), motorKey, enabled });
 }
 
@@ -6788,44 +6734,10 @@ async function telegramServicePersistChannel(env: unknown, channel: ValidatorNot
 }
 
 async function persistTelegramServiceChannelConfig(env: unknown, channel: ValidatorNotificationChannel) {
-  let savedChannel = channel;
-  if (isCloudValidatorTelegramChannel(channel)) {
-    const cloudResult = await persistCloudValidatorChannel(env, channel);
-    if (cloudResult.configured && !cloudResult.ok) {
-      console.warn(
-        JSON.stringify({
-          event: "[TELEGRAM_SERVICE] cloud_config_persist_failed",
-          user: maskTelemetryUserId(channel.userId),
-          channelId: channel.id,
-          error: cloudResult.error,
-        }),
-      );
-      throw new Error(cloudResult.error || "Cloudflare Telegram Engine nao confirmou o canal.");
-    }
-    if (cloudResult.ok && cloudResult.channel) {
-      savedChannel = cloudResult.channel;
-    }
-  }
-  await withTimeout(
-    clearValidatorChannelDeletedState(env, savedChannel),
-    LIVE_STATE_IO_TIMEOUT_MS,
-    "limpar bloqueio legado do canal Telegram",
-    true,
-  );
-  liveValidatorChannels = upsertValidatorChannel(savedChannel);
-  await withTimeout(
-    persistValidatorChannel(env, savedChannel),
-    LIVE_STATE_IO_TIMEOUT_MS,
-    "salvar canal Telegram legado",
-    false,
-  );
-  await withTimeout(
-    saveLiveState(env),
-    LIVE_STATE_IO_TIMEOUT_MS,
-    "salvar estado Telegram legado",
-    liveStateSaveStatus,
-  );
-  return savedChannel;
+  liveValidatorChannels = upsertValidatorChannel(channel);
+  await persistValidatorChannel(env, channel);
+  await saveLiveState(env);
+  return channel;
 }
 
 async function persistCloudValidatorChannel(env: unknown, channel: ValidatorNotificationChannel) {
@@ -7011,47 +6923,12 @@ async function callCloudValidatorChannelEndpoint(
 ) {
   const config = getTelegramEngineConfig(env);
   if (!config) return { ok: false as const, status: 503, error: "Cloudflare Telegram Engine nao configurado." };
-  const controller = new AbortController();
-  let timedOut = false;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<null>((resolve) => {
-    timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-      console.warn(
-        JSON.stringify({
-          event: "[TELEGRAM_V2] telegram_call indisponivel",
-          path,
-          status: 504,
-          telegram_response: "timeout",
-          error: `Cloudflare Telegram Engine excedeu ${TELEGRAM_ENGINE_TIMEOUT_MS}ms.`,
-        }),
-      );
-      resolve(null);
-    }, TELEGRAM_ENGINE_TIMEOUT_MS);
-  });
-  const fetchPromise = fetch(`${config.url}${path}`, {
+  const response = await fetch(`${config.url}${path}`, {
     method,
     cache: "no-store",
     headers: telegramEngineHeaders(config.secret, normalizeValidatorUserId(clientId), true),
     body: JSON.stringify(payload),
-    signal: controller.signal,
-  }).catch((error) => {
-    if (timedOut || controller.signal.aborted) return null;
-    console.warn(
-      JSON.stringify({
-        event: "[TELEGRAM_V2] telegram_call indisponivel",
-        path,
-        status: 504,
-        telegram_response: "timeout_or_network_error",
-        error: errorMessage(error),
-      }),
-    );
-    return null;
-  });
-  const response = await Promise.race([fetchPromise, timeoutPromise]).finally(() => {
-    if (timeout) clearTimeout(timeout);
-  });
+  }).catch(() => null);
   if (!response) return { ok: false as const, status: 502, error: "Cloudflare Telegram Engine indisponivel." };
   const data = readRecord(await response.json().catch(() => ({})));
   if (!response.ok || data.ok === false) {
@@ -7463,7 +7340,7 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     if (request.method === "POST") {
       const body = readRecord(await request.json().catch(() => ({})));
       const incoming = readRecord(body.channel || body);
-      const incomingToken = normalizeSecretValue(readFirstString(incoming, ["botToken", "bot_token", "telegram_bot_token"]));
+      const incomingToken = normalizeSecretValue(readString(incoming, "botToken"));
       const validationCode = readString(body, "validationCode") || readString(incoming, "validationCode");
       const existingById = liveValidatorChannels.find(
         (channel) => channel.userId === userId && channel.id === readString(incoming, "id"),
@@ -7534,8 +7411,8 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
 
   if (request.method === "POST" && url.pathname === "/validator/channels/validate") {
     const body = readRecord(await request.json().catch(() => ({})));
-    const botToken = normalizeSecretValue(readFirstString(body, ["botToken", "bot_token", "telegram_bot_token"]));
-    const chatId = readFirstString(body, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]);
+    const botToken = normalizeSecretValue(readString(body, "botToken"));
+    const chatId = readString(body, "chatId");
     if (!botToken) return json({ error: "Bot Token obrigatorio." }, 400);
     if (!chatId) return json({ error: "Chat ID obrigatorio." }, 400);
 
@@ -8218,7 +8095,7 @@ function normalizeServerNotificationChannel(
   const normalizedUserId = normalizeValidatorUserId(userId || readString(record, "userId"));
   if (!normalizedUserId) return null;
   const now = new Date().toISOString();
-  const incomingToken = normalizeSecretValue(readFirstString(record, ["botToken", "bot_token", "telegram_bot_token"]));
+  const incomingToken = normalizeSecretValue(readString(record, "botToken"));
   const tokenEncoded = incomingToken
     ? encodeServerToken(incomingToken)
     : readString(record, "botTokenEncoded") || existing?.botTokenEncoded || "";
@@ -8240,11 +8117,8 @@ function normalizeServerNotificationChannel(
     name: readString(record, "name") || "Canal Telegram",
     botTokenMasked: readString(record, "botTokenMasked") || maskServerBotToken(decodedToken),
     botTokenEncoded: tokenEncoded,
-    chatId:
-      readFirstString(record, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]) ||
-      existing?.chatId ||
-      "",
-    buttonLink: readFirstString(record, ["buttonLink", "button_link", "buttonUrl", "button_url"]) || existing?.buttonLink || "",
+    chatId: readString(record, "chatId"),
+    buttonLink: readString(record, "buttonLink"),
     isActive: record.isActive !== false,
     analyzingEnabled: readBooleanField(record, "analyzingEnabled"),
     analyzingCooldownRounds: Math.max(1, Math.floor(Number(record.analyzingCooldownRounds) || 3)),
@@ -8253,25 +8127,6 @@ function normalizeServerNotificationChannel(
       ...templatesRecord,
     },
     signalModules,
-    connectionStatus:
-      readString(record, "connectionStatus") ||
-      readString(record, "connection_status") ||
-      readString(existing as unknown as Record<string, unknown>, "connectionStatus") ||
-      undefined,
-    lastTestedAt:
-      readString(record, "lastTestedAt") ||
-      readString(record, "last_tested_at") ||
-      readString(existing as unknown as Record<string, unknown>, "lastTestedAt") ||
-      undefined,
-    lastTestMessageId:
-      readTelegramMessageId(record) ||
-      (existing ? readTelegramMessageId(existing as unknown as Record<string, unknown>) : null) ||
-      undefined,
-    lastConnectionError:
-      readString(record, "lastConnectionError") ||
-      readString(record, "last_connection_error") ||
-      readString(existing as unknown as Record<string, unknown>, "lastConnectionError") ||
-      "",
     createdAt: readString(record, "createdAt") || now,
     updatedAt: readString(record, "updatedAt") || now,
   } as ValidatorNotificationChannel;
@@ -8332,7 +8187,7 @@ function normalizeValidatorModuleTemplateFingerprint(value: string) {
 
 function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
   return {
-    enabled: true,
+    enabled: key === "validator",
     entryType: "AUTO",
     galeLimit: key === "ties_only" ? 0 : 1,
     coverTie: key === "ties_only",
@@ -8858,37 +8713,39 @@ function mergeValidatorChannelSignalModulesPreferNewer(
 
 function mergeValidatorChannelList(...lists: ValidatorNotificationChannel[][]) {
   const byKey = new Map<string, ValidatorNotificationChannel>();
-  const aliasToPrimaryKey = new Map<string, string>();
   for (const channel of lists.flat()) {
     if (!channel.id) continue;
-    const aliases = validatorChannelMergeKeys(channel);
-    const matchingKeys = [
-      ...new Set(
-        aliases
-          .map((alias) => aliasToPrimaryKey.get(alias))
-          .filter((alias): alias is string => Boolean(alias)),
-      ),
-    ];
-    const key = matchingKeys[0] || validatorChannelUniqueKey(channel);
+    const key = validatorChannelUniqueKey(channel);
     const existing = byKey.get(key);
     if (!existing) {
       byKey.set(key, channel);
-      for (const alias of aliases) aliasToPrimaryKey.set(alias, key);
       continue;
     }
 
-    let mergedChannel = mergeValidatorChannelRecords(existing, channel);
-    for (const duplicateKey of matchingKeys.slice(1)) {
-      const duplicate = byKey.get(duplicateKey);
-      if (!duplicate) continue;
-      mergedChannel = mergeValidatorChannelRecords(mergedChannel, duplicate);
-      byKey.delete(duplicateKey);
-      for (const [alias, primaryKey] of aliasToPrimaryKey.entries()) {
-        if (primaryKey === duplicateKey) aliasToPrimaryKey.set(alias, key);
-      }
-    }
+    const channelIsCloud = isCloudValidatorTelegramChannel(channel);
+    const existingIsCloud = isCloudValidatorTelegramChannel(existing);
+    const channelIsNewer =
+      stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>) >=
+      stateEntityUpdatedAtMs(existing as unknown as Record<string, unknown>);
+    const preferIncoming = channelIsCloud || (!existingIsCloud && channelIsNewer);
+    const mergedRecord = preferIncoming
+      ? mergeStateEntityRecord(
+          existing as unknown as Record<string, unknown>,
+          channel as unknown as Record<string, unknown>,
+        )
+      : mergeStateEntityRecord(
+          channel as unknown as Record<string, unknown>,
+          existing as unknown as Record<string, unknown>,
+        );
+    const mergedChannel = {
+      ...(mergedRecord as unknown as ValidatorNotificationChannel),
+      signalModules: mergeValidatorChannelSignalModulesPreferNewer(
+        validatorChannelSignalModules(existing),
+        validatorChannelSignalModules(channel),
+        channelIsNewer || preferIncoming,
+      ),
+    } as ValidatorNotificationChannel;
     byKey.set(key, mergedChannel);
-    for (const alias of validatorChannelMergeKeys(mergedChannel)) aliasToPrimaryKey.set(alias, key);
   }
 
   return [...byKey.values()].sort(
@@ -8896,47 +8753,6 @@ function mergeValidatorChannelList(...lists: ValidatorNotificationChannel[][]) {
       stateEntityUpdatedAtMs(right as unknown as Record<string, unknown>) -
       stateEntityUpdatedAtMs(left as unknown as Record<string, unknown>),
   );
-}
-
-function mergeValidatorChannelRecords(
-  existing: ValidatorNotificationChannel,
-  channel: ValidatorNotificationChannel,
-) {
-  const channelIsCloud = isCloudValidatorTelegramChannel(channel);
-  const existingIsCloud = isCloudValidatorTelegramChannel(existing);
-  const channelIsNewer =
-    stateEntityUpdatedAtMs(channel as unknown as Record<string, unknown>) >=
-    stateEntityUpdatedAtMs(existing as unknown as Record<string, unknown>);
-  const preferIncoming = channelIsCloud || (!existingIsCloud && channelIsNewer);
-  const mergedRecord = preferIncoming
-    ? mergeStateEntityRecord(
-        existing as unknown as Record<string, unknown>,
-        channel as unknown as Record<string, unknown>,
-      )
-    : mergeStateEntityRecord(
-        channel as unknown as Record<string, unknown>,
-        existing as unknown as Record<string, unknown>,
-      );
-  return {
-    ...(mergedRecord as unknown as ValidatorNotificationChannel),
-    signalModules: mergeValidatorChannelSignalModulesPreferNewer(
-      validatorChannelSignalModules(existing),
-      validatorChannelSignalModules(channel),
-      channelIsNewer || preferIncoming,
-    ),
-  } as ValidatorNotificationChannel;
-}
-
-function validatorChannelMergeKeys(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
-  const userId = normalizeValidatorUserId(channel.userId);
-  const id = readString(channel.id);
-  const chatId = normalizeValidatorChannelCode(channel.chatId);
-  const name = readString(channel.name).trim().toLowerCase();
-  return [
-    id ? `${userId}:id:${id}` : "",
-    chatId ? `${userId}:chat:${chatId}` : "",
-    name ? `${userId}:name:${name}` : "",
-  ].filter(Boolean);
 }
 
 function validatorChannelUniqueKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
@@ -8960,9 +8776,7 @@ function findValidatorChannelByIncomingCode(
   incoming: Record<string, unknown>,
 ) {
   const normalizedUserId = normalizeValidatorUserId(userId);
-  const incomingCode = normalizeValidatorChannelCode(
-    readFirstString(incoming, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]),
-  );
+  const incomingCode = normalizeValidatorChannelCode(readString(incoming, "chatId"));
   if (!normalizedUserId || !incomingCode) return null;
   return (
     channels.find(
@@ -9087,26 +8901,6 @@ async function fetchStoredValidatorChannel(env: unknown, userId: string, channel
     mergeValidatorChannelList(dedicatedChannel ? [dedicatedChannel] : [], stateChannel ? [stateChannel] : []).find(
       (channel) => !isValidatorChannelDeleted(channel, deletedRefs),
     ) || null
-  );
-}
-
-async function findCloudValidatorChannelForIncoming(
-  env: unknown,
-  userId: string,
-  target: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">,
-) {
-  const normalizedUserId = normalizeValidatorUserId(userId || target.userId);
-  if (!normalizedUserId) return null;
-  const targetId = readString(target.id);
-  const targetCode = normalizeValidatorChannelCode(target.chatId);
-  const targetName = readString(target.name).trim().toLowerCase();
-  const cloudChannels = await fetchCloudValidatorChannels(env, normalizedUserId);
-  return (
-    cloudChannels.find((channel) => {
-      if (targetId && channel.id === targetId) return true;
-      if (targetCode && normalizeValidatorChannelCode(channel.chatId) === targetCode) return true;
-      return Boolean(targetName && readString(channel.name).trim().toLowerCase() === targetName);
-    }) || null
   );
 }
 
@@ -11105,14 +10899,9 @@ async function sendValidatorModuleTelegramNotification(
     console.warn(
       JSON.stringify({
         event: "[TELEGRAM_AUTO] envio bloqueado por dedupe persistente",
-        client_id: maskTelemetryUserId(signal.channel.userId),
         user: maskTelemetryUserId(signal.channel.userId),
         channelId: signal.channel.id,
-        chat_id: signal.channel.chatId || "",
         moduleKey: signal.moduleKey,
-        module: signal.moduleKey,
-        active: validatorChannelModuleEnabled(signal.channel, signal.moduleKey, signal.moduleKey === "validator"),
-        group_found: Boolean(signal.channel.chatId),
         roundId: signal.roundId,
         signalKey: signal.signalKey,
         dedupeKey: signal.notificationKey,
@@ -11146,20 +10935,14 @@ async function sendValidatorModuleTelegramNotification(
   console.info(
     JSON.stringify({
       event: "[TELEGRAM_AUTO] enviando",
-      client_id: maskTelemetryUserId(signal.channel.userId),
       user: maskTelemetryUserId(signal.channel.userId),
       channelId: signal.channel.id,
-      chat_id: signal.channel.chatId || "",
       moduleKey: signal.moduleKey,
-      module: signal.moduleKey,
-      active: validatorChannelModuleEnabled(signal.channel, signal.moduleKey, signal.moduleKey === "validator"),
-      group_found: Boolean(signal.channel.chatId),
       roundId: signal.roundId,
       signalId: signal.signalKey,
       dedupeKey: signal.notificationKey,
       dedupe_action: reservationResult.action || "reserved",
       telegram_send_called: true,
-      message_sent: signal.message.slice(0, 240),
     }),
   );
   let result: Awaited<ReturnType<typeof sendCloudValidatorChannelPreview>>;
@@ -11196,14 +10979,9 @@ async function sendValidatorModuleTelegramNotification(
   console[result.ok ? "info" : "warn"](
     JSON.stringify({
       event: result.ok ? "[TELEGRAM_AUTO] enviado com sucesso" : "[TELEGRAM_AUTO] erro: motivo completo",
-      client_id: maskTelemetryUserId(signal.channel.userId),
       user: maskTelemetryUserId(signal.channel.userId),
       channelId: signal.channel.id,
-      chat_id: signal.channel.chatId || "",
       moduleKey: signal.moduleKey,
-      module: signal.moduleKey,
-      active: validatorChannelModuleEnabled(signal.channel, signal.moduleKey, signal.moduleKey === "validator"),
-      group_found: Boolean(signal.channel.chatId),
       roundId: signal.roundId,
       signalId: signal.signalKey,
       dedupeKey: signal.notificationKey,
@@ -11212,7 +10990,6 @@ async function sendValidatorModuleTelegramNotification(
       telegram_result: result.ok ? "success" : "error",
       status: result.status,
       telegramMessageId: result.ok ? result.messageId : null,
-      message_sent: signal.message.slice(0, 240),
       error: result.ok ? "" : result.error,
     }),
   );
@@ -12266,15 +12043,8 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
 }
 
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
-  const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
-  // Hotfix produção: não transformar um dashboard com rodada/dados reais em
-  // FEED_PAUSADO apenas porque o timestamp do publicador ficou preso. Isso era
-  // exatamente o que deixava o site em "SEM ENTRADA" mesmo com leitura neural
-  // e mesa online. Só pausa quando realmente não existe histórico para exibir.
-  if (rounds.length > 0) return false;
-
   const updatedAt = Date.parse(readString(dashboard, "updatedAt"));
-  if (!Number.isFinite(updatedAt)) return true;
+  if (!Number.isFinite(updatedAt)) return !Array.isArray(dashboard.rounds) || dashboard.rounds.length === 0;
   return Date.now() - updatedAt > LIVE_FEED_STALE_MS;
 }
 
@@ -12594,33 +12364,6 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   if (generatedNeural) {
     pickedSections.neuralReading = generatedNeural.reading;
     pickedSections.neuralScoreboard = generatedNeural.scoreboard;
-  }
-
-  const surfRoundSource = liveValidatorRoundHistory.length
-    ? liveValidatorRoundHistory
-    : incomingRounds.length
-      ? incomingRounds
-      : currentDashboard.rounds;
-  if (acceptsCurrentCycle && surfRoundSource.length >= 2) {
-    const computedSurf = SurfAnalyzerEngine.analyze(surfRoundSource, cycleDate);
-    const incomingSurf = (pickedSections.currentSurfAlert ??
-      incoming.currentSurfAlert ??
-      incoming.surfAlert) as DashboardData["currentSurfAlert"] | undefined;
-    pickedSections.currentSurfAlert = SurfAnalyzerEngine.mergeWithIncoming(computedSurf, incomingSurf);
-  }
-
-  const patternRoundSource = surfRoundSource;
-  if (acceptsCurrentCycle && patternRoundSource.length >= 6) {
-    const computedPattern = PatternMinerEngine.analyzeFromHistory(
-      patternRoundSource.slice(-DEFAULT_PATTERN_MINER_CONFIG.historyLimit),
-    );
-    const incomingPattern = (pickedSections.patternMinerSnapshot ??
-      incoming.patternMinerSnapshot ??
-      incoming.patternMiner) as PatternMinerSnapshot | undefined;
-    pickedSections.patternMinerSnapshot = PatternMinerEngine.mergeWithIncoming(
-      computedPattern,
-      incomingPattern,
-    );
   }
 
   const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;
@@ -13130,15 +12873,9 @@ function readServerNeuralSide(value: unknown): NeuralEntryState["expectedSide"] 
   const text = String(value || "")
     .trim()
     .toUpperCase();
-  if (text === "BANKER" || text === "BANCA" || text === "B" || text.includes("BANKER") || text.includes("BANCA")) {
-    return "BANKER";
-  }
-  if (text === "PLAYER" || text === "JOGADOR" || text === "P" || text.includes("PLAYER") || text.includes("JOGADOR")) {
-    return "PLAYER";
-  }
-  if (text === "TIE" || text === "EMPATE" || text === "T" || text.includes("TIE") || text.includes("EMPATE")) {
-    return "TIE";
-  }
+  if (text === "BANKER" || text === "B") return "BANKER";
+  if (text === "PLAYER" || text === "P") return "PLAYER";
+  if (text === "TIE" || text === "T") return "TIE";
   return null;
 }
 
@@ -13619,10 +13356,6 @@ function readMainSignal(payload: Record<string, unknown>) {
   return readRecord(
     payload.currentSignal ||
       payload.current_signal ||
-      payload.entradaAtual ||
-      payload.entrada_atual ||
-      payload.currentEntry ||
-      payload.current_entry ||
       payload.mainSignal ||
       payload.main_signal ||
       payload.primarySignal ||
@@ -13728,11 +13461,12 @@ function resolveLateSignalGuard(
   };
 }
 
-function isLateEntryWindow(_timing: DashboardData["bettingTiming"]) {
-  // Hotfix produção: o timing de aposta recebido pelo publicador pode chegar
-  // travado como CLOSED/0s e esconder toda entrada confirmada no site. A engine
-  // oficial/publicador já controla a validade; o site não deve zerar o sinal.
-  return false;
+function isLateEntryWindow(timing: DashboardData["bettingTiming"]) {
+  if (!timing) return false;
+  if (!isFreshBettingTiming(timing)) return false;
+  if (timing.phase === "CLOSED") return true;
+  const remaining = typeof timing.remainingSeconds === "number" ? timing.remainingSeconds : null;
+  return timing.phase === "OPEN" && remaining !== null && remaining <= LATE_ENTRY_BLOCK_SECONDS;
 }
 
 function isFreshBettingTiming(timing: DashboardData["bettingTiming"]) {
@@ -13792,23 +13526,9 @@ function normalizeSignal(
   signal: Record<string, unknown>,
   fallback: DashboardData["currentSignal"],
 ): DashboardData["currentSignal"] {
-  const side = normalizeSignalSide(
-    signal.side ||
-      signal.lado ||
-      signal.direcao ||
-      signal.direcao_entrada ||
-      signal.entry ||
-      signal.entrada ||
-      signal.force ||
-      signal.forca,
-  );
-  const status = normalizeSignalStatus(
-    signal.status || signal.resultado || signal.state || signal.estado || signal.situacao || signal.label,
-    side,
-  );
-  const protection = String(
-    signal.protection || signal.protecao || signal.validade || signal.gale || fallback.protection || "G1",
-  );
+  const side = normalizeSignalSide(signal.side || signal.direcao || signal.entry || signal.entrada);
+  const status = normalizeSignalStatus(signal.status || signal.resultado || signal.state, side);
+  const protection = String(signal.protection || signal.validade || signal.gale || fallback.protection || "G1");
   const terminalStatus = terminalSignalStatus(status);
   const incomingLastResult = readServerLastResult(signal.lastResult);
   const previousVisibleEntry =
@@ -13934,16 +13654,14 @@ function normalizeBettingTiming(value: unknown): DashboardData["bettingTiming"] 
 function readServerLastResult(value: unknown): DashboardData["currentSignal"]["lastResult"] {
   const record = readRecord(value);
   if (!Object.keys(record).length) return null;
-  const side = normalizeSignalSide(record.side || record.lado || record.direcao || record.entry || record.entrada);
-  const status = terminalSignalStatus(
-    normalizeSignalStatus(record.status || record.resultado || record.state || record.estado || record.situacao, side),
-  );
+  const side = normalizeSignalSide(record.side || record.direcao || record.entry || record.entrada);
+  const status = terminalSignalStatus(normalizeSignalStatus(record.status || record.resultado || record.state, side));
   if (!status || (side !== "BANKER" && side !== "PLAYER")) return null;
   return {
     id: String(record.id || record.signalId || `result-${Date.now()}`),
     side,
     status,
-    protection: String(record.protection || record.protecao || record.validade || record.gale || "G1"),
+    protection: String(record.protection || record.validade || record.gale || "G1"),
     finishedAt: readString(record, "finishedAt") || new Date().toISOString(),
   };
 }
@@ -14550,9 +14268,9 @@ function normalizeSignalSide(value: unknown): CurrentSignalSide {
   const text = String(value || "")
     .trim()
     .toUpperCase();
-  if (["B", "BANKER", "BANCA"].includes(text) || text.includes("BANKER") || text.includes("BANCA")) return "BANKER";
-  if (["P", "PLAYER", "JOGADOR"].includes(text) || text.includes("PLAYER") || text.includes("JOGADOR")) return "PLAYER";
-  if (["T", "TIE", "EMPATE"].includes(text) || text.includes("TIE") || text.includes("EMPATE")) return "TIE";
+  if (["B", "BANKER", "BANCA"].includes(text)) return "BANKER";
+  if (["P", "PLAYER", "JOGADOR"].includes(text)) return "PLAYER";
+  if (["T", "TIE", "EMPATE"].includes(text)) return "TIE";
   return "NONE";
 }
 
@@ -14560,13 +14278,7 @@ function normalizeSignalStatus(value: unknown, side: DashboardData["currentSigna
   const text = String(value || "")
     .trim()
     .toLowerCase();
-  if (
-    ["pending", "entrada", "active", "ativo", "confirmed", "confirmado", "confirmada"].includes(text) ||
-    text.includes("entrada confirmada") ||
-    text.includes("confirmad")
-  ) {
-    return "pending";
-  }
+  if (["pending", "entrada", "active", "ativo"].includes(text)) return "pending";
   if (["g1", "gale1"].includes(text)) return "g1";
   if (["green", "win", "sg"].includes(text)) return "green";
   if (["green_g1", "greeng1"].includes(text)) return "green_g1";
@@ -15982,13 +15694,9 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return [];
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
-
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
       headers: supabasePersistenceHeaders(config.key),
-      signal: controller.signal,
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
@@ -16001,8 +15709,6 @@ async function fetchSupabaseRows(env: unknown, table: string, query: string) {
   } catch (error) {
     console.warn(`Nao foi possivel carregar ${table}.`, error);
     return [];
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -16024,9 +15730,6 @@ async function fetchSupabaseRowsRange(env: unknown, table: string, query: string
   const config = getSupabasePersistenceConfig(env);
   if (!config) return [];
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
-
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
       headers: {
@@ -16034,7 +15737,6 @@ async function fetchSupabaseRowsRange(env: unknown, table: string, query: string
         Range: `${offset}-${offset + pageSize - 1}`,
         "Range-Unit": "items",
       },
-      signal: controller.signal,
     });
     if (response.status === 404 || response.status === 406) return [];
     if (!response.ok) {
@@ -16047,8 +15749,6 @@ async function fetchSupabaseRowsRange(env: unknown, table: string, query: string
   } catch (error) {
     console.warn(`Nao foi possivel carregar ${table}.`, error);
     return [];
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -16056,8 +15756,6 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
   const config = getSupabasePersistenceConfig(env);
   if (!config || Object.keys(row).length === 0) return false;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
       method: "POST",
@@ -16067,7 +15765,6 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
         Prefer: "resolution=merge-duplicates,return=minimal",
       },
       body: JSON.stringify(row),
-      signal: controller.signal,
     });
     if (!response.ok && response.status !== 404) {
       console.warn(`Nao foi possivel salvar ${table} (${response.status}).`);
@@ -16077,8 +15774,6 @@ async function persistSupabaseRow(env: unknown, table: string, row: Record<strin
   } catch (error) {
     console.warn(`Nao foi possivel salvar ${table}.`, error);
     return false;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -16087,8 +15782,6 @@ async function persistSupabaseRows(env: unknown, table: string, rows: Record<str
   const payload = rows.filter((row) => Object.keys(row).length > 0);
   if (!config || !payload.length) return false;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
       method: "POST",
@@ -16098,7 +15791,6 @@ async function persistSupabaseRows(env: unknown, table: string, rows: Record<str
         Prefer: "resolution=merge-duplicates,return=minimal",
       },
       body: JSON.stringify(payload),
-      signal: controller.signal,
     });
     if (!response.ok && response.status !== 404) {
       console.warn(`Nao foi possivel salvar lote em ${table} (${response.status}).`);
@@ -16108,8 +15800,6 @@ async function persistSupabaseRows(env: unknown, table: string, rows: Record<str
   } catch (error) {
     console.warn(`Nao foi possivel salvar lote em ${table}.`, error);
     return false;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -16117,8 +15807,6 @@ async function deleteSupabaseRows(env: unknown, table: string, query: string) {
   const config = getSupabasePersistenceConfig(env);
   if (!config || !query) return;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
   try {
     const response = await fetch(`${config.url}/rest/v1/${table}?${query}`, {
       method: "DELETE",
@@ -16126,15 +15814,12 @@ async function deleteSupabaseRows(env: unknown, table: string, query: string) {
         ...supabasePersistenceHeaders(config.key),
         Prefer: "return=minimal",
       },
-      signal: controller.signal,
     });
     if (!response.ok && response.status !== 404) {
       console.warn(`Nao foi possivel apagar ${table} (${response.status}).`);
     }
   } catch (error) {
     console.warn(`Nao foi possivel apagar ${table}.`, error);
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -18867,36 +18552,6 @@ function compareDashboardStateFreshness(left: Record<string, unknown>, right: Re
     if (diff !== 0) return diff;
   }
   return 0;
-}
-
-function shouldIgnoreStaleDashboardPost(current: LiveDashboardData, incoming: Record<string, unknown>) {
-  const currentState = current as unknown as Record<string, unknown>;
-  if (compareDashboardStateFreshness(currentState, incoming) <= 0) return false;
-
-  // Hotfix: after rollback/restart the upstream round id can go backwards even
-  // while the signal/update is newer. Do not keep production frozen on the old
-  // state when a fresh confirmed entry or fresh timestamp arrives.
-  const currentUpdatedAtMs = Date.parse(readString(currentState, "updatedAt") || "");
-  const incomingUpdatedAtMs = Date.parse(readString(incoming, "updatedAt") || readString(incoming, "updated_at") || "");
-  if (Number.isFinite(incomingUpdatedAtMs) && Number.isFinite(currentUpdatedAtMs)) {
-    if (incomingUpdatedAtMs > currentUpdatedAtMs + 1_000) return false;
-  }
-
-  const incomingSignal = normalizeSignal(readMainSignal(incoming), current.currentSignal);
-  if (isServerEntrySide(incomingSignal.side) && (incomingSignal.status === "pending" || incomingSignal.status === "g1")) {
-    return false;
-  }
-
-  const incomingNeural = readRecord(
-    incoming.neuralReading || incoming.neural_reading || incoming.numeroPagante || incoming.numero_pagante,
-  );
-  const neuralMode = String(incomingNeural.mode || incomingNeural.status || "").trim().toUpperCase();
-  const neuralSide = readServerNeuralSide(
-    incomingNeural.direcao || incomingNeural.direction || incomingNeural.puxando || incomingNeural.side,
-  );
-  if (["ACTIVE", "ATIVO", "VALIDO", "VALID"].includes(neuralMode) && neuralSide) return false;
-
-  return true;
 }
 
 function dashboardStateFreshnessScore(state: Record<string, unknown>) {

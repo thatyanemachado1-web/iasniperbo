@@ -4,18 +4,13 @@ import type { PatternMinerSnapshot } from "@/types/patternMiner";
 export function HotPatternDashboardCard({
   snapshot,
   isUsingRealData,
-  latestRoundId,
 }: {
   snapshot: PatternMinerSnapshot;
   isUsingRealData: boolean;
-  latestRoundId?: number;
 }) {
   return (
-    <PatternMinerMiniCard
-      snapshot={snapshot}
-      isUsingRealData={isUsingRealData}
-      latestRoundId={latestRoundId}
-      className="h-full w-full"
-    />
+    <div className="h-full min-w-0">
+      <PatternMinerMiniCard snapshot={snapshot} isUsingRealData={isUsingRealData} />
+    </div>
   );
 }

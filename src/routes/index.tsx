@@ -33,15 +33,12 @@ import { NeuralLines } from "@/components/brand/NeuralLines";
 import { SniperLogoMark } from "@/components/brand/SniperLogoMark";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import {
-  AccessApiError,
-  AccessApiTimeoutError,
   checkClientAccess,
   createPublicBillingCheckout,
   getBillingPlans,
   getSalesSettings,
   registerClient,
   saveAccessSession,
-  validateLoginAccess,
   type BillingPlan,
   type ClientAccess,
 } from "@/lib/accessApi";
@@ -78,7 +75,6 @@ export const Route = createFileRoute("/")({
 
 const WAITLIST_URL = "https://wa.me/5567992308362";
 const LOGIN_BOOTSTRAP_FALLBACK_MS = 3500;
-const LOGIN_REQUEST_TIMEOUT_MS = 20_000;
 
 const landingFallbackPlans: BillingPlan[] = [
   {
@@ -255,7 +251,6 @@ function LoginPage() {
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMode("login");
     setLoading(true);
     setNotice("");
     setPendingAccess(null);
@@ -264,41 +259,29 @@ function LoginPage() {
     const password = String(data.get("password") || "");
     setPrefillEmail(email);
     setCheckoutLeadEmail(email);
-
     try {
-      const access = await checkClientAccess(email, password, LOGIN_REQUEST_TIMEOUT_MS);
+      const access = await checkClientAccess(email, password);
       if (!access.registered) {
-        setMode("login");
+        if (!salesClosed) setMode("register");
         setNotice(
           salesClosed
             ? "Vagas encerradas no momento. Entre na fila de espera para a próxima abertura."
-            : "E-mail não encontrado. Confira se digitou corretamente. Se ainda não tem conta, use a aba Cadastro.",
+            : "E-mail ainda não cadastrado. Faça seu cadastro para continuar.",
         );
         return;
       }
-
-      const validated = validateLoginAccess(access);
-      if (!validated.ok) {
-        setNotice(validated.message);
-        return;
-      }
-
-      if (salesClosed && !canEnterWhenSalesClosed(validated.access)) {
+      if (salesClosed && !canEnterWhenSalesClosed(access)) {
         setNotice("Vagas encerradas. Somente clientes Premium com acesso ativo conseguem entrar na plataforma.");
         return;
       }
-
-      try {
-        saveAccessSession(validated.access, email);
-      } catch {
-        setNotice("Login feito, mas não foi possível salvar sua sessão local. Tente novamente.");
-        return;
-      }
-
-      window.location.assign("/app");
+      saveAccessSession(access, email);
+      window.location.href = "/app";
     } catch (err) {
-      setMode("login");
-      setNotice(resolveLoginErrorMessage(err));
+      const message = err instanceof Error ? err.message : "Não foi possível validar seu acesso.";
+      if (!salesClosed && shouldOpenRegisterForPasswordSetup(message)) {
+        setMode("register");
+      }
+      setNotice(message);
     } finally {
       setLoading(false);
     }
@@ -337,36 +320,20 @@ function LoginPage() {
       return;
     }
     try {
-      const access = await registerClient(
-        {
-          full_name: fullName,
-          email,
-          password,
-          phone: phoneDigits,
-          phone_full: buildInternationalPhone(selectedCountry.code, phoneDigits),
-          city: String(data.get("city") || "").trim(),
-          country: selectedCountry.country,
-          country_code: selectedCountry.code,
-        },
-        LOGIN_REQUEST_TIMEOUT_MS,
-      );
-
-      const validated = validateLoginAccess(access);
-      if (!validated.ok) {
-        setNotice(validated.message);
-        return;
-      }
-
-      try {
-        saveAccessSession(validated.access, email);
-      } catch {
-        setNotice("Cadastro concluído, mas não foi possível salvar sua sessão local. Tente entrar novamente.");
-        return;
-      }
-
-      window.location.assign("/app");
+      const access = await registerClient({
+        full_name: fullName,
+        email,
+        password,
+        phone: phoneDigits,
+        phone_full: buildInternationalPhone(selectedCountry.code, phoneDigits),
+        city: String(data.get("city") || "").trim(),
+        country: selectedCountry.country,
+        country_code: selectedCountry.code,
+      });
+      saveAccessSession(access, email);
+      window.location.href = "/app";
     } catch (err) {
-      setNotice(resolveLoginErrorMessage(err));
+      setNotice(err instanceof Error ? err.message : "Não foi possível concluir o cadastro.");
     } finally {
       setLoading(false);
     }
@@ -1186,26 +1153,12 @@ function isValidCheckoutEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function resolveLoginErrorMessage(error: unknown) {
-  if (error instanceof AccessApiTimeoutError) {
-    return error.message;
-  }
-  if (error instanceof AccessApiError) {
-    if (error.status === 401) {
-      return error.message || "E-mail ou senha incorretos.";
-    }
-    if (error.status === 503) {
-      return error.message || "Servidor de login indisponível no momento. Tente novamente em instantes.";
-    }
-    if (error.status === 0) {
-      return error.message;
-    }
-    return error.message || "Não foi possível validar seu acesso.";
-  }
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  return "Não foi possível validar seu acesso.";
+function shouldOpenRegisterForPasswordSetup(message: string) {
+  const normalized = message
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+  return normalized.includes("conta encontrada sem senha") || normalized.includes("crie sua senha");
 }
 
 function formatMoney(amount: number, currency: string) {

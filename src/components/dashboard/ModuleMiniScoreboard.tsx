@@ -30,31 +30,31 @@ export interface ModuleMiniScoreboardProps {
 
 const moduleTone = {
   MAIN: {
-    border: "border-white/10",
-    title: "text-muted-foreground",
-    glow: "",
-    progress: "rgba(255,255,255,0.42)",
+    border: "border-neon-cyan/20",
+    title: "text-neon-cyan",
+    glow: "shadow-[0_0_34px_-26px_var(--neon-cyan)]",
+    progress: "var(--neon-cyan)",
     description: "Entradas Banker/Player, com SG, G1 e RED separados.",
   },
   TIE: {
-    border: "border-white/10",
-    title: "text-muted-foreground",
-    glow: "",
-    progress: "rgba(255,255,255,0.42)",
+    border: "border-tie/20",
+    title: "text-tie",
+    glow: "shadow-[0_0_34px_-26px_var(--tie)]",
+    progress: "var(--tie)",
     description: "Tie Alert estatístico, com expirados separados de RED.",
   },
   NEURAL: {
-    border: "border-white/10",
-    title: "text-muted-foreground",
-    glow: "",
-    progress: "rgba(255,255,255,0.42)",
+    border: "border-neon-purple/20",
+    title: "text-gradient-brand",
+    glow: "shadow-[0_0_34px_-26px_var(--neon-purple)]",
+    progress: "var(--neon-purple)",
     description: "Leitura neural de números pagantes, separada da entrada principal.",
   },
   SURF: {
-    border: "border-white/10",
-    title: "text-muted-foreground",
-    glow: "",
-    progress: "rgba(255,255,255,0.42)",
+    border: "border-neon-blue/20",
+    title: "text-neon-blue",
+    glow: "shadow-[0_0_34px_-26px_var(--neon-blue)]",
+    progress: "var(--neon-blue)",
     description: "Surf Analyzer separado dos outros módulos.",
   },
 } as const;
@@ -90,7 +90,7 @@ export function ModuleMiniScoreboard({
     >
       <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.045]" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/24 to-transparent" />
-      <div className="pointer-events-none absolute bottom-0 left-3 right-3 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+      <div className="pointer-events-none absolute bottom-0 left-3 right-3 h-px bg-gradient-to-r from-transparent via-neon-cyan/22 to-transparent" />
       <div className="relative flex items-center gap-2.5">
         <MiniCircularProgress value={assertiveness} color={tone.progress} />
 
@@ -146,27 +146,27 @@ function moduleSequenceState(sequencePositive: number, sequenceNegative: number,
   if (sequenceExpired !== undefined && sequenceExpired > 0) {
     return {
       label: `${sequenceExpired} expirado${sequenceExpired === 1 ? "" : "s"}`,
-      className: "border-white/10 bg-white/5 text-muted-foreground",
+      className: "border-tie/25 bg-tie/10 text-tie",
     };
   }
 
   if (sequenceNegative > 0) {
     return {
       label: `${sequenceNegative} RED ${sequenceNegative === 1 ? "atual" : "seguidos"}`,
-      className: "border-white/10 bg-white/5 text-muted-foreground",
+      className: "border-destructive/30 bg-destructive/10 text-destructive",
     };
   }
 
   if (sequencePositive > 0) {
     return {
       label: `${sequencePositive} GREEN ${sequencePositive === 1 ? "atual" : "seguidos"}`,
-      className: "border-white/10 bg-white/5 text-muted-foreground",
+      className: "border-success/30 bg-success/10 text-success",
     };
   }
 
   return {
     label: "coletando",
-    className: "border-white/10 bg-white/5 text-muted-foreground",
+    className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
   };
 }
 
@@ -318,7 +318,7 @@ function ScoreboardDetailsModal({
           <MiniCircularProgress value={assertiveness} color={color} />
           <div>
             <div className="text-xs text-muted-foreground">Assertividade</div>
-            <div className="text-3xl font-black text-foreground">{formatPercent(assertiveness)}</div>
+            <div className="text-3xl font-black text-neon-cyan">{formatPercent(assertiveness)}</div>
             <div className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{dataStateLabel}</div>
           </div>
         </div>
@@ -343,7 +343,7 @@ function ScoreboardDetailsModal({
 function ToolInfoLine({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <span className="font-black uppercase tracking-[0.1em] text-muted-foreground">{label}: </span>
+      <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">{label}: </span>
       {value}
     </div>
   );
@@ -355,7 +355,7 @@ function moduleToolInfo(moduleType: ModuleMiniScoreboardProps["moduleType"]) {
       purpose: "mostra se a entrada oficial está pagando.",
       how: "conta SG, G1 e RED reais do card principal.",
       entry: "Entrada a seguir: a do card principal.",
-      entryClassName: "border-white/10 bg-secondary/20 text-muted-foreground",
+      entryClassName: "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
     };
   }
 
@@ -364,7 +364,7 @@ function moduleToolInfo(moduleType: ModuleMiniScoreboardProps["moduleType"]) {
       purpose: "mostra se número pagante está puxando lado.",
       how: "conta SG, G1 e RED reais da Neural.",
       entry: "Entrada pela Neural: o lado mostrado no ? da Leitura Neural.",
-      entryClassName: "border-white/10 bg-secondary/20 text-muted-foreground",
+      entryClassName: "border-neon-purple/25 bg-neon-purple/10 text-neon-purple",
     };
   }
 
@@ -373,7 +373,7 @@ function moduleToolInfo(moduleType: ModuleMiniScoreboardProps["moduleType"]) {
       purpose: "avisa quando existe pressão de empate.",
       how: "conta Green se o Tie aparece dentro da validade.",
       entry: "Entrada pelo Tie: só com alerta ativo e validade aberta.",
-      entryClassName: "border-white/10 bg-secondary/20 text-muted-foreground",
+      entryClassName: "border-tie/25 bg-tie/10 text-tie",
     };
   }
 
@@ -381,7 +381,7 @@ function moduleToolInfo(moduleType: ModuleMiniScoreboardProps["moduleType"]) {
     purpose: "mostra quando a mesa está puxando tendência.",
     how: "mede força do lado e risco de quebra.",
     entry: "Entrada pelo Surf: seguir o lado do surf com risco controlado.",
-    entryClassName: "border-white/10 bg-secondary/20 text-muted-foreground",
+    entryClassName: "border-neon-blue/25 bg-neon-blue/10 text-neon-blue",
   };
 }
 
@@ -397,13 +397,13 @@ function scoreboardDataState(chips: ScoreChipData[]) {
   if ((totalChip && totalValue <= 0) || !hasUsefulValue) {
     return {
       label: "Coletando",
-      className: "border-white/10 bg-white/5 text-muted-foreground",
+      className: "border-warning/25 bg-warning/10 text-warning",
     };
   }
 
   return {
     label: "Dados reais",
-    className: "border-white/10 bg-white/5 text-muted-foreground",
+    className: "border-success/25 bg-success/10 text-success",
   };
 }
 
@@ -418,7 +418,12 @@ function readChipNumber(value: string | number | undefined) {
   return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
 }
 
-function chipClass(_variant: ScoreChipVariant) {
+function chipClass(variant: ScoreChipVariant) {
+  if (variant === "green") return "border-success/25 bg-success/10 text-success";
+  if (variant === "red") return "border-destructive/30 bg-destructive/10 text-destructive";
+  if (variant === "purple") return "border-tie/25 bg-tie/10 text-tie";
+  if (variant === "yellow") return "border-warning/25 bg-warning/10 text-warning";
+  if (variant === "cyan") return "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan";
   return "border-white/10 bg-white/5 text-muted-foreground";
 }
 

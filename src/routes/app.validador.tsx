@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Activity,
@@ -838,7 +837,7 @@ function NeuralValidatorPage() {
       updatedAt: new Date().toISOString(),
     };
     const savePromise =
-      patch.signalModules && telegramChannelCanUpdateModules(channel)
+      channel.botTokenEncoded === "__cloudflare__" && patch.signalModules
         ? fetch(`/telegram/channels/${encodeURIComponent(channel.id)}`, {
             method: "PATCH",
             cache: "no-store",
@@ -860,9 +859,7 @@ function NeuralValidatorPage() {
 
   function applyChannelUpdate(channel: ValidatorNotificationChannel) {
     setChannels((current) => {
-      const next = markServerConfirmedChannels(
-        replaceValidatorChannel(current, markServerConfirmedChannel(channel)),
-      );
+      const next = replaceValidatorChannel(current, channel);
       writeNotificationChannels(next);
       return next;
     });
@@ -890,7 +887,6 @@ function NeuralValidatorPage() {
     try {
       const serverChannel = await toggleServerValidatorMotor(channel.id, motorKey, enabled);
       applyChannelUpdate(markServerConfirmedChannel(serverChannel));
-      showNotice(`${moduleDisplayName(motorKey)} ${enabled ? "ativado" : "desativado"} e salvo no servidor.`);
     } catch (error) {
       applyChannelUpdate(channel);
       showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a ativacao do motor.");
@@ -1855,12 +1851,20 @@ function CentralTelegramTab({
     channels[0] ||
     null;
   const selectedChannelModules = selectedChannel ? channelSignalModules(selectedChannel) : defaultTelegramModuleConfigs();
-  const connected = telegramChannelCanUpdateModules(selectedChannel);
+  const selectedChannelServerConfirmed = isServerConfirmedChannel(selectedChannel);
+  const selectedConnectionStatus = telegramChannelConnectionStatus(selectedChannel);
+  const connected = Boolean(
+    selectedChannelServerConfirmed &&
+      selectedConnectionStatus === "connected" &&
+      selectedChannel?.isActive &&
+      selectedChannel.chatId &&
+      (selectedChannel.botTokenMasked || (selectedChannel as ValidatorChannelWithModules).botTokenEncoded),
+  );
   const engineActive = connected && TELEGRAM_MODULE_OPTIONS.some((option) => selectedChannelModules[option.key]?.enabled);
   const activeConfigModuleKey = configuringModuleKey || selectedModuleKey;
 
   function patchChannelModule(key: ValidatorTelegramModuleKey, patch: Partial<ValidatorTelegramModuleConfig>) {
-    if (!selectedChannel) return;
+    if (!selectedChannel || !connected) return;
     if (typeof patch.enabled === "boolean" && Object.keys(patch).length === 1) {
       void onToggleModule(selectedChannel, key, patch.enabled);
       return;
@@ -1906,7 +1910,7 @@ function CentralTelegramTab({
                   name={option.label}
                   description={telegramModuleDescription(option.key)}
                   active={Boolean(moduleConfig.enabled)}
-                  disabled={!telegramEnabled || !selectedChannel}
+                  disabled={!telegramEnabled || !connected}
                   selected={selectedModuleKey === option.key}
                   onToggle={() => patchChannelModule(option.key, { enabled: !moduleConfig.enabled })}
                   onConfigure={() => {
@@ -2975,7 +2979,7 @@ function normalizeTelegramModuleTemplateFingerprint(value: string) {
 
 function defaultTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
   return {
-    enabled: true,
+    enabled: key === "validator",
     entryType: "AUTO",
     galeLimit: key === "ties_only" ? 0 : 1,
     coverTie: key === "ties_only",
@@ -3657,18 +3661,6 @@ function telegramChannelConnectionStatus(channel: ValidatorNotificationChannel |
   if (status === "connected" || status === "invalid" || status === "pending") return status;
   if (channel?.isActive && channel.chatId && (channel.botTokenMasked || channel.botTokenEncoded)) return "connected";
   return "pending";
-}
-
-function telegramChannelCanUpdateModules(channel: ValidatorNotificationChannel | null | undefined) {
-  return Boolean(
-    channel &&
-      isServerConfirmedChannel(channel) &&
-      telegramChannelConnectionStatus(channel) === "connected" &&
-      channel.id &&
-      channel.isActive &&
-      channel.chatId &&
-      (channel.botTokenMasked || (channel as ValidatorChannelWithModules).botTokenEncoded),
-  );
 }
 
 function validatorChannelDedupeKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {

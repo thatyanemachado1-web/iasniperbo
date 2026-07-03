@@ -1,9 +1,4 @@
 import { ModuleToggleStrip } from "@/components/dashboard/ModuleToggleStrip";
-import {
-  DASHBOARD_MODULE_CARD_BODY,
-  DASHBOARD_MODULE_CARD_FILL,
-  DASHBOARD_MODULE_CARD_ROOT,
-} from "@/components/dashboard/dashboardModuleCardLayout";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
@@ -30,7 +25,6 @@ export function TieAlertCard({
   onModuleTogglesChange,
   locked,
   compact = false,
-  className,
 }: {
   alert: TieAlert;
   scoreboard?: TieAlertScoreboard;
@@ -40,9 +34,9 @@ export function TieAlertCard({
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
   locked?: boolean;
   compact?: boolean;
-  className?: string;
 }) {
   const enabled = toggles?.tieAlert !== false;
+  const status = tieRadarStatus(alert);
   const multipliers = tieMultiplierStats(rounds, scoreboard);
   const tiePullers = tiePullerStats(rounds, scoreboard);
   const mainTiePuller = tiePullers[0];
@@ -50,81 +44,6 @@ export function TieAlertCard({
     (best, item) => (item.value > best.value ? item : best),
     multipliers[0],
   );
-  const view = buildTieView(alert, mainTiePuller, bestMultiplier);
-
-  if (compact) {
-    return (
-      <GlassCard
-        className={cn(
-          "digital-risk-card border-white/10 p-2 sm:p-2",
-          DASHBOARD_MODULE_CARD_ROOT,
-          view.borderClass,
-          !enabled && "border-muted-foreground/20",
-          className,
-        )}
-      >
-        <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
-        <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            Radar de Empate
-          </div>
-          <div className="flex max-w-[58%] shrink-0 flex-wrap items-center justify-end gap-1">
-            <AppBadge
-              tone={view.badgeTone}
-              pulse={enabled && alert.status === "active"}
-              className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
-            >
-              {view.badge}
-            </AppBadge>
-            <ModuleToggleStrip toggles={toggles} modules={["tieAlert"]} onChange={onModuleTogglesChange} compact />
-          </div>
-        </div>
-
-        <div className={cn(DASHBOARD_MODULE_CARD_BODY, "transition duration-200", !enabled && "opacity-45 saturate-50")}>
-          <div className={cn("rounded-xl border px-3 py-2.5 text-center", view.panelClass)}>
-            <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>{view.action}</div>
-            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              {view.headline}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
-            <TieStatChip label="Forca" value={`${alert.confidence}%`} tone={view.badgeTone === "green" ? "green" : "amber"} />
-            <TieStatChip label="Validade" value={`${alert.validityRounds}r`} tone="muted" />
-            <TieStatChip label="Nivel" value={normalizeRiskLabel(alert.level)} tone={view.badgeTone === "green" ? "green" : "amber"} />
-          </div>
-
-          <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
-            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Puxador - reseta 00:00 (BR)</div>
-            <div className="mt-0.5 font-semibold text-foreground">
-              {mainTiePuller ? <TiePullerSummaryInline item={mainTiePuller} /> : "Coletando numeros puxadores"}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-5 gap-1">
-            {multipliers.map((item) => (
-              <div key={item.label} className="rounded-md border border-white/10 bg-secondary/20 px-1 py-0.5 text-center">
-                <div className="text-[8px] font-black text-muted-foreground">{item.label}</div>
-                <div className="text-[10px] font-black">{item.value}</div>
-              </div>
-            ))}
-          </div>
-          <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
-        </div>
-
-        {!enabled && <DisabledTieNote />}
-        {locked && (
-          <PremiumLock
-            title="Radar de Empate Premium"
-            description="Leitura estatistica de empate disponivel para assinantes"
-          />
-        )}
-      </GlassCard>
-    );
-  }
-
-  const status = tieRadarStatus(alert);
   const tiePattern = bestTiePattern(patternMinerSnapshot);
 
   return (
@@ -254,7 +173,7 @@ export function TieAlertCard({
             )}
           >
             <div className="text-muted-foreground">Forca</div>
-            <div className="font-semibold text-tie">{alert.confidence}%</div>
+            <div className="font-semibold text-neon-purple">{alert.confidence}%</div>
           </div>
           <div
             className={cn(
@@ -296,7 +215,7 @@ export function TieAlertCard({
               Numero puxando Tie
             </div>
             <div className={cn("mt-1 font-black text-warning", compact && "mt-0.5")}>
-              {mainTiePuller ? <TiePullerSummaryInline item={mainTiePuller} /> : "Coletando"}
+              {mainTiePuller ? tiePullerSummary(mainTiePuller) : "Coletando"}
             </div>
           </div>
           <div
@@ -310,7 +229,7 @@ export function TieAlertCard({
             </div>
             <div className={cn("mt-1 font-black text-warning", compact && "mt-0.5")}>
               {bestMultiplier?.value > 0
-                ? `${bestMultiplier.label} (${bestMultiplier.value})`
+                ? `🟡 ${bestMultiplier.label} (${bestMultiplier.value})`
                 : "Coletando"}
             </div>
           </div>
@@ -373,7 +292,11 @@ export function TieAlertCard({
         ) : null}
       </div>
 
-      {!enabled && <DisabledTieNote />}
+      {!enabled && (
+        <div className="mt-2 rounded-lg border border-border/70 bg-secondary/25 px-3 py-2 text-[11px] font-semibold text-muted-foreground">
+          Radar de Empate desativado neste painel.
+        </div>
+      )}
 
       {locked && (
         <PremiumLock
@@ -383,101 +306,6 @@ export function TieAlertCard({
       )}
     </GlassCard>
   );
-}
-
-function DisabledTieNote() {
-  return (
-    <div className="mt-2 rounded-lg border border-border/70 bg-secondary/25 px-3 py-2 text-[11px] font-semibold text-muted-foreground">
-      Radar de Empate desativado neste painel.
-    </div>
-  );
-}
-
-function TieStatChip({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "green" | "amber" | "muted";
-}) {
-  const toneClass = {
-    green: "border-success/30 bg-success/8 text-success",
-    amber: "border-warning/30 bg-warning/8 text-warning",
-    muted: "border-border/60 bg-secondary/25 text-foreground",
-  }[tone];
-
-  return (
-    <div className={cn("rounded-lg border px-1 py-1.5", toneClass)}>
-      <div className="text-[8px] font-black uppercase tracking-[0.08em] opacity-75">{label}</div>
-      <div className="mt-0.5 text-[11px] font-black leading-none">{value}</div>
-    </div>
-  );
-}
-
-function buildTieView(
-  alert: TieAlert,
-  mainTiePuller: TiePullerStat | undefined,
-  bestMultiplier: { label: string; value: number },
-) {
-  if (alert.status === "green") {
-    return {
-      badge: "Tie green",
-      badgeTone: "green" as const,
-      action: "Tie pegou",
-      headline: `Confirmado - Forca ${alert.confidence}% - ${alert.validityRounds} rodadas`,
-      actionClass: "text-success",
-      panelClass: "border-success/35 bg-success/10",
-      borderClass: "border-success/30",
-    };
-  }
-
-  if (alert.status === "active" && (normalizeRisk(alert.level) === "ALTO" || alert.confidence >= 65)) {
-    return {
-      badge: "Tie forte",
-      badgeTone: "amber" as const,
-      action: "Possivel Tie",
-      headline: mainTiePuller
-        ? `${tiePullerSummary(mainTiePuller)} - Validade ${alert.validityRounds}r`
-        : `Pressao alta - Validade ${alert.validityRounds} rodadas`,
-      actionClass: "text-warning",
-      panelClass: "border-warning/35 bg-warning/10",
-      borderClass: "border-warning/30",
-    };
-  }
-
-  if (alert.status === "active") {
-    return {
-      badge: "Em observacao",
-      badgeTone: "amber" as const,
-      action: "Monitorar",
-      headline: `Empate em observacao - Forca ${alert.confidence}%`,
-      actionClass: "text-warning",
-      panelClass: "border-warning/25 bg-warning/8",
-      borderClass: "border-warning/20",
-    };
-  }
-
-  return {
-    badge: "Observando",
-    badgeTone: "muted" as const,
-    action: "Aguardar",
-    headline:
-      bestMultiplier.value > 0
-        ? `Sem alerta ativo - Maior mult. ${bestMultiplier.label}`
-        : "Sem alerta de empate ativo agora",
-    actionClass: "text-muted-foreground",
-    panelClass: "border-border/60 bg-secondary/20",
-    borderClass: "border-border/50",
-  };
-}
-
-function normalizeRiskLabel(level: TieAlert["level"]) {
-  const risk = normalizeRisk(level);
-  if (risk === "ALTO") return "ALTO";
-  if (risk === "MEDIO") return "MEDIO";
-  return "BAIXO";
 }
 
 function tieStatusLabel(status: TieAlert["status"]) {
@@ -491,7 +319,7 @@ function tieRadarStatus(alert: TieAlert) {
     return {
       badge: "Tie green",
       badgeTone: "green" as const,
-      label: "Tie pegou",
+      label: "🟡 Tie pegou",
       description: "Empate confirmado dentro da validade.",
       className: "text-success",
     };
@@ -512,7 +340,7 @@ function tieRadarStatus(alert: TieAlert) {
     return {
       badge: "Tie forte",
       badgeTone: "amber" as const,
-      label: "Possivel Tie",
+      label: "🟡 Possivel Tie",
       description: "So considerar entrada se a validade estiver aberta.",
       className: "text-warning",
     };
@@ -521,7 +349,7 @@ function tieRadarStatus(alert: TieAlert) {
   return {
     badge: "Em observacao",
     badgeTone: "amber" as const,
-    label: "Observacao",
+    label: "🟡 Observacao",
     description: "Empate sendo monitorado, sem confirmacao forte.",
     className: "text-warning",
   };
@@ -555,7 +383,7 @@ function tiePullerStats(rounds: Round[] | undefined, scoreboard?: TieAlertScoreb
 }
 
 function tiePullerSummary(item: TiePullerStat) {
-  return `${sideLabel(item.side)} ${item.score} com ${item.ties} Tie`;
+  return `${sideDot(item.side)} ${sideShortLabel(item.side)}${item.score} com ${item.ties} Tie`;
 }
 
 function TiePullerLine({ item, compact = false }: { item: TiePullerStat; compact?: boolean }) {
@@ -567,12 +395,12 @@ function TiePullerLine({ item, compact = false }: { item: TiePullerStat; compact
       )}
     >
       <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-1.5 font-black">
-          <SideNumber side={item.side} value={item.score} />
-          <span className="min-w-0 truncate text-warning">puxou {item.ties} Tie</span>
+        <div className={cn("truncate font-black", sideTextClass(item.side))}>
+          {sideDot(item.side)} {sideShortLabel(item.side)}{item.score}
+          <span className="ml-1 text-warning">puxou {item.ties} Tie</span>
         </div>
         <div className="text-[9px] font-semibold text-muted-foreground">
-          ate {item.window} casas - {item.samples} amostras
+          ate {item.window} casas · {item.samples} amostras
         </div>
       </div>
       <div className="shrink-0 text-right">
@@ -585,48 +413,22 @@ function TiePullerLine({ item, compact = false }: { item: TiePullerStat; compact
   );
 }
 
-function TiePullerSummaryInline({ item }: { item: TiePullerStat }) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <SideNumber side={item.side} value={item.score} />
-      <span className="truncate">
-        <span className={sideTextClass(item.side)}>com {item.ties}</span>{" "}
-        <span className="text-warning">Tie</span>
-      </span>
-    </span>
-  );
+function sideDot(side: TiePullerStat["side"]) {
+  if (side === "B") return "🔴";
+  if (side === "P") return "🔵";
+  return "🟡";
 }
 
-function SideNumber({ side, value }: { side: TiePullerStat["side"]; value: number }) {
-  return (
-    <span
-      className={cn(
-        "grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-black leading-none",
-        sideDotClass(side),
-      )}
-      title={`${sideLabel(side)} ${value}`}
-    >
-      {value}
-    </span>
-  );
-}
-
-function sideLabel(side: TiePullerStat["side"]) {
-  if (side === "B") return "Banker";
-  if (side === "P") return "Player";
-  return "Tie";
-}
-
-function sideDotClass(side: TiePullerStat["side"]) {
-  if (side === "B") return "border-banker/60 bg-banker text-white shadow-[0_0_14px_-6px_var(--banker)]";
-  if (side === "P") return "border-player/60 bg-player text-white shadow-[0_0_14px_-6px_var(--player)]";
-  return "border-tie/70 bg-tie text-background shadow-[0_0_14px_-6px_var(--tie)]";
+function sideShortLabel(side: TiePullerStat["side"]) {
+  if (side === "B") return "B";
+  if (side === "P") return "P";
+  return "T";
 }
 
 function sideTextClass(side: TiePullerStat["side"]) {
-  if (side === "B") return "text-banker";
-  if (side === "P") return "text-player";
-  return "text-tie";
+  if (side === "B") return "text-destructive";
+  if (side === "P") return "text-neon-blue";
+  return "text-warning";
 }
 
 function normalizeRisk(level: TieAlert["level"]) {

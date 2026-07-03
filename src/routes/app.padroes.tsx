@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { BrainCircuit, DatabaseZap, Flame, LineChart, Trophy } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { PatternAlertCard } from "@/components/patternMiner/PatternAlertCard";
 import { PatternStrategyCard } from "@/components/patternMiner/PatternStrategyCard";
 import { StrategyConclusion } from "@/components/patternMiner/PatternSequence";
@@ -16,8 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDashboardData } from "@/hooks/useDashboardData";
-import { usePatternMiner, resolvePatternMinerFeedStatus } from "@/hooks/usePatternMiner";
-import { useRoundHistory } from "@/hooks/useRoundHistory";
+import { usePatternMiner } from "@/hooks/usePatternMiner";
 import {
   PATTERN_MINER_HISTORY_OPTIONS,
   PATTERN_MINER_TOP_STRATEGIES_LIMIT,
@@ -33,19 +32,10 @@ function PatternMinerPage() {
   const { data: dashboardData, mode } = useDashboardData();
   const [historyLimit, setHistoryLimit] = useState<PatternMinerHistoryLimit>(15000);
   const hasRealHistory = mode === "live" && !dashboardData.mockMode;
-  const { history: roundHistory } = useRoundHistory(dashboardData, hasRealHistory);
-  const patternMinerSourceRounds = useMemo(
-    () => [...roundHistory.todayRounds, ...dashboardData.rounds],
-    [roundHistory.todayRounds, dashboardData.rounds],
-  );
   const { snapshot, isUsingRealData } = usePatternMiner({
-    rounds: patternMinerSourceRounds.length ? patternMinerSourceRounds : dashboardData.rounds,
+    rounds: dashboardData.rounds,
     historyLimit,
     enabled: hasRealHistory,
-    serverSnapshot:
-      hasRealHistory && historyLimit === 15000 ? dashboardData.patternMinerSnapshot : undefined,
-    feedStatus: resolvePatternMinerFeedStatus(dashboardData),
-    dashboardUpdatedAt: roundHistory.sourceUpdatedAt ?? dashboardData.updatedAt,
   });
   const primaryAlerts = [...snapshot.entryAlerts, ...snapshot.formingAlerts];
 
