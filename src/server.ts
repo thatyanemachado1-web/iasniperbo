@@ -3193,8 +3193,12 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
   }
 
   if (request.method === "GET" && url.pathname === "/dashboard") {
+    const openLocalDashboard =
+      readNamedServerSecret(env, "SNIPER_VPS_LOCAL_OPEN_DASHBOARD", "").trim() === "1";
     const authorized =
-      isLocalDevelopmentRequest(request) || (await isDashboardReadAuthorized(request, url, env));
+      openLocalDashboard ||
+      isLocalDevelopmentRequest(request) ||
+      (await isDashboardReadAuthorized(request, url, env));
     if (!authorized) {
       return json({ error: "Nao autorizado." }, 401);
     }
