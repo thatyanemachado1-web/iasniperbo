@@ -3193,7 +3193,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
   }
 
   if (request.method === "GET" && url.pathname === "/dashboard") {
-    if (!(await isDashboardReadAuthorized(request, url, env))) {
+    const authorized =
+      isLocalDevelopmentRequest(request) || (await isDashboardReadAuthorized(request, url, env));
+    if (!authorized) {
       return json({ error: "Nao autorizado." }, 401);
     }
 

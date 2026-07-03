@@ -1904,6 +1904,15 @@ def main() -> int:
                     logging.warning("Local dashboard HTTP 429; backing off local reads for 5.0s: %s", body)
                     time.sleep(max(0.75, args.interval))
                     continue
+                if status_code in {401, 403}:
+                    logging.error(
+                        "Local dashboard HTTP %s at %s — signals-api local sem senha admin. "
+                        "Reinicie: bash scripts/start_official_signals_api.sh",
+                        status_code,
+                        args.local_url,
+                    )
+                    time.sleep(max(2.0, args.interval))
+                    continue
                 raise
             local_read_backoff_until = 0.0
             local_payload, g1_blocked, blocked_round = apply_g1_publication_lock(raw_local_payload, last_published_payload)

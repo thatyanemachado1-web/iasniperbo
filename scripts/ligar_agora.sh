@@ -57,10 +57,16 @@ python3 -m venv .venv 2>/dev/null || true
 .venv/bin/pip install -q -r scripts/requirements-publisher.txt
 if [[ ! -d node_modules ]]; then npm install; fi
 
-echo "[5/6] Ligando signals-api..."
+echo "[5/6] Ligando signals-api (reinicia sempre)..."
+pkill -f "wrangler dev" 2>/dev/null || true
+sleep 2
 bash scripts/start_official_signals_api.sh || echo "   AVISO: signals-api falhou — veja logs/signals-api.log"
-sleep 4
+sleep 5
 curl -s --connect-timeout 3 http://127.0.0.1:8787/health && echo "   signals-api OK" || echo "   signals-api OFFLINE"
+curl -s --connect-timeout 3 -H "User-Agent: Mozilla/5.0 SNIPERBO-Official-Publisher/1.0" \
+  -H "x-sniper-admin-email: gabrielmendespromove@gmail.com" \
+  -H "x-sniper-admin-password: AdminSniper2026!" \
+  http://127.0.0.1:8787/dashboard | head -c 80 && echo "   dashboard local OK" || echo "   dashboard local FALHOU"
 
 echo "[6/6] Ligando publisher..."
 bash scripts/start_official_publisher.sh

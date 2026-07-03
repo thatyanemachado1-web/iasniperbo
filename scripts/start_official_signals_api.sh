@@ -45,6 +45,8 @@ fi
 
 export SIGNALS_API_PORT
 export FRONTEND_PORT="${FRONTEND_PORT:-5175}"
+export SNIPER_ADMIN_EMAIL="${SNIPER_ADMIN_EMAIL:-}"
+export SNIPER_ADMIN_PASSWORD="${SNIPER_ADMIN_PASSWORD:-}"
 
 nohup npx wrangler dev \
   --port "$SIGNALS_API_PORT" \
