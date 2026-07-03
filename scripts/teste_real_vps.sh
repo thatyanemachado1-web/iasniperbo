@@ -82,6 +82,7 @@ sleep 3
 cat > "$ROOT/.dev.vars" <<EOF
 SNIPER_ADMIN_EMAIL=$EMAIL
 SNIPER_ADMIN_PASSWORD=$PASS
+SNIPER_VPS_LOCAL_OPEN_DASHBOARD=1
 EOF
 chmod 600 "$ROOT/.dev.vars"
 pass ".dev.vars criado para wrangler"

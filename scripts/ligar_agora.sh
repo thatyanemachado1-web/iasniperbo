@@ -27,12 +27,18 @@ cat > scripts/official_publisher.local.env << 'EOF'
 SNIPER_ADMIN_EMAIL=gabrielmendespromove@gmail.com
 SNIPER_ADMIN_PASSWORD=AdminSniper2026!
 SNIPER_PUBLISH_PASSWORD_ONLY=1
+SNIPER_VPS_LOCAL_OPEN_DASHBOARD=1
 SNIPER_LOCAL_DASHBOARD_URL=http://127.0.0.1:8787/dashboard
 SIGNALS_API_PORT=8787
 SIGNALS_API_HOST=127.0.0.1
 PUBLISHER_INTERVAL=1.5
 EOF
-chmod 600 scripts/official_publisher.local.env
+cat > .dev.vars << 'EOF'
+SNIPER_ADMIN_EMAIL=gabrielmendespromove@gmail.com
+SNIPER_ADMIN_PASSWORD=AdminSniper2026!
+SNIPER_VPS_LOCAL_OPEN_DASHBOARD=1
+EOF
+chmod 600 scripts/official_publisher.local.env .dev.vars
 echo "   .env OK"
 
 echo "   Testando senha no site (sem token)..."
