@@ -474,6 +474,12 @@ function LoginPage() {
           <SniperLogoMark className="h-12 w-auto max-w-[170px] min-w-0 sm:h-16 sm:max-w-[280px] drop-shadow-[0_0_24px_rgba(0,229,255,0.24)]" />
           <div className="flex items-center gap-2">
             <div className="hidden min-w-[230px] grid-cols-2 rounded-2xl border border-neon-cyan/25 bg-black/35 p-1 shadow-[0_0_22px_rgba(0,229,255,0.1)] backdrop-blur-xl lg:grid">
+              <a
+                href="/app"
+                className="rounded-xl px-4 py-2 text-center text-xs font-black uppercase tracking-wide text-white transition btn-primary-grad"
+              >
+                Ver sinais
+              </a>
               <button
                 type="button"
                 onClick={focusLogin}
@@ -481,16 +487,13 @@ function LoginPage() {
               >
                 Entrar
               </button>
-              {!salesClosed && (
-                <button
-                  type="button"
-                  onClick={focusRegister}
-                  className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-wide text-neon-purple transition hover:bg-neon-purple/10"
-                >
-                  Cadastro
-                </button>
-              )}
             </div>
+            <a
+              href="/app"
+              className="inline-flex lg:hidden rounded-xl px-3 py-2 text-xs font-black uppercase btn-primary-grad"
+            >
+              Sinais
+            </a>
           </div>
         </header>
 

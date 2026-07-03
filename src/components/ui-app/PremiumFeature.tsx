@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { canSeeAdminUi } from "@/lib/adminSession";
+import { isPublicLiveSignalsEnabled } from "@/lib/publicLiveSignals";
 import { hasSignalAccess, readUserSession } from "@/lib/userSession";
 
 interface PremiumFeatureProps {
@@ -16,7 +17,8 @@ export function PremiumFeature({
   description = "Entre em contato ou finalize o checkout para liberar.",
   className = "",
 }: PremiumFeatureProps) {
-  const allowed = hasSignalAccess(readUserSession()) || canSeeAdminUi();
+  const allowed =
+    isPublicLiveSignalsEnabled() || hasSignalAccess(readUserSession()) || canSeeAdminUi();
   if (allowed) return className ? <div className={className}>{children}</div> : <>{children}</>;
 
   return (

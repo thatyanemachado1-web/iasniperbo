@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { AccessApiError, getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
+import { isPublicLiveDashboardPath } from "@/lib/publicLiveSignals";
 import { clearUserSession, hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app")({
@@ -19,6 +20,7 @@ function ProtectedAppRoute() {
     pathname.startsWith("/app/planos") ||
     pathname.startsWith("/app/assinatura") ||
     pathname.startsWith("/app/pagamentos");
+  const isPublicLiveDashboard = isPublicLiveDashboardPath(pathname);
   const isOwner = isAdminOwnerEmail(session.email);
   const hasBackendSession = Boolean(session.clientToken);
   const isAdminUser = hasBackendSession && (session.role === "admin" || session.role === "owner" || isOwner);
@@ -26,10 +28,11 @@ function ProtectedAppRoute() {
   const canOpenApp = hasBackendSession && session.registered;
   const demoExpired = session.accessMode === "demo" && isExpiredAt(session.expiresAt);
   const canOpenDashboard =
-    hasBackendSession &&
-    (fullAccess ||
-      (session.accessMode === "demo" && !demoExpired) ||
-      (session.registered && session.accessMode === "pending"));
+    isPublicLiveDashboard ||
+    (hasBackendSession &&
+      (fullAccess ||
+        (session.accessMode === "demo" && !demoExpired) ||
+        (session.registered && session.accessMode === "pending")));
 
   useEffect(() => {
     let active = true;
@@ -46,7 +49,7 @@ function ProtectedAppRoute() {
   }, []);
 
   useEffect(() => {
-    if (isAdminRoute) return;
+    if (isAdminRoute || isPublicLiveDashboard) return;
     if (salesClosed && !fullAccess && !isAdminUser) {
       navigate({ to: "/" });
       return;
@@ -67,13 +70,14 @@ function ProtectedAppRoute() {
     isAdminUser,
     isAdminRoute,
     isCheckoutRoute,
+    isPublicLiveDashboard,
     navigate,
     salesClosed,
     session.email,
   ]);
 
   useEffect(() => {
-    if (isAdminRoute || isOwner) return;
+    if (isAdminRoute || isOwner || isPublicLiveDashboard) return;
 
     let stopped = false;
     let refreshing = false;
@@ -123,10 +127,10 @@ function ProtectedAppRoute() {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshSession);
     };
-  }, [isAdminRoute, isOwner]);
+  }, [isAdminRoute, isOwner, isPublicLiveDashboard]);
 
-  if (!isAdminRoute && salesClosed && !fullAccess && !isAdminUser) return null;
-  if (!isAdminRoute && (!session.email || !canOpenApp)) return null;
+  if (!isAdminRoute && !isPublicLiveDashboard && salesClosed && !fullAccess && !isAdminUser) return null;
+  if (!isAdminRoute && !isPublicLiveDashboard && (!session.email || !canOpenApp)) return null;
   if (!isAdminRoute && !canOpenDashboard && !isCheckoutRoute && !isAccountRoute) return null;
 
   return (

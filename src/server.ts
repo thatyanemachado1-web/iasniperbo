@@ -780,6 +780,9 @@ function handleRateLimit(request: Request) {
   if (isOfficialDashboardPublisherRequest(request)) return null;
 
   const url = new URL(request.url);
+  if (request.method === "GET" && (url.pathname === "/dashboard" || url.pathname === "/dashboard/round-history")) {
+    return null;
+  }
   if (
     isLocalDevelopmentRequest(request) &&
     (url.pathname === "/dashboard" ||
@@ -3123,10 +3126,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     request.method === "GET" &&
     (url.pathname === "/dashboard/round-history" || url.pathname === "/validator/round-history")
   ) {
-    if (!(await isDashboardReadAuthorized(request, url, env))) {
-      return json({ error: "Nao autorizado." }, 401);
-    }
-
+    // Historico publico para o painel ao vivo sem login.
     const limit = clampRoundHistoryLimit(url.searchParams.get("limit"));
     const storedRounds = await withTimeout(
       fetchStoredValidatorRounds(
@@ -3193,16 +3193,6 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
   }
 
   if (request.method === "GET" && url.pathname === "/dashboard") {
-    const openLocalDashboard =
-      readNamedServerSecret(env, "SNIPER_VPS_LOCAL_OPEN_DASHBOARD", "").trim() === "1";
-    const authorized =
-      openLocalDashboard ||
-      isLocalDevelopmentRequest(request) ||
-      (await isDashboardReadAuthorized(request, url, env));
-    if (!authorized) {
-      return json({ error: "Nao autorizado." }, 401);
-    }
-
     await syncDashboardReadState(env);
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
     if (cycle.changed) {
