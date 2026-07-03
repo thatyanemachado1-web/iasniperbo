@@ -303,6 +303,8 @@ type AdminActionType =
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
 const LIVE_STATE_ID = "main";
+const LIVE_DASHBOARD_FAST_STATE_ID = `${LIVE_STATE_ID}:dashboard_fast`;
+const LIVE_DASHBOARD_FAST_CACHE_URL = `${LIVE_STATE_CACHE_URL}/dashboard_fast`;
 const LIVE_STATE_TABLE = "sniper_live_state";
 const SNIPER_DEPLOY_MARKER = "2026-06-25-client-registration-persistence-v3";
 const CLIENT_REGISTRY_SNAPSHOT_LATEST_ID = `${LIVE_STATE_ID}:client_registry_latest`;
@@ -3247,6 +3249,14 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     const calendarChange = incomingRounds.length
       ? trackNeuralCalendarRounds(incomingRounds)
       : emptyNeuralCalendarChangeSet();
+    const fastSaveTask = saveDashboardFastState(env, liveDashboardData);
+    runBackgroundTask(ctx, fastSaveTask, "salvar dashboard rapido");
+    const fastSaveStatus = await withTimeout(
+      fastSaveTask,
+      1_400,
+      "salvar dashboard rapido",
+      { durable: false, cache: false, saved_at: "" },
+    );
     const saveStateTask = saveLiveState(env);
     runBackgroundTask(ctx, saveStateTask, "salvar estado vivo do dashboard");
     runBackgroundTask(
@@ -3279,9 +3289,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
           ),
         "monitorar sinais imediatamente",
       );
-      return json(dashboardPublishAck(liveDashboardData, "queued", "queued_immediate"));
+      return json(dashboardPublishAck(liveDashboardData, { fast: fastSaveStatus, full: "queued" }, "queued_immediate"));
     }
-    return json(dashboardPublishAck(liveDashboardData, "queued", "skipped_non_publish_signal"));
+    return json(dashboardPublishAck(liveDashboardData, { fast: fastSaveStatus, full: "queued" }, "skipped_non_publish_signal"));
   }
 
   return null;
@@ -18474,6 +18484,10 @@ function liveStateCacheRequest() {
   return new Request(LIVE_STATE_CACHE_URL, { method: "GET" });
 }
 
+function liveDashboardFastCacheRequest() {
+  return new Request(LIVE_DASHBOARD_FAST_CACHE_URL, { method: "GET" });
+}
+
 async function loadLiveState(env: unknown) {
   const now = Date.now();
   if (liveStateLoadedAt && now - liveStateLoadedAt < LIVE_STATE_LOAD_MIN_INTERVAL_MS) {
@@ -18491,8 +18505,13 @@ async function loadLiveState(env: unknown) {
 }
 
 async function syncDashboardReadState(env: unknown) {
-  const durableState = await loadDurableLiveState(env);
-  const durableDashboard = readRecord(durableState?.dashboard);
+  const [durableState, fastDashboardState] = await Promise.all([
+    loadDurableLiveState(env),
+    loadDashboardFastState(env),
+  ]);
+  const durableDashboard = readRecord(
+    mergeStateWithFastDashboard(durableState || {}, fastDashboardState || {}).dashboard,
+  );
   if (!hasRecordFields(durableDashboard)) return;
   if (compareDashboardStateFreshness(durableDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
     liveDashboardData = restoreDashboardData(durableDashboard);
@@ -18502,13 +18521,17 @@ async function loadLiveStateFresh(env: unknown) {
   const currentSalesSettings = liveSalesSettings;
   const currentSiteContentSettings = liveSiteContentSettings;
   try {
-    const [durableState, cacheState] = await withTimeout(
-      Promise.all([loadDurableLiveState(env), loadLiveStateCache()]),
+    const [durableState, cacheState, fastDashboardState] = await withTimeout(
+      Promise.all([loadDurableLiveState(env), loadLiveStateCache(), loadDashboardFastState(env)]),
       LIVE_STATE_IO_TIMEOUT_MS,
       "carregar estado vivo",
-      [null, null] as [Record<string, unknown> | null, Record<string, unknown> | null],
+      [null, null, null] as [
+        Record<string, unknown> | null,
+        Record<string, unknown> | null,
+        Record<string, unknown> | null,
+      ],
     );
-    const state = mergeLiveStates(durableState, cacheState);
+    const state = mergeStateWithFastDashboard(mergeLiveStates(durableState, cacheState), fastDashboardState);
     if (state) {
       const shouldPersistRecoveredRegistry = shouldPersistRecoveredClientRegistry(env, durableState, cacheState, state);
       applyLiveState(state);
@@ -18577,6 +18600,125 @@ async function loadLiveStateCache() {
     console.warn("Nao foi possivel carregar estado vivo do cache.", error);
     return null;
   }
+}
+
+async function loadDashboardFastState(env: unknown) {
+  const [durableState, cacheState] = await Promise.all([
+    loadDurableLiveStateById(env, LIVE_DASHBOARD_FAST_STATE_ID),
+    loadDashboardFastStateCache(),
+  ]);
+  return mergeStateWithFastDashboard(durableState, cacheState);
+}
+
+async function loadDashboardFastStateCache() {
+  const cache = getLiveStateCache();
+  if (!cache) return null;
+
+  try {
+    const response = await withTimeout(
+      cache.match(liveDashboardFastCacheRequest()),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "carregar cache rapido do dashboard",
+      undefined,
+    );
+    if (!response) return null;
+
+    return readRecord(await response.json().catch(() => null));
+  } catch (error) {
+    console.warn("Nao foi possivel carregar cache rapido do dashboard.", error);
+    return null;
+  }
+}
+
+async function saveDashboardFastState(env: unknown, dashboard: LiveDashboardData) {
+  const state = buildDashboardFastState(dashboard);
+  const [durableResult, cacheResult] = await Promise.allSettled([
+    saveDurableLiveStateById(env, LIVE_DASHBOARD_FAST_STATE_ID, state),
+    saveDashboardFastStateCache(state),
+  ]);
+  return {
+    durable: durableResult.status === "fulfilled" && durableResult.value === true,
+    cache: cacheResult.status === "fulfilled" && cacheResult.value === true,
+    saved_at: readString(state, "savedAt"),
+  };
+}
+
+async function saveDashboardFastStateCache(state: Record<string, unknown>) {
+  const cache = getLiveStateCache();
+  if (!cache) return false;
+
+  try {
+    await cache.put(
+      liveDashboardFastCacheRequest(),
+      new Response(JSON.stringify(state), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store, no-cache, must-revalidate",
+          pragma: "no-cache",
+        },
+      }),
+    );
+    return true;
+  } catch (error) {
+    console.warn("Nao foi possivel salvar cache rapido do dashboard.", error);
+    return false;
+  }
+}
+
+function buildDashboardFastState(dashboard: LiveDashboardData) {
+  const snapshot = publicDashboardSnapshot(dashboard);
+  const fastDashboard = {
+    updatedAt: snapshot.updatedAt || new Date().toISOString(),
+    cycleDate: snapshot.cycleDate,
+    dailyCycleDate: snapshot.dailyCycleDate,
+    rounds: Array.isArray(snapshot.rounds) ? snapshot.rounds.slice(-30) : [],
+    currentSignal: snapshot.currentSignal,
+    neuralReading: snapshot.neuralReading,
+    neuralScoreboard: snapshot.neuralScoreboard,
+    neuralEntryState: snapshot.neuralEntryState ?? null,
+    neuralEntryLastResult: snapshot.neuralEntryLastResult ?? null,
+    bettingTiming: snapshot.bettingTiming ?? null,
+    engineDecision: snapshot.engineDecision,
+    currentSurfAlert: snapshot.currentSurfAlert,
+    currentTieAlert: snapshot.currentTieAlert,
+    mainScoreboard: snapshot.mainScoreboard,
+    surfAnalyzerScoreboard: snapshot.surfAnalyzerScoreboard,
+    tieAlertScoreboard: snapshot.tieAlertScoreboard,
+    moduleToggles: snapshot.moduleToggles,
+    entryMode: snapshot.entryMode,
+  };
+  return {
+    snapshotType: "dashboard_fast",
+    dashboard: fastDashboard,
+    validatorRoundHistory: liveValidatorRoundHistory.slice(-MAX_MONITOR_ROUND_HISTORY),
+    savedAt: new Date().toISOString(),
+  };
+}
+
+function mergeStateWithFastDashboard(
+  baseState: Record<string, unknown> | null,
+  fastState: Record<string, unknown> | null,
+) {
+  if (!baseState && !fastState) return null;
+  const base = readRecord(baseState || {});
+  const fast = readRecord(fastState || {});
+  const baseDashboard = readRecord(base.dashboard);
+  const fastDashboard = readRecord(fast.dashboard);
+  const fastIsNewer =
+    hasRecordFields(fastDashboard) &&
+    (!hasRecordFields(baseDashboard) || compareDashboardStateFreshness(fastDashboard, baseDashboard) >= 0);
+  const dashboard = fastIsNewer ? { ...baseDashboard, ...fastDashboard } : baseDashboard;
+  const validatorRoundHistory = fastIsNewer
+    ? mergeMonitorRoundHistory(
+        normalizeStoredRoundHistory(base.validatorRoundHistory),
+        normalizeStoredRoundHistory(fast.validatorRoundHistory),
+      )
+    : base.validatorRoundHistory;
+
+  return {
+    ...base,
+    ...(fastIsNewer ? { dashboard, validatorRoundHistory } : {}),
+  };
 }
 
 function applyLiveState(state: Record<string, unknown>) {
