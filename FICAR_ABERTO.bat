@@ -6,6 +6,5 @@ echo COLLECTOR_LOGIN_EMAIL=gabrielmendespromove@gmail.com
 echo COLLECTOR_LOGIN_PASSWORD=221600Pmcg11
 ) > collector_login.local.env
 
-start "SNIPERBO Publisher" cmd /k "cd /d %~dp0 && powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { & '.\scripts\configurar_publisher_credenciais.ps1' -AdminEmail 'gabrielmendespromove@gmail.com' -AdminPassword 'AdminSniper2026!' -LocalDashboardUrl 'http://127.0.0.1:8791/dashboard'; & '.\scripts\start_official_publisher.ps1' }\""
-
+start "SNIPERBO Publisher" cmd /k "cd /d %~dp0 && powershell -NoProfile -ExecutionPolicy Bypass -File scripts\iniciar_publisher_windows.ps1"
 call "%~dp0LIGAR_COLETOR_AGORA.bat"
