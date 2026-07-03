@@ -33,7 +33,8 @@ taskkill /F /IM msedge.exe 2>nul
 for /f "tokens=2" %%P in ('wmic process where "commandline like '%%sniper_bo_scraper.py%%'" get processid /format:list 2^>nul ^| find "="') do taskkill /F /PID %%P 2>nul
 timeout /t 2 /nobreak >nul
 
-echo [1/4] Verificando coletor...
+echo [1/4] Reparando coletor...
+"%PY%" "%ROOT%\scripts\reparar_scraper.py" "%ROOT%"
 "%PY%" "%ROOT%\scripts\restaurar_scraper.py" "%ROOT%"
 if errorlevel 1 (
   echo.
