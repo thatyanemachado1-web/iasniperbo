@@ -3187,13 +3187,14 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       return json({ error: "Nao autorizado." }, 401);
     }
 
-    await syncDashboardReadState(env);
-    const cycle = ensureDashboardDailyCycle(liveDashboardData);
+    const dashboardForRead = await resolveDashboardForRead(env);
+    const cycle = ensureDashboardDailyCycle(dashboardForRead);
+    const snapshot = cycle.changed ? cycle.dashboard : dashboardForRead;
     if (cycle.changed) {
-      liveDashboardData = cycle.dashboard;
+      liveDashboardData = snapshot;
       runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
-    return json(publicDashboardSnapshot(liveDashboardData));
+    return json(publicDashboardSnapshot(snapshot));
   }
 
   if (
@@ -18558,7 +18559,31 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
   const second = readRecord(secondary);
   if (!hasRecordFields(first)) return second;
   if (!hasRecordFields(second)) return first;
+  const firstUpdated = Date.parse(readString(first, "updatedAt") || "");
+  const secondUpdated = Date.parse(readString(second, "updatedAt") || "");
+  if (Number.isFinite(firstUpdated) && Number.isFinite(secondUpdated) && firstUpdated !== secondUpdated) {
+    return firstUpdated >= secondUpdated ? first : second;
+  }
   return compareDashboardStateFreshness(first, second) >= 0 ? first : second;
+}
+
+async function resolveDashboardForRead(env: unknown): Promise<LiveDashboardData> {
+  const [durableState, cacheState] = await Promise.all([loadDurableLiveState(env), loadLiveStateCache()]);
+  const merged = mergeLiveStates(durableState, cacheState);
+  const persistedRaw = readRecord(merged?.dashboard);
+  const candidates: LiveDashboardData[] = [liveDashboardData];
+  if (hasRecordFields(persistedRaw)) {
+    candidates.push(restoreDashboardData(persistedRaw));
+  }
+  return candidates.reduce((best, next) => {
+    const bestUpdated = Date.parse(readString(best as unknown as Record<string, unknown>, "updatedAt") || "");
+    const nextUpdated = Date.parse(readString(next as unknown as Record<string, unknown>, "updatedAt") || "");
+    if (Number.isFinite(nextUpdated) && Number.isFinite(bestUpdated)) {
+      return nextUpdated >= bestUpdated ? next : best;
+    }
+    if (Number.isFinite(nextUpdated)) return next;
+    return best;
+  });
 }
 
 function shouldIgnoreStaleDashboardPost(
