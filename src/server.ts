@@ -373,7 +373,7 @@ const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
-const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 1_500;
+const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 5_000;
 const CLIENT_REGISTRY_PROTECTION_INTERVAL_MS = 60_000;
 const CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS = 5 * 60_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
@@ -770,6 +770,14 @@ function shouldLoadLiveStateForRequest(request: Request) {
   if (url.pathname.startsWith("/assets/")) return false;
   if (url.pathname.startsWith("/favicon")) return false;
   if (url.pathname === "/robots.txt" || url.pathname === "/sitemap.xml" || url.pathname === "/manifest.webmanifest") {
+    return false;
+  }
+  if (
+    request.method === "GET" &&
+    (url.pathname === "/dashboard" ||
+      url.pathname === "/dashboard/round-history" ||
+      url.pathname === "/health")
+  ) {
     return false;
   }
   return !/\.(?:avif|css|gif|ico|jpeg|jpg|js|json|map|mp3|png|svg|txt|webm|webp|woff2?)$/i.test(url.pathname);
@@ -3200,7 +3208,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     if (cycle.changed) {
       runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
-    return json(publicDashboardSnapshot(liveDashboardData));
+    return json(publicDashboardSnapshot(liveDashboardData), 200, { cache: "live" });
   }
 
   if (
@@ -19662,17 +19670,27 @@ function parseJsonSafe(value: string) {
   }
 }
 
-function json(data: unknown, status = 200) {
+function json(data: unknown, status = 200, options?: { cache?: "live" | "none" }) {
+  const cacheHeaders =
+    options?.cache === "live"
+      ? {
+          "cache-control": "public, max-age=1, s-maxage=1, stale-while-revalidate=5",
+          "cdn-cache-control": "max-age=1",
+          "cloudflare-cdn-cache-control": "max-age=1",
+        }
+      : {
+          "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0",
+          "cdn-cache-control": "no-store",
+          "cloudflare-cdn-cache-control": "no-store",
+          "surrogate-control": "no-store",
+          pragma: "no-cache",
+          expires: "0",
+        };
   return new Response(status === 204 ? null : JSON.stringify(data), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0",
-      "cdn-cache-control": "no-store",
-      "cloudflare-cdn-cache-control": "no-store",
-      "surrogate-control": "no-store",
-      pragma: "no-cache",
-      expires: "0",
+      ...cacheHeaders,
       vary: "Authorization",
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
