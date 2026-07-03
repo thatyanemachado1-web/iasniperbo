@@ -22,6 +22,9 @@ def apply_login(config: dict, email: str, password: str) -> None:
     if not email or not password:
         return
 
+    game_url = "https://77super.com/en/game/101803005-Bac%20Bo"
+    site_url = "https://77super.com"
+
     flat_keys = {
         "email": email,
         "password": password,
@@ -39,9 +42,16 @@ def apply_login(config: dict, email: str, password: str) -> None:
         "casino_email": email,
         "casino_password": password,
         "username": email,
+        "site_url": site_url,
+        "game_url": game_url,
+        "url": game_url,
+        "target_url": game_url,
+        "headless": False,
+        "keep_browser_open": True,
         "auto_login": True,
         "autoLogin": True,
         "login_automatico": True,
+        "perform_login": True,
     }
     for key, value in flat_keys.items():
         config[key] = value
@@ -85,6 +95,27 @@ def main() -> int:
     config["database_path"] = db_path
     apply_login(config, email, password)
     config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if email and password:
+        env_lines = [
+            f"EMAIL={email}",
+            f"PASSWORD={password}",
+            f"LOGIN_EMAIL={email}",
+            f"LOGIN_PASSWORD={password}",
+            f"SNIPER_LOGIN_EMAIL={email}",
+            f"SNIPER_LOGIN_PASSWORD={password}",
+            f"SITE_LOGIN_EMAIL={email}",
+            f"SITE_LOGIN_PASSWORD={password}",
+        ]
+        env_text = "\n".join(env_lines) + "\n"
+        (root / ".env").write_text(env_text, encoding="utf-8")
+        codex = Path(
+            r"C:\Users\Usuario\OneDrive\Documentos\Codex\2026-05-24\voc-um-desenvolvedor-python-s-nior"
+        )
+        if not codex.exists():
+            codex = Path.home() / "OneDrive" / "Documentos" / "Codex" / "2026-05-24" / "voc-um-desenvolvedor-python-s-nior"
+        if codex.exists():
+            (codex / ".env").write_text(env_text, encoding="utf-8")
 
     sqlite3.connect(db_path).close()
     print(f"database_path={db_path}")

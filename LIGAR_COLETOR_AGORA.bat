@@ -51,12 +51,15 @@ if defined COLLECTOR_LOGIN_PASSWORD set CASINO_PASSWORD=%COLLECTOR_LOGIN_PASSWOR
 
 echo.
 echo Pasta do Chrome: %WORKDIR%
-echo Abrindo coletor + Chrome...
+echo Coletor fica ABERTO. Se fechar, reinicia sozinho.
 echo NAO FECHE esta janela.
 echo.
 
 cd /d "%WORKDIR%"
-"%PY%" "%SCRAPER%" --config "%ROOT%\config.json" --interval 0.5 --admin-api-enabled --no-telegram --log-file "%ROOT%\official_legacy_collector.log"
+:LOOP
 echo.
-echo Coletor encerrou. Codigo: %ERRORLEVEL%
-pause
+echo [%date% %time%] Ligando coletor...
+"%PY%" "%SCRAPER%" --config "%ROOT%\config.json" --interval 0.5 --admin-api-enabled --no-telegram --log-file "%ROOT%\official_legacy_collector.log"
+echo Coletor parou (codigo %ERRORLEVEL%). Reiniciando em 8 segundos...
+timeout /t 8 /nobreak >nul
+goto LOOP
