@@ -47,15 +47,8 @@ def patch_source(source: str) -> tuple[str, bool]:
 
 
 def patch_file(path: Path) -> bool:
-    if not path.exists():
-        return False
-    source = path.read_text(encoding="utf-8", errors="ignore")
-    updated, changed = patch_source(source)
-    if not changed:
-        return False
-    path.write_text(updated, encoding="utf-8")
-    print(f"browser flags corrigidos: {path}")
-    return True
+    # Desativado: remover flags dentro do .py quebrou strings CSS.
+    return False
 
 
 def main() -> int:

@@ -41,36 +41,7 @@ def patch_config(root: Path) -> None:
 
 
 def patch_scraper(scraper_path: Path) -> bool:
-    if not scraper_path.exists():
-        return False
-    source = scraper_path.read_text(encoding="utf-8", errors="ignore")
-    if "DEFAULT_SELECTORS" not in source:
-        return False
-
-    block = ",\n    ".join(f'"{item}"' for item in SELECTOR_TEXTS)
-    replacement = f"DEFAULT_SELECTORS = [\n    {block},\n]"
-    updated, count = re.subn(
-        r"DEFAULT_SELECTORS\s*=\s*\[[^\]]*\]",
-        replacement,
-        source,
-        count=1,
-        flags=re.DOTALL,
-    )
-    if count:
-        scraper_path.write_text(updated, encoding="utf-8")
-        print(f"sniper_bo_scraper.py atualizado: {scraper_path}")
-        return True
-
-    # Evita encerrar quando nao acha botao na primeira tentativa.
-    relaxed = source
-    relaxed = relaxed.replace(
-        "ciclo finalizado. candidatos=0",
-        "ciclo finalizado. candidatos=0 - aguardando proximo ciclo",
-    )
-    if relaxed != source:
-        scraper_path.write_text(relaxed, encoding="utf-8")
-        print(f"sniper_bo_scraper.py relaxado: {scraper_path}")
-        return True
+    # Nao editar o .py — patches quebraram seletores CSS dentro de strings.
     return False
 
 
