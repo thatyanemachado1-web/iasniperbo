@@ -363,6 +363,7 @@ const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
 const DEFAULT_OLLAMA_MODEL = "qwen2.5:7b";
 const DEFAULT_EDGE_TTS_VOICE = "pt-BR-AntonioNeural";
 const MAX_SERVER_ROUND_HISTORY = 50_000;
+const DASHBOARD_READ_ROUND_LIMIT = 30;
 const MAX_MONITOR_ROUND_HISTORY = 300;
 const MAX_VALIDATOR_ROUND_WRITE_BATCH = 500;
 const MAX_VALIDATOR_DETAIL_RESPONSE = 200;
@@ -18502,7 +18503,7 @@ async function repairDashboardSnapshotFromPersistedHistory(env: unknown) {
   const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
   const cycleDate = currentDashboardCycleDate();
   const repaired = updateDashboardData(liveDashboardData, {
-    rounds: persistedRounds.slice(-30),
+    rounds: persistedRounds.slice(-DASHBOARD_READ_ROUND_LIMIT),
     cycleDate,
     dailyCycleDate: cycleDate,
     updatedAt:
@@ -18510,22 +18511,28 @@ async function repairDashboardSnapshotFromPersistedHistory(env: unknown) {
       liveDashboardData.updatedAt ||
       new Date().toISOString(),
   });
-  return { changed: true, dashboard: repaired };
+  return { changed: true, dashboard: { ...repaired, mockMode: false } };
 }
 
-async function fetchPersistedDashboardRounds(env: unknown) {
+async function fetchPersistedDashboardRounds(env: unknown, limit = DASHBOARD_READ_ROUND_LIMIT) {
   const storedRounds = await withTimeout(
-    fetchStoredValidatorRounds(env, MAX_SERVER_ROUND_HISTORY),
+    fetchStoredValidatorRounds(env, limit),
     LIVE_STATE_IO_TIMEOUT_MS,
     "carregar historico persistido do dashboard",
     [] as Round[],
   );
-  return mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, MAX_SERVER_ROUND_HISTORY);
+  return mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, limit);
+}
+
+function dashboardHasMockLikeRounds(dashboard: LiveDashboardData) {
+  if (dashboard.mockMode) return true;
+  return isDefaultMockDashboardState(dashboard as unknown as Record<string, unknown>);
 }
 
 function dashboardNeedsPersistedHistoryRepair(dashboard: LiveDashboardData, persistedRounds: Round[]) {
   const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
   if (!latestPersistedRound) return false;
+  if (dashboardHasMockLikeRounds(dashboard)) return true;
 
   const dashboardRounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
   if (!dashboardRounds.length) return true;
@@ -18535,7 +18542,7 @@ function dashboardNeedsPersistedHistoryRepair(dashboard: LiveDashboardData, pers
   if (latestPersistedRound.id > latestDashboardRound.id) return true;
   if (roundHistoryKey(latestPersistedRound) !== roundHistoryKey(latestDashboardRound)) return true;
 
-  const dashboardUpdatedAtMs = Date.parse(readString(dashboard, "updatedAt") || "");
+  const dashboardUpdatedAtMs = Date.parse(readString(dashboard as unknown as Record<string, unknown>, "updatedAt") || "");
   const persistedUpdatedAtMs = Date.parse(getRoundRecordedAt(latestPersistedRound) || "");
   if (Number.isFinite(persistedUpdatedAtMs) && Number.isFinite(dashboardUpdatedAtMs)) {
     return persistedUpdatedAtMs > dashboardUpdatedAtMs + 1_000;
