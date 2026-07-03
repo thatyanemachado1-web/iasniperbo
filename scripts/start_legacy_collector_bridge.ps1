@@ -20,8 +20,7 @@ $ProjectEnvPath = Join-Path $ProjectRoot ".env"
 function Resolve-LegacyCollectorRoot($Root) {
   $candidates = @(
     $Root,
-    "C:\SNIPERBO",
-    "C:\Users\Usuario\OneDrive\Documentos\Codex\2026-05-24\voc-um-desenvolvedor-python-s-nior"
+    "C:\SNIPERBO"
   ) | Select-Object -Unique
 
   foreach ($candidate in $candidates) {

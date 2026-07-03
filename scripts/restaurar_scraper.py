@@ -1,4 +1,4 @@
-"""Restaura sniper_bo_scraper.py — validacao com ast (sem py_compile no Windows)."""
+"""Restaura sniper_bo_scraper.py dentro de C:\\SNIPERBO."""
 from __future__ import annotations
 
 import ast
@@ -6,21 +6,8 @@ import shutil
 import sys
 from pathlib import Path
 
-
-def codex_dir() -> Path:
-    codex = Path(
-        r"C:\Users\Usuario\OneDrive\Documentos\Codex\2026-05-24\voc-um-desenvolvedor-python-s-nior"
-    )
-    if codex.exists():
-        return codex
-    return (
-        Path.home()
-        / "OneDrive"
-        / "Documentos"
-        / "Codex"
-        / "2026-05-24"
-        / "voc-um-desenvolvedor-python-s-nior"
-    )
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sniperbo_paths import project_root
 
 
 def is_valid_python(path: Path) -> bool:
@@ -33,52 +20,30 @@ def is_valid_python(path: Path) -> bool:
         return False
 
 
-def backup(path: Path) -> None:
-    if path.is_file():
-        shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
-
-
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else r"C:\SNIPERBO").resolve()
-    codex = codex_dir()
+    root = project_root(sys.argv[1] if len(sys.argv) > 1 else None)
+    target = root / "sniper_bo_scraper.py"
 
-    targets = []
-    for path in (root / "sniper_bo_scraper.py", codex / "sniper_bo_scraper.py"):
-        if path.parent.exists():
-            targets.append(path)
-
-    candidates: list[Path] = []
-    seen: set[str] = set()
-    for base in (root, codex):
-        if not base.exists():
-            continue
-        for name in (
-            "sniper_bo_scraper.py.bak",
-            "sniper_bo_scraper.py.orig",
-            "sniper_bo_scraper.py.original",
-            "sniper_bo_scraper.py",
-        ):
-            path = base / name
-            key = str(path.resolve()).lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            candidates.append(path)
+    candidates = [
+        root / "sniper_bo_scraper.py.bak",
+        root / "sniper_bo_scraper.py.orig",
+        root / "sniper_bo_scraper.py.original",
+        root / "sniper_bo_scraper.py",
+    ]
 
     good = next((p for p in candidates if is_valid_python(p)), None)
     if not good:
-        print("ERRO: nenhuma copia valida de sniper_bo_scraper.py")
-        print("OneDrive > botao direito no arquivo > Historico de versoes > restaurar versao de ontem")
+        print("ERRO: sniper_bo_scraper.py quebrado em C:\\SNIPERBO")
+        print("Copie de novo o arquivo original para C:\\SNIPERBO\\sniper_bo_scraper.py")
         return 1
 
-    print(f"OK copia valida: {good}")
-    for target in targets:
-        if target.resolve() == good.resolve():
-            print(f"ja ok: {target}")
-            continue
-        backup(target)
+    if good.resolve() != target.resolve():
+        if target.is_file():
+            shutil.copy2(target, target.with_suffix(target.suffix + ".bak"))
         shutil.copy2(good, target)
-        print(f"restaurado: {target}")
+        print(f"restaurado de: {good}")
+    else:
+        print(f"ok: {target}")
 
     return 0
 
