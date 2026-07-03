@@ -36,7 +36,14 @@ export function PatternMinerMiniCard({
   className?: string;
 }) {
   const [flashPulse, setFlashPulse] = useState(false);
-  const confirmedAlert = lifecycle.activeSignal?.alert ?? snapshot.entryAlerts[0];
+  const lifecycleControlsEntry =
+    lifecycle.displayState === "entry_confirmed" ||
+    lifecycle.displayState === "waiting_result" ||
+    lifecycle.displayState === "result_green" ||
+    lifecycle.displayState === "result_red" ||
+    lifecycle.displayState === "result_tie";
+  const confirmedAlert = lifecycle.activeSignal?.alert ??
+    (lifecycleControlsEntry ? snapshot.entryAlerts[0] : undefined);
   const formingAlert = snapshot.formingAlerts[0];
   const activeStrategy =
     lifecycle.activeSignal?.strategy ??
@@ -45,7 +52,15 @@ export function PatternMinerMiniCard({
     formingAlert?.strategy ??
     snapshot.hotStrategies[0] ??
     snapshot.ranking[0];
-  const view = buildPatternView(snapshot, lifecycle, isUsingRealData, confirmedAlert, formingAlert, activeStrategy);
+  const view = buildPatternView(
+    snapshot,
+    lifecycle,
+    isUsingRealData,
+    confirmedAlert,
+    formingAlert,
+    activeStrategy,
+    lifecycleControlsEntry,
+  );
 
   useEffect(() => {
     if (lifecycle.resultFlash === "none") return;
@@ -145,6 +160,7 @@ function buildPatternView(
   confirmedAlert: PatternMinerSnapshot["entryAlerts"][number] | undefined,
   formingAlert: PatternMinerSnapshot["formingAlerts"][number] | undefined,
   activeStrategy: PatternMinerStrategy | undefined,
+  lifecycleControlsEntry: boolean,
 ) {
   if (!isUsingRealData) {
     return idleView("Coletando", "Aguardar", "Histórico real ainda não disponível");
@@ -153,7 +169,7 @@ function buildPatternView(
   const strategy =
     lifecycle.activeSignal?.strategy ??
     lifecycle.lastSignalResult?.strategy ??
-    confirmedAlert?.strategy ??
+    (lifecycleControlsEntry ? confirmedAlert?.strategy : undefined) ??
     formingAlert?.strategy ??
     activeStrategy;
   const assertiveness = strategy?.accuracy ?? strategy?.assertiveness;

@@ -92,4 +92,38 @@ const afterRed = resolvePatternIaLifecycle(incoming, [...sampleRounds, round(11,
 assert.equal(afterRed.displayState, "result_red");
 assert.equal(afterRed.activeSignal, null);
 
+resetPatternIaLifecycleForTests();
+resetPatternIaEntryHistoryForTests();
+
+const firstEntry = {
+  ...incoming,
+  entryAlerts: [incoming.entryAlerts[0]],
+};
+const secondEntry = {
+  ...incoming,
+  entryAlerts: [
+    {
+      ...incoming.entryAlerts[0],
+      id: "validated-test-2",
+      strategy: {
+        ...incoming.entryAlerts[0].strategy,
+        id: "pm-test-2",
+        signal_id: "pattern-ai:pm-test-2:10:P:2",
+        event_id: "validated-pm-test-2-10",
+        expectedResult: "P",
+        next_side: "P",
+      },
+    },
+  ],
+};
+
+resolvePatternIaLifecycle(firstEntry, sampleRounds, t0);
+const queuedWhileActive = resolvePatternIaLifecycle(
+  { entryAlerts: [...firstEntry.entryAlerts, ...secondEntry.entryAlerts], formingAlerts: [] },
+  sampleRounds,
+  t0 + 50,
+);
+assert.equal(queuedWhileActive.displayState, "entry_confirmed");
+assert.equal(queuedWhileActive.queueLength, 1);
+
 console.log("pattern-miner-lifecycle.test.mjs passed");

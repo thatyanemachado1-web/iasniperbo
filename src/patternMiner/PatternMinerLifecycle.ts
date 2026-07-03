@@ -119,19 +119,20 @@ function activateSignal(signal: PatternIaActiveSignal) {
 }
 
 function enqueueConfirmedSignals(snapshot: PatternMinerSnapshot) {
-  if (store.activeSignal || store.lastSignalResult) return;
-
   for (const alert of snapshot.entryAlerts) {
     if (!isConfirmedEntryAlert(alert)) continue;
     const signal = buildActiveSignal(alert);
     const key = signalKey(signal);
     if (store.completedSignalKeys.has(key)) continue;
     if (store.queue.some((item) => signalKey(item) === key)) continue;
-    if (store.activeSignal) {
-      store.queue.push(signal);
-    } else {
+    if (store.activeSignal && signalKey(store.activeSignal) === key) continue;
+
+    if (!store.activeSignal && !store.lastSignalResult) {
       activateSignal(signal);
+      return;
     }
+
+    store.queue.push(signal);
   }
 }
 
@@ -298,11 +299,9 @@ export function resolvePatternIaLifecycle(
 
   if (!store.lastSignalResult) {
     advanceActiveSignal(rounds, nowMs);
-    if (!store.activeSignal) {
-      enqueueConfirmedSignals(snapshot);
-      if (!store.activeSignal && !store.lastSignalResult) {
-        store.displayState = resolveMonitoringState(snapshot);
-      }
+    enqueueConfirmedSignals(snapshot);
+    if (!store.activeSignal && !store.lastSignalResult) {
+      store.displayState = resolveMonitoringState(snapshot);
     }
   }
 
