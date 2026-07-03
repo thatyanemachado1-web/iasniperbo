@@ -6,12 +6,13 @@ cd /d "%~dp0"
 echo Reiniciando coletor e publisher para sniperbo.com...
 echo.
 
-taskkill /F /IM python.exe /FI "WINDOWTITLE eq *official_dashboard_publisher*" 2>nul
 for /f "tokens=2" %%P in ('wmic process where "commandline like '%%official_dashboard_publisher.py%%'" get processid /format:list 2^>nul ^| find "="') do taskkill /F /PID %%P 2>nul
 for /f "tokens=2" %%P in ('wmic process where "commandline like '%%sniper_bo_scraper.py%%'" get processid /format:list 2^>nul ^| find "="') do taskkill /F /PID %%P 2>nul
+for /f "tokens=2" %%P in ('wmic process where "commandline like '%%watch_sniperbo_official.ps1%%'" get processid /format:list 2^>nul ^| find "="') do taskkill /F /PID %%P 2>nul
 
 timeout /t 2 /nobreak >nul
 
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\copiar_config_coletor.ps1" 2>nul
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\configurar_publisher_credenciais.ps1" -AdminEmail "gabrielmendespromove@gmail.com" -AdminPassword "AdminSniper2026!"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\ligar_sinais.ps1"
 

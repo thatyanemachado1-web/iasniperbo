@@ -67,6 +67,8 @@ if defined SCRAPER (
     echo   Ja esta em %DEST%
   )
   if exist "%SCRAPER%\..\config.json" copy /Y "%SCRAPER%\..\config.json" "%DEST%\config.json" >nul 2>nul
+  if not exist "%DEST%\config.json" if exist "%DEST%\Codex\2026-05-24\voc-um-desenvolvedor-python-s-nior\config.json" copy /Y "%DEST%\Codex\2026-05-24\voc-um-desenvolvedor-python-s-nior\config.json" "%DEST%\config.json" >nul
+  if not exist "%DEST%\config.json" if exist "%DEST%\scripts\copiar_config_coletor.ps1" powershell -NoProfile -ExecutionPolicy Bypass -File "%DEST%\scripts\copiar_config_coletor.ps1" >nul 2>nul
 ) else (
   echo.
   echo   *** ATENCAO ***
@@ -90,6 +92,7 @@ if exist "%DEST%\scripts\ligar_sinais.ps1" (
     "& '%DEST%\scripts\configurar_publisher_credenciais.ps1' -AdminEmail $env:SNIPER_SETUP_EMAIL -AdminPassword $env:SNIPER_SETUP_PASS;" ^
     "& '%DEST%\scripts\ligar_sinais.ps1'"
 ) else (
+  echo ERRO: scripts\ligar_sinais.ps1 nao encontrado.
 )
 
 echo.
