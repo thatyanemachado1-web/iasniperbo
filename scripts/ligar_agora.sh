@@ -35,6 +35,23 @@ EOF
 chmod 600 scripts/official_publisher.local.env
 echo "   .env OK"
 
+echo "   Testando senha no site (sem token)..."
+PUB_HTTP=$(curl -s --connect-timeout 5 --max-time 12 -o /tmp/sniper_pub_test.json -w "%{http_code}" \
+  -X POST "https://sniperbo.com/dashboard/publish" \
+  -H "Content-Type: application/json" \
+  -H "User-Agent: Mozilla/5.0 SNIPERBO-Official-Publisher/1.0" \
+  -H "x-sniper-admin-email: gabrielmendespromove@gmail.com" \
+  -H "x-sniper-admin-password: AdminSniper2026!" \
+  -d '{"probe":true}' || echo "000")
+if [[ "$PUB_HTTP" != "200" ]]; then
+  echo ""
+  echo "ERRO: senha rejeitada pelo site (HTTP $PUB_HTTP)."
+  echo "A senha correta e: AdminSniper2026!  (A maiusculo no Admin)"
+  echo "Corrija scripts/official_publisher.local.env e rode de novo."
+  exit 1
+fi
+echo "   senha OK (HTTP 200)"
+
 echo "[4/6] Python + dependências..."
 python3 -m venv .venv 2>/dev/null || true
 .venv/bin/pip install -q -r scripts/requirements-publisher.txt
