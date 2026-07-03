@@ -24,9 +24,9 @@ function Test-ConfigIsSuper($Path) {
   if (-not (Test-Path -LiteralPath $Path)) { return $false }
   try {
     $text = [System.IO.File]::ReadAllText($Path).ToLowerInvariant()
-    if ($text -match "77super|browser_profile_77super") { return $true }
-    if ($text -match "score\.|cassino.?score|casino.?score") { return $false }
-    return $true
+    if ($text -match "score\.bet|scorebet|cassinoscore|casino.?score|/score/|cassino score") { return $false }
+    if ($text -match "77super\.com") { return $true }
+    return $false
   } catch {
     return $false
   }
@@ -36,28 +36,8 @@ function Find-ConfigJson {
   $gerar = Join-Path $ScriptDir "gerar_config_super.ps1"
   if (Test-Path -LiteralPath $DestConfig) {
     if (Test-ConfigIsSuper $DestConfig) { return $DestConfig }
-    Write-Host "[AVISO] config.json atual NAO e da Casa Super. Recriando..." -ForegroundColor Yellow
+    Write-Host "[AVISO] config.json aponta para Score/outro cassino. Recriando Super..." -ForegroundColor Yellow
     Remove-Item -LiteralPath $DestConfig -Force -ErrorAction SilentlyContinue
-  }
-  $roots = @(
-    $ProjectRoot,
-    (Join-Path $ProjectRoot "Codex"),
-    "C:\Users\Usuario\OneDrive\Documentos\Codex",
-    "C:\Users\$env:USERNAME\OneDrive\Documentos\Codex",
-    "C:\Codex"
-  ) | Select-Object -Unique
-  foreach ($root in $roots) {
-    if (-not (Test-Path -LiteralPath $root)) { continue }
-    try {
-      $found = Get-ChildItem -LiteralPath $root -Filter "config.json" -Recurse -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch "\\node_modules\\" -and (Test-ConfigIsSuper $_.FullName) } |
-        Select-Object -First 1
-      if ($found) {
-        Copy-Item -LiteralPath $found.FullName -Destination $DestConfig -Force
-        Write-Host "[OK] config.json Casa Super copiado de:" $found.FullName -ForegroundColor Green
-        return $DestConfig
-      }
-    } catch { }
   }
   if (Test-Path -LiteralPath $gerar) {
     & $gerar
