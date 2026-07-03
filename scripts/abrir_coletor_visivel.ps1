@@ -44,20 +44,16 @@ $dataDir = Join-Path $Root "data"
 $dbPath = Join-Path $dataDir "bacbo.db"
 New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 
-if (Test-Path -LiteralPath $Config) {
+$fixConfigScript = Join-Path $Root "scripts\fix_collector_config.py"
+if (Test-Path -LiteralPath $fixConfigScript) {
+  & $pythonExe $fixConfigScript $Root
+} elseif (Test-Path -LiteralPath $Config) {
   try {
     $configRaw = Get-Content -LiteralPath $Config -Raw -Encoding UTF8
     $configObj = $configRaw | ConvertFrom-Json
-    $currentDb = [string]$configObj.database_path
-    $currentDbDir = if ($currentDb) { Split-Path -Parent $currentDb } else { "" }
-    $dbOk = $false
-    if ($currentDb -and (Test-Path -LiteralPath $currentDb)) { $dbOk = $true }
-    elseif ($currentDbDir -and (Test-Path -LiteralPath $currentDbDir)) { $dbOk = $true }
-    if (-not $dbOk) {
-      $configObj | Add-Member -NotePropertyName database_path -NotePropertyValue $dbPath -Force
-      $configObj | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Config -Encoding UTF8
-      Write-Host "config.json: database_path -> $dbPath" -ForegroundColor Yellow
-    }
+    $configObj | Add-Member -NotePropertyName database_path -NotePropertyValue $dbPath -Force
+    $configObj | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Config -Encoding UTF8
+    Write-Host "config.json: database_path -> $dbPath" -ForegroundColor Yellow
   } catch {
     Write-Host "AVISO: nao foi possivel ajustar config.json: $($_.Exception.Message)" -ForegroundColor Yellow
   }
