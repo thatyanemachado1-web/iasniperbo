@@ -334,6 +334,7 @@ export interface DashboardData {
   mockMode: boolean;
   rounds: Round[];
   updatedAt?: string;
+  feedStatus?: "live" | "stale" | "paused";
   bettingTiming?: BettingTiming | null;
   currentSignal: MainSignal;
   currentTieAlert: TieAlert;
