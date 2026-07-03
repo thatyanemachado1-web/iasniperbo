@@ -1,0 +1,26 @@
+SNIPERBO - COMO LIGAR OS SINAIS (passo a passo simples)
+========================================================
+
+1) Abra a pasta do projeto no Windows:
+   C:\SNIPERBO
+
+2) Procure o arquivo:
+   LIGAR_SINAIS.bat
+
+3) Clique DUAS VEZES nele.
+
+4) Uma janela preta vai abrir. Espere terminar (pode demorar 1-2 minutos).
+   - Na primeira vez o Chrome pode abrir sozinho (mesa Bac Bo).
+   - Nao feche a janela enquanto estiver rodando.
+
+5) Quando aparecer "Pronto!", abra no navegador:
+   https://sniperbo.com/app
+
+6) Se algo der errado, mande print ou copie o texto da janela preta.
+
+
+O que o arquivo faz sozinho:
+- Configura login admin
+- Liga coletor da mesa
+- Liga publisher para o site
+- Mantem tudo vivo em background
