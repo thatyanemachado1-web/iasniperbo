@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Teste REAL ponta a ponta na VPS — diagnostica e corrige 401 de vez.
+# Versao: 2026-07-03-reexec (curl|bash re-roda copia do git apos passo 1)
 set -euo pipefail
 
 ROOT="/opt/iasniperbo"
 ENV_FILE="$ROOT/scripts/official_publisher.local.env"
 REMOTE="https://sniperbo.com"
 LOCAL="http://127.0.0.1:8787"
+SCRIPT_SELF="$ROOT/scripts/teste_real_vps.sh"
 
 cd "$ROOT"
 
@@ -33,7 +35,16 @@ curl -fsSL -o scripts/start_official_signals_api.sh \
 curl -fsSL -o scripts/start_official_publisher.sh \
   "https://raw.githubusercontent.com/thatyanemachado1-web/iasniperbo/main/scripts/start_official_publisher.sh" \
   && pass "start_official_publisher.sh baixado" || warn "nao baixou start_official_publisher.sh"
+curl -fsSL -o scripts/teste_real_vps.sh \
+  "https://raw.githubusercontent.com/thatyanemachado1-web/iasniperbo/main/scripts/teste_real_vps.sh" \
+  && pass "teste_real_vps.sh baixado" || warn "nao baixou teste_real_vps.sh"
 chmod +x scripts/*.sh 2>/dev/null || true
+
+# curl|bash executa versao antiga em memoria — re-roda a copia atualizada do git.
+if [[ -z "${SNIPER_VPS_TEST_REEXEC:-}" && -f "$SCRIPT_SELF" ]]; then
+  export SNIPER_VPS_TEST_REEXEC=1
+  exec bash "$SCRIPT_SELF"
+fi
 
 # --- 2. .env ---
 echo ""
@@ -174,8 +185,8 @@ elif grep -q "ReadTimeout\|Publish failed\|timeout" /tmp/sniper_test_pub.log 2>/
   fail "Python: timeout ao publicar no site — VPS lenta, mas auth OK"
   grep -E "timeout|Timeout|Published|Publish" /tmp/sniper_test_pub.log | tail -5
 else
-  warn "Python nao publicou em 50s — veja log:"
-  tail -n 8 /tmp/sniper_test_pub.log 2>/dev/null || true
+  fail "Python nao publicou em 50s — veja log:"
+  tail -n 12 /tmp/sniper_test_pub.log 2>/dev/null || true
 fi
 
 # --- 7. Site ao vivo ---

@@ -383,7 +383,7 @@ def request_json_with_meta(
         if isinstance(timeout, tuple):
             request_timeout = timeout
         else:
-            request_timeout = (min(POST_TIMEOUT[0], float(timeout)), float(timeout))
+            request_timeout = (min(max(8.0, float(timeout) * 0.25), float(timeout)), float(timeout))
     else:
         request_timeout = timeout
     headers = {
