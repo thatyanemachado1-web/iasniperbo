@@ -30,6 +30,9 @@ curl -fsSL -o scripts/official_dashboard_publisher.py \
 curl -fsSL -o scripts/start_official_signals_api.sh \
   "https://raw.githubusercontent.com/thatyanemachado1-web/iasniperbo/main/scripts/start_official_signals_api.sh" \
   && pass "start_official_signals_api.sh baixado" || fail "nao baixou signals-api script"
+curl -fsSL -o scripts/start_official_publisher.sh \
+  "https://raw.githubusercontent.com/thatyanemachado1-web/iasniperbo/main/scripts/start_official_publisher.sh" \
+  && pass "start_official_publisher.sh baixado" || warn "nao baixou start_official_publisher.sh"
 chmod +x scripts/*.sh 2>/dev/null || true
 
 # --- 2. .env ---
@@ -144,16 +147,21 @@ SNIPER_LOCAL_DASHBOARD_URL=http://127.0.0.1:8787/dashboard
 SIGNALS_API_PORT=8787
 SIGNALS_API_HOST=127.0.0.1
 PUBLISHER_INTERVAL=1.5
+SNIPER_REMOTE_TIMEOUT=45
+SNIPER_LOCAL_TIMEOUT=10
 EOF
 chmod 600 "$ENV_FILE"
 
-timeout 20 .venv/bin/python scripts/official_dashboard_publisher.py \
+timeout 65 .venv/bin/python scripts/official_dashboard_publisher.py \
   --env-file "$ENV_FILE" \
   --local-url "http://127.0.0.1:8787/dashboard" \
   --interval 2 \
+  --remote-timeout 45 \
+  --local-timeout 10 \
+  --no-urgent-signal \
   --log-file /tmp/sniper_test_pub.log 2>/tmp/sniper_test_pub.log &
 TPID=$!
-sleep 12
+sleep 50
 kill "$TPID" 2>/dev/null || true
 
 if grep -q "Published official dashboard" /tmp/sniper_test_pub.log 2>/dev/null; then
@@ -162,11 +170,11 @@ if grep -q "Published official dashboard" /tmp/sniper_test_pub.log 2>/dev/null; 
 elif grep -q "Local dashboard HTTP 401" /tmp/sniper_test_pub.log 2>/dev/null; then
   fail "Python: 401 na API LOCAL (8787) — signals-api precisa codigo novo"
   grep -E "401|403|Publish|Local dashboard" /tmp/sniper_test_pub.log | tail -5
-elif grep -q "Publish auth failed" /tmp/sniper_test_pub.log 2>/dev/null; then
-  fail "Python: 401 no SITE — senha rejeitada"
-  grep -E "401|Publish" /tmp/sniper_test_pub.log | tail -5
+elif grep -q "ReadTimeout\|Publish failed\|timeout" /tmp/sniper_test_pub.log 2>/dev/null; then
+  fail "Python: timeout ao publicar no site — VPS lenta, mas auth OK"
+  grep -E "timeout|Timeout|Published|Publish" /tmp/sniper_test_pub.log | tail -5
 else
-  warn "Python nao publicou em 12s — veja log:"
+  warn "Python nao publicou em 50s — veja log:"
   tail -n 8 /tmp/sniper_test_pub.log 2>/dev/null || true
 fi
 

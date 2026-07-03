@@ -2236,7 +2236,11 @@ def main() -> int:
         except (URLError, TimeoutError, OSError, RuntimeError) as exc:
             logging.warning("Publish failed: %s", exc)
             full_publish_failures += 1
-            full_backoff_seconds = min(180.0, max(60.0, 30.0 * full_publish_failures))
+            exc_text = str(exc).casefold()
+            if "timeout" in exc_text or "timed out" in exc_text:
+                full_backoff_seconds = min(30.0, max(5.0, 5.0 * full_publish_failures))
+            else:
+                full_backoff_seconds = min(180.0, max(60.0, 30.0 * full_publish_failures))
             full_publish_backoff_until = time.monotonic() + full_backoff_seconds
             logging.warning("Full dashboard publish backoff for %.1fs; urgent signal remains active.", full_backoff_seconds)
             # Do not mark failed payloads as published; next loop must send the latest state.
