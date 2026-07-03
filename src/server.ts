@@ -18568,7 +18568,12 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
 }
 
 async function resolveDashboardForRead(env: unknown): Promise<LiveDashboardData> {
-  const durableState = await loadDurableLiveState(env);
+  let durableState = await loadDurableLiveState(env);
+  if (!durableState) {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    durableState = await loadDurableLiveState(env);
+  }
+
   const durableDashboard = readRecord(readRecord(durableState).dashboard);
   if (hasRecordFields(durableDashboard)) {
     const persisted = restoreDashboardData(durableDashboard);
@@ -18576,14 +18581,7 @@ async function resolveDashboardForRead(env: unknown): Promise<LiveDashboardData>
     return persisted;
   }
 
-  const cacheState = await loadLiveStateCache();
-  const cacheDashboard = readRecord(readRecord(cacheState).dashboard);
-  if (hasRecordFields(cacheDashboard)) {
-    const persisted = restoreDashboardData(cacheDashboard);
-    liveDashboardData = persisted;
-    return persisted;
-  }
-
+  // Edge cache is per-datacenter and caused flip-flopping stale signals — do not use it for reads.
   return liveDashboardData;
 }
 
