@@ -471,7 +471,7 @@ const DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES: Record<ValidatorTelegra
   ai_patterns: `\u2705 <b>{{result}}</b>\n\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   paying_numbers: `\u2705 <b>{{result}}</b>\n\n\u{1F48E} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   surf_alert: `\u2705 <b>{{result}}</b>\n\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
-  ties_only: `\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>Empate confirmado</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
+  ties_only: `\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>{{tieResult}}</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   validator: `\u2705 <b>{{result}}</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
 };
 const DEFAULT_VALIDATOR_TELEGRAM_MODULE_ANALYZING_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
@@ -3339,8 +3339,13 @@ async function handleNeuralCalendarRequest(request: Request, url: URL, env: unkn
     return json({ error: "Calendario Neural disponivel apenas para usuarios premium." }, 403);
   }
 
-  await hydrateNeuralCalendarStatsFromTables(env);
-  await ensureEngineCalendarAggregatesAvailable(env);
+  await withTimeout(
+    hydrateNeuralCalendarStatsFromTables(env),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar agregados do Calendario Neural",
+    undefined,
+  );
+  kickOffEngineCalendarAggregatesBackfill(env);
 
   const now = saoPauloDateParts();
   const requestedYear = clampCalendarYear(url.searchParams.get("year"), now.year);
@@ -4424,6 +4429,14 @@ async function ensureEngineCalendarAggregatesAvailable(env: unknown) {
       engineCalendarAutoBackfillPromise = null;
     });
   await engineCalendarAutoBackfillPromise;
+}
+
+function kickOffEngineCalendarAggregatesBackfill(env: unknown) {
+  if (!getSupabasePersistenceConfig(env)) return;
+
+  void ensureEngineCalendarAggregatesAvailable(env).catch((error) => {
+    console.warn("Backfill automatico do Calendario Neural falhou em segundo plano.", error);
+  });
 }
 
 function hasEngineCalendarAggregateRows() {
@@ -7228,13 +7241,14 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     const body = readRecord(await request.json().catch(() => ({})));
     const patternId = readString(body, "patternId");
     const detectedRoundId = Math.floor(Number(body.detectedRoundId) || 0);
-    const incomingPattern = normalizeServerSavedPattern(body.pattern, userId);
-    let pattern = liveValidatorPatterns.find((item) => item.userId === userId && item.id === patternId);
-    if (!pattern && incomingPattern && incomingPattern.id === patternId) {
-      pattern = incomingPattern;
-      liveValidatorPatterns = upsertValidatorPattern(incomingPattern);
-      await persistValidatorPattern(env, incomingPattern);
+    if (Array.isArray(liveDashboardData.rounds) && liveDashboardData.rounds.length) {
+      liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, liveDashboardData.rounds);
     }
+    const savedUserPatterns = liveValidatorPatterns.filter(
+      (item) => item.userId === userId && !isValidatorPatternDeleted(item),
+    );
+    const activeUserPatterns = validatorDispatchableSavedPatternsForUser(userId);
+    let pattern = activeUserPatterns.find((item) => item.id === patternId) || null;
     console.info(
       JSON.stringify({
         event: "[VALIDATOR_DISPATCH] live_hit_received",
@@ -7242,10 +7256,20 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
         patternId,
         detectedRoundId,
         patternFound: Boolean(pattern),
-        incomingPattern: Boolean(incomingPattern),
+        savedPatterns: savedUserPatterns.length,
+        activeSavedPatterns: activeUserPatterns.length,
         channelsForUser: liveValidatorChannels.filter((channel) => channel.userId === userId).length,
       }),
     );
+    if (!activeUserPatterns.length) {
+      logValidatorSkippedNoSavedPatterns("live_hit", {
+        user: maskTelemetryUserId(userId),
+        patternId,
+        detectedRoundId,
+        savedPatterns: savedUserPatterns.length,
+      });
+      return json({ error: "Nenhum padrao salvo ativo para enviar no Validador." }, 400);
+    }
     if (!pattern) {
       console.warn(
         JSON.stringify({
@@ -7253,14 +7277,22 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
           user: maskTelemetryUserId(userId),
           patternId,
           detectedRoundId,
-          reason: "pattern_not_found",
+          reason: "saved_pattern_not_found_or_inactive",
         }),
       );
-      return json({ error: "Padrao nao encontrado no servidor. Salve a estrategia novamente." }, 404);
+      return json({ error: "Padrao salvo ativo nao encontrado para este usuario." }, 404);
     }
-    if (!pattern.isActive) return json({ error: "Padrao inativo." }, 400);
-    if (!validatorPatternAllowsTelegramForward(pattern)) {
-      return json({ error: "Padrao esta em monitorar/desativado." }, 400);
+    if (!validatorSavedPatternMatchesRoundHistory(pattern, detectedRoundId)) {
+      console.warn(
+        JSON.stringify({
+          event: "[VALIDATOR_DISPATCH] blocked",
+          user: maskTelemetryUserId(userId),
+          patternId: pattern.id,
+          detectedRoundId,
+          reason: "pattern_match_not_real",
+        }),
+      );
+      return json({ error: "Padrao salvo nao bate com o historico real atual." }, 409);
     }
 
     const channel = findValidatorTelegramChannelForPattern(pattern);
@@ -7924,19 +7956,20 @@ async function sendTelegramMessage({
     disable_web_page_preview: true,
   };
 
+  const fallbackButtonUrl = normalizeTelegramButtonUrl(buttonUrl);
   const inlineButtons = Array.isArray(buttons)
     ? buttons
         .map((button) => ({
           text: String(button.label || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
-          url: normalizeTelegramButtonUrl(button.url),
+          url: normalizeTelegramButtonUrl(button.url) || fallbackButtonUrl,
         }))
         .filter((button) => button.text && button.url)
         .slice(0, MAX_VALIDATOR_TELEGRAM_BUTTONS)
     : [];
-  if (!inlineButtons.length && buttonUrl) {
+  if (!inlineButtons.length && fallbackButtonUrl) {
     inlineButtons.push({
       text: buttonLabel.slice(0, 64) || "Abrir",
-      url: buttonUrl,
+      url: fallbackButtonUrl,
     });
   }
 
@@ -8104,8 +8137,13 @@ function normalizeTelegramMessage(value: string) {
 function normalizeTelegramButtonUrl(value: string) {
   const clean = value.trim();
   if (!clean) return "";
+  const normalized = clean.startsWith("@")
+    ? `https://t.me/${clean.slice(1)}`
+    : /^(t\.me|telegram\.me)\//i.test(clean)
+      ? `https://${clean}`
+      : clean;
   try {
-    const url = new URL(clean);
+    const url = new URL(normalized);
     if (url.protocol !== "http:" && url.protocol !== "https:") return "";
     return url.toString();
   } catch {
@@ -8369,7 +8407,7 @@ function normalizeValidatorTelegramButtons(
     return {
       enabled: Object.prototype.hasOwnProperty.call(record, "enabled") ? readBooleanField(record, "enabled") : true,
       label: (readString(record, "label") || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
-      url: readString(record, "url"),
+      url: normalizeTelegramButtonUrl(readString(record, "url")),
     };
   });
 
@@ -8384,7 +8422,7 @@ function normalizeValidatorTelegramButtons(
           ? readBooleanField(legacyRecord, "buttonEnabled")
           : true,
         label: (readString(legacyRecord, "buttonLabel") || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
-        url: readString(legacyRecord, "buttonUrl"),
+        url: normalizeTelegramButtonUrl(readString(legacyRecord, "buttonUrl")),
       });
     } else {
       normalized.push(...fallback.map((button) => ({ ...button })));
@@ -10113,6 +10151,15 @@ async function processValidatorLiveMonitoring(env: unknown, options: ValidatorMo
     surfAlert: Boolean(readRecord(liveDashboardData.currentSurfAlert).surf_alert),
     dashboardUpdatedAt: liveDashboardData.updatedAt || "",
   });
+  const dispatchableValidatorPatterns = validatorDispatchableSavedPatterns();
+  if (!dispatchableValidatorPatterns.length) {
+    logValidatorSkippedNoSavedPatterns("monitor", {
+      trigger: options.trigger || "unknown",
+      savedPatterns: liveValidatorPatterns.filter((pattern) => !isValidatorPatternDeleted(pattern)).length,
+      activeSavedPatterns: 0,
+      roundId: latestRound?.id ?? null,
+    });
+  }
 
   for (const probe of cardProbes) {
     logTelegramAutoV2Event(probe.confirmed ? "card detectado" : "card nao confirmado", {
@@ -10295,6 +10342,16 @@ async function processTelegramV2OnlyMonitoring(env: unknown, options: ValidatorM
     "carregar canais para telegram v2",
     undefined,
   );
+  const dispatchableValidatorPatterns = validatorDispatchableSavedPatterns();
+  if (!dispatchableValidatorPatterns.length) {
+    logValidatorSkippedNoSavedPatterns("v2_only", {
+      trigger: options.trigger || "unknown",
+      savedPatterns: liveValidatorPatterns.filter((pattern) => !isValidatorPatternDeleted(pattern)).length,
+      activeSavedPatterns: 0,
+      confirmedModules: freshCards.map(({ card }) => card.moduleKey),
+      roundId: latestRound.id,
+    });
+  }
 
   const taskCountsByModule = new Map<ValidatorTelegramModuleKey, number>();
   const successfulSendsByModule = new Map<ValidatorTelegramModuleKey, number>();
@@ -10360,6 +10417,47 @@ async function sendValidatorEntryTelegramNotification(
   matchedAtMs: number,
   options: ValidatorMonitorOptions,
 ) {
+  const savedPattern = liveValidatorPatterns.find((item) => item.userId === pattern.userId && item.id === pattern.id);
+  if (!savedPattern || !validatorPatternCanDispatchTelegram(savedPattern)) {
+    logValidatorSkippedNoSavedPatterns("send_entry", {
+      user: maskTelemetryUserId(pattern.userId),
+      patternId: pattern.id,
+      channelId: channel.id,
+      roundId,
+      savedPatterns: liveValidatorPatterns.filter((item) => item.userId === pattern.userId && !isValidatorPatternDeleted(item)).length,
+    });
+    return false;
+  }
+  pattern = savedPattern;
+  const linkedChannel = findValidatorTelegramChannelForPattern(pattern);
+  if (!linkedChannel || linkedChannel.id !== channel.id) {
+    console.warn(
+      JSON.stringify({
+        event: "[VALIDATOR_DISPATCH] blocked",
+        user: maskTelemetryUserId(pattern.userId),
+        patternId: pattern.id,
+        channelId: channel.id,
+        expectedChannelId: pattern.telegramChannelId,
+        roundId,
+        reason: "channel_not_bound_to_saved_pattern",
+      }),
+    );
+    return false;
+  }
+  channel = linkedChannel;
+  if (!validatorSavedPatternMatchesRoundHistory(pattern, roundId)) {
+    console.warn(
+      JSON.stringify({
+        event: "[VALIDATOR_DISPATCH] blocked",
+        user: maskTelemetryUserId(pattern.userId),
+        patternId: pattern.id,
+        channelId: channel.id,
+        roundId,
+        reason: "pattern_match_not_real",
+      }),
+    );
+    return false;
+  }
   const roundReceivedAtMs = options.roundReceivedAtMs || matchedAtMs;
   const telegramSendStartedAtMs = Date.now();
   const message = buildServerValidatorTelegramMessage(pattern, channel);
@@ -11396,7 +11494,11 @@ async function sendValidatorTelegramResultNotification(
         ? moduleConfig.tieTemplate
         : moduleConfig.greenTemplate;
   const sentAt = new Date().toISOString();
-  const message = renderValidatorTelegramTemplate(template, variables);
+  const message = decorateValidatorTieResultMessage(
+    moduleKey,
+    renderValidatorTelegramTemplate(template, variables),
+    variables.tieMultiplier,
+  );
   const result = isCloudValidatorTelegramChannel(channel)
     ? await sendCloudValidatorChannelPreview(
         env,
@@ -11490,7 +11592,22 @@ function validatorTelegramResultVariables(
     percentage: readString(payloadJson, "percentage"),
     confidence: readString(payloadJson, "confidence"),
     tieMultiplier: outcome.tieMultiplier,
+    tieResult: formatValidatorTieConfirmedLabel(outcome.label, outcome.tieMultiplier),
   };
+}
+
+function formatValidatorTieConfirmedLabel(result: string, tieMultiplier: string) {
+  const label = tieMultiplier ? `Empate ${tieMultiplier}` : result || "Empate";
+  return /confirmado/i.test(label) ? label : `${label} confirmado`;
+}
+
+function decorateValidatorTieResultMessage(
+  moduleKey: ValidatorTelegramModuleKey,
+  message: string,
+  tieMultiplier: string,
+) {
+  if (moduleKey !== "ties_only" || !tieMultiplier) return message;
+  return message.replace(/\bEmpate confirmado\b/gi, `Empate ${tieMultiplier} confirmado`);
 }
 
 function validatorTelegramPayloadVariables(
@@ -11941,14 +12058,58 @@ function validatorNotificationAlreadySent(key: string) {
 }
 
 function validatorPatternAllowsTelegramForward(pattern: SavedValidatorPattern) {
-  return pattern.destination !== "disabled" && pattern.destination !== "monitor";
+  return pattern.destination === "telegram" || pattern.destination === "site_telegram";
+}
+
+function validatorPatternCanDispatchTelegram(pattern: SavedValidatorPattern) {
+  return (
+    !isValidatorPatternDeleted(pattern) &&
+    pattern.isActive &&
+    validatorPatternAllowsTelegramForward(pattern) &&
+    pattern.pattern.length > 0
+  );
+}
+
+function validatorDispatchableSavedPatternsForUser(userId: string) {
+  const normalizedUserId = normalizeValidatorUserId(userId);
+  return liveValidatorPatterns.filter(
+    (pattern) => pattern.userId === normalizedUserId && validatorPatternCanDispatchTelegram(pattern),
+  );
+}
+
+function validatorDispatchableSavedPatterns() {
+  return liveValidatorPatterns.filter(validatorPatternCanDispatchTelegram);
+}
+
+function logValidatorSkippedNoSavedPatterns(context: string, payload: Record<string, unknown> = {}) {
+  console.info(
+    JSON.stringify({
+      event: "VALIDATOR_SKIPPED_NO_SAVED_PATTERNS",
+      context,
+      ...payload,
+    }),
+  );
+}
+
+function validatorSavedPatternMatchesRoundHistory(pattern: SavedValidatorPattern, detectedRoundId = 0) {
+  if (!pattern.pattern.length || liveValidatorRoundHistory.length < pattern.pattern.length) return false;
+  let endIndex = liveValidatorRoundHistory.length;
+  const targetRoundId = Math.floor(Number(detectedRoundId) || 0);
+  if (targetRoundId) {
+    const targetIndex = liveValidatorRoundHistory.findIndex((round) => Math.floor(Number(round.id) || 0) === targetRoundId);
+    if (targetIndex < 0) return false;
+    endIndex = targetIndex + 1;
+  }
+  const matchedRounds = liveValidatorRoundHistory.slice(Math.max(0, endIndex - pattern.pattern.length), endIndex);
+  return matchesServerValidatorPattern(matchedRounds, pattern.pattern);
 }
 
 function findValidatorTelegramChannelForPattern(pattern: SavedValidatorPattern) {
   const userChannels = liveValidatorChannels.filter((channel) => channel.userId === pattern.userId);
+  if (!pattern.telegramChannelId) return null;
   const preferred = userChannels.find((channel) => channel.id === pattern.telegramChannelId);
   if (isUsableValidatorTelegramChannel(preferred)) return preferred;
-  return userChannels.find(isUsableValidatorTelegramChannel) || null;
+  return null;
 }
 
 function isUsableValidatorTelegramChannel(channel?: ValidatorNotificationChannel) {

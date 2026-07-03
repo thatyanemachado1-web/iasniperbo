@@ -35,9 +35,14 @@ else:
 
 USER_AGENT = "Mozilla/5.0 SNIPERBO-Official-Publisher/1.0"
 POST_TIMEOUT = (3.0, 5.0)
+URGENT_SIGNAL_TIMEOUT = 8.0
 UPLOAD_WARNING_MS = 2000.0
 DIRECT_TELEGRAM_TARGET_MS = 300.0
+DIRECT_TELEGRAM_TIMEOUT = (1.0, 8.0)
+DIRECT_TELEGRAM_BUTTON_URL = "https://sniperbo.com/app"
 DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 1.2
+DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_ROUNDS = 4
+DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_SECONDS = 120.0
 DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS = {
     "duplicate_signal",
     "entry_not_allowed",
@@ -543,7 +548,7 @@ def publish_urgent_signal(
         token=token,
         extra_headers=publisher_headers,
         payload=build_urgent_signal_payload(local_payload),
-        timeout=min(args.remote_timeout, 1.2),
+        timeout=min(float(args.remote_timeout), URGENT_SIGNAL_TIMEOUT),
     )
     return (body if isinstance(body, dict) else {}, status_code, upload_ms)
 
@@ -560,13 +565,15 @@ def direct_telegram_entry(value: Any) -> str:
 
 
 def direct_confirmed_entry_status(value: Any) -> bool:
-    text = str(value or "").strip().casefold().replace("_", " ")
+    text = direct_normalized_text(value)
     return (
         "entrada confirmada" in text
+        or "entrada ativa" in text
         or "confirmad" in text
         or "active" in text
         or "ativo" in text
         or "validado" in text
+        or "alerta" in text
     )
 
 
@@ -596,11 +603,11 @@ def direct_visual_paying_status(reading: dict[str, Any]) -> str:
 
 def direct_telegram_entry_label(entry: str) -> str:
     if entry == "BANKER":
-        return "🔴 BANKER"
+        return "\U0001F534 BANKER"
     if entry == "PLAYER":
-        return "🔵 PLAYER"
+        return "\U0001F535 PLAYER"
     if entry == "TIE":
-        return "🟡 TIE"
+        return "\U0001F7E1 TIE"
     return "Automatico"
 
 
@@ -612,11 +619,11 @@ def direct_telegram_score_label(entry: str, number: Any) -> str:
     if not digits:
         return decorate_direct_telegram_message(text)
     if entry == "BANKER":
-        return f"🔴 B{digits}"
+        return f"\U0001F534 B{digits}"
     if entry == "PLAYER":
-        return f"🔵 P{digits}"
+        return f"\U0001F535 P{digits}"
     if entry == "TIE":
-        return f"🟡 T{digits}"
+        return f"\U0001F7E1 T{digits}"
     return decorate_direct_telegram_message(text)
 
 
@@ -633,11 +640,11 @@ def decorate_direct_telegram_message(message: str) -> str:
         if any(icon in prefix for icon in ("🔴", "🔵", "🟡")):
             return match.group(0)
         if side == "B":
-            return f"{prefix}🔴 B{number}"
+            return f"{prefix}\U0001F534 B{number}"
         if side == "P":
-            return f"{prefix}🔵 P{number}"
+            return f"{prefix}\U0001F535 P{number}"
         if side == "T":
-            return f"{prefix}🟡 T{number}"
+            return f"{prefix}\U0001F7E1 T{number}"
         return match.group(0)
 
     return re.sub(r"(^|[^\w🔴🔵🟡])([BPT])\s*([2-9]|1[0-2])\b", replace_score, text, flags=re.IGNORECASE)
@@ -667,6 +674,27 @@ def direct_engine_state(value: Any) -> str:
     if not isinstance(value, dict):
         return ""
     return str(value.get("state") or value.get("status") or "").strip().upper()
+
+
+def direct_normalized_text(value: Any) -> str:
+    text = str(value or "").strip().casefold()
+    replacements = {
+        "á": "a",
+        "à": "a",
+        "ã": "a",
+        "â": "a",
+        "é": "e",
+        "ê": "e",
+        "í": "i",
+        "ó": "o",
+        "ô": "o",
+        "õ": "o",
+        "ú": "u",
+        "ç": "c",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text.replace("_", " ")
 
 
 def direct_status_is_open(status: str) -> bool:
@@ -730,6 +758,18 @@ def build_direct_telegram_message(module_key: str, entry: str, variables: dict[s
             f"🎯 <b>Entrada:</b> {entry_label}",
             "🛡️ <b>Cobertura:</b> até G4",
             f"📊 <b>Nível:</b> {variables.get('level') or 'Ativo'}",
+        ])
+    if module_key == "validator":
+        pattern = str(variables.get("pattern") or "Padrao validado").strip()
+        percentage = str(variables.get("percentage") or variables.get("confidence") or "--").strip()
+        return "\n".join([
+            "🤖 <b>PADRAO VALIDADOR</b>",
+            "",
+            f"🎲 <b>Mesa:</b> {variables.get('table') or 'Bac Bo'}",
+            f"🧩 <b>Padrao:</b> {pattern}",
+            f"🎯 <b>Entrada:</b> {entry_label}",
+            "🛡️ <b>Protecao:</b> G1",
+            f"📊 <b>Assertividade:</b> {percentage}",
         ])
     return "\n".join([
         "🎯 <b>ENTRADA CONFIRMADA</b>",
@@ -1175,10 +1215,27 @@ def direct_first_ai_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any
     return None
 
 
-def direct_module_has_pending(pending_items: list[dict[str, Any]], module_key: str) -> bool:
+def direct_pending_is_stale(pending: dict[str, Any], current_round_id: int) -> bool:
+    if not current_round_id:
+        return False
+    try:
+        pending_round_id = int(float(str(pending.get("roundId") or "0")))
+    except (TypeError, ValueError):
+        return False
+    if not pending_round_id:
+        return False
+    max_gale = int(pending.get("maxGale") or 1)
+    return current_round_id - pending_round_id > max(3, max_gale + 2)
+
+
+def direct_module_has_pending(pending_items: list[dict[str, Any]], module_key: str, current_round_id: int = 0) -> bool:
     if not module_key:
         return False
-    return any(str(item.get("moduleKey") or "") == module_key for item in pending_items)
+    return any(
+        str(item.get("moduleKey") or "") == module_key
+        and not direct_pending_is_stale(item, current_round_id)
+        for item in pending_items
+    )
 
 
 def direct_pattern_status(stats: dict[str, Any], assertiveness: float, has_sample: bool) -> str:
@@ -1349,6 +1406,112 @@ def direct_ai_pattern_from_engine(payload: dict[str, Any], round_id: int) -> dic
     }
 
 
+def direct_compact_family_value(value: Any) -> str:
+    text = direct_normalized_text(value)
+    text = re.sub(r"\s*>\s*", ">", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def direct_signal_family_key(signal: dict[str, Any]) -> str:
+    if not isinstance(signal, dict):
+        return ""
+    module_key = str(signal.get("moduleKey") or "")
+    variables = signal.get("variables") if isinstance(signal.get("variables"), dict) else {}
+    entry = direct_telegram_entry(signal.get("entry") or variables.get("entry"))
+    if module_key in {"ai_patterns", "validator"}:
+        raw_pattern = variables.get("pattern") or signal.get("pattern")
+        sequence = variables.get("sequence")
+        if not raw_pattern and isinstance(sequence, list):
+            raw_pattern = " > ".join(str(item) for item in sequence if item)
+        pattern = direct_compact_family_value(raw_pattern)
+        if not entry or not pattern:
+            return ""
+        return f"pattern:{entry}:{pattern}"
+    if module_key == "surf_alert":
+        marker = direct_compact_family_value(variables.get("risk") or variables.get("status") or signal.get("signalKey"))
+        if not entry or not marker:
+            return ""
+        return f"surf:{entry}:{marker}"
+    if module_key == "ties_only":
+        level = direct_compact_family_value(variables.get("level") or "tie")
+        return f"ties:TIE:{level or 'tie'}"
+    return ""
+
+
+def direct_signal_family_cooldown(
+    signal: dict[str, Any],
+    cooldowns: dict[str, dict[str, Any]],
+    now: float,
+) -> tuple[str, dict[str, Any] | None]:
+    family_key = direct_signal_family_key(signal)
+    if not family_key:
+        return "", None
+    cooldown = cooldowns.get(family_key)
+    if not cooldown:
+        return family_key, None
+    try:
+        current_round_id = int(float(str(signal.get("roundId") or "0")))
+    except (TypeError, ValueError):
+        current_round_id = 0
+    try:
+        until_round_id = int(float(str(cooldown.get("untilRoundId") or "0")))
+    except (TypeError, ValueError):
+        until_round_id = 0
+    try:
+        until_time = float(cooldown.get("untilTime") or 0.0)
+    except (TypeError, ValueError):
+        until_time = 0.0
+    round_blocked = bool(current_round_id and until_round_id and current_round_id <= until_round_id)
+    time_blocked = bool(until_time and now < until_time)
+    return family_key, cooldown if round_blocked or time_blocked else None
+
+
+def direct_register_signal_family_cooldown(
+    cooldowns: dict[str, dict[str, Any]],
+    signal: dict[str, Any],
+    outcome_round_id: Any,
+    now: float,
+) -> str:
+    family_key = direct_signal_family_key(signal)
+    if not family_key:
+        return ""
+    try:
+        resolved_round_id = int(float(str(outcome_round_id or "0")))
+    except (TypeError, ValueError):
+        resolved_round_id = 0
+    cooldowns[family_key] = {
+        "untilRoundId": resolved_round_id + DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_ROUNDS if resolved_round_id else 0,
+        "untilTime": now + DIRECT_TELEGRAM_RESULT_FAMILY_COOLDOWN_SECONDS,
+        "moduleKey": signal.get("moduleKey"),
+        "entry": signal.get("entry"),
+    }
+    return family_key
+
+
+def direct_prune_signal_family_cooldowns(
+    cooldowns: dict[str, dict[str, Any]],
+    current_round_id: int,
+    now: float,
+) -> None:
+    for family_key, cooldown in list(cooldowns.items()):
+        try:
+            until_round_id = int(float(str(cooldown.get("untilRoundId") or "0")))
+        except (TypeError, ValueError):
+            until_round_id = 0
+        try:
+            until_time = float(cooldown.get("untilTime") or 0.0)
+        except (TypeError, ValueError):
+            until_time = 0.0
+        round_active = bool(current_round_id and until_round_id and current_round_id <= until_round_id)
+        time_active = bool(until_time and now < until_time)
+        if not round_active and not time_active:
+            cooldowns.pop(family_key, None)
+    if len(cooldowns) > 500:
+        for family_key in list(cooldowns)[: len(cooldowns) - 250]:
+            cooldowns.pop(family_key, None)
+
+
 def direct_ai_patterns_from_alerts(payload: dict[str, Any], round_id: int) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for alert in pattern_entry_alerts(payload):
@@ -1432,21 +1595,41 @@ def direct_telegram_signals(payload: dict[str, Any], pattern_round_bank: list[di
             "message": build_direct_telegram_message("paying_numbers", entry, variables),
         })
 
-    ai_candidate = direct_first_ai_candidate(direct_ai_patterns_from_alerts(payload, round_id))
+    ai_candidate = (
+        direct_first_ai_candidate(direct_ai_patterns_from_alerts(payload, round_id))
+        or direct_ai_pattern_from_engine(payload, round_id)
+        or direct_first_ai_candidate(direct_ai_patterns_from_round_bank(pattern_round_bank or [], round_id))
+    )
     if ai_candidate:
         candidates.append(ai_candidate)
 
     surf = payload.get("currentSurfAlert") if isinstance(payload.get("currentSurfAlert"), dict) else {}
     surf_side = direct_telegram_entry(
-        surf.get("surf_prediction_side") or surf.get("surf_side") or surf.get("side") or surf.get("entry")
+        surf.get("surf_prediction_side")
+        or surf.get("predictionSide")
+        or surf.get("expectedSide")
+        or surf.get("entrySide")
+        or surf.get("surf_side")
+        or surf.get("side")
+        or surf.get("entry")
     )
-    surf_status = str(surf.get("surf_status") or surf.get("status") or surf.get("phase") or "").strip().casefold()
+    surf_status = direct_normalized_text(
+        surf.get("surf_prediction_status")
+        or surf.get("predictionStatus")
+        or surf.get("surf_status")
+        or surf.get("status")
+        or surf.get("phase")
+        or surf.get("surf_phase")
+        or ""
+    )
     surf_risk = surf.get("surf_break_risk") or surf.get("surf_risk") or surf.get("risk") or ""
-    if surf_side and (surf_status in {"active", "ativo", "confirmado", "confirmed"} or direct_float(surf_risk) >= 70):
-        variables = {"risk": surf_risk, "table": "Bac Bo"}
+    surf_confidence = surf.get("surf_prediction_confidence") or surf.get("surf_confidence") or surf.get("confidence") or ""
+    surf_active = bool(surf.get("surf_alert")) or direct_confirmed_entry_status(surf_status) or direct_float(surf_risk) >= 70
+    if surf_side and surf_active:
+        variables = {"risk": surf_risk or surf_confidence or surf_status, "table": "Bac Bo"}
         candidates.append({
             "moduleKey": "surf_alert",
-            "signalKey": f"publisher:surf:{round_id}:{surf_side}:{surf_status}:{surf_risk}",
+            "signalKey": f"publisher:surf:{round_id}:{surf_side}:{surf_status}:{surf_risk}:{surf_confidence}",
             "roundId": round_id,
             "entry": surf_side,
             "variables": variables,
@@ -1454,8 +1637,8 @@ def direct_telegram_signals(payload: dict[str, Any], pattern_round_bank: list[di
         })
 
     tie = payload.get("currentTieAlert") if isinstance(payload.get("currentTieAlert"), dict) else {}
-    tie_status = str(tie.get("status") or "").strip().casefold()
-    if tie_status == "active":
+    tie_status = direct_normalized_text(tie.get("status") or tie.get("phase") or tie.get("state") or "")
+    if tie_status in {"active", "ativo"} or direct_confirmed_entry_status(tie_status):
         level = str(tie.get("level") or tie.get("nivel") or "Ativo")
         variables = {"level": level, "table": "Bac Bo"}
         candidates.append({
@@ -1523,8 +1706,9 @@ def publish_direct_telegram_signal(
             **({"result": signal["result"]} if signal.get("result") else {}),
             **({"protection": signal["protection"]} if signal.get("protection") else {}),
             "buttonLabel": "Abrir Sniper Bo IA",
+            "buttonUrl": DIRECT_TELEGRAM_BUTTON_URL,
         },
-        timeout=(0.25, 1.0),
+        timeout=DIRECT_TELEGRAM_TIMEOUT,
     )
     sent = body.get("sent") if isinstance(body, dict) else []
     blocked = body.get("blocked") if isinstance(body, dict) else []
@@ -1581,8 +1765,8 @@ def direct_tie_multiplier(round_item: dict[str, Any]) -> str:
         return f"{int(explicit)}x"
     if direct_round_side(round_item) != "TIE":
         return ""
-    banker = direct_float(round_item.get("bankerScore") or round_item.get("banker_score"))
-    player = direct_float(round_item.get("playerScore") or round_item.get("player_score"))
+    banker = direct_float(round_item.get("bankerScore") or round_item.get("banker_score") or round_item.get("banker"))
+    player = direct_float(round_item.get("playerScore") or round_item.get("player_score") or round_item.get("player"))
     if banker != player:
         return ""
     score = int(round(banker))
@@ -1617,13 +1801,15 @@ def direct_result_message(pending: dict[str, Any], outcome: dict[str, Any]) -> s
             f"🛡️ <b>Proteção:</b> {gale}",
         ])
     if status == "TIE":
-        tie_text = f"EMPATE {tie_multiplier}".strip()
+        tie_text = f"Empate {tie_multiplier}".strip() if tie_multiplier else "Empate"
+        confirmed_text = f"Empate {tie_multiplier} confirmado" if tie_multiplier else "Empate confirmado"
         return "\n".join([
-            f"🟡 <b>{tie_text}</b>",
+            f"✅ <b>{tie_text}</b>",
             "",
             *pattern_line,
             f"🎯 <b>Entrada:</b> {entry}",
-            "✅ <b>Empate confirmado</b>",
+            f"🟡 <b>{confirmed_text}</b>",
+            f"🛡️ <b>Proteção:</b> {gale}",
         ])
     return "\n".join([
         f"✅ <b>{label}</b>",
@@ -1801,6 +1987,7 @@ def main() -> int:
     direct_telegram_pending: list[dict[str, Any]] = []
     direct_telegram_result_keys: set[str] = set()
     direct_telegram_module_hold_until: dict[str, float] = {}
+    direct_telegram_family_cooldowns: dict[str, dict[str, Any]] = {}
     last_direct_payload_mismatch_key = ""
     direct_pattern_bank_file = direct_pattern_bank_path(args, env)
     direct_pattern_round_bank = load_direct_pattern_round_bank(direct_pattern_bank_file)
@@ -1865,16 +2052,46 @@ def main() -> int:
 
             signal_fingerprint = dashboard_signal_fingerprint(local_payload)
             signal_changed = bool(args.urgent_signal and signal_fingerprint and signal_fingerprint != last_signal_fingerprint)
-            telegram_result_payload, _telegram_result_source = direct_telegram_payload(last_published_payload, local_payload)
+            telegram_result_payload, _telegram_result_source = direct_telegram_payload(last_published_payload, None)
+            telegram_result_round_id = direct_round_id(telegram_result_payload) if telegram_result_payload else 0
             next_direct_pending: list[dict[str, Any]] = []
             for pending in direct_telegram_pending:
                 outcome = resolve_direct_telegram_outcome(pending, telegram_result_payload)
                 if not outcome:
+                    if direct_pending_is_stale(pending, telegram_result_round_id):
+                        logging.info(
+                            "direct telegram pending expired: module=%s entry=%s round=%s current_round=%s",
+                            pending.get("moduleKey"),
+                            pending.get("entry"),
+                            pending.get("roundId"),
+                            telegram_result_round_id,
+                        )
+                        continue
                     next_direct_pending.append(pending)
                     continue
                 result_key = f"{pending.get('signalKey')}:result:{outcome.get('status')}:{outcome.get('roundId')}"
                 aggregate_result_key = direct_result_dedupe_key(pending, outcome)
                 if result_key in direct_telegram_result_keys or aggregate_result_key in direct_telegram_result_keys:
+                    result_now = time.monotonic()
+                    module_key = str(pending.get("moduleKey") or "")
+                    if module_key:
+                        direct_telegram_module_hold_until[module_key] = (
+                            result_now + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
+                        )
+                    family_key = direct_register_signal_family_cooldown(
+                        direct_telegram_family_cooldowns,
+                        pending,
+                        outcome.get("roundId"),
+                        result_now,
+                    )
+                    if family_key:
+                        logging.info(
+                            "direct telegram family cooldown armed: family=%s module=%s entry=%s until_round=%s reason=duplicate_result",
+                            family_key,
+                            pending.get("moduleKey"),
+                            pending.get("entry"),
+                            direct_telegram_family_cooldowns[family_key].get("untilRoundId"),
+                        )
                     continue
                 result_signal = {
                     "moduleKey": pending.get("moduleKey"),
@@ -1916,9 +2133,24 @@ def main() -> int:
                         direct_telegram_result_keys.add(result_key)
                         direct_telegram_result_keys.add(aggregate_result_key)
                         module_key = str(pending.get("moduleKey") or "")
+                        result_now = time.monotonic()
                         if module_key:
                             direct_telegram_module_hold_until[module_key] = (
-                                time.monotonic() + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
+                                result_now + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
+                            )
+                        family_key = direct_register_signal_family_cooldown(
+                            direct_telegram_family_cooldowns,
+                            pending,
+                            outcome.get("roundId"),
+                            result_now,
+                        )
+                        if family_key:
+                            logging.info(
+                                "direct telegram family cooldown armed: family=%s module=%s entry=%s until_round=%s",
+                                family_key,
+                                pending.get("moduleKey"),
+                                pending.get("entry"),
+                                direct_telegram_family_cooldowns[family_key].get("untilRoundId"),
                             )
                     else:
                         next_direct_pending.append(pending)
@@ -1927,7 +2159,7 @@ def main() -> int:
                     next_direct_pending.append(pending)
             direct_telegram_pending = next_direct_pending[-100:]
 
-            telegram_entry_payload, telegram_entry_source = direct_telegram_payload(last_published_payload, local_payload)
+            telegram_entry_payload, telegram_entry_source = direct_telegram_payload(last_published_payload, None)
             telegram_entry_round_id = direct_round_id(telegram_entry_payload) if telegram_entry_payload else 0
             local_round_id = direct_round_id(local_payload)
             if (
@@ -1955,17 +2187,40 @@ def main() -> int:
                 if not direct_key or direct_key in direct_telegram_sent_keys:
                     continue
                 direct_module_key = str(direct_signal.get("moduleKey") or "")
+                direct_now = time.monotonic()
+                direct_prune_signal_family_cooldowns(
+                    direct_telegram_family_cooldowns,
+                    telegram_entry_round_id,
+                    direct_now,
+                )
                 module_hold_until = direct_telegram_module_hold_until.get(direct_module_key, 0.0)
-                if module_hold_until and time.monotonic() < module_hold_until:
+                if module_hold_until and direct_now < module_hold_until:
                     continue
-                if direct_module_has_pending(direct_telegram_pending, direct_module_key):
+                family_key, family_cooldown = direct_signal_family_cooldown(
+                    direct_signal,
+                    direct_telegram_family_cooldowns,
+                    direct_now,
+                )
+                if family_cooldown:
+                    logging.info(
+                        "direct telegram skipped: module=%s entry=%s round=%s reason=resolved_family_cooldown family=%s until_round=%s",
+                        direct_signal.get("moduleKey"),
+                        direct_signal.get("entry"),
+                        direct_signal.get("roundId"),
+                        family_key,
+                        family_cooldown.get("untilRoundId"),
+                    )
+                    direct_telegram_sent_keys.add(direct_key)
+                    if len(direct_telegram_sent_keys) > 500:
+                        direct_telegram_sent_keys = set(list(direct_telegram_sent_keys)[-250:])
+                    continue
+                if direct_module_has_pending(direct_telegram_pending, direct_module_key, telegram_entry_round_id):
                     logging.info(
                         "direct telegram skipped: module=%s entry=%s round=%s reason=pending_module_open",
                         direct_signal.get("moduleKey"),
                         direct_signal.get("entry"),
                         direct_signal.get("roundId"),
                     )
-                    direct_telegram_sent_keys.add(direct_key)
                     continue
                 try:
                     direct_ok, direct_status, direct_ms, direct_reason = publish_direct_telegram_signal(
