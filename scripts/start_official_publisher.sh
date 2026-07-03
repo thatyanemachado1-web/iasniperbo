@@ -60,6 +60,8 @@ cd "$PROJECT_ROOT"
 nohup "$PYTHON_BIN" "$SCRIPT_DIR/official_dashboard_publisher.py" \
   --env-file "$SOURCE_ENV_FILE" \
   --local-url "$LOCAL_DASHBOARD_URL" \
+  --remote-base-url "https://sniperbo.com" \
+  --remote-url "https://sniperbo.com/dashboard/publish" \
   --interval "$PUBLISHER_INTERVAL" \
   --remote-timeout "$REMOTE_TIMEOUT" \
   --local-timeout "$LOCAL_TIMEOUT" \

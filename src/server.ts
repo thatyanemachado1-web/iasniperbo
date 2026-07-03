@@ -3194,9 +3194,10 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   if (request.method === "GET" && url.pathname === "/dashboard") {
     await syncDashboardReadState(env);
+    const beforeCycle = liveDashboardData;
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
+    liveDashboardData = rehydrateDashboardAfterDailyCycle(beforeCycle, cycle.dashboard, cycle.changed);
     if (cycle.changed) {
-      liveDashboardData = cycle.dashboard;
       runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
     return json(publicDashboardSnapshot(liveDashboardData));
@@ -12955,6 +12956,23 @@ function roundsFromNeuralCycleReset(rounds: Round[], resetRoundKey: string) {
   const resetIndex = sortedRounds.findIndex((round) => roundHistoryKey(round) === resetRoundKey);
   if (resetIndex < 0) return [];
   return sortedRounds.slice(resetIndex);
+}
+
+function rehydrateDashboardAfterDailyCycle(
+  previous: LiveDashboardData,
+  cycled: LiveDashboardData,
+  cycleChanged: boolean,
+): LiveDashboardData {
+  if (!cycleChanged) return cycled;
+  const rounds = Array.isArray(previous.rounds) ? previous.rounds : [];
+  if (!rounds.length) return cycled;
+  const cycleDate = currentDashboardCycleDate();
+  return updateDashboardData(cycled, {
+    rounds,
+    updatedAt: new Date().toISOString(),
+    cycleDate,
+    dailyCycleDate: cycleDate,
+  });
 }
 
 function ensureDashboardDailyCycle(
