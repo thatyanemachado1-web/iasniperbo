@@ -3047,6 +3047,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     request.method === "OPTIONS" &&
     (url.pathname === "/dashboard" ||
       url.pathname === "/dashboard/signal" ||
+      url.pathname === "/dashboard/publish" ||
       url.pathname === "/dashboard/round-history" ||
       url.pathname === "/calendar/neural" ||
       url.pathname === "/calendar/neural/backfill" ||
@@ -3220,7 +3221,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
         ok: true,
         ignored: "stale",
         saved: "skipped",
-        dashboard: publicDashboardSnapshot(liveDashboardData),
+        ...dashboardPublishAck(liveDashboardData, "skipped", "skipped_stale"),
       });
     }
     if (incomingRounds.length) {
@@ -3264,19 +3265,70 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/dashboard/signal" ||
       (url.pathname === "/dashboard" && telegramV2OnlyEnabled(env));
     if (shouldRunImmediateMonitor) {
-      const saveStatus = await saveStateTask;
-      const monitorStatus = await withTimeout(
-        processValidatorLiveMonitoring(env, monitorOptions),
-        LIVE_STATE_IO_TIMEOUT_MS,
+      runBackgroundTask(
+        ctx,
+        saveStateTask
+          .catch(() => null)
+          .then(() =>
+            withTimeout(
+              processValidatorLiveMonitoring(env, monitorOptions),
+              LIVE_STATE_IO_TIMEOUT_MS,
+              "monitorar sinais imediatamente",
+              false,
+            ),
+          ),
         "monitorar sinais imediatamente",
-        false,
       );
-      return json({ ok: true, saved: saveStatus, monitor: monitorStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
+      return json(dashboardPublishAck(liveDashboardData, "queued", "queued_immediate"));
     }
-    return json({ ok: true, saved: "queued", monitor: "skipped_non_publish_signal", dashboard: publicDashboardSnapshot(liveDashboardData) });
+    return json(dashboardPublishAck(liveDashboardData, "queued", "skipped_non_publish_signal"));
   }
 
   return null;
+}
+
+function dashboardPublishAck(dashboard: LiveDashboardData, saved: unknown, monitor: unknown) {
+  const snapshot = publicDashboardSnapshot(dashboard);
+  const rounds = Array.isArray(snapshot.rounds) ? snapshot.rounds : [];
+  const latestRound = rounds.length ? rounds[rounds.length - 1] : null;
+  const signal = readRecord(snapshot.currentSignal);
+  const neuralEntryState = readRecord(snapshot.neuralEntryState);
+  const signalId =
+    readString(neuralEntryState, "signal_id") ||
+    readString(neuralEntryState, "signalId") ||
+    readString(signal, "signal_id") ||
+    readString(signal, "id");
+  const module =
+    readString(neuralEntryState, "module") ||
+    readString(neuralEntryState, "source") ||
+    readString(signal, "module") ||
+    readString(signal, "source");
+  const roundId =
+    readString(latestRound, "id") ||
+    readString(latestRound, "round_id") ||
+    readString(latestRound, "roundId") ||
+    readString(neuralEntryState, "round_id") ||
+    readString(neuralEntryState, "roundId") ||
+    readString(signal, "round_id") ||
+    readString(signal, "roundId");
+
+  return {
+    ok: true,
+    saved,
+    monitor,
+    updatedAt: snapshot.updatedAt || "",
+    round_id: roundId,
+    signal_id: signalId,
+    card_signal_id: signalId,
+    module,
+    dashboard: {
+      updatedAt: snapshot.updatedAt || "",
+      rounds: latestRound ? [latestRound] : [],
+      currentSignal: snapshot.currentSignal,
+      neuralEntryState: snapshot.neuralEntryState ?? null,
+      neuralEntryLastResult: snapshot.neuralEntryLastResult ?? null,
+    },
+  };
 }
 
 function runBackgroundTask(ctx: unknown, promise: Promise<unknown>, label: string) {
