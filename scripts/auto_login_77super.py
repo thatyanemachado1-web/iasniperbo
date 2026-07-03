@@ -188,7 +188,11 @@ def main() -> int:
             user_data_dir=str(profile),
             headless=False,
             channel=channel,
-            args=["--start-maximized"],
+            args=[
+                "--start-maximized",
+                "--disable-blink-features=AutomationControlled",
+            ],
+            ignore_default_args=["--enable-automation"],
             viewport=None,
         )
         page = context.pages[0] if context.pages else context.new_page()
@@ -218,6 +222,14 @@ def main() -> int:
             print("AVISO: login pode nao ter completado. Tentando continuar mesmo assim...")
         else:
             print("OK: Bac Bo aberto com sessao.")
+
+        print("Aguardando jogo carregar (30s)...")
+        time.sleep(10)
+        try:
+            page.mouse.click(960, 540)
+        except Exception:
+            pass
+        time.sleep(20)
 
         context.close()
 

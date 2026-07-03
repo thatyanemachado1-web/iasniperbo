@@ -16,6 +16,7 @@ if not exist "%PY%" set "PY=python"
 
 "%PY%" "%ROOT%\scripts\fix_collector_config.py" "%ROOT%"
 "%PY%" "%ROOT%\scripts\patch_77super_login.py" "%ROOT%"
+"%PY%" "%ROOT%\scripts\patch_browser_black_screen.py" "%ROOT%"
 "%PY%" "%ROOT%\scripts\auto_login_77super.py" "%ROOT%"
 if errorlevel 1 (
   echo ERRO no login automatico
