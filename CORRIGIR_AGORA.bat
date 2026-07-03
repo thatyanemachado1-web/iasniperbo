@@ -2,7 +2,7 @@
 chcp 65001 >nul
 title SNIPERBO - Corrigir scripts e reiniciar
 set "DEST=C:\SNIPERBO"
-set "BRANCH=cursor/fix-collector-401-f115"
+set "BRANCH=cursor/corrigir-agora-bat-f115"
 set "ZIP=%TEMP%\sniperbo-fix.zip"
 set "EXTRACT=%TEMP%\sniperbo-fix-extract"
 set "ADMIN_EMAIL=gabrielmendespromove@gmail.com"
@@ -41,13 +41,21 @@ copy /Y "%SRC%\DIAGNOSTICAR_SINAIS.bat" "%DEST\" >nul 2>nul
 copy /Y "%SRC%\REINICIAR_SINAIS.bat" "%DEST\" >nul 2>nul
 copy /Y "%SRC%\LIGAR_SINAIS.bat" "%DEST\" >nul 2>nul
 copy /Y "%SRC%\VERIFICAR_SINAIS.bat" "%DEST\" >nul 2>nul
+copy /Y "%SRC%\CASA_SUPER.bat" "%DEST\" >nul 2>nul
+copy /Y "%SRC%\LOGIN_SUPER.bat" "%DEST\" >nul 2>nul
+copy /Y "%SRC%\ABRIR_MESA.bat" "%DEST\" >nul 2>nul
 
 echo [4/5] Copiando config.json se existir...
 if exist "%DEST%\scripts\copiar_config_coletor.ps1" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%DEST%\scripts\copiar_config_coletor.ps1" 2>nul
 )
 
-echo [5/5] Credenciais + ligar sinais...
+echo [5/6] Config Super + credenciais publisher + ligar sinais...
+if exist "%DEST%\scripts\super_casino.local.env" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%DEST%\scripts\corrigir_para_super.ps1" -SkipOpenMesa
+) else (
+  echo   Rode LOGIN_SUPER.bat para salvar email/senha da 77super.com
+)
 powershell -NoProfile -ExecutionPolicy Bypass -File "%DEST%\scripts\configurar_publisher_credenciais.ps1" -AdminEmail "%ADMIN_EMAIL%" -AdminPassword "%ADMIN_PASS%"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%DEST%\scripts\ligar_sinais.ps1"
 

@@ -1,3 +1,8 @@
+param(
+  [switch]$SkipOpenMesa,
+  [switch]$SkipKill
+)
+
 $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
@@ -97,7 +102,9 @@ config.setdefault("enabled", True)
 config.setdefault("host", "127.0.0.1")
 config.setdefault("port", 8791)
 config.setdefault("evolution", True)
-config.setdefault("manual_login_only", True)
+config.setdefault("manual_login_only", False)
+config.setdefault("session_reuse", True)
+config.setdefault("max_login_attempts", 5)
 config.setdefault("send_tie_alert", False)
 config.setdefault("telegram", {"enabled": False})
 
@@ -148,18 +155,35 @@ $candidates = @(
 )
 foreach ($c in $candidates) { if (Test-Path -LiteralPath $c) { $python = $c; break } }
 
-Write-Host "[1/3] Restaurando config completo + source_url Super..." -ForegroundColor Yellow
+Write-Host "[1/4] Restaurando config completo + source_url Super..." -ForegroundColor Yellow
 & $python $patchFile $ProjectRoot $SuperUrl $SuperLogin 2>&1 | ForEach-Object { Write-Host "  $_" }
 
-Write-Host "[2/3] Parando coletores antigos..." -ForegroundColor Yellow
-Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -like "*sniper_bo_scraper.py*" } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-Start-Sleep -Seconds 2
+$SuperEnv = Join-Path $ScriptDir "super_casino.local.env"
+$loginScript = Join-Path $ScriptDir "aplicar_login_super.py"
+if ((Test-Path -LiteralPath $SuperEnv) -and (Test-Path -LiteralPath $loginScript)) {
+  Write-Host "[2/4] Aplicando login automatico Super..." -ForegroundColor Yellow
+  & $python $loginScript $ProjectRoot 2>&1 | ForEach-Object { Write-Host "  $_" }
+} else {
+  Write-Host "[2/4] Login automatico: rode LOGIN_SUPER.bat (credenciais 77super.com)" -ForegroundColor Yellow
+}
 
-Write-Host "[3/3] Abrindo mesa Super..." -ForegroundColor Yellow
-& (Join-Path $ScriptDir "abrir_mesa.ps1")
+if (-not $SkipKill) {
+  Write-Host "[3/4] Parando coletores antigos..." -ForegroundColor Yellow
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*sniper_bo_scraper.py*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Seconds 2
+} else {
+  Write-Host "[3/4] Pulando parada de coletores (-SkipKill)" -ForegroundColor Gray
+}
 
-Write-Host ""
-Write-Host "Pronto. Chrome deve abrir em 77super.com" -ForegroundColor Green
+if (-not $SkipOpenMesa) {
+  Write-Host "[4/4] Abrindo mesa Super..." -ForegroundColor Yellow
+  & (Join-Path $ScriptDir "abrir_mesa.ps1")
+  Write-Host ""
+  Write-Host "Pronto. Chrome deve abrir em 77super.com" -ForegroundColor Green
+} else {
+  Write-Host "[4/4] Config Super aplicado (-SkipOpenMesa)" -ForegroundColor Green
+}
+
 Write-Host ""

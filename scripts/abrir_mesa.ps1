@@ -33,8 +33,12 @@ function Test-ConfigIsSuper($Path) {
 }
 
 function Find-ConfigJson {
-  $gerar = Join-Path $ScriptDir "gerar_config_super.ps1"
+  $corrigir = Join-Path $ScriptDir "corrigir_para_super.ps1"
   $codexConfig = Join-Path $ProjectRoot "Codex\2026-05-24\voc-um-desenvolvedor-python-s-nior\config.json"
+  if (Test-Path -LiteralPath $corrigir) {
+    & $corrigir -SkipOpenMesa -SkipKill
+    if (Test-Path -LiteralPath $DestConfig) { return $DestConfig }
+  }
   if (Test-Path -LiteralPath $codexConfig) {
     Copy-Item -LiteralPath $codexConfig -Destination $DestConfig -Force
     Write-Host "[OK] config.json restaurado da pasta Codex" -ForegroundColor Green
@@ -45,6 +49,7 @@ function Find-ConfigJson {
     }
     return $DestConfig
   }
+  $gerar = Join-Path $ScriptDir "gerar_config_super.ps1"
   if (Test-Path -LiteralPath $gerar) {
     & $gerar
     if (Test-Path -LiteralPath $DestConfig) { return $DestConfig }
@@ -166,7 +171,7 @@ if ($ready) {
   Write-Host "Agora rode LIGAR_SINAIS.bat ou REINICIAR_SINAIS.bat" -ForegroundColor Cyan
 } else {
   Write-Host "[AVISO] Coletor ainda nao respondeu na porta 8791." -ForegroundColor Yellow
-  Write-Host "  - Chrome abriu em 77super.com? Faca login se pedir." -ForegroundColor Yellow
+  Write-Host "  - Chrome abriu em 77super.com? Se pedir login, rode LOGIN_SUPER.bat" -ForegroundColor Yellow
   Write-Host "  - Clique Permitir se pedir 'gravando fluxo'." -ForegroundColor Yellow
   Write-Host "  - Veja erros em: $LogFile" -ForegroundColor Yellow
   if (Test-Path -LiteralPath $LogFile) {

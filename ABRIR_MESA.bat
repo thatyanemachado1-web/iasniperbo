@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 echo.
 echo ================================================
-echo   SNIPERBO - Abrindo mesa Bac Bo no Chrome
+echo   SNIPERBO - Abrindo mesa Bac Bo (Casa Super)
 echo ================================================
 echo.
 echo   Aguarde 30 a 60 segundos. NAO feche esta janela.

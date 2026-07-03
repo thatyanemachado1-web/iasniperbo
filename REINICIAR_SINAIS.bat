@@ -12,7 +12,7 @@ for /f "tokens=2" %%P in ('wmic process where "commandline like '%%watch_sniperb
 
 timeout /t 2 /nobreak >nul
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\copiar_config_coletor.ps1" 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\corrigir_para_super.ps1" -SkipOpenMesa
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\configurar_publisher_credenciais.ps1" -AdminEmail "gabrielmendespromove@gmail.com" -AdminPassword "AdminSniper2026!"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\ligar_sinais.ps1"
 
