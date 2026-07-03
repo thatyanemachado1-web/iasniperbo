@@ -16,6 +16,12 @@ echo "  SNIPERBO — LIGAR TUDO AGORA"
 echo "=========================================="
 
 git fetch origin 2>/dev/null && git reset --hard origin/main 2>/dev/null || true
+curl -fsSL -o scripts/official_dashboard_publisher.py \
+  "https://raw.githubusercontent.com/thatyanemachado1-web/iasniperbo/main/scripts/official_dashboard_publisher.py"
+curl -fsSL -o scripts/start_official_publisher.sh \
+  "https://raw.githubusercontent.com/thatyanemachado1-web/iasniperbo/main/scripts/start_official_publisher.sh"
+curl -fsSL -o scripts/vps_mesa_pulse.py \
+  "https://raw.githubusercontent.com/thatyanemachado1-web/iasniperbo/main/scripts/vps_mesa_pulse.py"
 chmod +x scripts/*.sh 2>/dev/null || true
 
 cat > scripts/official_publisher.local.env <<EOF
@@ -25,9 +31,11 @@ SNIPER_PUBLISH_PASSWORD_ONLY=1
 SNIPER_LOCAL_DASHBOARD_URL=$LOCAL/dashboard
 SIGNALS_API_PORT=8787
 SIGNALS_API_HOST=127.0.0.1
-PUBLISHER_INTERVAL=8
-SNIPER_REMOTE_TIMEOUT=60
+PUBLISHER_INTERVAL=15
+SNIPER_REMOTE_TIMEOUT=90
 SNIPER_LOCAL_TIMEOUT=15
+SNIPER_REMOTE_BASE_URL=https://sniperbo.com
+SNIPER_REMOTE_PUBLISH_URL=https://sniperbo.com/dashboard/publish
 EOF
 cat > .dev.vars <<EOF
 SNIPER_ADMIN_EMAIL=$EMAIL
@@ -56,10 +64,10 @@ echo ">> Publisher..."
 bash scripts/start_official_publisher.sh
 sleep 3
 
-echo ">> Pulse continuo (rodadas a cada 35s)..."
+echo ">> Pulse continuo (rodadas a cada 60s)..."
 nohup .venv/bin/python scripts/vps_mesa_pulse.py \
   --env-file scripts/official_publisher.local.env \
-  --interval 35 \
+  --interval 60 \
   >> logs/vps-mesa-pulse.log 2>&1 &
 echo $! > logs/vps-mesa-pulse.pid
 
