@@ -34,10 +34,16 @@ function Test-ConfigIsSuper($Path) {
 
 function Find-ConfigJson {
   $gerar = Join-Path $ScriptDir "gerar_config_super.ps1"
+  $codexConfig = Join-Path $ProjectRoot "Codex\2026-05-24\voc-um-desenvolvedor-python-s-nior\config.json"
+  if (Test-Path -LiteralPath $codexConfig) {
+    Copy-Item -LiteralPath $codexConfig -Destination $DestConfig -Force
+    Write-Host "[OK] config.json restaurado da pasta Codex" -ForegroundColor Green
+  }
   if (Test-Path -LiteralPath $DestConfig) {
-    if (Test-ConfigIsSuper $DestConfig) { return $DestConfig }
-    Write-Host "[AVISO] config.json aponta para Score/outro cassino. Recriando Super..." -ForegroundColor Yellow
-    Remove-Item -LiteralPath $DestConfig -Force -ErrorAction SilentlyContinue
+    if (-not (Test-ConfigIsSuper $DestConfig)) {
+      Write-Host "[AVISO] Ajustando source_url para 77super.com..." -ForegroundColor Yellow
+    }
+    return $DestConfig
   }
   if (Test-Path -LiteralPath $gerar) {
     & $gerar
@@ -84,6 +90,8 @@ if (-not $config) {
   }
   exit 1
 }
+
+New-Item -ItemType Directory -Path (Join-Path $ProjectRoot "data") -Force | Out-Null
 
 $envValues = Read-EnvFile $LocalEnv
 $token = $envValues["SNIPER_LOCAL_DASHBOARD_TOKEN"]

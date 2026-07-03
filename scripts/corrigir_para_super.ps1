@@ -5,6 +5,7 @@ $Scraper = Join-Path $ProjectRoot "sniper_bo_scraper.py"
 $Config = Join-Path $ProjectRoot "config.json"
 $SuperUrl = "https://77super.com/en/game/101803005-Bac%20Bo"
 $SuperLogin = "https://77super.com/"
+$DataDir = Join-Path $ProjectRoot "data"
 
 Write-Host ""
 Write-Host "=== SNIPERBO - Corrigir para Casa Super ===" -ForegroundColor Cyan
@@ -15,10 +16,8 @@ if (-not (Test-Path -LiteralPath $Scraper)) {
   exit 1
 }
 
-# 1) Sempre recriar config.json da Super (ignora Score)
-& (Join-Path $ScriptDir "gerar_config_super.ps1")
+New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 
-# 2) Patch no scraper: trocar URLs de Score -> 77super
 $pyPatch = @'
 import json, re, sys
 from pathlib import Path
@@ -28,67 +27,102 @@ scraper = root / "sniper_bo_scraper.py"
 config_path = root / "config.json"
 super_url = sys.argv[2]
 super_login = sys.argv[3]
+data_dir = root / "data"
+data_dir.mkdir(parents=True, exist_ok=True)
+default_db = str(data_dir / "bacbo.sqlite")
+
+def load_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig", errors="ignore"))
+    except Exception:
+        return {}
+
+def find_base_config() -> dict:
+    candidates = [
+        config_path.with_suffix(".json.bak"),
+        root / "config.json.bak",
+        root / "Codex" / "2026-05-24" / "voc-um-desenvolvedor-python-s-nior" / "config.json",
+        config_path,
+    ]
+    best = {}
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        data = load_json(candidate)
+        if len(data) > len(best):
+            best = data
+    return best
+
+def is_score_url(url: str) -> bool:
+    u = str(url or "").lower()
+    if not u.startswith("http"):
+        return False
+    if "77super" in u:
+        return False
+    score_markers = ("score.bet", "scorebet", "cassinoscore", "casino-score", "casinoscore", "jogoscore")
+    if any(m in u for m in score_markers):
+        return True
+    if "score" in u and any(x in u for x in ("cassino", "casino", "bet", "game", "play")):
+        return True
+    return False
+
+def patch_url_value(key: str, value):
+    if not isinstance(value, str):
+        return value
+    if not value.startswith("http"):
+        return value
+    if is_score_url(value):
+        return super_login if "login" in key.lower() else super_url
+    return value
+
+config = find_base_config()
+if not config:
+    config = {}
+
+url_keys = [
+    "source_url", "url", "game_url", "target_url", "mesa_url", "login_url",
+    "base_url", "site_url", "table_url", "start_url",
+]
+for key in url_keys:
+    if key in config:
+        config[key] = patch_url_value(key, config[key])
+
+config["source_url"] = super_url
+config["url"] = super_url
+config["casa"] = "super"
+config.setdefault("headless", False)
+config.setdefault("enabled", True)
+config.setdefault("host", "127.0.0.1")
+config.setdefault("port", 8791)
+config.setdefault("evolution", True)
+config.setdefault("manual_login_only", True)
+config.setdefault("send_tie_alert", False)
+config.setdefault("telegram", {"enabled": False})
+
+db_path = str(config.get("database_path") or config.get("db_path") or default_db)
+if not db_path.strip():
+    db_path = default_db
+db_file = Path(db_path)
+if not db_file.is_absolute():
+    db_file = root / db_file
+db_file.parent.mkdir(parents=True, exist_ok=True)
+config["database_path"] = str(db_file)
+
+config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 text = scraper.read_text(encoding="utf-8", errors="ignore")
 original = text
 
-score_domains = (
-    "score.bet", "scorebet", "cassinoscore", "casino-score", "casinoscore",
-    "jogoscore", "score.com", "cassinscore", "cassino-score", "score777",
-)
-score_path_hints = ("/score/", "cassino score", "casino score")
-
-def is_score_url(url: str) -> bool:
-    u = url.lower()
-    if "77super" in u:
-        return False
-    if any(d in u for d in score_domains):
-        return True
-    if "score" in u and "bankerscore" not in u and "playerscore" not in u:
-        if any(h in u for h in ("cassino", "casino", "bet", "game", "play")):
-            return True
-    return False
-
-def patch_urls(s: str) -> str:
+def patch_urls_in_text(s: str) -> str:
     def repl(m):
         url = m.group(0)
         return super_url if is_score_url(url) else url
     return re.sub(r"https?://[^\s\"'<>]+", repl, s)
 
-text = patch_urls(text)
-
-# Descobrir chaves usadas no scraper
-keys = set(re.findall(r"""config(?:\.get|\[)\s*['"]([^'"]+)['"]""", text, re.I))
-keys |= set(re.findall(r"""cfg(?:\.get|\[)\s*['"]([^'"]+)['"]""", text, re.I))
-keys |= set(re.findall(r"""settings(?:\.get|\[)\s*['"]([^'"]+)['"]""", text, re.I))
-
-# Montar config completo
-base = {
-    "casa": "super",
-    "url": super_url,
-    "game_url": super_url,
-    "target_url": super_url,
-    "mesa_url": super_url,
-    "login_url": super_login,
-    "browser_profile_dir": "browser_profile_77super",
-    "profile_directory": "browser_profile_77super",
-    "user_data_dir": "browser_profile_77super",
-    "headless": False,
-    "no_telegram": True,
-}
-url_keys = {k for k in keys if any(x in k.lower() for x in ("url", "link", "site", "mesa", "game", "target", "login"))}
-for k in url_keys:
-    if "login" in k.lower():
-        base[k] = super_login
-    else:
-        base[k] = super_url
-for k in keys:
-    base.setdefault(k, super_url if "url" in k.lower() else base.get(k, ""))
-
-config_path.write_text(json.dumps(base, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-changed = text != original
-if changed:
+text = patch_urls_in_text(text)
+if text != original:
     backup = scraper.with_suffix(".py.bak")
     if not backup.exists():
         backup.write_text(original, encoding="utf-8")
@@ -97,7 +131,9 @@ if changed:
 else:
     print("SCRAPER_OK")
 
-print("CONFIG_KEYS=" + ",".join(sorted(keys)) if keys else "CONFIG_KEYS=default")
+print("DATABASE_PATH=" + config["database_path"])
+print("SOURCE_URL=" + config.get("source_url", super_url))
+print("CONFIG_KEYS=" + str(len(config)))
 print("CONFIG_WRITTEN=" + str(config_path))
 '@
 
@@ -112,16 +148,18 @@ $candidates = @(
 )
 foreach ($c in $candidates) { if (Test-Path -LiteralPath $c) { $python = $c; break } }
 
-Write-Host "[2/3] Corrigindo scraper e config..." -ForegroundColor Yellow
+Write-Host "[1/3] Restaurando config completo + source_url Super..." -ForegroundColor Yellow
 & $python $patchFile $ProjectRoot $SuperUrl $SuperLogin 2>&1 | ForEach-Object { Write-Host "  $_" }
 
-Write-Host "[3/3] Reiniciando coletor na Super..." -ForegroundColor Yellow
+Write-Host "[2/3] Parando coletores antigos..." -ForegroundColor Yellow
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
   Where-Object { $_.CommandLine -like "*sniper_bo_scraper.py*" } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
+
+Write-Host "[3/3] Abrindo mesa Super..." -ForegroundColor Yellow
 & (Join-Path $ScriptDir "abrir_mesa.ps1")
 
 Write-Host ""
-Write-Host "Pronto. Chrome deve abrir em 77super.com (NAO Score)." -ForegroundColor Green
+Write-Host "Pronto. Chrome deve abrir em 77super.com" -ForegroundColor Green
 Write-Host ""
