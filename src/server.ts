@@ -3196,18 +3196,8 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       return json({ error: "Nao autorizado." }, 401);
     }
 
-    await syncDashboardReadState(env);
-    const repair = await repairDashboardSnapshotFromPersistedHistory(env);
-    if (repair.changed) {
-      liveDashboardData = repair.dashboard;
-      runBackgroundTask(ctx, saveLiveState(env), "salvar dashboard reparado");
-    }
-    const cycle = ensureDashboardDailyCycle(liveDashboardData);
-    if (cycle.changed) {
-      liveDashboardData = cycle.dashboard;
-      runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
-    }
-    return json(publicDashboardSnapshot(liveDashboardData));
+    const snapshot = await buildAuthenticatedDashboardSnapshot(env, ctx);
+    return json(snapshot);
   }
 
   if (
@@ -12272,6 +12262,128 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
   } as LiveDashboardData;
 }
 
+async function buildAuthenticatedDashboardSnapshot(env: unknown, ctx?: unknown) {
+  await syncDashboardReadState(env);
+
+  const persistedRounds = await fetchPersistedDashboardRounds(env);
+  const repair = await repairDashboardSnapshotFromPersistedHistory(env);
+  if (repair.changed) {
+    liveDashboardData = repair.dashboard;
+    runBackgroundTask(ctx, saveLiveState(env), "salvar dashboard reparado");
+  }
+
+  const cycle = ensureDashboardDailyCycle(liveDashboardData);
+  if (cycle.changed) {
+    liveDashboardData = cycle.dashboard;
+    runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
+  }
+
+  liveDashboardData = await enforceDashboardRoundParity(env, liveDashboardData, persistedRounds);
+  return enrichPublicDashboardSnapshot(liveDashboardData);
+}
+
+async function enforceDashboardRoundParity(
+  env: unknown,
+  dashboard: LiveDashboardData,
+  cachedPersistedRounds?: Round[],
+) {
+  const persistedRounds = cachedPersistedRounds?.length
+    ? cachedPersistedRounds
+    : await fetchPersistedDashboardRounds(env);
+  if (!persistedRounds.length) return dashboard;
+
+  liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, persistedRounds);
+  const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
+  const latestDashboardRound = latestRoundFromRoundList(dashboard.rounds);
+  const roundsMissing = !Array.isArray(dashboard.rounds) || dashboard.rounds.length === 0;
+  const roundsMismatch = Boolean(
+    latestPersistedRound &&
+      (!latestDashboardRound ||
+        latestPersistedRound.id !== latestDashboardRound.id ||
+        roundHistoryKey(latestPersistedRound) !== roundHistoryKey(latestDashboardRound)),
+  );
+  if (!roundsMissing && !roundsMismatch) {
+    return { ...exposeServerNeuralEntryAsCurrentSignal(dashboard), mockMode: false };
+  }
+
+  const cycleDate = currentDashboardCycleDate();
+  const synced = updateDashboardData(dashboard, {
+    ...pickDashboardSections(dashboard as unknown as Record<string, unknown>),
+    currentSignal: dashboard.currentSignal,
+    rounds: persistedRounds.slice(-DASHBOARD_READ_ROUND_LIMIT),
+    cycleDate,
+    dailyCycleDate: cycleDate,
+    updatedAt:
+      (latestPersistedRound ? getRoundRecordedAt(latestPersistedRound) : "") ||
+      dashboard.updatedAt ||
+      new Date().toISOString(),
+  });
+  const normalized = { ...exposeServerNeuralEntryAsCurrentSignal(synced), mockMode: false };
+  liveDashboardData = normalized;
+  return normalized;
+}
+
+function enrichPublicDashboardSnapshot(dashboard: LiveDashboardData) {
+  const snapshot = publicDashboardSnapshot(dashboard);
+  return {
+    ...snapshot,
+    ...buildDashboardReadMetadata(snapshot),
+  };
+}
+
+function buildDashboardReadMetadata(dashboard: LiveDashboardData) {
+  const latestRound = latestRoundFromRoundList(dashboard.rounds);
+  const signal = dashboard.currentSignal;
+  const side = signal?.side ?? "NONE";
+  const entryState = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
+  const entryResult = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
+  let displayState = "analyzing";
+
+  if (entryResult?.kind === "red" || signal?.status === "red") {
+    displayState = "red";
+  } else if (entryResult?.kind === "tie_sg" || entryResult?.kind === "tie_g1" || signal?.status === "tie") {
+    displayState = "tie";
+  } else if (
+    entryResult?.kind === "sg" ||
+    entryResult?.kind === "g1" ||
+    signal?.status === "green" ||
+    signal?.status === "green_g1"
+  ) {
+    displayState = "green";
+  } else if (
+    entryState ||
+    (isServerEntrySide(side) && (signal?.status === "pending" || signal?.status === "g1"))
+  ) {
+    displayState = "confirmed";
+  } else if (dashboard.neuralReading?.mode === "ACTIVE" || dashboard.neuralReading?.mode === "OBSERVING") {
+    displayState = "active";
+  }
+
+  return {
+    latestRoundId: latestRound?.id ?? null,
+    revision: computeDashboardRevision(dashboard, latestRound),
+    displayState,
+    side,
+  };
+}
+
+function computeDashboardRevision(dashboard: LiveDashboardData, latestRound: Round | null) {
+  if (!latestRound) return 2;
+  let revision = 3;
+  const signal = dashboard.currentSignal;
+  if (normalizeServerNeuralEntryState(dashboard.neuralEntryState)) revision += 2;
+  else if (isServerEntrySide(signal?.side) && (signal?.status === "pending" || signal?.status === "g1")) {
+    revision += 2;
+  } else if (signal?.status === "green" || signal?.status === "green_g1") {
+    revision += 1;
+  } else if (dashboard.neuralReading?.mode === "ACTIVE") {
+    revision += 1;
+  }
+  const updatedAtMs = Date.parse(dashboard.updatedAt || "");
+  if (Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs <= 120_000) revision += 1;
+  return revision;
+}
+
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
   const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
   // Hotfix produção: não transformar um dashboard com rodada/dados reais em
@@ -13221,41 +13333,50 @@ function roundsFromNeuralCycleReset(rounds: Round[], resetRoundKey: string) {
 function ensureDashboardDailyCycle(
   dashboard: DashboardData & { updatedAt?: string; cycleDate?: string; dailyCycleDate?: string },
 ) {
+  let workingDashboard = dashboard;
+  const dashboardRounds = Array.isArray(workingDashboard.rounds) ? workingDashboard.rounds : [];
+  if (!dashboardRounds.length && liveValidatorRoundHistory.length) {
+    workingDashboard = {
+      ...workingDashboard,
+      rounds: liveValidatorRoundHistory.slice(-DASHBOARD_READ_ROUND_LIMIT),
+    };
+  }
+
   const cycleDate = currentDashboardCycleDate();
-  if (readDashboardCycleDate(dashboard) === cycleDate) {
+  if (readDashboardCycleDate(workingDashboard) === cycleDate) {
     return {
       dashboard: {
-        ...dashboard,
+        ...workingDashboard,
         cycleDate,
         dailyCycleDate: cycleDate,
-        strictDailyCounters: (dashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
+        strictDailyCounters: (workingDashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
       },
-      changed: false,
+      changed: workingDashboard !== dashboard,
     };
   }
 
   const persistedLatestRound = latestRoundFromRoundList(liveValidatorRoundHistory);
-  const dashboardLatestRound = latestRoundFromRoundList(dashboard.rounds);
+  const dashboardLatestRound = latestRoundFromRoundList(workingDashboard.rounds);
   const hasPersistedCurrentRound = Boolean(
     persistedLatestRound &&
       dashboardLatestRound &&
       persistedLatestRound.id === dashboardLatestRound.id &&
       roundHistoryKey(persistedLatestRound) === roundHistoryKey(dashboardLatestRound),
   );
-  if (hasPersistedCurrentRound) {
+  if (hasPersistedCurrentRound || persistedLatestRound) {
     return {
       dashboard: {
-        ...dashboard,
+        ...workingDashboard,
         cycleDate,
         dailyCycleDate: cycleDate,
-        strictDailyCounters: (dashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
+        strictDailyCounters: (workingDashboard as unknown as { strictDailyCounters?: boolean }).strictDailyCounters ?? false,
       },
       changed: true,
     };
   }
 
   return {
-    dashboard: resetDashboardDailyCycle(dashboard, cycleDate),
+    dashboard: resetDashboardDailyCycle(workingDashboard, cycleDate),
     changed: true,
   };
 }
