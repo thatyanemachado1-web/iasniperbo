@@ -1,0 +1,18 @@
+[Unit]
+Description=SniperBO Official Dashboard Publisher
+After=network-online.target sniper-signals-api.service
+Wants=network-online.target
+Requires=sniper-signals-api.service
+
+[Service]
+Type=simple
+User=sniper
+Group=sniper
+WorkingDirectory=/opt/iasniperbo
+EnvironmentFile=/opt/iasniperbo/scripts/official_publisher.local.env
+ExecStart=/opt/iasniperbo/.venv/bin/python /opt/iasniperbo/scripts/official_dashboard_publisher.py --env-file /opt/iasniperbo/scripts/official_publisher.local.env --local-url http://127.0.0.1:8787/dashboard --interval 0.25 --repeat-interval 1.5 --urgent-retry-interval 0.25 --non-entry-urgent-interval 0.5 --log-file /opt/iasniperbo/official_dashboard_publisher.log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

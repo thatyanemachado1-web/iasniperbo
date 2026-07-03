@@ -1,0 +1,16 @@
+[Unit]
+Description=SniperBO Official Watchdog (signals-api + publisher)
+After=network-online.target
+
+[Service]
+Type=simple
+User=sniper
+Group=sniper
+WorkingDirectory=/opt/iasniperbo
+EnvironmentFile=-/opt/iasniperbo/scripts/official_publisher.local.env
+ExecStart=/bin/bash /opt/iasniperbo/scripts/watch_sniperbo_official.sh 15
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
