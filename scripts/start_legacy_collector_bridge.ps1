@@ -85,6 +85,15 @@ function Get-CollectorProcesses {
     })
 }
 
+function Get-StrayScraperProcesses {
+  @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Name -match "python" -and
+      $_.CommandLine -like "*sniper_bo_scraper.py*" -and
+      $_.CommandLine -notlike "*official_legacy_collector.log*"
+    })
+}
+
 function Get-LegacyChromeProcesses {
   @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
@@ -152,6 +161,27 @@ function Test-Url($Url, $Token = "") {
     return [int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500
   } catch {
     return $false
+  }
+}
+
+function Test-UrlAuth($Url, $Token = "") {
+  try {
+    $headers = @{ Accept = "application/json" }
+    if ($Token) { $headers.Authorization = "Bearer $Token" }
+    $response = Invoke-WebRequest -Uri $Url -Headers $headers -TimeoutSec 3 -UseBasicParsing
+    return [pscustomobject]@{
+      Ok = [int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500
+      StatusCode = [int]$response.StatusCode
+    }
+  } catch {
+    $statusCode = 0
+    if ($_.Exception.Response) {
+      try { $statusCode = [int]$_.Exception.Response.StatusCode } catch { }
+    }
+    return [pscustomobject]@{
+      Ok = $false
+      StatusCode = $statusCode
+    }
   }
 }
 
@@ -298,8 +328,10 @@ if (-not $adminEmail) { $adminEmail = Read-EnvValue $legacyEnv "SNIPER_ADMIN_EMA
 $adminPassword = Read-EnvValue $localEnv "SNIPER_ADMIN_PASSWORD"
 if (-not $adminPassword) { $adminPassword = Read-EnvValue $legacyEnv "SNIPER_ADMIN_PASSWORD" }
 
-$legacyToken = Read-EnvValue $legacyEnv "SNIPER_ADMIN_TOKEN"
+# Prefer JWT from official_publisher.local.env so collector and publisher share the same token.
+$legacyToken = Read-EnvValue $localEnv "SNIPER_LOCAL_DASHBOARD_TOKEN"
 if (-not $legacyToken) { $legacyToken = Read-EnvValue $localEnv "SNIPER_ADMIN_TOKEN" }
+if (-not $legacyToken) { $legacyToken = Read-EnvValue $legacyEnv "SNIPER_ADMIN_TOKEN" }
 
 $officialToken = Read-EnvValue $projectEnv "SNIPER_DASHBOARD_TOKEN"
 if (-not $officialToken) { $officialToken = Read-EnvValue $projectEnv "VITE_SNIPER_DASHBOARD_TOKEN" }
@@ -308,6 +340,10 @@ if (-not $officialToken) { $officialToken = Read-EnvValue $localEnv "SNIPER_ADMI
 if (-not $legacyToken -or -not $officialToken) {
   Write-StartupLog "missing collector bridge token configuration"
   throw "Legacy collector bridge tokens are missing."
+}
+
+foreach ($process in Get-StrayScraperProcesses) {
+  Stop-SafeProcess $process.ProcessId "stray-scraper"
 }
 
 $freshness = Test-LegacyCollectorFresh $legacyToken
@@ -320,9 +356,23 @@ $collectorProcesses = Get-CollectorProcesses
 $legacyListenerPid = Get-LegacyApiListenerPid
 if ($collectorProcesses.Count -gt 1 -and $legacyListenerPid) {
   $collectorPidText = ($collectorProcesses.ProcessId -join ",")
-  Write-StartupLog "legacy collector duplicate detected listener=$legacyListenerPid pids=$collectorPidText keeping all alive to avoid closing browser"
+  Write-StartupLog "legacy collector duplicate detected listener=$legacyListenerPid pids=$collectorPidText stopping extras"
+  foreach ($process in $collectorProcesses) {
+    if ([int]$process.ProcessId -ne $legacyListenerPid) {
+      Stop-SafeProcess $process.ProcessId "duplicate-collector"
+    }
+  }
+  $collectorProcesses = Get-CollectorProcesses
 }
-$legacyDashboardReady = Test-Url "http://127.0.0.1:$LegacyApiPort/dashboard" $legacyToken
+
+$legacyDashboardAuth = Test-UrlAuth "http://127.0.0.1:$LegacyApiPort/dashboard" $legacyToken
+$legacyDashboardReady = $legacyDashboardAuth.Ok
+if (-not $legacyDashboardReady -and $legacyDashboardAuth.StatusCode -eq 401 -and ($collectorProcesses.Count -gt 0 -or $legacyListenerPid)) {
+  Write-StartupLog "legacy collector token mismatch status=401 restarting with current env token"
+  Stop-LegacyCollectorStack "token-mismatch-401"
+  $collectorProcesses = @()
+  $legacyListenerPid = 0
+}
 if ($collectorProcesses.Count -eq 0 -and -not $legacyListenerPid -and -not $legacyDashboardReady) {
   Write-StartupLog "starting legacy collector isolated port=$LegacyApiPort root=$LegacyRoot"
   $configArgs = ""
