@@ -20,8 +20,25 @@ function Read-EnvFile($Path) {
   return $values
 }
 
+function Test-ConfigIsSuper($Path) {
+  if (-not (Test-Path -LiteralPath $Path)) { return $false }
+  try {
+    $text = [System.IO.File]::ReadAllText($Path).ToLowerInvariant()
+    if ($text -match "77super|browser_profile_77super") { return $true }
+    if ($text -match "score\.|cassino.?score|casino.?score") { return $false }
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 function Find-ConfigJson {
-  if (Test-Path -LiteralPath $DestConfig) { return $DestConfig }
+  $gerar = Join-Path $ScriptDir "gerar_config_super.ps1"
+  if (Test-Path -LiteralPath $DestConfig) {
+    if (Test-ConfigIsSuper $DestConfig) { return $DestConfig }
+    Write-Host "[AVISO] config.json atual NAO e da Casa Super. Recriando..." -ForegroundColor Yellow
+    Remove-Item -LiteralPath $DestConfig -Force -ErrorAction SilentlyContinue
+  }
   $roots = @(
     $ProjectRoot,
     (Join-Path $ProjectRoot "Codex"),
@@ -33,14 +50,18 @@ function Find-ConfigJson {
     if (-not (Test-Path -LiteralPath $root)) { continue }
     try {
       $found = Get-ChildItem -LiteralPath $root -Filter "config.json" -Recurse -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch "\\node_modules\\" } |
+        Where-Object { $_.FullName -notmatch "\\node_modules\\" -and (Test-ConfigIsSuper $_.FullName) } |
         Select-Object -First 1
       if ($found) {
         Copy-Item -LiteralPath $found.FullName -Destination $DestConfig -Force
-        Write-Host "[OK] config.json copiado de:" $found.FullName -ForegroundColor Green
+        Write-Host "[OK] config.json Casa Super copiado de:" $found.FullName -ForegroundColor Green
         return $DestConfig
       }
     } catch { }
+  }
+  if (Test-Path -LiteralPath $gerar) {
+    & $gerar
+    if (Test-Path -LiteralPath $DestConfig) { return $DestConfig }
   }
   return ""
 }
@@ -59,7 +80,7 @@ function Find-Python {
 }
 
 Write-Host ""
-Write-Host "=== SNIPERBO - Abrindo mesa Bac Bo ===" -ForegroundColor Cyan
+Write-Host "=== SNIPERBO - Abrindo mesa Bac Bo (Casa Super) ===" -ForegroundColor Cyan
 Write-Host ""
 
 if (-not (Test-Path -LiteralPath $Scraper)) {
@@ -157,7 +178,7 @@ if ($ready) {
   Write-Host "Agora rode LIGAR_SINAIS.bat ou REINICIAR_SINAIS.bat" -ForegroundColor Cyan
 } else {
   Write-Host "[AVISO] Coletor ainda nao respondeu na porta 8791." -ForegroundColor Yellow
-  Write-Host "  - Chrome abriu? Faca login na casa de apostas se pedir." -ForegroundColor Yellow
+  Write-Host "  - Chrome abriu em 77super.com? Faca login se pedir." -ForegroundColor Yellow
   Write-Host "  - Clique Permitir se pedir 'gravando fluxo'." -ForegroundColor Yellow
   Write-Host "  - Veja erros em: $LogFile" -ForegroundColor Yellow
   if (Test-Path -LiteralPath $LogFile) {
