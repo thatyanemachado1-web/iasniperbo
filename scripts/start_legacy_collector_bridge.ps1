@@ -16,7 +16,23 @@ $BridgeLog = Join-Path $ProjectRoot "legacy_collector_bridge.log"
 $PublisherScript = Join-Path $ScriptDir "official_dashboard_publisher.py"
 $LocalEnvPath = Join-Path $ScriptDir "official_publisher.local.env"
 $ProjectEnvPath = Join-Path $ProjectRoot ".env"
-$LegacyRoot = "C:\Users\Usuario\OneDrive\Documentos\Codex\2026-05-24\voc-um-desenvolvedor-python-s-nior"
+
+function Resolve-LegacyCollectorRoot($Root) {
+  $candidates = @(
+    $Root,
+    "C:\SNIPERBO",
+    "C:\Users\Usuario\OneDrive\Documentos\Codex\2026-05-24\voc-um-desenvolvedor-python-s-nior"
+  ) | Select-Object -Unique
+
+  foreach ($candidate in $candidates) {
+    if (Test-Path -LiteralPath (Join-Path $candidate "sniper_bo_scraper.py")) {
+      return $candidate
+    }
+  }
+  return $Root
+}
+
+$LegacyRoot = Resolve-LegacyCollectorRoot $ProjectRoot
 $LegacyScript = Join-Path $LegacyRoot "sniper_bo_scraper.py"
 $LegacyEnvPath = Join-Path $LegacyRoot ".env"
 $LegacyPython = Join-Path $LegacyRoot ".venv\Scripts\python.exe"
