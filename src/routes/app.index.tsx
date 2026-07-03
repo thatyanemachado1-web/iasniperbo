@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Clock, Crown } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useDashboardData, isDashboardLive } from "@/hooks/useDashboardData";
 import { ModuleMiniScoreboard } from "@/components/dashboard/ModuleMiniScoreboard";
 import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
 import { AIReadingCard } from "@/components/dashboard/AIReadingCard";
@@ -39,13 +39,11 @@ export const Route = createFileRoute("/app/")({
 });
 
 function DashboardPage() {
-  const { data: d, dashboardUrl, mode, setModuleToggles } = useDashboardData();
+  const { data: d, dashboardUrl, mode, error, setModuleToggles } = useDashboardData();
   const userSession = readUserSession();
   const fullAccess = hasFullAccess(userSession);
-  const { history: roundHistory, resetHistory } = useRoundHistory(
-    d,
-    mode === "live" && !d.mockMode,
-  );
+  const liveDashboard = isDashboardLive(d, mode);
+  const { history: roundHistory, resetHistory } = useRoundHistory(d, liveDashboard);
   const patternMinerSourceRounds = useMemo(
     () => [...roundHistory.todayRounds, ...d.rounds],
     [roundHistory.todayRounds, d.rounds],
@@ -53,7 +51,7 @@ function DashboardPage() {
   const patternMiner = usePatternMiner({
     rounds: patternMinerSourceRounds.length ? patternMinerSourceRounds : d.rounds,
     historyLimit: 15000,
-    enabled: mode === "live" && !d.mockMode,
+    enabled: liveDashboard,
     serverSnapshot: d.patternMinerSnapshot,
     feedStatus: resolvePatternMinerFeedStatus(d),
     dashboardUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
@@ -66,10 +64,12 @@ function DashboardPage() {
     rounds: dailySurfSourceRounds,
     tableId: "bac-bo",
     sourceUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
-    enabled: mode === "live" && !d.mockMode,
+    enabled: liveDashboard,
   });
-  const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
-  const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;
+  const surfAlert = liveDashboard ? d.currentSurfAlert : d.currentSurfAlert;
+  const surfBoard = liveDashboard
+    ? d.surfAnalyzerScoreboard
+    : d.surfAnalyzerScoreboard;
   const mainResult = calculateMainResult(d.mainScoreboard);
   const tieResult = calculateTieResult(d.tieAlertScoreboard);
   const neuralResult = calculateNeuralResult(d.neuralReading);
@@ -89,12 +89,21 @@ function DashboardPage() {
       ? "Dados em tempo real"
       : mode === "connecting"
         ? "Conectando API"
-        : "Modo demonstração";
-  const dataModeTone = mode === "live" ? "green" : mode === "connecting" ? "blue" : "amber";
+        : mode === "error"
+          ? "Erro no feed live"
+          : "Aguardando feed";
+  const dataModeTone =
+    mode === "live" ? "green" : mode === "connecting" ? "blue" : mode === "error" ? "red" : "amber";
   const dashboardSourceLabel = formatDashboardSource(dashboardUrl);
 
   return (
     <div className="space-y-4">
+      {mode === "error" && error ? (
+        <GlassCard className="border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          Feed live indisponível: {error instanceof Error ? error.message : String(error)}
+        </GlassCard>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs text-muted-foreground">Olá,</div>

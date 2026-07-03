@@ -1,6 +1,6 @@
 import { BrainCircuit, CheckCircle2, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useDashboardData, isDashboardLive } from "@/hooks/useDashboardData";
 import type { NeuralEntryLastResult, SignalSide } from "@/types/dashboard";
 
 type PopupKind = "green" | "red" | "tie";
@@ -23,12 +23,14 @@ export function NeuralEntryLivePopupBridge() {
   const result = data.neuralEntryLastResult;
   const key = useMemo(() => neuralPopupKey(result), [result]);
 
+  const liveDashboard = isDashboardLive(data, mode);
+
   useEffect(() => {
-    if (mode !== "live" || data.mockMode || !key || key === previousKeyRef.current) return;
+    if (!liveDashboard || !key || key === previousKeyRef.current) return;
     previousKeyRef.current = key;
     const nextPopup = buildNeuralPopup(result);
     if (nextPopup) setPopup(nextPopup);
-  }, [data.mockMode, key, mode, result]);
+  }, [key, liveDashboard, result]);
 
   useEffect(() => {
     if (!popup) return;

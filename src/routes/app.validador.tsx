@@ -44,7 +44,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useDashboardData, isDashboardLive } from "@/hooks/useDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
 import { hasFullAccess, readUserSession } from "@/lib/userSession";
 import {
@@ -253,7 +253,7 @@ function NeuralValidatorPage() {
   const adminAccess = Boolean(adminSession?.token && !hasClientSession);
   const fullAccess = adminAccess || hasFullAccess(session);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
+  const realTimeRounds = isDashboardLive(data, mode) ? data.rounds : [];
   const planLimits = adminAccess ? planLimitForSession("vip", true) : planLimitForSession(session.plan, fullAccess);
   const [serverHistory, setServerHistory] = useState<Round[]>([]);
   const [serverHistoryStatus, setServerHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");

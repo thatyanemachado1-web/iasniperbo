@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { Button } from "@/components/ui/button";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useDashboardData, isDashboardLive } from "@/hooks/useDashboardData";
 import { useRoundHistory } from "@/hooks/useRoundHistory";
 import { fetchNeuralCalendar } from "@/lib/neuralCalendarApi";
 import type {
@@ -72,8 +72,11 @@ interface WeekdayHourCellData {
 
 function NeuralCalendarPage() {
   const today = useMemo(() => saoPauloTodayParts(), []);
-  const { data: liveDashboardData } = useDashboardData();
-  const { history: roundHistory } = useRoundHistory(liveDashboardData, !liveDashboardData.mockMode);
+  const { data: liveDashboardData, mode } = useDashboardData();
+  const { history: roundHistory } = useRoundHistory(
+    liveDashboardData,
+    isDashboardLive(liveDashboardData, mode),
+  );
   const allowedYears = useMemo(() => [today.year - 1, today.year, today.year + 1], [today.year]);
   const [engineMode, setEngineMode] = useState<NeuralCalendarEngineKey>("todos");
   const [customEngines, setCustomEngines] = useState<NeuralCalendarEngineKey[]>(

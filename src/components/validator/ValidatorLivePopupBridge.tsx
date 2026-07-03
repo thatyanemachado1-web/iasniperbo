@@ -1,6 +1,6 @@
 import { BellRing, CheckCircle2, Clock3, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useDashboardData, isDashboardLive } from "@/hooks/useDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
 import {
@@ -55,7 +55,7 @@ export function ValidatorLivePopupBridge() {
   const [serverRounds, setServerRounds] = useState<Round[]>([]);
   const [popups, setPopups] = useState<PatternPopup[]>([]);
   const telegramSendKeysRef = useRef(new Set<string>());
-  const liveRounds = mode === "live" && !data.mockMode ? data.rounds : [];
+  const liveRounds = isDashboardLive(data, mode) ? data.rounds : [];
   const storedRounds = useMemo(
     () => readValidatorHistory(liveRounds).slice(-MAX_CLIENT_MONITOR_ROUNDS),
     [liveRounds, data.updatedAt],

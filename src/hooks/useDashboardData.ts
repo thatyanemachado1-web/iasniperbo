@@ -1,11 +1,19 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
+import {
+  createConnectingDashboardShell,
+  isLiveDashboardPayload,
+  type DashboardDataMode,
+} from "@/lib/dashboardLive";
 import { LOCAL_SIGNALS_API_BASE_URL } from "@/lib/runtimePorts";
 import { readUserSession } from "@/lib/userSession";
 import { useEffect, useMemo, useState } from "react";
 import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } from "@/types/dashboard";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
+
+export type { DashboardDataMode };
+export { isDashboardLive, isLiveDashboardPayload } from "@/lib/dashboardLive";
 
 const LIVE_REFETCH_INTERVAL_MS = 800;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
@@ -159,57 +167,75 @@ async function fetchDashboardData(): Promise<DashboardData> {
   });
 
   if (!response.ok) {
-    throw new Error(`Dashboard API returned ${response.status}`);
+    const body = await response.text().catch(() => "");
+    throw new Error(`Dashboard API ${response.status}: ${body.slice(0, 180) || response.statusText}`);
   }
 
-  return normalizeDashboardData(await response.json());
+  const payload = normalizeDashboardData(await response.json());
+  if (payload.mockMode === true) {
+    return { ...payload, mockMode: false };
+  }
+  return payload;
 }
 
-function isLiveDashboardPayload(data: DashboardData | undefined | null) {
-  if (!data || data.mockMode === true) return false;
-  if (data.updatedAt) return true;
-  return Array.isArray(data.rounds) && data.rounds.length > 0;
+function resolveDashboardAuthToken() {
+  const url = configuredDashboardUrl();
+  const userSession = readUserSession();
+  const adminSession = readAdminSession();
+  return configuredDashboardToken(url) || adminSession?.token || userSession.clientToken || "";
+}
+
+function initialDashboardPlaceholder(): DashboardData {
+  if (isHostedAppOrigin()) return createConnectingDashboardShell();
+  if (isLocalFrontend()) return createConnectingDashboardShell();
+  return mockDashboardData;
 }
 
 function resolveDashboardMode(
   dashboardUrl: string,
   query: {
     data: DashboardData | undefined;
-    isPlaceholderData: boolean;
     isPending: boolean;
     isFetching: boolean;
     isError: boolean;
   },
-) {
-  if (!dashboardUrl) return "mock" as const;
-  const hasLivePayload = isLiveDashboardPayload(query.data) && !query.isPlaceholderData;
-  if (hasLivePayload) return "live" as const;
-  if (query.isPending || (query.isFetching && !hasLivePayload)) return "connecting" as const;
-  if (query.isError) return "fallback" as const;
-  return "fallback" as const;
+): DashboardDataMode {
+  if (!dashboardUrl) return "mock";
+  const payload = query.data;
+  if (isLiveDashboardPayload(payload)) return "live";
+  if (query.isPending && !payload?.updatedAt) return "connecting";
+  if (query.isFetching && !isLiveDashboardPayload(payload)) return "connecting";
+  if (query.isError) return "error";
+  if (!isLiveDashboardPayload(payload)) return "connecting";
+  return "live";
 }
 
 export function useDashboardData() {
   const dashboardUrl = configuredDashboardUrl();
+  const authToken = resolveDashboardAuthToken();
   const [moduleToggles, setModuleTogglesState] = useState<ModuleToggles>(() =>
     readStoredModuleToggles(),
   );
   const query = useQuery({
-    queryKey: ["dashboard-data", dashboardUrl],
+    queryKey: ["dashboard-data", dashboardUrl, authToken ? `auth:${authToken.slice(-12)}` : "anon"],
     queryFn: fetchDashboardData,
     enabled: Boolean(dashboardUrl) && typeof window !== "undefined",
-    placeholderData: mockDashboardData,
+    placeholderData: keepPreviousData,
+    initialData: initialDashboardPlaceholder(),
     refetchInterval: dashboardUrl ? LIVE_REFETCH_INTERVAL_MS : false,
     refetchIntervalInBackground: true,
-    retry: 1,
+    refetchOnWindowFocus: true,
+    retry: 2,
     staleTime: 0,
   });
-  const hasLivePayload = isLiveDashboardPayload(query.data) && !query.isPlaceholderData;
+  const hasLivePayload = isLiveDashboardPayload(query.data);
   const data = useMemo(() => {
-    const rawData = hasLivePayload ? (query.data as DashboardData) : (query.data ?? mockDashboardData);
+    const rawData = hasLivePayload
+      ? (query.data as DashboardData)
+      : query.data ?? initialDashboardPlaceholder();
     return {
       ...rawData,
-      mockMode: hasLivePayload ? false : Boolean(rawData.mockMode),
+      mockMode: hasLivePayload ? false : false,
       moduleToggles,
       entryMode: "off" as const,
       entryModeFilter: undefined,

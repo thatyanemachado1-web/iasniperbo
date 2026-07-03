@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useDashboardData, isDashboardLive } from "@/hooks/useDashboardData";
 import { usePatternMiner, resolvePatternMinerFeedStatus } from "@/hooks/usePatternMiner";
 import { useRoundHistory } from "@/hooks/useRoundHistory";
 import {
@@ -32,7 +32,7 @@ export const Route = createFileRoute("/app/padroes")({
 function PatternMinerPage() {
   const { data: dashboardData, mode } = useDashboardData();
   const [historyLimit, setHistoryLimit] = useState<PatternMinerHistoryLimit>(15000);
-  const hasRealHistory = mode === "live" && !dashboardData.mockMode;
+  const hasRealHistory = isDashboardLive(dashboardData, mode);
   const { history: roundHistory } = useRoundHistory(dashboardData, hasRealHistory);
   const patternMinerSourceRounds = useMemo(
     () => [...roundHistory.todayRounds, ...dashboardData.rounds],

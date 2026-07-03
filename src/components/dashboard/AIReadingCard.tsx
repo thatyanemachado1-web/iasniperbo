@@ -8,13 +8,14 @@ import { generateAIReading, type AIReadingSnapshot } from "@/lib/aiReader.functi
 import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
 import { readVoiceResponseError } from "@/lib/voiceApiError";
+import { isDashboardLive, type DashboardDataMode } from "@/hooks/useDashboardData";
 import type { DashboardData } from "@/types/dashboard";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import { Sparkles, RefreshCw, Volume2, VolumeX } from "lucide-react";
 
 type Props = {
   data: DashboardData;
-  mode: "mock" | "fallback" | "connecting" | "live";
+  mode: DashboardDataMode;
 };
 
 const AI_READING_VOICE_KEY = "sniper_ai_reading_voice_enabled";
@@ -122,7 +123,7 @@ export function AIReadingCard({ data, mode }: Props) {
   const autoVoiceKey = `${stateKey}|${data.updatedAt ?? ""}`;
   autoVoiceKeyRef.current = autoVoiceKey;
 
-  const liveReady = mode === "live" && data.mockMode === false;
+  const liveReady = isDashboardLive(data, mode);
 
   const {
     data: reading,

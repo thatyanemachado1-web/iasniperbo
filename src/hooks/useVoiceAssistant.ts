@@ -3,6 +3,7 @@ import { readAdminSession } from "@/lib/adminApi";
 import { requestLocalAiCommentary } from "@/lib/localAiApi";
 import { readUserSession } from "@/lib/userSession";
 import { readVoiceResponseError } from "@/lib/voiceApiError";
+import { isDashboardLive, type DashboardDataMode } from "@/hooks/useDashboardData";
 import type { AdaptiveStrategySnapshot } from "@/types/adaptiveStrategy";
 import type { DashboardData } from "@/types/dashboard";
 import {
@@ -15,7 +16,7 @@ import {
   type VoicePriority,
 } from "@/lib/voiceNarrative";
 
-type DashboardMode = "mock" | "fallback" | "connecting" | "live";
+type DashboardMode = DashboardDataMode;
 export type VoiceProvider = "browser" | "edge-tts" | "elevenlabs" | "piper";
 export type BrowserVoiceChoice = "browser_auto" | "pt-BR-AntonioNeural";
 
@@ -78,7 +79,7 @@ export function useVoiceAssistant(
     typeof window.speechSynthesis !== "undefined" &&
     typeof window.SpeechSynthesisUtterance !== "undefined";
   const supported = provider === "browser" ? speechSupported : audioSupported || speechSupported;
-  const hasLiveBackendData = mode === "live" && data.mockMode === false;
+  const hasLiveBackendData = isDashboardLive(data, mode);
   const events = useMemo(() => {
     const resultEvents = buildVoiceResultEvents(previousDataRef.current, data, style);
     if (resultEvents.length) return resultEvents;

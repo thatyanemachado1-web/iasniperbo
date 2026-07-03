@@ -1,6 +1,6 @@
 import { CheckCircle2, Radio, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import { useDashboardData, isDashboardLive } from "@/hooks/useDashboardData";
 import type { MainSignal, SignalSide } from "@/types/dashboard";
 
 type PopupKind = "entry" | "g1" | "green" | "red" | "tie";
@@ -21,15 +21,17 @@ export function MainSignalLivePopupBridge() {
   const { data, mode } = useDashboardData();
   const [popup, setPopup] = useState<MainSignalPopup | null>(null);
   const previousKeyRef = useRef("");
-  const signal = data.currentSignal;
+  const liveDashboard = isDashboardLive(data, mode);
   const key = useMemo(() => signalPopupKey(signal), [signal]);
 
+  const signal = data.currentSignal;
+
   useEffect(() => {
-    if (mode !== "live" || data.mockMode || !key || key === previousKeyRef.current) return;
+    if (!liveDashboard || !key || key === previousKeyRef.current) return;
     previousKeyRef.current = key;
     const nextPopup = buildSignalPopup(signal);
     if (nextPopup) setPopup(nextPopup);
-  }, [data.mockMode, key, mode, signal]);
+  }, [key, liveDashboard, signal]);
 
   useEffect(() => {
     if (!popup) return;
