@@ -73,6 +73,13 @@ export function useRoundHistory(data: DashboardData, enabled: boolean): UseRound
         collectionStartedAt: current.collectionStartedAt || capturedAt,
         rounds: Array.from(byKey.values()).sort(compareStoredRounds).slice(-MAX_STORED_ROUNDS),
       };
+
+      const prevLast = current.rounds.at(-1)?.key ?? "";
+      const nextLast = next.rounds.at(-1)?.key ?? "";
+      if (next.rounds.length === current.rounds.length && prevLast === nextLast) {
+        return current;
+      }
+
       writeHistory(next);
       return next;
     });

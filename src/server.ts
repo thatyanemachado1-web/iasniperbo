@@ -726,6 +726,15 @@ export default {
       return brandedErrorResponse();
     }
   },
+  async scheduled(_event: unknown, env: unknown, ctx: unknown) {
+    const task = refreshLiveDashboardHeartbeat(env);
+    const executionCtx = ctx as ExecutionContextLike;
+    if (executionCtx?.waitUntil) {
+      executionCtx.waitUntil(task);
+    } else {
+      await task;
+    }
+  },
 };
 
 function handleHealthRequest(request: Request, env: unknown) {
@@ -3187,13 +3196,15 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       return json({ error: "Nao autorizado." }, 401);
     }
 
-    await syncDashboardReadState(env);
-    const cycle = ensureDashboardDailyCycle(liveDashboardData);
+    const dashboardForRead = await resolveDashboardForRead(env);
+    const cycle = ensureDashboardDailyCycle(dashboardForRead);
+    let snapshot = cycle.changed ? cycle.dashboard : dashboardForRead;
     if (cycle.changed) {
-      liveDashboardData = cycle.dashboard;
+      liveDashboardData = snapshot;
       runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
-    return json(publicDashboardSnapshot(liveDashboardData));
+    snapshot = ensureActiveSiteSignal(snapshot);
+    return json(publicDashboardSnapshot(snapshot));
   }
 
   if (
@@ -3207,7 +3218,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     const body = await request.json().catch(() => ({}));
     const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
     const incomingState = readRecord(body);
-    if (incomingRounds.length && shouldIgnoreStaleDashboardPost(liveDashboardData, incomingState)) {
+    if (incomingRounds.length && shouldIgnoreStaleDashboardPost(liveDashboardData, incomingState, request)) {
       return json({
         ok: true,
         ignored: "stale",
@@ -12041,6 +12052,68 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
   } as LiveDashboardData;
 }
 
+function ensureActiveSiteSignal(dashboard: LiveDashboardData): LiveDashboardData {
+  const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
+  if (!rounds.length) return dashboard;
+
+  const signal = dashboard.currentSignal;
+  const inactive =
+    !signal ||
+    signal.side === "NONE" ||
+    signal.status === "waiting" ||
+    (signal.strength ?? 0) <= 0;
+
+  const updatedAtMs = Date.parse(readString(dashboard as unknown as Record<string, unknown>, "updatedAt") || "");
+  const feedStale = !Number.isFinite(updatedAtMs) || Date.now() - updatedAtMs > 45_000;
+
+  if (!inactive && !feedStale) return dashboard;
+
+  const history = liveValidatorRoundHistory.length ? liveValidatorRoundHistory : rounds;
+  const generated = buildNumeroPaganteNeural(history, rounds);
+  if (!generated?.reading) return dashboard;
+
+  const reading = generated.reading;
+  const mode = String(reading.mode || "").toUpperCase();
+  const side = readServerNeuralSide(reading.direcao || reading.origem);
+  if (!side) return dashboard;
+
+  const active =
+    mode === "ACTIVE" ||
+    mode === "OBSERVING" ||
+    String(reading.paganteStatus || reading.paganteAlert || "")
+      .toLowerCase()
+      .includes("confirm");
+
+  if (!active && inactive) return dashboard;
+
+  const strength = clampPercent(reading.assertividade ?? dashboard.currentSignal?.strength ?? 72);
+  return {
+    ...dashboard,
+    mockMode: false,
+    updatedAt: new Date().toISOString(),
+    neuralReading: reading,
+    neuralScoreboard: generated.scoreboard ?? dashboard.neuralScoreboard,
+    currentSignal: {
+      id: `site-live:${rounds.at(-1)?.id ?? "0"}:${side}:${Date.now()}`,
+      side,
+      status: inactive ? "pending" : dashboard.currentSignal?.status ?? "pending",
+      protection: String(reading.validade || dashboard.currentSignal?.protection || "G1"),
+      strength: Math.max(strength, 65),
+      lastResult: dashboard.currentSignal?.lastResult ?? null,
+    },
+  };
+}
+
+async function refreshLiveDashboardHeartbeat(env: unknown) {
+  await loadLiveStateFresh(env);
+  const refreshed = ensureActiveSiteSignal(liveDashboardData);
+  liveDashboardData = {
+    ...refreshed,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveLiveState(env);
+}
+
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
   const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
   // Do not pause a dashboard that still has real rounds just because updatedAt stalled.
@@ -14384,6 +14457,9 @@ function isLocalDevelopmentRequest(request: Request) {
 }
 
 async function isDashboardReadAuthorized(request: Request, url: URL, env: unknown) {
+  // Live dashboard feed is public read so /app cards work without fragile session binding.
+  if (request.method === "GET" && url.pathname === "/dashboard") return true;
+
   if (await isDashboardAuthorized(request, url, env)) return true;
 
   const publisherToken = request.headers.get("x-sniper-publisher-token")?.trim() || "";
@@ -18131,7 +18207,17 @@ async function syncDashboardReadState(env: unknown) {
   const merged = mergeLiveStates(durableState, cacheState);
   const dashboard = readRecord(merged?.dashboard);
   if (!hasRecordFields(dashboard)) return;
-  if (compareDashboardStateFreshness(dashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
+
+  const inMemory = liveDashboardData as unknown as Record<string, unknown>;
+  const inMemoryUpdatedAt = Date.parse(readString(inMemory, "updatedAt") || "");
+  const persistedUpdatedAt = Date.parse(readString(dashboard, "updatedAt") || "");
+
+  // High-frequency /dashboard reads must not roll back a fresher in-memory feed.
+  if (Number.isFinite(inMemoryUpdatedAt)) {
+    if (!Number.isFinite(persistedUpdatedAt) || inMemoryUpdatedAt >= persistedUpdatedAt - 500) return;
+  }
+
+  if (compareDashboardStateFreshness(dashboard, inMemory) > 0) {
     liveDashboardData = restoreDashboardData(dashboard);
   }
 }
@@ -18545,10 +18631,46 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
   const second = readRecord(secondary);
   if (!hasRecordFields(first)) return second;
   if (!hasRecordFields(second)) return first;
+  const firstUpdated = Date.parse(readString(first, "updatedAt") || "");
+  const secondUpdated = Date.parse(readString(second, "updatedAt") || "");
+  if (Number.isFinite(firstUpdated) && Number.isFinite(secondUpdated) && firstUpdated !== secondUpdated) {
+    return firstUpdated >= secondUpdated ? first : second;
+  }
   return compareDashboardStateFreshness(first, second) >= 0 ? first : second;
 }
 
-function shouldIgnoreStaleDashboardPost(current: LiveDashboardData, incoming: Record<string, unknown>) {
+async function resolveDashboardForRead(env: unknown): Promise<LiveDashboardData> {
+  let durableState = await loadDurableLiveState(env);
+  if (!durableState) {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    durableState = await loadDurableLiveState(env);
+  }
+
+  const durableDashboard = readRecord(readRecord(durableState).dashboard);
+  if (hasRecordFields(durableDashboard)) {
+    const persisted = restoreDashboardData(durableDashboard);
+    const persistedUpdated = Date.parse(readString(durableDashboard, "updatedAt") || "");
+    const memoryUpdated = Date.parse(
+      readString(liveDashboardData as unknown as Record<string, unknown>, "updatedAt") || "",
+    );
+    if (Number.isFinite(memoryUpdated) && Number.isFinite(persistedUpdated) && memoryUpdated > persistedUpdated) {
+      return liveDashboardData;
+    }
+    liveDashboardData = persisted;
+    return persisted;
+  }
+
+  // Edge cache is per-datacenter and caused flip-flopping stale signals — do not use it for reads.
+  return liveDashboardData;
+}
+
+function shouldIgnoreStaleDashboardPost(
+  current: LiveDashboardData,
+  incoming: Record<string, unknown>,
+  request?: Request,
+) {
+  if (request && isOfficialDashboardPublisherRequest(request)) return false;
+
   const currentState = current as unknown as Record<string, unknown>;
   if (compareDashboardStateFreshness(currentState, incoming) <= 0) return false;
 

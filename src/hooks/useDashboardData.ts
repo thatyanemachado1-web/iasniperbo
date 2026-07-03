@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } from "@/types/dashboard";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 
-const LIVE_REFETCH_INTERVAL_MS = 300;
+const LIVE_REFETCH_INTERVAL_MS = 2500;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
 const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v2";
@@ -114,6 +114,9 @@ function defaultDashboardUrl() {
   if (isLocalFrontend()) {
     return ensureDashboardPath(LOCAL_SIGNALS_API_BASE_URL);
   }
+  if (ALLOWED_REMOTE_API_HOSTS.has(window.location.hostname)) {
+    return ensureDashboardPath(`${window.location.protocol}//${window.location.host}`);
+  }
   return ensureDashboardPath(PUBLIC_LIVE_API_BASE_URL);
 }
 
@@ -163,10 +166,25 @@ export function useDashboardData() {
     enabled: Boolean(dashboardUrl) && typeof window !== "undefined",
     initialData: mockDashboardData,
     refetchInterval: dashboardUrl ? LIVE_REFETCH_INTERVAL_MS : false,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
     retry: 1,
-    staleTime: 0,
+    staleTime: 2_000,
   });
+  const liveFingerprint = useMemo(() => {
+    const raw = query.data ?? mockDashboardData;
+    const lastRound = raw.rounds?.at(-1);
+    return [
+      raw.updatedAt ?? "",
+      raw.currentSignal?.id ?? "",
+      raw.currentSignal?.status ?? "",
+      raw.currentSignal?.side ?? "",
+      raw.rounds?.length ?? 0,
+      lastRound?.id ?? "",
+      lastRound?.result ?? "",
+    ].join("|");
+  }, [query.data]);
+
   const data = useMemo(() => {
     const rawData = query.data ?? mockDashboardData;
     return {
@@ -175,7 +193,7 @@ export function useDashboardData() {
       entryMode: "off" as const,
       entryModeFilter: undefined,
     };
-  }, [query.data, moduleToggles]);
+  }, [liveFingerprint, moduleToggles, query.data]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -1006,7 +1024,9 @@ function readNeuralLiveSequence(key: string): NeuralLiveSequence | null {
 }
 
 function writeNeuralLiveSequence(key: string, sequence: NeuralLiveSequence) {
-  window.localStorage.setItem(key, JSON.stringify(sequence));
+  const payload = JSON.stringify(sequence);
+  if (window.localStorage.getItem(key) === payload) return;
+  window.localStorage.setItem(key, payload);
 }
 
 function neuralScoreWentBackwards(current: Omit<NeuralScoreBaseline, "day">, baseline: NeuralScoreBaseline) {
