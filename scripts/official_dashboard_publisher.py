@@ -142,12 +142,12 @@ def load_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
         return values
-    for raw_line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    for raw_line in path.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
+        values[key.strip().lstrip("\ufeff")] = value.strip().strip('"').strip("'")
     return values
 
 
@@ -1803,11 +1803,21 @@ def main() -> int:
     token_index = 0
     using_admin_session = False
     direct_publisher_endpoint = args.remote_url.rstrip("/").endswith("/dashboard/publish")
-    direct_publisher_token = (
+    explicit_publisher_token = (
         env.get("SNIPER_PUBLISHER_TOKEN", "").strip()
         or os.getenv("SNIPER_PUBLISHER_TOKEN", "").strip()
-        or (remote_tokens[0] if remote_tokens else "")
     )
+    direct_publisher_token = explicit_publisher_token
+    if direct_publisher_endpoint and not admin_email and not admin_password and not explicit_publisher_token:
+        logging.error("Missing SNIPER_ADMIN_EMAIL/SNIPER_ADMIN_PASSWORD for direct publish auth.")
+        return 2
+    if direct_publisher_endpoint and (admin_email or admin_password):
+        logging.info(
+            "Direct publish auth: email=%s password=%s publisher_token=%s",
+            "set" if admin_email else "missing",
+            "set" if admin_password else "missing",
+            "set" if explicit_publisher_token else "headers-only",
+        )
     rate_limit_sleep = 0.0
     last_fingerprint = ""
     last_signal_fingerprint = ""

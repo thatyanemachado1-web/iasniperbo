@@ -17,7 +17,11 @@ $BridgeLog = Join-Path $ProjectRoot "legacy_collector_bridge.log"
 function Read-EnvFile($Path) {
   $values = @{}
   if (-not (Test-Path -LiteralPath $Path)) { return $values }
-  Get-Content -LiteralPath $Path | ForEach-Object {
+  $raw = [System.IO.File]::ReadAllText($Path)
+  if ($raw.Length -gt 0 -and [int][char]$raw[0] -eq 0xFEFF) {
+    $raw = $raw.Substring(1)
+  }
+  $raw -split "`r?`n" | ForEach-Object {
     $line = $_.Trim()
     if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { return }
     $parts = $line.Split("=", 2)
@@ -171,10 +175,14 @@ if ($bridge.Ok) {
 
 Write-Host ""
 Write-Host "--- Site producao ---" -ForegroundColor Yellow
+$pubEmail = $envValues["SNIPER_ADMIN_EMAIL"]
+$pubPassword = $envValues["SNIPER_ADMIN_PASSWORD"]
+if (-not $pubEmail) { Write-Host "[AVISO] SNIPER_ADMIN_EMAIL vazio no .env (BOM UTF-8?)" -ForegroundColor Yellow }
+if (-not $pubPassword) { Write-Host "[AVISO] SNIPER_ADMIN_PASSWORD vazio no .env (BOM UTF-8?)" -ForegroundColor Yellow }
 try {
-  $headers = @{ Accept = "application/json"; "User-Agent" = "sniperbo-official-publisher/1.0" }
-  if ($email) { $headers["x-sniper-admin-email"] = $email }
-  if ($password) { $headers["x-sniper-admin-password"] = $password }
+  $headers = @{ Accept = "application/json"; "User-Agent" = "Mozilla/5.0 SNIPERBO-Official-Publisher/1.0" }
+  if ($pubEmail) { $headers["x-sniper-admin-email"] = $pubEmail }
+  if ($pubPassword) { $headers["x-sniper-admin-password"] = $pubPassword }
   $pub = Invoke-RestMethod -Uri "https://sniperbo.com/dashboard/publish" -Method POST -Headers $headers -ContentType "application/json" -Body '{"probe":true}' -TimeoutSec 10
   $dash = $pub.dashboard
   $sig = $dash.currentSignal
