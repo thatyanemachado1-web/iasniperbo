@@ -18568,22 +18568,23 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
 }
 
 async function resolveDashboardForRead(env: unknown): Promise<LiveDashboardData> {
-  const [durableState, cacheState] = await Promise.all([loadDurableLiveState(env), loadLiveStateCache()]);
-  const merged = mergeLiveStates(durableState, cacheState);
-  const persistedRaw = readRecord(merged?.dashboard);
-  const candidates: LiveDashboardData[] = [liveDashboardData];
-  if (hasRecordFields(persistedRaw)) {
-    candidates.push(restoreDashboardData(persistedRaw));
+  const durableState = await loadDurableLiveState(env);
+  const durableDashboard = readRecord(readRecord(durableState).dashboard);
+  if (hasRecordFields(durableDashboard)) {
+    const persisted = restoreDashboardData(durableDashboard);
+    liveDashboardData = persisted;
+    return persisted;
   }
-  return candidates.reduce((best, next) => {
-    const bestUpdated = Date.parse(readString(best as unknown as Record<string, unknown>, "updatedAt") || "");
-    const nextUpdated = Date.parse(readString(next as unknown as Record<string, unknown>, "updatedAt") || "");
-    if (Number.isFinite(nextUpdated) && Number.isFinite(bestUpdated)) {
-      return nextUpdated >= bestUpdated ? next : best;
-    }
-    if (Number.isFinite(nextUpdated)) return next;
-    return best;
-  });
+
+  const cacheState = await loadLiveStateCache();
+  const cacheDashboard = readRecord(readRecord(cacheState).dashboard);
+  if (hasRecordFields(cacheDashboard)) {
+    const persisted = restoreDashboardData(cacheDashboard);
+    liveDashboardData = persisted;
+    return persisted;
+  }
+
+  return liveDashboardData;
 }
 
 function shouldIgnoreStaleDashboardPost(
