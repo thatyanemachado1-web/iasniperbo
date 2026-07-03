@@ -12268,6 +12268,7 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
   return {
     ...publicDashboard,
     currentSignal: signal,
+    mockMode: false,
   } as LiveDashboardData;
 }
 
@@ -18496,22 +18497,38 @@ async function repairDashboardSnapshotFromPersistedHistory(env: unknown) {
   }
 
   liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, persistedRounds);
-  if (!dashboardNeedsPersistedHistoryRepair(liveDashboardData, persistedRounds)) {
-    return { changed: false, dashboard: liveDashboardData };
+  const mergedSnapshot = await loadMergedDashboardSnapshot(env);
+  let baseDashboard = liveDashboardData;
+  if (mergedSnapshot && dashboardSignalStateScore(mergedSnapshot) > dashboardSignalStateScore(liveDashboardData)) {
+    baseDashboard = mergedSnapshot;
+  }
+
+  if (!dashboardNeedsPersistedHistoryRepair(baseDashboard, persistedRounds)) {
+    const normalized = { ...exposeServerNeuralEntryAsCurrentSignal(baseDashboard), mockMode: false };
+    const changed =
+      baseDashboard !== liveDashboardData ||
+      dashboardSignalStateScore(normalized) > dashboardSignalStateScore(liveDashboardData) ||
+      liveDashboardData.mockMode === true;
+    return { changed, dashboard: changed ? normalized : liveDashboardData };
   }
 
   const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
   const cycleDate = currentDashboardCycleDate();
-  const repaired = updateDashboardData(liveDashboardData, {
+  const mergedRecord = mergedSnapshot ? (mergedSnapshot as unknown as Record<string, unknown>) : {};
+  const repaired = updateDashboardData(baseDashboard, {
+    ...pickDashboardSections(mergedRecord),
+    currentSignal: readMainSignal(mergedRecord),
     rounds: persistedRounds.slice(-DASHBOARD_READ_ROUND_LIMIT),
     cycleDate,
     dailyCycleDate: cycleDate,
     updatedAt:
+      readString(mergedRecord, "updatedAt") ||
       (latestPersistedRound ? getRoundRecordedAt(latestPersistedRound) : "") ||
-      liveDashboardData.updatedAt ||
+      baseDashboard.updatedAt ||
       new Date().toISOString(),
   });
-  return { changed: true, dashboard: { ...repaired, mockMode: false } };
+  const withSignal = exposeServerNeuralEntryAsCurrentSignal(repaired);
+  return { changed: true, dashboard: { ...withSignal, mockMode: false } };
 }
 
 async function fetchPersistedDashboardRounds(env: unknown, limit = DASHBOARD_READ_ROUND_LIMIT) {
@@ -18962,9 +18979,81 @@ function pickDashboardState(primary: unknown, secondary: unknown) {
   if (!hasRecordFields(second)) return first;
   const firstRoundCount = dashboardRoundCount(first);
   const secondRoundCount = dashboardRoundCount(second);
-  if (firstRoundCount > 0 && secondRoundCount === 0) return first;
-  if (secondRoundCount > 0 && firstRoundCount === 0) return second;
-  return compareDashboardStateFreshness(first, second) >= 0 ? first : second;
+  let picked = compareDashboardStateFreshness(first, second) >= 0 ? first : second;
+  if (firstRoundCount > 0 && secondRoundCount === 0) picked = first;
+  else if (secondRoundCount > 0 && firstRoundCount === 0) picked = second;
+  return mergeDashboardStateRecords(picked, picked === first ? second : first);
+}
+
+function mergeDashboardStateRecords(
+  primary: Record<string, unknown>,
+  secondary: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...primary };
+  if (dashboardRoundCount(primary) === 0 && dashboardRoundCount(secondary) > 0) {
+    merged.rounds = secondary.rounds;
+  }
+
+  const primarySignal = readMainSignal(primary);
+  const secondarySignal = readMainSignal(secondary);
+  if (
+    !isServerEntrySide(primarySignal.side) &&
+    isServerEntrySide(secondarySignal.side) &&
+    (secondarySignal.status === "pending" || secondarySignal.status === "g1")
+  ) {
+    merged.currentSignal = secondarySignal;
+  }
+
+  const primaryNeural = readRecord(primary.neuralReading || primary.neural_reading);
+  const secondaryNeural = readRecord(secondary.neuralReading || secondary.neural_reading);
+  if (String(primaryNeural.mode || "").toUpperCase() !== "ACTIVE" && String(secondaryNeural.mode || "").toUpperCase() === "ACTIVE") {
+    merged.neuralReading = secondaryNeural;
+  }
+
+  const primaryEntryState = readRecord(primary.neuralEntryState);
+  const secondaryEntryState = readRecord(secondary.neuralEntryState);
+  if (!readString(primaryEntryState, "key") && readString(secondaryEntryState, "key")) {
+    merged.neuralEntryState = secondaryEntryState;
+  }
+
+  const primaryEntryResult = readRecord(primary.neuralEntryLastResult);
+  const secondaryEntryResult = readRecord(secondary.neuralEntryLastResult);
+  if (!readString(primaryEntryResult, "id") && readString(secondaryEntryResult, "id")) {
+    merged.neuralEntryLastResult = secondaryEntryResult;
+  }
+
+  if (!readRecord(primary.currentTieAlert).id && readRecord(secondary.currentTieAlert).id) {
+    merged.currentTieAlert = secondary.currentTieAlert;
+  }
+  if (!readRecord(primary.currentSurfAlert).surf_alert && readRecord(secondary.currentSurfAlert).surf_alert) {
+    merged.currentSurfAlert = secondary.currentSurfAlert ?? secondary.surfAlert;
+  }
+  if (!readRecord(primary.patternMinerSnapshot).entryAlerts && readRecord(secondary.patternMinerSnapshot).entryAlerts) {
+    merged.patternMinerSnapshot = secondary.patternMinerSnapshot ?? secondary.patternMiner;
+  }
+
+  return merged;
+}
+
+function dashboardSignalStateScore(dashboard: LiveDashboardData) {
+  let score = 0;
+  if (isServerEntrySide(dashboard.currentSignal?.side)) score += 10;
+  if (normalizeServerNeuralEntryState(dashboard.neuralEntryState)) score += 20;
+  if (String(dashboard.neuralReading?.mode || "").toUpperCase() === "ACTIVE") score += 15;
+  if (Array.isArray(dashboard.rounds) && dashboard.rounds.length > 0) score += 5;
+  return score;
+}
+
+async function loadMergedDashboardSnapshot(env: unknown) {
+  const [durableState, cacheState] = await withTimeout(
+    Promise.all([loadDurableLiveState(env), loadLiveStateCache()]),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    "carregar snapshot mergeado do dashboard",
+    [null, null] as [Record<string, unknown> | null, Record<string, unknown> | null],
+  );
+  const mergedDashboard = readRecord(mergeLiveStates(durableState, cacheState)?.dashboard);
+  if (!hasRecordFields(mergedDashboard)) return null;
+  return restoreDashboardData(mergedDashboard);
 }
 
 function dashboardRoundCount(state: Record<string, unknown>) {
