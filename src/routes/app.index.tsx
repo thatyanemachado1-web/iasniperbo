@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Clock, Crown } from "lucide-react";
-import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData, isDashboardLive } from "@/hooks/useDashboardData";
 import { ModuleMiniScoreboard } from "@/components/dashboard/ModuleMiniScoreboard";
 import { EngineDecisionCard } from "@/components/dashboard/EngineDecisionCard";
