@@ -18577,6 +18577,13 @@ async function resolveDashboardForRead(env: unknown): Promise<LiveDashboardData>
   const durableDashboard = readRecord(readRecord(durableState).dashboard);
   if (hasRecordFields(durableDashboard)) {
     const persisted = restoreDashboardData(durableDashboard);
+    const persistedUpdated = Date.parse(readString(durableDashboard, "updatedAt") || "");
+    const memoryUpdated = Date.parse(
+      readString(liveDashboardData as unknown as Record<string, unknown>, "updatedAt") || "",
+    );
+    if (Number.isFinite(memoryUpdated) && Number.isFinite(persistedUpdated) && memoryUpdated > persistedUpdated) {
+      return liveDashboardData;
+    }
     liveDashboardData = persisted;
     return persisted;
   }
