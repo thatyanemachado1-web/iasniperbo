@@ -15,6 +15,29 @@ pass() { echo "  [OK] $1"; }
 fail() { echo "  [FALHOU] $1"; FAIL=1; }
 warn() { echo "  [AVISO] $1"; }
 
+# curl -w "%{http_code}" + "|| echo 000" duplica codigo (000000) quando curl falha com timeout.
+curl_http_code() {
+  local code=""
+  code="$(curl "$@" -w "%{http_code}" 2>/dev/null)" || true
+  code="${code:-000}"
+  echo "${code:0:3}"
+}
+
+wait_local_dashboard_ok() {
+  local attempt
+  for attempt in 1 2 3 4 5 6; do
+    L_HTTP="$(curl_http_code -s --connect-timeout 5 --max-time 12 \
+      -o /tmp/sniper_local_dash.json \
+      -H "User-Agent: Mozilla/5.0 SNIPERBO-Official-Publisher/1.0" \
+      -H "x-sniper-admin-email: $EMAIL" \
+      -H "x-sniper-admin-password: $PASS" \
+      "$LOCAL/dashboard")"
+    [[ "$L_HTTP" == "200" ]] && return 0
+    sleep 4
+  done
+  return 1
+}
+
 FAIL=0
 
 echo ""
@@ -72,15 +95,23 @@ PASS="${SNIPER_ADMIN_PASSWORD:-AdminSniper2026!}"
 # --- 3. Teste REMOTO (site) ---
 echo ""
 echo "[3] Teste REMOTO — sniperbo.com (sem token, so senha)..."
-R_HTTP=$(curl -s --connect-timeout 8 --max-time 15 -o /tmp/sniper_remote_pub.json -w "%{http_code}" \
+rm -f /tmp/sniper_remote_pub.json
+R_HTTP="$(curl_http_code -s --connect-timeout 12 --max-time 30 \
+  -o /tmp/sniper_remote_pub.json \
   -X POST "$REMOTE/dashboard/publish" \
   -H "Content-Type: application/json" \
   -H "User-Agent: Mozilla/5.0 SNIPERBO-Official-Publisher/1.0" \
   -H "x-sniper-admin-email: $EMAIL" \
   -H "x-sniper-admin-password: $PASS" \
-  -d '{"probe":true}' || echo "000")
+  -d '{"probe":true}')"
+REMOTE_JSON_OK=0
+if [[ -f /tmp/sniper_remote_pub.json ]] && grep -q '"ok"[[:space:]]*:[[:space:]]*true' /tmp/sniper_remote_pub.json 2>/dev/null; then
+  REMOTE_JSON_OK=1
+fi
 if [[ "$R_HTTP" == "200" ]]; then
   pass "publish remoto HTTP 200 — email e senha corretos no SITE"
+elif [[ "$REMOTE_JSON_OK" -eq 1 ]]; then
+  pass "publish remoto ok=true (HTTP $R_HTTP — rede lenta, mas auth OK no SITE)"
 else
   fail "publish remoto HTTP $R_HTTP — senha ou email errados no site"
   head -c 150 /tmp/sniper_remote_pub.json 2>/dev/null; echo ""
@@ -104,9 +135,9 @@ python3 -m venv .venv 2>/dev/null || true
 .venv/bin/pip install -q -r scripts/requirements-publisher.txt 2>/dev/null || true
 [[ -d node_modules ]] || npm install --silent 2>/dev/null
 bash scripts/start_official_signals_api.sh || fail "signals-api nao subiu"
-sleep 8
+sleep 5
 
-H_HTTP=$(curl -s --connect-timeout 5 -o /tmp/sniper_health.json -w "%{http_code}" "$LOCAL/health" || echo "000")
+H_HTTP="$(curl_http_code -s --connect-timeout 5 --max-time 10 -o /tmp/sniper_health.json "$LOCAL/health")"
 if [[ "$H_HTTP" == "200" ]]; then
   pass "health local HTTP 200"
 else
@@ -117,33 +148,24 @@ fi
 # --- 5. Teste LOCAL dashboard ---
 echo ""
 echo "[5] Teste LOCAL — 127.0.0.1:8787/dashboard..."
-L_HTTP=$(curl -s --connect-timeout 5 --max-time 10 -o /tmp/sniper_local_dash.json -w "%{http_code}" \
-  -H "User-Agent: Mozilla/5.0 SNIPERBO-Official-Publisher/1.0" \
-  -H "x-sniper-admin-email: $EMAIL" \
-  -H "x-sniper-admin-password: $PASS" \
-  "$LOCAL/dashboard" || echo "000")
-if [[ "$L_HTTP" == "200" ]]; then
+if wait_local_dashboard_ok; then
   pass "dashboard local HTTP 200"
   ROUNDS=$(python3 -c "import json; d=json.load(open('/tmp/sniper_local_dash.json')); print(len(d.get('rounds',[])))" 2>/dev/null || echo "?")
   echo "  rodadas locais: $ROUNDS"
 else
-  fail "dashboard local HTTP $L_HTTP — ESTE e o 401 que voce ve no log"
+  fail "dashboard local HTTP $L_HTTP — wrangler ainda nao liberou leitura"
   head -c 150 /tmp/sniper_local_dash.json 2>/dev/null; echo ""
-  echo "  >> Corrigindo: git pull + reiniciar wrangler..."
-  git pull origin main 2>/dev/null || true
+  echo "  >> Reiniciando wrangler uma vez..."
   pkill -f "wrangler dev" 2>/dev/null || true
   sleep 2
   bash scripts/start_official_signals_api.sh
-  sleep 8
-  L_HTTP2=$(curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" \
-    -H "User-Agent: Mozilla/5.0 SNIPERBO-Official-Publisher/1.0" \
-    -H "x-sniper-admin-email: $EMAIL" \
-    -H "x-sniper-admin-password: $PASS" \
-    "$LOCAL/dashboard" || echo "000")
-  if [[ "$L_HTTP2" == "200" ]]; then
+  sleep 5
+  if wait_local_dashboard_ok; then
     pass "dashboard local HTTP 200 apos reinicio"
+    ROUNDS=$(python3 -c "import json; d=json.load(open('/tmp/sniper_local_dash.json')); print(len(d.get('rounds',[])))" 2>/dev/null || echo "?")
+    echo "  rodadas locais: $ROUNDS"
   else
-    fail "dashboard local ainda HTTP $L_HTTP2"
+    fail "dashboard local ainda HTTP ${L_HTTP:-000}"
   fi
 fi
 
