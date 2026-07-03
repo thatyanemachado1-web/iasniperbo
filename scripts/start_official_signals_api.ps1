@@ -42,12 +42,17 @@ foreach ($listener in $listeners) {
   }
 }
 
-$serverEntry = Join-Path $ProjectRoot "dist\server\server.js"
+$serverEntry = Join-Path $ProjectRoot ".output\server\index.mjs"
 $srvxEntry = Join-Path $ProjectRoot "node_modules\srvx\bin\srvx.mjs"
+$legacyServerEntry = Join-Path $ProjectRoot "dist\server\server.js"
 
 if (-not (Test-Path -LiteralPath $serverEntry)) {
-  Write-StartupLog "dist server missing path=$serverEntry"
-  throw "dist/server/server.js not found. Run npm run build before starting the signals API."
+  if (Test-Path -LiteralPath $legacyServerEntry) {
+    $serverEntry = $legacyServerEntry
+  } else {
+    Write-StartupLog "server build missing paths=.output\server\index.mjs and dist\server\server.js"
+    throw "Build not found. Run: npm install && npm run build"
+  }
 }
 
 if (-not (Test-Path -LiteralPath $srvxEntry)) {
@@ -58,7 +63,13 @@ if (-not (Test-Path -LiteralPath $srvxEntry)) {
 $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
 $processInfo = New-Object System.Diagnostics.ProcessStartInfo
 $processInfo.FileName = $nodePath
-$processInfo.Arguments = "`"$srvxEntry`" --prod --port $SignalsApiPort --host 127.0.0.1 `"dist\server`""
+$serverDir = if (Test-Path -LiteralPath (Join-Path $ProjectRoot ".output\server")) {
+  ".output\server"
+} else {
+  "dist\server"
+}
+
+$processInfo.Arguments = "`"$srvxEntry`" --prod --port $SignalsApiPort --host 127.0.0.1 `"$serverDir`""
 $processInfo.WorkingDirectory = $ProjectRoot
 $processInfo.UseShellExecute = $false
 $processInfo.CreateNoWindow = $true
