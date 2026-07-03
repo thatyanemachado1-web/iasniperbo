@@ -1769,6 +1769,8 @@ def main() -> int:
     env = load_env_file(args.env_file)
     admin_email = env_value(env, "SNIPER_ADMIN_EMAIL") or env_value(env, "SNIPER_ADMIN_EMAILS").split(",", 1)[0].strip()
     admin_password = env_value(env, "SNIPER_ADMIN_PASSWORD")
+    if not admin_password:
+        logging.error("SNIPER_ADMIN_PASSWORD is empty in %s — publish will return HTTP 401.", args.env_file)
     local_token = (
         env_value(env, "SNIPER_LOCAL_DASHBOARD_TOKEN")
         or env_value(env, "SNIPER_DASHBOARD_TOKEN")

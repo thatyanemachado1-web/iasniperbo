@@ -777,6 +777,7 @@ function shouldLoadLiveStateForRequest(request: Request) {
 
 function handleRateLimit(request: Request) {
   if (request.method === "OPTIONS") return null;
+  if (isOfficialDashboardPublisherRequest(request)) return null;
 
   const url = new URL(request.url);
   const limit = rateLimitForRequest(request.method, url.pathname);
@@ -14342,13 +14343,13 @@ async function isDashboardWriteAuthorized(request: Request, url: URL, env: unkno
   const publisherToken = request.headers.get("x-sniper-publisher-token")?.trim() || "";
   if (publisherToken && dashboardPublisherTokens(env).includes(publisherToken)) return true;
 
-  if (!(await isOfficialDashboardPublisherAuthorized(request, env))) return false;
+  if (await isOfficialDashboardPublisherAuthorized(request, env)) return true;
 
   const token = getBearerToken(request);
-  if (!token) return true;
+  if (!token) return false;
 
   const session = await verifySessionToken(env, token);
-  if (!session) return true;
+  if (!session) return false;
   if (session.scope !== "owner" && session.scope !== "admin_approver") return false;
 
   if (await sessionMatchesRequestBinding(env, request, session)) return true;
