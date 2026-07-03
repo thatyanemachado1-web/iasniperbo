@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } from "@/types/dashboard";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 
-const LIVE_REFETCH_INTERVAL_MS = 4000;
+const LIVE_REFETCH_INTERVAL_MS = 2500;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
 const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v2";

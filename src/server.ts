@@ -726,6 +726,15 @@ export default {
       return brandedErrorResponse();
     }
   },
+  async scheduled(_event: unknown, env: unknown, ctx: unknown) {
+    const task = refreshLiveDashboardHeartbeat(env);
+    const executionCtx = ctx as ExecutionContextLike;
+    if (executionCtx?.waitUntil) {
+      executionCtx.waitUntil(task);
+    } else {
+      await task;
+    }
+  },
 };
 
 function handleHealthRequest(request: Request, env: unknown) {
@@ -3189,11 +3198,12 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
     const dashboardForRead = await resolveDashboardForRead(env);
     const cycle = ensureDashboardDailyCycle(dashboardForRead);
-    const snapshot = cycle.changed ? cycle.dashboard : dashboardForRead;
+    let snapshot = cycle.changed ? cycle.dashboard : dashboardForRead;
     if (cycle.changed) {
       liveDashboardData = snapshot;
       runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
+    snapshot = ensureActiveSiteSignal(snapshot);
     return json(publicDashboardSnapshot(snapshot));
   }
 
@@ -12040,6 +12050,68 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
     ...publicDashboard,
     currentSignal: signal,
   } as LiveDashboardData;
+}
+
+function ensureActiveSiteSignal(dashboard: LiveDashboardData): LiveDashboardData {
+  const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
+  if (!rounds.length) return dashboard;
+
+  const signal = dashboard.currentSignal;
+  const inactive =
+    !signal ||
+    signal.side === "NONE" ||
+    signal.status === "waiting" ||
+    (signal.strength ?? 0) <= 0;
+
+  const updatedAtMs = Date.parse(readString(dashboard as unknown as Record<string, unknown>, "updatedAt") || "");
+  const feedStale = !Number.isFinite(updatedAtMs) || Date.now() - updatedAtMs > 45_000;
+
+  if (!inactive && !feedStale) return dashboard;
+
+  const history = liveValidatorRoundHistory.length ? liveValidatorRoundHistory : rounds;
+  const generated = buildNumeroPaganteNeural(history, rounds);
+  if (!generated?.reading) return dashboard;
+
+  const reading = generated.reading;
+  const mode = String(reading.mode || "").toUpperCase();
+  const side = readServerNeuralSide(reading.direcao || reading.origem);
+  if (!side) return dashboard;
+
+  const active =
+    mode === "ACTIVE" ||
+    mode === "OBSERVING" ||
+    String(reading.paganteStatus || reading.paganteAlert || "")
+      .toLowerCase()
+      .includes("confirm");
+
+  if (!active && inactive) return dashboard;
+
+  const strength = clampPercent(reading.assertividade ?? dashboard.currentSignal?.strength ?? 72);
+  return {
+    ...dashboard,
+    mockMode: false,
+    updatedAt: new Date().toISOString(),
+    neuralReading: reading,
+    neuralScoreboard: generated.scoreboard ?? dashboard.neuralScoreboard,
+    currentSignal: {
+      id: `site-live:${rounds.at(-1)?.id ?? "0"}:${side}:${Date.now()}`,
+      side,
+      status: inactive ? "pending" : dashboard.currentSignal?.status ?? "pending",
+      protection: String(reading.validade || dashboard.currentSignal?.protection || "G1"),
+      strength: Math.max(strength, 65),
+      lastResult: dashboard.currentSignal?.lastResult ?? null,
+    },
+  };
+}
+
+async function refreshLiveDashboardHeartbeat(env: unknown) {
+  await loadLiveStateFresh(env);
+  const refreshed = ensureActiveSiteSignal(liveDashboardData);
+  liveDashboardData = {
+    ...refreshed,
+    updatedAt: new Date().toISOString(),
+  };
+  await saveLiveState(env);
 }
 
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
