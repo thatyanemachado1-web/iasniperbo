@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Valida login admin e grava e-mail/senha (sem token JWT).
+# Grava e-mail/senha admin — sem token JWT, sem login bloqueante.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,20 +19,6 @@ if [[ -z "$PASSWORD" ]]; then
   exit 1
 fi
 
-echo "Validando login admin em $REMOTE ..."
-HTTP_CODE="$(
-  curl -s -o /tmp/sniper_admin_login.json -w "%{http_code}" -X POST "$REMOTE/admin/login" \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"
-)"
-
-if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "Login falhou (HTTP $HTTP_CODE). Verifique e-mail e senha." >&2
-  head -c 200 /tmp/sniper_admin_login.json 2>/dev/null || true
-  echo ""
-  exit 1
-fi
-
 cat > "$LOCAL_ENV" <<EOF
 SNIPER_ADMIN_EMAIL=$EMAIL
 SNIPER_ADMIN_PASSWORD=$PASSWORD
@@ -44,4 +30,22 @@ PUBLISHER_INTERVAL=1.5
 FRONTEND_PORT=5175
 EOF
 chmod 600 "$LOCAL_ENV"
-echo "Credenciais OK em $LOCAL_ENV (modo sem token — só e-mail e senha)."
+echo "Credenciais salvas em $LOCAL_ENV (sem token)."
+
+echo -n "Testando login (max 10s)... "
+HTTP_CODE="$(
+  curl -s --connect-timeout 5 --max-time 10 -o /tmp/sniper_admin_login.json -w "%{http_code}" \
+    -X POST "$REMOTE/admin/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" || echo "000"
+)"
+
+if [[ "$HTTP_CODE" == "200" ]]; then
+  echo "OK"
+elif [[ "$HTTP_CODE" == "000" ]]; then
+  echo "timeout (VPS lenta) — credenciais salvas mesmo assim, publisher usa senha direto."
+else
+  echo "HTTP $HTTP_CODE — verifique e-mail/senha (AdminSniper2026! com A maiúsculo)."
+  head -c 120 /tmp/sniper_admin_login.json 2>/dev/null || true
+  echo ""
+fi

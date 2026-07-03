@@ -23,23 +23,25 @@ if [[ -z "$EMAIL" || -z "$PASSWORD" ]]; then
 fi
 
 echo ""
-echo "1) Login admin..."
+echo "1) Login admin (max 10s)..."
 HTTP_LOGIN="$(
-  curl -s -o /tmp/sniper_admin_login.json -w "%{http_code}" -X POST "$REMOTE/admin/login" \
+  curl -s --connect-timeout 5 --max-time 10 -o /tmp/sniper_admin_login.json -w "%{http_code}" \
+    -X POST "$REMOTE/admin/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"
+    -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" || echo "000"
 )"
 echo "   login HTTP $HTTP_LOGIN"
 
 echo ""
-echo "2) Publish probe (sem token, só senha nos headers)..."
+echo "2) Publish probe (sem token, max 15s)..."
 HTTP_CODE="$(
-  curl -s -o /tmp/sniper_publish_probe.json -w "%{http_code}" -X POST "$REMOTE/dashboard/publish" \
+  curl -s --connect-timeout 5 --max-time 15 -o /tmp/sniper_publish_probe.json -w "%{http_code}" \
+    -X POST "$REMOTE/dashboard/publish" \
     -H "Content-Type: application/json" \
     -H "User-Agent: Mozilla/5.0 SNIPERBO-Official-Publisher/1.0" \
     -H "x-sniper-admin-email: $EMAIL" \
     -H "x-sniper-admin-password: $PASSWORD" \
-    -d '{"probe":true}'
+    -d '{"probe":true}' || echo "000"
 )"
 echo "   publish HTTP $HTTP_CODE"
 head -c 200 /tmp/sniper_publish_probe.json 2>/dev/null || true
