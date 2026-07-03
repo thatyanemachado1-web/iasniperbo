@@ -8,12 +8,16 @@ echo ================================================
 echo   SNIPERBO - Abrindo mesa Bac Bo no Chrome
 echo ================================================
 echo.
-echo   Aguarde... o Chrome vai abrir sozinho.
-echo   NAO feche esta janela ate terminar.
+echo   Aguarde 30 a 60 segundos. NAO feche esta janela.
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\abrir_mesa.ps1"
+if not exist "%~dp0scripts" mkdir "%~dp0scripts"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$u='https://raw.githubusercontent.com/thatyanemachado1-web/iasniperbo/cursor/corrigir-agora-bat-f115/scripts/abrir_mesa.ps1';" ^
+  "$f='%~dp0scripts\abrir_mesa.ps1';" ^
+  "try { Invoke-WebRequest -Uri $u -OutFile $f -UseBasicParsing } catch { Write-Host 'Sem internet - usando script local.' };" ^
+  "& $f"
 
 echo.
-echo Pressione qualquer tecla para fechar...
-pause >nul
+pause
