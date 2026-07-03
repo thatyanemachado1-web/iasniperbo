@@ -34,8 +34,34 @@ $pythonCandidates = @(
   "python.exe"
 ) | Select-Object -Unique
 
-$pythonExe = $pythonCandidates | Where-Object { Test-Path -LiteralPath $_ -or $_ -eq "python.exe" } | Select-Object -First 1
+$pythonExe = $pythonCandidates | Where-Object {
+  if ($_ -eq "python.exe") { return $true }
+  return Test-Path -LiteralPath $_
+} | Select-Object -First 1
 if (-not $pythonExe) { $pythonExe = "python.exe" }
+
+$dataDir = Join-Path $Root "data"
+$dbPath = Join-Path $dataDir "bacbo.db"
+New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+
+if (Test-Path -LiteralPath $Config) {
+  try {
+    $configRaw = Get-Content -LiteralPath $Config -Raw -Encoding UTF8
+    $configObj = $configRaw | ConvertFrom-Json
+    $currentDb = [string]$configObj.database_path
+    $currentDbDir = if ($currentDb) { Split-Path -Parent $currentDb } else { "" }
+    $dbOk = $false
+    if ($currentDb -and (Test-Path -LiteralPath $currentDb)) { $dbOk = $true }
+    elseif ($currentDbDir -and (Test-Path -LiteralPath $currentDbDir)) { $dbOk = $true }
+    if (-not $dbOk) {
+      $configObj | Add-Member -NotePropertyName database_path -NotePropertyValue $dbPath -Force
+      $configObj | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Config -Encoding UTF8
+      Write-Host "config.json: database_path -> $dbPath" -ForegroundColor Yellow
+    }
+  } catch {
+    Write-Host "AVISO: nao foi possivel ajustar config.json: $($_.Exception.Message)" -ForegroundColor Yellow
+  }
+}
 
 $configArg = ""
 if (Test-Path -LiteralPath $Config) {
