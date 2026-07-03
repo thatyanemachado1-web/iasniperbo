@@ -1,4 +1,4 @@
-# Ligar sinais SNIPERBO — um comando só
+# Ligar sinais SNIPERBO - um comando so
 # Uso: powershell -ExecutionPolicy Bypass -File scripts\ligar_sinais.ps1
 
 $ErrorActionPreference = "Stop"
@@ -12,7 +12,9 @@ function Read-EnvFile($Path) {
   if (-not (Test-Path -LiteralPath $Path)) { return $values }
   Get-Content -LiteralPath $Path | ForEach-Object {
     $line = $_.Trim()
-    if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { return }
+    if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) {
+      return
+    }
     $parts = $line.Split("=", 2)
     $values[$parts[0].Trim()] = $parts[1].Trim().Trim('"').Trim("'")
   }
@@ -22,7 +24,7 @@ function Read-EnvFile($Path) {
 Set-Location $ProjectRoot
 
 Write-Host ""
-Write-Host "=== SNIPERBO — Ligando motor real de sinais ===" -ForegroundColor Cyan
+Write-Host "=== SNIPERBO - Ligando motor real de sinais ===" -ForegroundColor Cyan
 Write-Host ""
 
 if (-not (Test-Path -LiteralPath $LocalEnv)) {
@@ -30,7 +32,7 @@ if (-not (Test-Path -LiteralPath $LocalEnv)) {
     throw "Arquivo de exemplo ausente: $EnvExample"
   }
   Copy-Item -LiteralPath $EnvExample -Destination $LocalEnv
-  Write-Host "Criado $LocalEnv — preencha SNIPER_ADMIN_EMAIL e SNIPER_ADMIN_PASSWORD, depois rode de novo." -ForegroundColor Yellow
+  Write-Host "Criado $LocalEnv - preencha SNIPER_ADMIN_EMAIL e SNIPER_ADMIN_PASSWORD, depois rode de novo." -ForegroundColor Yellow
   exit 1
 }
 
@@ -38,10 +40,14 @@ $localValues = Read-EnvFile $LocalEnv
 $configScript = Join-Path $ScriptDir "configurar_publisher_credenciais.ps1"
 if ((Test-Path -LiteralPath $configScript) -and $localValues["SNIPER_ADMIN_PASSWORD"]) {
   Write-Host "[0/3] Atualizando JWT via login admin..." -ForegroundColor Green
+  $dashboardUrl = $localValues["SNIPER_LOCAL_DASHBOARD_URL"]
+  if (-not $dashboardUrl) {
+    $dashboardUrl = "http://127.0.0.1:8791/dashboard"
+  }
   & $configScript `
     -AdminEmail ($localValues["SNIPER_ADMIN_EMAIL"]) `
     -AdminPassword ($localValues["SNIPER_ADMIN_PASSWORD"]) `
-    -LocalDashboardUrl ($localValues["SNIPER_LOCAL_DASHBOARD_URL"])
+    -LocalDashboardUrl $dashboardUrl
 }
 
 $missing = @()
@@ -76,7 +82,7 @@ try {
   $health = Invoke-RestMethod -Uri "http://127.0.0.1:8787/health" -TimeoutSec 3
   Write-Host "Signals API: $($health.status) porta $($health.port)" -ForegroundColor Green
 } catch {
-  Write-Host "Signals API: OFFLINE — rode npm run build && scripts\start_official_signals_api.ps1" -ForegroundColor Red
+  Write-Host "Signals API: OFFLINE - rode npm run build e depois start_official_signals_api.ps1" -ForegroundColor Red
 }
 
 try {

@@ -51,7 +51,7 @@ if (-not (Test-Path -LiteralPath $serverEntry)) {
     $serverEntry = $legacyServerEntry
   } else {
     Write-StartupLog "server build missing paths=.output\server\index.mjs and dist\server\server.js"
-    throw "Build not found. Run: npm install && npm run build"
+    throw "Build not found. Run: npm install; npm run build"
   }
 }
 
