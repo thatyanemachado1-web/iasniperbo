@@ -200,6 +200,24 @@ async function publicRequest<T>(path: string, body: Record<string, unknown>) {
   return apiRequest<T>(path, { method: "POST", body });
 }
 
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = 25000) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new AccessApiError(
+        "O servidor demorou para responder. Aguarde 30 segundos e tente de novo.",
+        408,
+      );
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 async function apiRequest<T>(
   path: string,
   init: {
@@ -209,7 +227,7 @@ async function apiRequest<T>(
   } = {},
 ) {
   const token = readUserSession().clientToken || "";
-  const response = await fetch(`${publicApiBaseUrl()}${path}`, {
+  const response = await fetchWithTimeout(`${publicApiBaseUrl()}${path}`, {
     method: init.method || "GET",
     headers: {
       "Content-Type": "application/json",
@@ -233,7 +251,14 @@ async function apiRequest<T>(
 }
 
 function publicApiBaseUrl() {
+  if (typeof window === "undefined") {
+    return normalizeBaseUrl(getInitialApiUrl());
+  }
   if (isLocalFrontend()) {
+    return window.location.origin;
+  }
+  const host = window.location.hostname.toLowerCase();
+  if (host === "sniperbo.com" || host === "www.sniperbo.com") {
     return window.location.origin;
   }
   return normalizeBaseUrl(getInitialApiUrl());
