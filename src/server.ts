@@ -3127,20 +3127,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     }
 
     const limit = clampRoundHistoryLimit(url.searchParams.get("limit"));
-    const storedRounds = await withTimeout(
-      fetchStoredValidatorRounds(
-        env,
-        limit,
-        validatorTableId(url.searchParams.get("tableId") || url.searchParams.get("table")),
-      ),
-      LIVE_STATE_IO_TIMEOUT_MS,
-      "carregar historico do Validador",
-      [] as Round[],
-    );
-    if (storedRounds.length) {
-      liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, storedRounds);
-    }
-    const rounds = mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, limit);
+    const tableId = validatorTableId(url.searchParams.get("tableId") || url.searchParams.get("table"));
+    await loadLiveState(env);
+    const rounds = await loadDashboardReadRounds(env, limit, tableId);
     return json({
       rounds,
       total: rounds.length,
@@ -12263,34 +12252,76 @@ function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardDat
 }
 
 async function buildAuthenticatedDashboardSnapshot(env: unknown, ctx?: unknown) {
+  await loadLiveState(env);
   await syncDashboardReadState(env);
 
-  const persistedRounds = await fetchPersistedDashboardRounds(env);
-  const repair = await repairDashboardSnapshotFromPersistedHistory(env);
-  if (repair.changed) {
-    liveDashboardData = repair.dashboard;
+  const [persistedRounds, mergedSnapshot] = await Promise.all([
+    loadDashboardReadRounds(env, DASHBOARD_READ_ROUND_LIMIT),
+    loadMergedDashboardSnapshot(env),
+  ]);
+
+  let dashboard =
+    mergedSnapshot && dashboardSignalStateScore(mergedSnapshot) >= dashboardSignalStateScore(liveDashboardData)
+      ? mergedSnapshot
+      : liveDashboardData;
+
+  if (persistedRounds.length && dashboardNeedsPersistedHistoryRepair(dashboard, persistedRounds)) {
+    dashboard = rebuildDashboardSnapshotFromPersistedSources(dashboard, mergedSnapshot, persistedRounds);
+    liveDashboardData = dashboard;
     runBackgroundTask(ctx, saveLiveState(env), "salvar dashboard reparado");
   }
 
-  const cycle = ensureDashboardDailyCycle(liveDashboardData);
+  const cycle = ensureDashboardDailyCycle(dashboard);
+  dashboard = cycle.dashboard;
+  liveDashboardData = dashboard;
   if (cycle.changed) {
-    liveDashboardData = cycle.dashboard;
     runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
   }
 
-  liveDashboardData = await enforceDashboardRoundParity(env, liveDashboardData, persistedRounds);
-  return enrichPublicDashboardSnapshot(liveDashboardData);
+  dashboard = await enforceDashboardRoundParity(env, dashboard, persistedRounds, mergedSnapshot);
+  liveDashboardData = dashboard;
+  return enrichPublicDashboardSnapshot(dashboard);
+}
+
+function rebuildDashboardSnapshotFromPersistedSources(
+  baseDashboard: LiveDashboardData,
+  mergedSnapshot: LiveDashboardData | null,
+  persistedRounds: Round[],
+) {
+  const signalSource =
+    mergedSnapshot && dashboardSignalStateScore(mergedSnapshot) > dashboardSignalStateScore(baseDashboard)
+      ? mergedSnapshot
+      : baseDashboard;
+  const mergedRecord = signalSource as unknown as Record<string, unknown>;
+  const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
+  const cycleDate = currentDashboardCycleDate();
+  const repaired = updateDashboardData(baseDashboard, {
+    ...pickDashboardSections(mergedRecord),
+    currentSignal: readMainSignal(mergedRecord),
+    neuralEntryState: mergedRecord.neuralEntryState,
+    neuralEntryLastResult: mergedRecord.neuralEntryLastResult,
+    rounds: persistedRounds.slice(-DASHBOARD_READ_ROUND_LIMIT),
+    cycleDate,
+    dailyCycleDate: cycleDate,
+    updatedAt:
+      readString(mergedRecord, "updatedAt") ||
+      (latestPersistedRound ? getRoundRecordedAt(latestPersistedRound) : "") ||
+      baseDashboard.updatedAt ||
+      new Date().toISOString(),
+  });
+  return { ...exposeServerNeuralEntryAsCurrentSignal(repaired), mockMode: false };
 }
 
 async function enforceDashboardRoundParity(
   env: unknown,
   dashboard: LiveDashboardData,
   cachedPersistedRounds?: Round[],
+  mergedSnapshot?: LiveDashboardData | null,
 ) {
   const persistedRounds = cachedPersistedRounds?.length
     ? cachedPersistedRounds
-    : await fetchPersistedDashboardRounds(env);
-  if (!persistedRounds.length) return dashboard;
+    : await loadDashboardReadRounds(env, DASHBOARD_READ_ROUND_LIMIT);
+  if (!persistedRounds.length) return { ...exposeServerNeuralEntryAsCurrentSignal(dashboard), mockMode: false };
 
   liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, persistedRounds);
   const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
@@ -12306,21 +12337,11 @@ async function enforceDashboardRoundParity(
     return { ...exposeServerNeuralEntryAsCurrentSignal(dashboard), mockMode: false };
   }
 
-  const cycleDate = currentDashboardCycleDate();
-  const synced = updateDashboardData(dashboard, {
-    ...pickDashboardSections(dashboard as unknown as Record<string, unknown>),
-    currentSignal: dashboard.currentSignal,
-    rounds: persistedRounds.slice(-DASHBOARD_READ_ROUND_LIMIT),
-    cycleDate,
-    dailyCycleDate: cycleDate,
-    updatedAt:
-      (latestPersistedRound ? getRoundRecordedAt(latestPersistedRound) : "") ||
-      dashboard.updatedAt ||
-      new Date().toISOString(),
-  });
-  const normalized = { ...exposeServerNeuralEntryAsCurrentSignal(synced), mockMode: false };
-  liveDashboardData = normalized;
-  return normalized;
+  const signalSource =
+    mergedSnapshot && dashboardSignalStateScore(mergedSnapshot) > dashboardSignalStateScore(dashboard)
+      ? mergedSnapshot
+      : dashboard;
+  return rebuildDashboardSnapshotFromPersistedSources(dashboard, signalSource, persistedRounds);
 }
 
 function enrichPublicDashboardSnapshot(dashboard: LiveDashboardData) {
@@ -12386,13 +12407,10 @@ function computeDashboardRevision(dashboard: LiveDashboardData, latestRound: Rou
 
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
   const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
-  // Hotfix produção: não transformar um dashboard com rodada/dados reais em
-  // FEED_PAUSADO apenas porque o timestamp do publicador ficou preso. Isso era
-  // exatamente o que deixava o site em "SEM ENTRADA" mesmo com leitura neural
-  // e mesa online. Só pausa quando realmente não existe histórico para exibir.
   if (rounds.length > 0) return false;
+  if (liveValidatorRoundHistory.length > 0) return false;
 
-  const updatedAt = Date.parse(readString(dashboard, "updatedAt"));
+  const updatedAt = Date.parse(readString(dashboard as unknown as Record<string, unknown>, "updatedAt"));
   if (!Number.isFinite(updatedAt)) return true;
   return Date.now() - updatedAt > LIVE_FEED_STALE_MS;
 }
@@ -18598,9 +18616,7 @@ async function syncDashboardReadState(env: unknown) {
 
   const mergedDashboard = readRecord(mergedState.dashboard);
   if (hasRecordFields(mergedDashboard)) {
-    if (compareDashboardStateFreshness(mergedDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
-      liveDashboardData = restoreDashboardData(mergedDashboard);
-    }
+    liveDashboardData = restoreDashboardData(mergedDashboard);
   }
 
   if (Array.isArray(mergedState.validatorRoundHistory)) {
@@ -18611,60 +18627,24 @@ async function syncDashboardReadState(env: unknown) {
   }
 }
 
-async function repairDashboardSnapshotFromPersistedHistory(env: unknown) {
-  const persistedRounds = await fetchPersistedDashboardRounds(env);
-  if (!persistedRounds.length) {
-    return { changed: false, dashboard: liveDashboardData };
-  }
-
-  liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, persistedRounds);
-  const mergedSnapshot = await loadMergedDashboardSnapshot(env);
-  let baseDashboard = liveDashboardData;
-  if (mergedSnapshot && dashboardSignalStateScore(mergedSnapshot) > dashboardSignalStateScore(liveDashboardData)) {
-    baseDashboard = mergedSnapshot;
-  }
-
-  if (!dashboardNeedsPersistedHistoryRepair(baseDashboard, persistedRounds)) {
-    const normalized = { ...exposeServerNeuralEntryAsCurrentSignal(baseDashboard), mockMode: false };
-    const changed =
-      baseDashboard !== liveDashboardData ||
-      dashboardSignalStateScore(normalized) > dashboardSignalStateScore(liveDashboardData) ||
-      liveDashboardData.mockMode === true;
-    return { changed, dashboard: changed ? normalized : liveDashboardData };
-  }
-
-  const latestPersistedRound = latestRoundFromRoundList(persistedRounds);
-  const cycleDate = currentDashboardCycleDate();
-  const mergedRecord = mergedSnapshot ? (mergedSnapshot as unknown as Record<string, unknown>) : {};
-  const repaired = updateDashboardData(baseDashboard, {
-    ...pickDashboardSections(mergedRecord),
-    currentSignal: readMainSignal(mergedRecord),
-    rounds: persistedRounds.slice(-DASHBOARD_READ_ROUND_LIMIT),
-    cycleDate,
-    dailyCycleDate: cycleDate,
-    updatedAt:
-      readString(mergedRecord, "updatedAt") ||
-      (latestPersistedRound ? getRoundRecordedAt(latestPersistedRound) : "") ||
-      baseDashboard.updatedAt ||
-      new Date().toISOString(),
-  });
-  const withSignal = exposeServerNeuralEntryAsCurrentSignal(repaired);
-  return { changed: true, dashboard: { ...withSignal, mockMode: false } };
-}
-
-async function fetchPersistedDashboardRounds(env: unknown, limit = DASHBOARD_READ_ROUND_LIMIT) {
+async function loadDashboardReadRounds(env: unknown, limit: number, tableId = "bac-bo") {
   const storedRounds = await withTimeout(
-    fetchStoredValidatorRounds(env, limit),
+    fetchStoredValidatorRounds(env, limit, tableId),
     LIVE_STATE_IO_TIMEOUT_MS,
-    "carregar historico persistido do dashboard",
+    "carregar rodadas persistidas do dashboard",
     [] as Round[],
   );
+  if (storedRounds.length) {
+    liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, storedRounds);
+  }
   return mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, limit);
 }
 
 function dashboardHasMockLikeRounds(dashboard: LiveDashboardData) {
   if (dashboard.mockMode) return true;
-  return isDefaultMockDashboardState(dashboard as unknown as Record<string, unknown>);
+  if (isDefaultMockDashboardState(dashboard as unknown as Record<string, unknown>)) return true;
+  const latestRound = latestRoundFromRoundList(dashboard.rounds);
+  return Boolean(latestRound && latestRound.id > 0 && latestRound.id <= 2_000);
 }
 
 function dashboardNeedsPersistedHistoryRepair(dashboard: LiveDashboardData, persistedRounds: Round[]) {
@@ -18679,6 +18659,7 @@ function dashboardNeedsPersistedHistoryRepair(dashboard: LiveDashboardData, pers
   if (!latestDashboardRound) return true;
   if (latestPersistedRound.id > latestDashboardRound.id) return true;
   if (roundHistoryKey(latestPersistedRound) !== roundHistoryKey(latestDashboardRound)) return true;
+  if (latestDashboardRound.id <= 2_000 && latestPersistedRound.id > latestDashboardRound.id) return true;
 
   const dashboardUpdatedAtMs = Date.parse(readString(dashboard as unknown as Record<string, unknown>, "updatedAt") || "");
   const persistedUpdatedAtMs = Date.parse(getRoundRecordedAt(latestPersistedRound) || "");
