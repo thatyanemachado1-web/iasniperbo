@@ -22,7 +22,7 @@ if [[ ! -f "$LOCAL_ENV" ]]; then
   exit 1
 fi
 
-for key in SNIPER_ADMIN_EMAIL SNIPER_ADMIN_PASSWORD SNIPER_ADMIN_TOKEN; do
+for key in SNIPER_ADMIN_EMAIL SNIPER_ADMIN_PASSWORD; do
   if ! grep -q "^${key}=.\+" "$LOCAL_ENV" 2>/dev/null; then
     echo "Variavel vazia: $key em official_publisher.local.env" >&2
     exit 1

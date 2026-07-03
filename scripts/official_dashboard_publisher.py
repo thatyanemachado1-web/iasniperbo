@@ -151,8 +151,33 @@ def load_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def env_flag(env: dict[str, str], name: str, default: bool = False) -> bool:
+    raw = os.getenv(name) or env.get(name, "")
+    text = str(raw or "").strip().casefold()
+    if not text:
+        return default
+    return text in {"1", "true", "yes", "on"}
+
+
+def password_only_publish_enabled(env: dict[str, str], direct_publisher_endpoint: bool) -> bool:
+    raw = os.getenv("SNIPER_PUBLISH_PASSWORD_ONLY") or env.get("SNIPER_PUBLISH_PASSWORD_ONLY", "")
+    text = str(raw or "").strip().casefold()
+    if text in {"0", "false", "no", "off"}:
+        return False
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    return direct_publisher_endpoint
+
+
 def env_value(env: dict[str, str], name: str, default: str = "") -> str:
     return os.getenv(name) or env.get(name, default)
+
+
+def publisher_auth_headers(admin_email: str, admin_password: str) -> dict[str, str]:
+    return {
+        "x-sniper-admin-email": admin_email,
+        "x-sniper-admin-password": admin_password,
+    }
 
 
 def unique_tokens(*values: str) -> list[str]:
@@ -424,16 +449,15 @@ def read_local_dashboard(
     admin_email: str = "",
     admin_password: str = "",
     publisher_token: str = "",
+    *,
+    password_only: bool = False,
 ) -> dict[str, Any]:
-    headers = {
-        "x-sniper-admin-email": admin_email,
-        "x-sniper-admin-password": admin_password,
-    }
-    if publisher_token:
+    headers = publisher_auth_headers(admin_email, admin_password)
+    if publisher_token and not password_only:
         headers["x-sniper-publisher-token"] = publisher_token
     payload = request_json(
         args.local_url,
-        token=local_token,
+        token="" if password_only else local_token,
         extra_headers=headers,
         timeout=args.local_timeout,
     )
@@ -446,17 +470,16 @@ def publish_payload(
     local_payload: dict[str, Any],
     admin_email: str,
     admin_password: str,
+    *,
+    password_only: bool = False,
 ) -> tuple[dict[str, Any], int, float]:
-    publisher_headers = {
-        "x-sniper-admin-email": admin_email,
-        "x-sniper-admin-password": admin_password,
-    }
-    if token:
+    publisher_headers = publisher_auth_headers(admin_email, admin_password)
+    if token and not password_only:
         publisher_headers["x-sniper-publisher-token"] = token
     body, status_code, upload_ms = request_json_with_meta(
         args.remote_url,
         method="POST",
-        token=token,
+        token="" if password_only else token,
         extra_headers=publisher_headers,
         payload=local_payload,
         timeout=float(args.remote_timeout),
@@ -553,17 +576,16 @@ def publish_urgent_signal(
     local_payload: dict[str, Any],
     admin_email: str,
     admin_password: str,
+    *,
+    password_only: bool = False,
 ) -> tuple[dict[str, Any], int, float]:
-    publisher_headers = {
-        "x-sniper-admin-email": admin_email,
-        "x-sniper-admin-password": admin_password,
-    }
-    if token:
+    publisher_headers = publisher_auth_headers(admin_email, admin_password)
+    if token and not password_only:
         publisher_headers["x-sniper-publisher-token"] = token
     body, status_code, upload_ms = request_json_with_meta(
         args.signal_url,
         method="POST",
-        token=token,
+        token="" if password_only else token,
         extra_headers=publisher_headers,
         payload=build_urgent_signal_payload(local_payload),
         timeout=min(args.remote_timeout, 1.2),
@@ -1769,8 +1791,8 @@ def main() -> int:
     env = load_env_file(args.env_file)
     admin_email = env_value(env, "SNIPER_ADMIN_EMAIL") or env_value(env, "SNIPER_ADMIN_EMAILS").split(",", 1)[0].strip()
     admin_password = env_value(env, "SNIPER_ADMIN_PASSWORD")
-    if not admin_password:
-        logging.error("SNIPER_ADMIN_PASSWORD is empty in %s — publish will return HTTP 401.", args.env_file)
+    direct_publisher_endpoint = args.remote_url.rstrip("/").endswith("/dashboard/publish")
+    password_only = password_only_publish_enabled(env, direct_publisher_endpoint)
     local_token = (
         env_value(env, "SNIPER_LOCAL_DASHBOARD_TOKEN")
         or env_value(env, "SNIPER_DASHBOARD_TOKEN")
@@ -1797,14 +1819,18 @@ def main() -> int:
         "user_id": env_value(env, "TELEGRAM_ENGINE_USER_ID") if direct_telegram_enabled and direct_telegram_single_target else "",
         "channel_id": env_value(env, "TELEGRAM_ENGINE_CHANNEL_ID") if direct_telegram_enabled and direct_telegram_single_target else "",
     }
-    if not local_token:
+    if password_only:
+        if not admin_email or not admin_password:
+            logging.error("Password-only publish requires SNIPER_ADMIN_EMAIL and SNIPER_ADMIN_PASSWORD in %s.", args.env_file)
+            return 2
+        local_token = ""
+    elif not local_token:
         logging.error("Missing local dashboard token in env file.")
         return 2
 
     token = ""
     token_index = 0
     using_admin_session = False
-    direct_publisher_endpoint = args.remote_url.rstrip("/").endswith("/dashboard/publish")
     direct_publisher_token = (
         env.get("SNIPER_PUBLISHER_TOKEN", "").strip()
         or os.getenv("SNIPER_PUBLISHER_TOKEN", "").strip()
@@ -1834,42 +1860,19 @@ def main() -> int:
     logging.info("Pattern miner bank loaded: rounds=%s path=%s", len(direct_pattern_round_bank), direct_pattern_bank_file)
     logging.info("Official dashboard publisher started: %s -> %s", args.local_url, args.remote_url)
     logging.info(
-        "Publisher auth: email=%s password_len=%s token_len=%s",
+        "Publisher auth mode=%s email=%s password_len=%s",
+        "password-only" if password_only else "token",
         admin_email or "(empty)",
         len(admin_password or ""),
-        len(direct_publisher_token or ""),
     )
-
-    def refresh_publish_token(reason: str) -> str:
-        nonlocal direct_publisher_token, local_token
-        if not admin_email or not admin_password:
-            logging.error("Cannot refresh publish token (%s): missing admin email/password.", reason)
-            return ""
-        try:
-            refreshed = admin_login(args.remote_base_url, admin_email, admin_password, args.remote_timeout)
-        except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
-            logging.warning("Admin login refresh failed (%s): %s", reason, exc)
-            return ""
-        direct_publisher_token = refreshed
-        if not env_value(env, "SNIPER_LOCAL_DASHBOARD_TOKEN"):
-            local_token = refreshed
-        logging.info("Admin publish token refreshed (%s).", reason)
-        return refreshed
-
-    if direct_publisher_endpoint and admin_email and admin_password:
-        startup_token = refresh_publish_token("startup")
-        if startup_token:
-            token = startup_token
-            using_admin_session = True
 
     while True:
         try:
             if rate_limit_sleep > 0:
                 time.sleep(rate_limit_sleep)
             if direct_publisher_endpoint:
-                if not token:
-                    token = direct_publisher_token
-                using_admin_session = bool(token)
+                token = "" if password_only else (token or direct_publisher_token)
+                using_admin_session = password_only or bool(token)
             elif not token:
                 if token_index < len(remote_tokens):
                     token = remote_tokens[token_index]
@@ -1892,7 +1895,14 @@ def main() -> int:
             t0_perf = time.perf_counter()
             try:
                 raw_local_payload = suppress_late_open_entries(
-                    read_local_dashboard(args, local_token, admin_email, admin_password, direct_publisher_token)
+                    read_local_dashboard(
+                        args,
+                        local_token,
+                        admin_email,
+                        admin_password,
+                        "" if password_only else direct_publisher_token,
+                        password_only=password_only,
+                    )
                 )
             except HTTPError as exc:
                 status_code, body = http_error_summary(exc)
@@ -2093,6 +2103,7 @@ def main() -> int:
                             local_payload,
                             admin_email,
                             admin_password,
+                            password_only=password_only,
                         )
                         log_publish_timing(
                             "urgent",
@@ -2158,7 +2169,14 @@ def main() -> int:
                 continue
 
             t1_perf = time.perf_counter()
-            response, status_code, upload_ms = publish_payload(args, token, local_payload, admin_email, admin_password)
+            response, status_code, upload_ms = publish_payload(
+                args,
+                token,
+                local_payload,
+                admin_email,
+                admin_password,
+                password_only=password_only,
+            )
             log_publish_timing(
                 "dashboard",
                 local_payload,
@@ -2203,11 +2221,12 @@ def main() -> int:
                     full_backoff_seconds,
                 )
             if status_code in {401, 403}:
-                refreshed = refresh_publish_token(f"http_{status_code}")
-                if refreshed:
-                    token = refreshed
-                    using_admin_session = True
-                else:
+                logging.error(
+                    "Publish auth failed (%s). Verifique SNIPER_ADMIN_EMAIL e SNIPER_ADMIN_PASSWORD em %s.",
+                    status_code,
+                    args.env_file,
+                )
+                if not password_only:
                     if using_admin_session:
                         token_index = 0
                     token = ""
