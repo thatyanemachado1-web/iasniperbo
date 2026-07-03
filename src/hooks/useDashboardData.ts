@@ -1,4 +1,4 @@
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
 import {
@@ -8,14 +8,14 @@ import {
 } from "@/lib/dashboardLive";
 import { LOCAL_SIGNALS_API_BASE_URL } from "@/lib/runtimePorts";
 import { readUserSession } from "@/lib/userSession";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } from "@/types/dashboard";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 
 export type { DashboardDataMode };
 export { isDashboardLive, isLiveDashboardPayload } from "@/lib/dashboardLive";
 
-const LIVE_REFETCH_INTERVAL_MS = 800;
+const LIVE_REFETCH_INTERVAL_MS = 300;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
 const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
 const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v2";
@@ -213,6 +213,8 @@ function resolveDashboardMode(
 export function useDashboardData() {
   const dashboardUrl = configuredDashboardUrl();
   const authToken = resolveDashboardAuthToken();
+  const queryClient = useQueryClient();
+  const lastRoundKeyRef = useRef("");
   const [moduleToggles, setModuleTogglesState] = useState<ModuleToggles>(() =>
     readStoredModuleToggles(),
   );
@@ -241,6 +243,21 @@ export function useDashboardData() {
       entryModeFilter: undefined,
     };
   }, [hasLivePayload, query.data, moduleToggles]);
+
+  useEffect(() => {
+    if (!dashboardUrl || typeof window === "undefined") return;
+    const rounds = query.data?.rounds;
+    if (!Array.isArray(rounds) || !rounds.length) return;
+    const latest = rounds[rounds.length - 1];
+    const roundKey = `${latest?.id ?? ""}:${latest?.result ?? ""}:${query.data?.updatedAt ?? ""}`;
+    if (lastRoundKeyRef.current && roundKey !== lastRoundKeyRef.current) {
+      void queryClient.refetchQueries({
+        queryKey: ["dashboard-data", dashboardUrl],
+        type: "active",
+      });
+    }
+    lastRoundKeyRef.current = roundKey;
+  }, [dashboardUrl, query.data?.rounds, query.data?.updatedAt, queryClient]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;

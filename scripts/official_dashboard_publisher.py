@@ -294,14 +294,6 @@ def apply_g1_publication_lock(
         guarded[field] = copy.deepcopy(previous)
         blocked_fields.append(field)
 
-    previous_alerts = pattern_entry_alerts(last_published)
-    incoming_alerts = pattern_entry_alerts(guarded)
-    if blocked_fields and previous_alerts and incoming_alerts:
-        pattern = guarded.get("patternMinerSnapshot") or guarded.get("patternMiner")
-        if isinstance(pattern, dict):
-            pattern["entryAlerts"] = copy.deepcopy(previous_alerts)
-            blocked_fields.append("patternMinerSnapshot.entryAlerts")
-
     if not blocked_fields:
         return guarded, False, ""
 
@@ -475,6 +467,14 @@ def publish_payload(
 def dashboard_signal_fingerprint(payload: dict[str, Any]) -> str:
     signal = payload.get("currentSignal") if isinstance(payload.get("currentSignal"), dict) else {}
     neural_result = payload.get("neuralEntryLastResult") if isinstance(payload.get("neuralEntryLastResult"), dict) else {}
+    neural_state = payload.get("neuralEntryState") if isinstance(payload.get("neuralEntryState"), dict) else {}
+    neural_reading = payload.get("neuralReading") if isinstance(payload.get("neuralReading"), dict) else {}
+    surf = payload.get("currentSurfAlert") if isinstance(payload.get("currentSurfAlert"), dict) else {}
+    tie = payload.get("currentTieAlert") if isinstance(payload.get("currentTieAlert"), dict) else {}
+    pattern = payload.get("patternMinerSnapshot") or payload.get("patternMiner")
+    pattern_alerts = pattern.get("entryAlerts") if isinstance(pattern, dict) else []
+    first_pattern = pattern_alerts[0] if pattern_alerts and isinstance(pattern_alerts[0], dict) else {}
+    pattern_strategy = first_pattern.get("strategy") if isinstance(first_pattern.get("strategy"), dict) else {}
     rounds = payload.get("rounds") if isinstance(payload.get("rounds"), list) else []
     last_round = rounds[-1] if rounds and isinstance(rounds[-1], dict) else {}
     signal_status = signal.get("status")
@@ -484,6 +484,16 @@ def dashboard_signal_fingerprint(payload: dict[str, Any]) -> str:
         "signalStatus": signal_status,
         "signalSide": signal.get("side"),
         "neuralResultId": neural_result.get("id"),
+        "neuralStateId": neural_state.get("id") or neural_state.get("triggerRoundKey"),
+        "neuralMode": neural_reading.get("mode"),
+        "neuralSide": neural_reading.get("direcao") or neural_reading.get("origem"),
+        "surfAlert": surf.get("surf_alert"),
+        "surfSide": surf.get("surf_side") or surf.get("surf_prediction_side"),
+        "tieStatus": tie.get("status"),
+        "tieLevel": tie.get("level"),
+        "patternStatus": pattern_strategy.get("status"),
+        "patternSide": pattern_strategy.get("next_side") or pattern_strategy.get("expectedResult"),
+        "patternRoundId": pattern_strategy.get("round_id"),
     }
     return json.dumps(compact, sort_keys=True, separators=(",", ":"))
 
@@ -491,11 +501,22 @@ def dashboard_signal_fingerprint(payload: dict[str, Any]) -> str:
 def urgent_signal_min_interval(payload: dict[str, Any], args: argparse.Namespace) -> float:
     signal = payload.get("currentSignal") if isinstance(payload.get("currentSignal"), dict) else {}
     neural_result = payload.get("neuralEntryLastResult") if isinstance(payload.get("neuralEntryLastResult"), dict) else {}
+    neural_reading = payload.get("neuralReading") if isinstance(payload.get("neuralReading"), dict) else {}
     status = str(signal.get("status") or "").strip().casefold()
-    priority_statuses = {"pending", "g1", "green", "green_g1", "red"}
-    if status in priority_statuses or neural_result.get("id"):
-        return max(0.2, float(args.urgent_retry_interval))
-    return max(float(args.non_entry_urgent_interval), float(args.urgent_retry_interval))
+    priority_statuses = {"pending", "g1", "green", "green_g1", "red", "active", "tie_watch"}
+    surf = payload.get("currentSurfAlert") if isinstance(payload.get("currentSurfAlert"), dict) else {}
+    tie = payload.get("currentTieAlert") if isinstance(payload.get("currentTieAlert"), dict) else {}
+    pattern = payload.get("patternMinerSnapshot") or payload.get("patternMiner")
+    pattern_alerts = pattern.get("entryAlerts") if isinstance(pattern, dict) else []
+    has_module_signal = (
+        bool(surf.get("surf_alert"))
+        or str(tie.get("status") or "").strip().casefold() == "active"
+        or bool(pattern_alerts)
+        or str(neural_reading.get("mode") or "").strip().casefold() in {"active", "ativo", "valido", "valid"}
+    )
+    if status in priority_statuses or neural_result.get("id") or has_module_signal:
+        return max(0.15, float(args.urgent_retry_interval))
+    return max(0.35, float(args.non_entry_urgent_interval))
 
 
 def build_urgent_signal_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -512,6 +533,8 @@ def build_urgent_signal_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "engineDecision",
         "currentSurfAlert",
         "currentTieAlert",
+        "patternMinerSnapshot",
+        "patternMiner",
         "mainScoreboard",
         "surfAnalyzerScoreboard",
         "tieAlertScoreboard",
@@ -1720,12 +1743,12 @@ def main() -> int:
     parser.add_argument("--remote-base-url", default="https://sniperbo.com")
     parser.add_argument("--remote-url", default="https://sniperbo.com/dashboard/publish")
     parser.add_argument("--signal-url", default="")
-    parser.add_argument("--interval", type=float, default=0.7)
+    parser.add_argument("--interval", type=float, default=0.25)
     parser.add_argument("--local-timeout", type=float, default=2.0)
-    parser.add_argument("--remote-timeout", type=float, default=12.0)
-    parser.add_argument("--repeat-interval", type=float, default=12.0)
-    parser.add_argument("--urgent-retry-interval", type=float, default=0.8)
-    parser.add_argument("--non-entry-urgent-interval", type=float, default=12.0)
+    parser.add_argument("--remote-timeout", type=float, default=8.0)
+    parser.add_argument("--repeat-interval", type=float, default=1.5)
+    parser.add_argument("--urgent-retry-interval", type=float, default=0.25)
+    parser.add_argument("--non-entry-urgent-interval", type=float, default=0.5)
     parser.add_argument("--urgent-signal", action="store_true", default=True, help="Publish a minimal signal payload before the full dashboard.")
     parser.add_argument("--no-urgent-signal", dest="urgent_signal", action="store_false", help="Disable urgent signal publishing.")
     parser.add_argument("--skip-full-publish", action="store_true", help="Only publish urgent signal payloads; do not POST the heavy full dashboard.")
@@ -1793,6 +1816,7 @@ def main() -> int:
     urgent_failures = 0
     last_publish_at = 0.0
     last_published_payload: dict[str, Any] | None = None
+    last_round_id = ""
     queued_locked_urgent_payload: dict[str, Any] | None = None
     full_publish_failures = 0
     full_publish_backoff_until = 0.0
@@ -1864,7 +1888,15 @@ def main() -> int:
                 queued_locked_urgent_payload = None
 
             signal_fingerprint = dashboard_signal_fingerprint(local_payload)
-            signal_changed = bool(args.urgent_signal and signal_fingerprint and signal_fingerprint != last_signal_fingerprint)
+            current_round_id = extract_round_id(local_payload)
+            round_changed = bool(current_round_id and current_round_id != last_round_id)
+            if round_changed:
+                last_round_id = current_round_id
+            signal_changed = bool(
+                args.urgent_signal
+                and signal_fingerprint
+                and (signal_fingerprint != last_signal_fingerprint or round_changed)
+            )
             telegram_result_payload, _telegram_result_source = direct_telegram_payload(last_published_payload, local_payload)
             next_direct_pending: list[dict[str, Any]] = []
             for pending in direct_telegram_pending:
@@ -2080,17 +2112,17 @@ def main() -> int:
 
             if args.skip_full_publish:
 
-                time.sleep(max(0.25, args.interval))
+                time.sleep(max(0.1, args.interval))
 
                 continue
 
             fingerprint = dashboard_fingerprint(local_payload)
             now = time.monotonic()
             if now < full_publish_backoff_until:
-                time.sleep(max(0.25, args.interval))
+                time.sleep(max(0.1, args.interval))
                 continue
-            if fingerprint == last_fingerprint and (now - last_publish_at) < max(args.interval, args.repeat_interval):
-                time.sleep(max(0.25, args.interval))
+            if fingerprint == last_fingerprint and not round_changed and (now - last_publish_at) < max(args.interval, args.repeat_interval):
+                time.sleep(max(0.1, args.interval))
                 continue
 
             t1_perf = time.perf_counter()
@@ -2151,7 +2183,7 @@ def main() -> int:
             logging.warning("Full dashboard publish backoff for %.1fs; urgent signal remains active.", full_backoff_seconds)
             # Do not mark failed payloads as published; next loop must send the latest state.
 
-        time.sleep(max(0.25, args.interval))
+        time.sleep(max(0.1, args.interval))
 
 
 if __name__ == "__main__":

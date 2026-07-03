@@ -42,7 +42,7 @@ export function usePatternMiner({
 
   useEffect(() => {
     if (!enabled) return;
-    const timer = window.setInterval(() => setClock((value) => value + 1), 300);
+    const timer = window.setInterval(() => setClock((value) => value + 1), 150);
     return () => window.clearInterval(timer);
   }, [enabled]);
 

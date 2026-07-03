@@ -16,7 +16,7 @@ import {
   readPatternIaEntryHistory,
 } from "./PatternMinerEntryHistory.ts";
 
-const RESULT_FLASH_MS = 1_200;
+const RESULT_FLASH_MS = 400;
 
 interface LifecycleStore {
   activeSignal: PatternIaActiveSignal | null;

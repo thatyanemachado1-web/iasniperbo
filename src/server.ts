@@ -375,7 +375,7 @@ const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
-const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
+const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 1_500;
 const CLIENT_REGISTRY_PROTECTION_INTERVAL_MS = 60_000;
 const CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS = 5 * 60_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
@@ -3264,13 +3264,15 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
       url.pathname === "/dashboard/signal" ||
       (url.pathname === "/dashboard" && telegramV2OnlyEnabled(env));
     if (shouldRunImmediateMonitor) {
-      const saveStatus = await saveStateTask;
-      const monitorStatus = await withTimeout(
-        processValidatorLiveMonitoring(env, monitorOptions),
-        LIVE_STATE_IO_TIMEOUT_MS,
-        "monitorar sinais imediatamente",
-        false,
-      );
+      const [saveStatus, monitorStatus] = await Promise.all([
+        saveStateTask,
+        withTimeout(
+          processValidatorLiveMonitoring(env, monitorOptions),
+          LIVE_STATE_IO_TIMEOUT_MS,
+          "monitorar sinais imediatamente",
+          false,
+        ),
+      ]);
       return json({ ok: true, saved: saveStatus, monitor: monitorStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
     }
     return json({ ok: true, saved: "queued", monitor: "skipped_non_publish_signal", dashboard: publicDashboardSnapshot(liveDashboardData) });
@@ -18439,11 +18441,15 @@ async function loadLiveState(env: unknown) {
 }
 
 async function syncDashboardReadState(env: unknown) {
-  const durableState = await loadDurableLiveState(env);
-  const durableDashboard = readRecord(durableState?.dashboard);
-  if (!hasRecordFields(durableDashboard)) return;
-  if (compareDashboardStateFreshness(durableDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
-    liveDashboardData = restoreDashboardData(durableDashboard);
+  const [durableState, cacheState] = await Promise.all([
+    loadDurableLiveState(env),
+    loadLiveStateCache(),
+  ]);
+  const merged = mergeLiveStates(durableState, cacheState);
+  const dashboard = readRecord(merged?.dashboard);
+  if (!hasRecordFields(dashboard)) return;
+  if (compareDashboardStateFreshness(dashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
+    liveDashboardData = restoreDashboardData(dashboard);
   }
 }
 async function loadLiveStateFresh(env: unknown) {
