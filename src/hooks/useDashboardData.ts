@@ -164,6 +164,9 @@ export function useDashboardData() {
     initialData: mockDashboardData,
     refetchInterval: dashboardUrl ? LIVE_REFETCH_INTERVAL_MS : false,
     refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+    refetchOnMount: "always",
     retry: 1,
     staleTime: 0,
   });
