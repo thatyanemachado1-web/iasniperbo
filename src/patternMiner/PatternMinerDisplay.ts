@@ -7,10 +7,15 @@ export { sideBgClass, sideTextClass };
 const SIDE_LABEL: Record<RoundResult, string> = {
   B: "BANKER",
   P: "PLAYER",
-  T: "TIE",
+  T: "TIE/EMPATE",
 };
 
 export function formatPatternToken(token: string) {
+  const side = token[0] as RoundResult | undefined;
+  const value = token.slice(1);
+  if (side === "B") return value ? `Banker ${value}` : "Banker";
+  if (side === "P") return value ? `Player ${value}` : "Player";
+  if (side === "T") return value ? `Empate ${value}` : "Empate";
   return token;
 }
 

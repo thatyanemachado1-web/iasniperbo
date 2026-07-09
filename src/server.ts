@@ -16,6 +16,7 @@ import { renderErrorPage } from "./lib/error-page";
 import { DEFAULT_PATTERN_MINER_CONFIG, PatternMinerEngine } from "./patternMiner/PatternMinerEngine";
 import { SurfAnalyzerEngine } from "./surf/SurfAnalyzerEngine";
 import { TieRadarEngine } from "./tieRadar/TieRadarEngine";
+import { buildTieRadarHistoryAnalysis } from "./tieRadar/TieRadarHistoryEngine";
 import { calculateMotorAssertiveness } from "./utils/assertiveness";
 import { NeuralValidatorEngine } from "./neuralValidator/NeuralValidatorEngine";
 import { buildNumeroPaganteNeural } from "./utils/numeroPaganteNeural";
@@ -37,6 +38,8 @@ import type {
   ActiveEntryMode,
   CurrentSignalSide,
   DashboardData,
+  DashboardDailyResultsByModule,
+  DashboardPersistentResult,
   EntryModeStats,
   NeuralEntryLastResult,
   NeuralEntryState,
@@ -76,6 +79,9 @@ type ExecutionContextLike = {
 
 type LiveDashboardData = DashboardData & {
   updatedAt?: string;
+  revision?: number;
+  sequenceId?: number;
+  revisionFingerprint?: string;
   cycleDate?: string;
   dailyCycleDate?: string;
   strictDailyCounters?: boolean;
@@ -90,9 +96,30 @@ type LiveDashboardData = DashboardData & {
   neuralPanelCycleResetRoundKey?: string;
   neuralEntryState?: NeuralEntryState | null;
   neuralEntryLastResult?: NeuralEntryLastResult | null;
+  collectorStatus?: string;
+  websocketStatus?: string;
+  lastRoundId?: string | number | null;
+  lastRoundAt?: string;
+  publisherStatus?: string;
+  health?: Record<string, unknown>;
+  payingNumbers?: unknown;
+  pressureReading?: Record<string, unknown>;
+  performanceStats?: Record<string, unknown>;
+  validatorStats?: Record<string, unknown>;
+  patternHotSignal?: unknown;
+  aiPatternSignal?: unknown;
+  patternIaServerCycle?: unknown;
 };
-const LATE_ENTRY_BLOCK_SECONDS = 2.2;
+const LATE_ENTRY_BLOCK_SECONDS = 1.0;
 const BETTING_TIMING_MAX_AGE_MS = 20_000;
+const DASHBOARD_REALTIME_RESULT_VISIBLE_MS = 900;
+const DASHBOARD_STALE_SIGNAL_MS = 90_000;
+const NEURAL_RESULT_REENTRY_BLOCK_MS = 90_000;
+const DASHBOARD_STREAM_HEARTBEAT_MS = 15_000;
+const DAILY_RESULT_MODULE_NEURAL = "LEITURA_NEURAL_NUMERO_PAGANTE";
+const DAILY_RESULT_MODULE_SURF = "SURF_ANALYZER";
+const DAILY_RESULT_MODULE_PATTERN = "PADROES_IA";
+const MAX_DAILY_RESULTS_PER_MODULE = 100;
 type NeuralCalendarClassification = "muito_pagante" | "operavel" | "perigoso" | "sem_amostra";
 type CalendarEngineKey =
   | "todos"
@@ -158,6 +185,14 @@ type EngineCalendarSignalEvent = {
   year: number;
   source: string;
   payload: Record<string, unknown>;
+};
+type DashboardStreamClient = {
+  id: string;
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  heartbeatTimer: ReturnType<typeof setInterval> | null;
+  closed: boolean;
+  lastRevision: string | number | null;
+  closedAt: number | null;
 };
 type EngineCalendarBackfillSourceReport = {
   source: string;
@@ -237,6 +272,27 @@ type NeuralCalendarDateParts = {
 type WorkerCacheStorage = CacheStorage & { default?: Cache };
 type AdminRole = "owner" | "admin";
 type BillingPlanId = "free" | "premium" | "vip";
+type BillingPlanOfferId = "premium" | "vip";
+type PlanOfferStatus = "active" | "inactive" | "promo" | "sold_out";
+type PlanOfferSettings = {
+  id: BillingPlanOfferId;
+  name: string;
+  slug: string;
+  description: string;
+  price: number;
+  oldPrice: number;
+  billingPeriod: "monthly";
+  isActive: boolean;
+  isFeatured: boolean;
+  badgeText: string;
+  checkoutUrl: string;
+  benefits: string[];
+  sortOrder: number;
+  accessLevel: BillingPlanOfferId;
+  status: PlanOfferStatus;
+  updatedAt: string;
+  updatedBy: string;
+};
 type SubscriptionStatus = "free" | "pending" | "active" | "expired" | "cancelled" | "past_due";
 type SalesSettings = {
   salesClosed: boolean;
@@ -303,11 +359,16 @@ type AdminActionType =
   | "DELETE_USER";
 
 const LIVE_STATE_CACHE_URL = "https://sniperbo.com/__sniperbo_live_state_v1";
+const DASHBOARD_SNAPSHOT_CACHE_URL = "https://sniperbo.com/__sniperbo_dashboard_latest_v1";
 const LIVE_STATE_ID = "main";
 const LIVE_STATE_TABLE = "sniper_live_state";
+const DASHBOARD_PERSISTENT_RESULTS_TABLE = "dashboard_persistent_results";
+const DASHBOARD_MONTHLY_TIE_STATS_TABLE = "dashboard_monthly_tie_stats";
 const SNIPER_DEPLOY_MARKER = "2026-06-25-client-registration-persistence-v3";
+const PUBLIC_REGISTRATION_MAINTENANCE = false;
 const CLIENT_REGISTRY_SNAPSHOT_LATEST_ID = `${LIVE_STATE_ID}:client_registry_latest`;
 const CLIENT_REGISTRY_SNAPSHOT_PREFIX = `${LIVE_STATE_ID}:client_registry:`;
+const DASHBOARD_SNAPSHOT_LATEST_ID = `${LIVE_STATE_ID}:dashboard_latest`;
 const CRM_CLIENTS_TABLE = "crm_clients";
 const CRM_DEALS_TABLE = "crm_deals";
 const CRM_INVOICES_TABLE = "crm_invoices";
@@ -373,10 +434,20 @@ const VALIDATOR_TELEGRAM_MAX_PARALLEL_SENDS = 80;
 const NEURAL_PANEL_CYCLE_RESET_VERSION = "2026-06-11-manual-reset-v1";
 const MAX_NARRATION_CHARS = 900;
 const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
-const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8;
+const ADMIN_SESSION_TTL_SECONDS = CLIENT_SESSION_TTL_SECONDS;
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const LIVE_STATE_IO_TIMEOUT_MS = 2_500;
+const LIVE_STATE_IO_TIMEOUT_MS = 8_000;
+const FAST_SIGNAL_SAVE_TIMEOUT_MS = 450;
+const FAST_PUBLISH_SAVE_TIMEOUT_MS = 1_500;
+const DASHBOARD_FAST_ACK_CACHE_TIMEOUT_MS = 180;
+const DASHBOARD_FAST_ACK_DURABLE_TIMEOUT_MS = 1200;
 const LIVE_STATE_LOAD_MIN_INTERVAL_MS = 8_000;
+const DASHBOARD_READ_STATE_SYNC_INTERVAL_MS = 1_500;
+const DASHBOARD_STORED_ROUND_REPAIR_INTERVAL_MS = 5_000;
+const DASHBOARD_INLINE_REPAIR_TIMEOUT_MS = 1_200;
+const DASHBOARD_EMPTY_SNAPSHOT_REPAIR_TIMEOUT_MS = 1_200;
+const DASHBOARD_STORED_ROUND_REPAIR_LIMIT = 300;
+const DASHBOARD_CLIENT_AUTH_CACHE_TTL_MS = 60_000;
 const CLIENT_REGISTRY_PROTECTION_INTERVAL_MS = 60_000;
 const CLIENT_REGISTRY_SNAPSHOT_INTERVAL_MS = 5 * 60_000;
 const TELEGRAM_SEND_TIMEOUT_MS = 4_000;
@@ -384,6 +455,7 @@ const TELEGRAM_ENGINE_TIMEOUT_MS = 8_000;
 const VALIDATOR_TELEGRAM_TARGET_MS = 200;
 const VALIDATOR_TELEGRAM_DEDUPE_RESERVATION_TTL_MS = 30_000;
 const LIVE_FEED_STALE_MS = 150_000;
+const LIVE_ROUND_TIME_STALE_MS = 150_000;
 const FREE_TRIAL_MINUTES = 30;
 const ELEVENLABS_API_KEY_SECRET_NAMES = [
   "ELEVENLABS_TTS_API_KEY",
@@ -519,6 +591,8 @@ const DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES: Record<ValidatorTelegramM
 };
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
+const dashboardStreamClients = new Map<string, DashboardStreamClient>();
+let dashboardStreamClientCounter = 0;
 let liveDashboardData: LiveDashboardData = pausedDashboardSnapshot(
   resetDashboardDailyCycle({
     ...mockDashboardData,
@@ -565,6 +639,7 @@ let liveSalesSettings: SalesSettings = {
   updated_at: "",
   updated_by: "",
 };
+let livePlanOffers: Record<BillingPlanOfferId, PlanOfferSettings> = createDefaultPlanOffers();
 let liveSiteContentSettings: SiteContentSettings = DEFAULT_SITE_CONTENT_SETTINGS;
 let liveLocalAiSettings: Partial<LocalAiSettings> = {};
 let liveLocalAiLogs: LocalAiLog[] = [];
@@ -578,6 +653,11 @@ let liveStateLoadedAt = 0;
 let liveStateLoadPromise: Promise<void> | null = null;
 let liveStateSavePromise: Promise<LiveStateSaveStatus> | null = null;
 let liveStateSavePending = false;
+let dashboardReadStateSyncedAt = 0;
+let dashboardReadStateSyncPromise: Promise<void> | null = null;
+let dashboardStoredRoundRepairCheckedAt = 0;
+let dashboardStoredRoundRepairPromise: Promise<boolean> | null = null;
+const dashboardClientAuthCache = new Map<string, { ok: boolean; tokenType: string; expiresAt: number }>();
 let protectedClientRegistryState: Record<string, unknown> | null = null;
 let protectedClientRegistryLoadedAt = 0;
 let clientRegistrySnapshotSavedAt = 0;
@@ -623,6 +703,7 @@ function brandedErrorResponse(): Response {
 
 function withSecurityHeaders(response: Response): Response {
   const headers = new Headers(response.headers);
+  const contentType = headers.get("content-type") || "";
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
   headers.set("Referrer-Policy", "no-referrer");
@@ -630,6 +711,14 @@ function withSecurityHeaders(response: Response): Response {
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
   headers.set("Permissions-Policy", "camera=(), geolocation=(), payment=(), usb=()");
   headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  if (contentType.toLowerCase().includes("text/html")) {
+    headers.set("cache-control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0");
+    headers.set("cdn-cache-control", "no-store");
+    headers.set("cloudflare-cdn-cache-control", "no-store");
+    headers.set("clear-site-data", '"cache"');
+    headers.set("pragma", "no-cache");
+    headers.set("expires", "0");
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -688,6 +777,9 @@ export default {
       const healthResponse = handleHealthRequest(request, env);
       if (healthResponse) return withSecurityHeaders(healthResponse);
 
+      const legacyServiceWorkerResponse = handleLegacyServiceWorkerRequest(request);
+      if (legacyServiceWorkerResponse) return withSecurityHeaders(legacyServiceWorkerResponse);
+
       const telegramV2DiagnosticsEarly = await handleTelegramV2DiagnosticsRequest(request, url, env, ctx);
       if (telegramV2DiagnosticsEarly) return withSecurityHeaders(telegramV2DiagnosticsEarly);
 
@@ -719,7 +811,7 @@ export default {
       const billingResponse = await handleBillingRequest(request, env);
       if (billingResponse) return withSecurityHeaders(billingResponse);
 
-      const adminApiResponse = await handleAdminApiRequest(request, env);
+      const adminApiResponse = await handleAdminApiRequest(request, env, ctx);
       if (adminApiResponse) return withSecurityHeaders(adminApiResponse);
 
       const dashboardResponse = await handleDashboardRequest(request, env, ctx);
@@ -755,6 +847,27 @@ function handleHealthRequest(request: Request, env: unknown) {
   });
 }
 
+function handleLegacyServiceWorkerRequest(request: Request) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/service-worker.js" && url.pathname !== "/sw.js") return null;
+  if (request.method !== "GET" && request.method !== "HEAD") return null;
+
+  return new Response(
+    `self.addEventListener("install",event=>{self.skipWaiting();event.waitUntil(caches.keys().then(keys=>Promise.all(keys.map(key=>caches.delete(key)))));});self.addEventListener("activate",event=>{event.waitUntil((async()=>{try{const registrations=await self.registration.unregister();}catch(e){}try{const clientsList=await clients.matchAll({type:"window",includeUncontrolled:true});for(const client of clientsList){client.navigate(client.url.includes("/app")?"/app?reload=1":client.url);}}catch(e){}})());});`,
+    {
+      headers: {
+        "content-type": "application/javascript; charset=utf-8",
+        "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0",
+        "cdn-cache-control": "no-store",
+        "cloudflare-cdn-cache-control": "no-store",
+        pragma: "no-cache",
+        expires: "0",
+        "service-worker-allowed": "/",
+      },
+    },
+  );
+}
+
 function redirectLegacyAdminRoute(request: Request) {
   if (request.method !== "GET" && request.method !== "HEAD") return null;
   if (request.headers.get("authorization")) return null;
@@ -778,6 +891,14 @@ function redirectLegacyAdminRoute(request: Request) {
 function shouldLoadLiveStateForRequest(request: Request) {
   if (request.method === "OPTIONS") return false;
   const url = new URL(request.url);
+  if (
+    request.method === "GET" &&
+    (url.pathname === "/dashboard" ||
+      url.pathname === "/dashboard/stream" ||
+      url.pathname === "/dashboard/round-history")
+  ) {
+    return false;
+  }
   if (isLightweightApiRequest(url.pathname)) return false;
   if (isAppShellRequest(url.pathname)) return false;
   if (url.pathname.startsWith("/assets/")) return false;
@@ -795,6 +916,10 @@ function isAppShellRequest(pathname: string) {
 function isLightweightApiRequest(pathname: string) {
   return (
     pathname === "/admin/login" ||
+    pathname === "/auth/check" ||
+    pathname === "/auth/diagnostics" ||
+    pathname === "/auth/register" ||
+    pathname === "/auth/verify" ||
     pathname === "/sales/settings" ||
     pathname === "/billing/plans" ||
     pathname === "/billing/checkout" ||
@@ -853,8 +978,9 @@ function rateLimitForRequest(method: string, pathname: string) {
   if (pathname === "/voice/narration") return 25;
   if (pathname === "/api/voice/speak") return 40;
   if (pathname === "/api/ai/local-commentary") return 60;
-  if (pathname === "/dashboard") return method === "GET" ? 120 : 240;
-  if (pathname === "/dashboard/round-history") return 120;
+  if (pathname === "/dashboard") return method === "GET" ? 3000 : 240;
+  if (pathname === "/dashboard/stream") return 3000;
+  if (pathname === "/dashboard/round-history") return 1000;
   if (pathname === "/dashboard/signal") return 240;
   if (pathname === "/dashboard/publish") return 240;
   if (pathname === "/validator/validate") return 120;
@@ -1684,6 +1810,10 @@ async function handleBillingRequest(request: Request, env: unknown) {
     if (!plan || plan === "free") {
       return json({ error: "Escolha um plano VIP ou Premium para abrir o checkout." }, 400);
     }
+    const offer = getPlanOffer(plan, env);
+    if (!offer.isActive || offer.status === "inactive" || offer.status === "sold_out") {
+      return json({ error: "Este plano esta fechado no momento." }, 403);
+    }
     const auth = await requireClientBillingSession(request, env);
     const client = auth.ok ? auth.client : await recoverCheckoutClientFromBody(env, request, body, auth);
     if (!client) {
@@ -1730,7 +1860,7 @@ async function requireClientBillingSession(
 ): Promise<
   { ok: true; client: Record<string, unknown>; session: SessionPayload } | { ok: false; status: number; error: string }
 > {
-  const token = getBearerToken(request);
+  const token = dashboardRequestToken(request);
   if (!token) return { ok: false, status: 401, error: "Sessao obrigatoria." };
 
   const session = await verifySessionToken(env, token);
@@ -2327,7 +2457,7 @@ async function applyMercadoPagoPayment(env: unknown, payment: Record<string, unk
   return { activated, status };
 }
 
-async function handleAdminApiRequest(request: Request, env: unknown) {
+async function handleAdminApiRequest(request: Request, env: unknown, ctx?: ExecutionContext) {
   const url = new URL(request.url);
 
   if (request.method === "GET" && url.pathname === "/__sniperbo/version") {
@@ -2466,7 +2596,12 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     let client = await resolveClientForAuth(env, email, "auth_check");
     if (!client) {
-      await recoverClientRegistryForAuth(env, email, "auth_check");
+      await withTimeout(
+        recoverClientRegistryForAuth(env, email, "auth_check"),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "recuperar cadastro para login",
+        false,
+      );
       client = await resolveClientForAuth(env, email, "auth_check_recovered");
     }
     if (!client && password) {
@@ -2516,7 +2651,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       client.updated_at = new Date().toISOString();
       upsertLiveClient(client);
       upsertRecipientFromClient(client);
-      const persisted = await persistClientRegistryAfterClientChange(env, client, "auth_check_password_bind");
+      const persisted = await persistClientRegistryAfterClientChange(env, client, "auth_check_password_bind", ctx);
       if (!persisted.ok) return clientRegistryDurableSaveError();
       recordAccessEvent("client_password_bound_on_login", {
         ...client,
@@ -2543,6 +2678,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "POST" && url.pathname === "/auth/register") {
+    if (PUBLIC_REGISTRATION_MAINTENANCE) {
+      return json({ error: "Cadastro temporariamente em manutencao." }, 503);
+    }
+
     const body = readRecord(await request.json().catch(() => ({})));
     const email = readString(body, "email").toLowerCase();
     const password = readString(body, "password");
@@ -2559,13 +2698,28 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
     let existingIndex = liveClients.findIndex((item) => readString(item, "email").toLowerCase() === email);
     if (existingIndex < 0) {
-      await hydrateClientFromBilling(env, email);
+      await withTimeout(
+        hydrateClientFromBilling(env, email),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "hidratar cadastro no registro",
+        null,
+      );
       syncClientFromRecipientEmail(email) || syncClientFromAdminUserEmail(env, email);
       existingIndex = liveClients.findIndex((item) => readString(item, "email").toLowerCase() === email);
     }
     if (existingIndex < 0) {
-      await recoverClientRegistryForAuth(env, email, "auth_register");
-      await hydrateClientFromBilling(env, email);
+      await withTimeout(
+        recoverClientRegistryForAuth(env, email, "auth_register"),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "recuperar cadastro no registro",
+        false,
+      );
+      await withTimeout(
+        hydrateClientFromBilling(env, email),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "reidratar cadastro no registro",
+        null,
+      );
       syncClientFromRecipientEmail(email) || syncClientFromAdminUserEmail(env, email);
       existingIndex = liveClients.findIndex((item) => readString(item, "email").toLowerCase() === email);
     }
@@ -2633,10 +2787,10 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       env,
       client,
       existingIndex >= 0 ? "auth_register_update" : "auth_register_new",
+      ctx,
     );
     if (!persisted.ok) return clientRegistryDurableSaveError();
     const access = await clientAccess(env, client, request);
-    await saveLiveState(env);
     return json({ access }, existingIndex >= 0 ? 200 : 201);
   }
 
@@ -2701,7 +2855,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (url.pathname === "/admin/sales-settings") {
     if (request.method === "GET") {
-      return json({ salesSettings: adminSalesSettings(env) });
+      return json({ salesSettings: adminSalesSettings(env, adminPersistenceStatus(env)) });
     }
 
     if (request.method === "POST") {
@@ -2717,11 +2871,56 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         targetEmail: "global",
         action: "UPDATE_USER",
         beforeJson: {},
-        afterJson: adminSalesSettings(env),
+        afterJson: adminSalesSettings(env, adminPersistenceStatus(env)),
         reason: nextClosed ? "Vendas encerradas pelo admin." : "Vendas reabertas pelo admin.",
       });
       const saveStatus = await saveLiveState(env);
-      return json({ salesSettings: adminSalesSettings(env, saveStatus) });
+      return json({ salesSettings: adminSalesSettings(env, adminPersistenceStatus(env, saveStatus)) });
+    }
+
+    return json({ error: "Metodo nao permitido." }, 405);
+  }
+
+  if (url.pathname === "/admin/plan-offers") {
+    if (request.method === "GET") {
+      return json({ plans: adminPlanOffers(env), persistence: adminPersistenceStatus(env) });
+    }
+
+    if (request.method === "POST") {
+      const body = readRecord(await request.json().catch(() => ({})));
+      const planId = normalizeBillingPlanOfferId(body.planId || body.id);
+      if (!planId) return json({ error: "Plano invalido." }, 400);
+      const before = getPlanOffer(planId, env);
+      const patch = readRecord(body.patch || body.plan || body);
+      const actor = adminActorEmailFromRequest(request, env, adminRole);
+      livePlanOffers = {
+        ...livePlanOffers,
+        [planId]: normalizePlanOffer(
+          planId,
+          {
+            ...before,
+            ...patch,
+            id: planId,
+            updatedAt: new Date().toISOString(),
+            updatedBy: actor,
+          },
+          createDefaultPlanOffers(env)[planId],
+        ),
+      };
+      recordAdminActionLog(env, request, adminRole, {
+        targetUserId: "plan-offers",
+        targetEmail: planId,
+        action: "UPDATE_USER",
+        beforeJson: before,
+        afterJson: livePlanOffers[planId],
+        reason: "Plano/oferta atualizado no painel.",
+      });
+      const saveStatus = await saveLiveState(env);
+      return json({
+        plan: getPlanOffer(planId, env),
+        plans: adminPlanOffers(env),
+        persistence: adminPersistenceStatus(env, saveStatus),
+      });
     }
 
     return json({ error: "Metodo nao permitido." }, 405);
@@ -2729,7 +2928,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
 
   if (url.pathname === "/admin/site-content") {
     if (request.method === "GET") {
-      return json({ siteContent: adminSiteContentSettings(env) });
+      return json({ siteContent: adminSiteContentSettings(env, adminPersistenceStatus(env)) });
     }
 
     if (request.method === "POST") {
@@ -2753,7 +2952,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         reason: "Conteudo visual do site atualizado.",
       });
       const saveStatus = await saveLiveState(env);
-      return json({ siteContent: adminSiteContentSettings(env, saveStatus) });
+      return json({ siteContent: adminSiteContentSettings(env, adminPersistenceStatus(env, saveStatus)) });
     }
 
     return json({ error: "Metodo nao permitido." }, 405);
@@ -2765,7 +2964,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "GET" && url.pathname === "/admin/overview") {
-    await hydrateClientsFromBillingUsers(env);
+    await withTimeout(
+      hydrateClientsFromBillingUsers(env),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "hidratar clientes para overview admin",
+      false,
+    );
+    runBackgroundTask(ctx, hydrateClientsFromBillingUsersAndSave(env), "hidratar clientes para overview admin");
     return json({ overview: buildAdminPanelOverview(syncAdminManagedUsers(env)) });
   }
 
@@ -2778,9 +2983,14 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
   }
 
   if (request.method === "GET" && url.pathname === "/admin/users") {
-    await hydrateClientsFromBillingUsers(env);
+    await withTimeout(
+      hydrateClientsFromBillingUsers(env),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "hidratar clientes para lista admin",
+      false,
+    );
+    runBackgroundTask(ctx, hydrateClientsFromBillingUsersAndSave(env), "hidratar clientes para lista admin");
     const users = syncAdminManagedUsers(env);
-    await saveLiveState(env);
     return json({
       users,
       overview: buildAdminPanelOverview(users),
@@ -2802,15 +3012,13 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       const body = readRecord(await request.json().catch(() => ({})));
       const result = await deleteAdminManagedUser(env, adminRole, request, target, readString(body, "reason"));
       if (!result.ok) return json({ error: result.error }, result.status);
-      await saveLiveState(env);
       return json({ ok: true, user: result.user });
     }
 
     if (request.method === "PATCH" && !actionPath) {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = await updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_USER");
+      const result = await updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_USER", ctx);
       if (!result.ok) return json({ error: result.error }, result.status);
-      await saveLiveState(env);
       return json({ user: result.user });
     }
 
@@ -2823,41 +3031,37 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
         target,
         Number(body.days || 0),
         readString(body, "reason"),
+        ctx,
       );
       if (!result.ok) return json({ error: result.error }, result.status);
-      await saveLiveState(env);
       return json({ user: result.user });
     }
 
     if (request.method === "POST" && actionPath === "block") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = await blockAdminManagedUser(env, adminRole, request, target, readString(body, "reason"));
+      const result = await blockAdminManagedUser(env, adminRole, request, target, readString(body, "reason"), ctx);
       if (!result.ok) return json({ error: result.error }, result.status);
-      await saveLiveState(env);
       return json({ user: result.user });
     }
 
     if (request.method === "POST" && actionPath === "unblock") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = await unblockAdminManagedUser(env, adminRole, request, target, readString(body, "reason"));
+      const result = await unblockAdminManagedUser(env, adminRole, request, target, readString(body, "reason"), ctx);
       if (!result.ok) return json({ error: result.error }, result.status);
-      await saveLiveState(env);
       return json({ user: result.user });
     }
 
     if (request.method === "POST" && actionPath === "change-plan") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = await updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_PLAN");
+      const result = await updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_PLAN", ctx);
       if (!result.ok) return json({ error: result.error }, result.status);
-      await saveLiveState(env);
       return json({ user: result.user });
     }
 
     if (request.method === "POST" && actionPath === "change-role") {
       const body = readRecord(await request.json().catch(() => ({})));
-      const result = await updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_ROLE");
+      const result = await updateAdminManagedUser(env, adminRole, request, target, body, "UPDATE_ROLE", ctx);
       if (!result.ok) return json({ error: result.error }, result.status);
-      await saveLiveState(env);
       return json({ user: result.user });
     }
   }
@@ -2954,7 +3158,7 @@ async function handleAdminApiRequest(request: Request, env: unknown) {
       }
       upsertRecipientFromClient(liveClients[clientIndex]);
       await saveLiveState(env);
-      return handleAdminApiRequest(request, env);
+      return handleAdminApiRequest(request, env, ctx);
     }
 
     if (request.method === "PATCH") {
@@ -3131,7 +3335,13 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     if (storedRounds.length) {
       liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, storedRounds);
     }
-    const rounds = mergeRoundHistoryWithLimit(storedRounds, liveValidatorRoundHistory, limit);
+    const dashboardRounds = Array.isArray(liveDashboardData.rounds) ? liveDashboardData.rounds : [];
+    const mergedMonitorRounds = mergeRoundHistoryWithLimit(
+      storedRounds,
+      mergeRoundHistoryWithLimit(liveValidatorRoundHistory, dashboardRounds, MAX_MONITOR_ROUND_HISTORY),
+      MAX_MONITOR_ROUND_HISTORY,
+    );
+    const rounds = mergeRoundHistoryWithLimit([], mergedMonitorRounds, limit);
     return json({
       rounds,
       total: rounds.length,
@@ -3142,6 +3352,7 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
 
   if (request.method === "POST" && url.pathname === "/validator/round-history") {
     if (!(await isDashboardWriteAuthorized(request, url, env))) {
+      await recordDeniedDashboardAccess(env, request, url, "validator_round_history_write_denied");
       return json({ error: "Nao autorizado." }, 401);
     }
 
@@ -3160,6 +3371,9 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
         liveDashboardData,
         dashboardBeforeTieScoreboard,
         incomingRounds,
+      );
+      liveDashboardData = finalizeRealtimeDashboardSnapshot(
+        refreshServerTieRadarHistory(liveDashboardData, liveValidatorRoundHistory),
       );
       const engineCalendarChange = trackEngineCalendarAggregates(dashboardBeforeTieScoreboard, liveDashboardData);
       runBackgroundTask(
@@ -3182,44 +3396,245 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     });
   }
 
-  if (request.method === "GET" && url.pathname === "/dashboard") {
-    if (!(await isDashboardReadAuthorized(request, url, env))) {
+  if (
+    request.method === "GET" &&
+    (url.pathname === "/dashboard/stream" || (url.pathname === "/dashboard" && url.searchParams.get("stream") === "1"))
+  ) {
+    const dashboardGetStartedAt = Date.now();
+    const authResult = await isDashboardReadAuthorizedForDashboardGet(request, url, env);
+    console.info(`[DASHBOARD_STREAM_AUTH] step=auth durationMs=${authResult.timings.auth}`);
+    if (!authResult.ok) {
+      await recordDeniedDashboardAccess(env, request, url, "dashboard_stream_read_denied");
+      console.info(
+        `[DASHBOARD_STREAM_DENIED] tokenType=${authResult.tokenType} durationMs=${Date.now() - dashboardGetStartedAt} latestRoundId= revision=`,
+      );
       return json({ error: "Nao autorizado." }, 401);
     }
 
-    await syncDashboardReadState(env);
+    const loadSnapshotStartedAt = Date.now();
+    await syncDashboardReadStateForFastDashboardGet(env, dashboardSnapshotNeedsFreshnessRepair(liveDashboardData));
+    console.info(`[DASHBOARD_STREAM_TIMING] step=loadSnapshot durationMs=${Date.now() - loadSnapshotStartedAt}`);
+
+    const repairStartedAt = Date.now();
+    const repairedFromRounds = await repairDashboardSnapshotForFastDashboardGet(env, ctx);
+    console.info(`[DASHBOARD_STREAM_TIMING] step=repair durationMs=${Date.now() - repairStartedAt}`);
+    if (repairedFromRounds) {
+      runBackgroundTask(ctx, saveLiveState(env), "salvar reparo do snapshot do dashboard");
+    }
+
     const cycle = ensureDashboardDailyCycle(liveDashboardData);
     if (cycle.changed) {
       liveDashboardData = cycle.dashboard;
       runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
     }
-    return json(publicDashboardSnapshot(liveDashboardData));
+    const persistentStartedAt = Date.now();
+    const persistentHydrated = await hydrateDashboardPersistentPeriodsForFastGet(env);
+    console.info(`[DASHBOARD_TIMING] step=persistentResults durationMs=${Date.now() - persistentStartedAt}`);
+    if (persistentHydrated) {
+      runBackgroundTask(ctx, saveLiveState(env), "salvar historico persistente hidratado");
+    }
+    const beforeRevision = liveDashboardData.revision;
+    liveDashboardData = finalizeRealtimeDashboardSnapshot(liveDashboardData);
+    if (liveDashboardData.revision !== beforeRevision) {
+      runBackgroundTask(ctx, saveLiveState(env), "salvar snapshot realtime");
+    }
+
+    const snapshot = publicDashboardSnapshot(liveDashboardData);
+    console.info(`[DASHBOARD_STREAM_TOTAL] tokenType=${authResult.tokenType} durationMs=${Date.now() - dashboardGetStartedAt}`);
+
+    let streamClient: DashboardStreamClient | null = null;
+    const stream = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        const client = {
+          id: `dash-stream-${Date.now()}-${++dashboardStreamClientCounter}`,
+          controller,
+          heartbeatTimer: null,
+          closed: false,
+          lastRevision: null,
+          closedAt: null,
+        } as DashboardStreamClient;
+        streamClient = client;
+        dashboardStreamClients.set(client.id, client);
+        const streamRevision = dashboardDisplayRevision(snapshot);
+        const sent = sendDashboardStreamFrame(client, "dashboard", streamRevision, snapshot);
+        if (!sent) {
+          closeDashboardStreamClient(client.id);
+          return;
+        }
+
+        client.heartbeatTimer = setInterval(() => {
+          sendDashboardStreamFrame(client, "heartbeat", Date.now(), { heartbeat: Date.now() });
+        }, DASHBOARD_STREAM_HEARTBEAT_MS);
+        const cleanup = () => {
+          closeDashboardStreamClient(client.id);
+        };
+        request.signal.addEventListener("abort", cleanup, { once: true });
+      },
+      cancel: () => {
+        if (!streamClient) return;
+        closeDashboardStreamClient(streamClient.id);
+      },
+    });
+    return withSecurityHeaders(
+      new Response(stream, {
+        headers: {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0",
+          "cdn-cache-control": "no-store",
+          "cloudflare-cdn-cache-control": "no-store",
+          "surrogate-control": "no-store",
+          "pragma": "no-cache",
+          expires: "0",
+          vary: "Authorization",
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET,OPTIONS",
+          "access-control-allow-headers":
+            "Accept,Cache-Control,Content-Type,Pragma,Authorization,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature,x-sniper-admin-email,x-sniper-admin-password,x-sniper-publisher-token",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+        },
+      }),
+    );
+  }
+
+  if (request.method === "GET" && url.pathname === "/dashboard") {
+    const dashboardGetStartedAt = Date.now();
+    const authResult = await isDashboardReadAuthorizedForDashboardGet(request, url, env);
+    console.info(`[DASHBOARD_TIMING] step=auth durationMs=${authResult.timings.auth}`);
+    console.info(`[DASHBOARD_TIMING] step=profile durationMs=${authResult.timings.profile}`);
+    console.info(`[DASHBOARD_TIMING] step=subscription durationMs=${authResult.timings.subscription}`);
+    if (!authResult.ok) {
+      await recordDeniedDashboardAccess(env, request, url, "dashboard_read_denied");
+      console.info(`[DASHBOARD_TOTAL] tokenType=${authResult.tokenType} durationMs=${Date.now() - dashboardGetStartedAt} latestRoundId= revision=`);
+      return json({ error: "Nao autorizado." }, 401);
+    }
+
+    const loadSnapshotStartedAt = Date.now();
+    await syncDashboardReadStateForFastDashboardGet(env, dashboardSnapshotNeedsFreshnessRepair(liveDashboardData));
+    console.info(`[DASHBOARD_TIMING] step=loadSnapshot durationMs=${Date.now() - loadSnapshotStartedAt}`);
+
+    const repairStartedAt = Date.now();
+    const repairedFromRounds = await repairDashboardSnapshotForFastDashboardGet(env, ctx);
+    console.info(`[DASHBOARD_TIMING] step=repair durationMs=${Date.now() - repairStartedAt}`);
+    if (repairedFromRounds) {
+      runBackgroundTask(ctx, saveLiveState(env), "salvar reparo do snapshot do dashboard");
+    }
+
+    const cycle = ensureDashboardDailyCycle(liveDashboardData);
+    if (cycle.changed) {
+      liveDashboardData = cycle.dashboard;
+      runBackgroundTask(ctx, saveLiveState(env), "salvar ciclo do dashboard");
+    }
+    const beforeRevision = liveDashboardData.revision;
+    liveDashboardData = finalizeRealtimeDashboardSnapshot(liveDashboardData);
+    if (liveDashboardData.revision !== beforeRevision) {
+      runBackgroundTask(ctx, saveLiveState(env), "salvar snapshot realtime");
+    }
+    const snapshot = publicDashboardSnapshot(liveDashboardData);
+    const snapshotLatestRound = latestRoundFromRoundList(snapshot.rounds);
+    console.info(`[DASHBOARD_TIMING] step=response durationMs=${Date.now() - dashboardGetStartedAt}`);
+    console.info(
+      `[WORKER_DASHBOARD_GET] revision=${dashboardDisplayRevision(snapshot)} displayState=${snapshot.displayState || ""} side=${snapshot.displaySide || ""}`,
+    );
+    console.info(
+      `[DASHBOARD_RESPONSE] tokenType=${dashboardRequestTokenType(request)} latestRoundId=${
+        snapshotLatestRound?.id || ""
+      } revision=${dashboardDisplayRevision(snapshot)} displayState=${snapshot.displayState || ""} durationMs=${
+        Date.now() - dashboardGetStartedAt
+      }`,
+    );
+    console.info(
+      `[DASHBOARD_TOTAL] tokenType=${authResult.tokenType} durationMs=${Date.now() - dashboardGetStartedAt} latestRoundId=${
+        snapshotLatestRound?.id || ""
+      } revision=${dashboardDisplayRevision(snapshot)}`,
+    );
+    return json(snapshot);
   }
 
   if (
     request.method === "POST" &&
     (url.pathname === "/dashboard" || url.pathname === "/dashboard/signal" || url.pathname === "/dashboard/publish")
   ) {
+    const publishRequestStartedAt = Date.now();
+    const publishAuthStartedAt = Date.now();
     if (!(await isDashboardWriteAuthorized(request, url, env))) {
+      runDeferredBackgroundTask(
+        ctx,
+        () => recordDeniedDashboardAccess(env, request, url, "dashboard_write_denied"),
+        "registrar acesso negado ao dashboard write",
+      );
       return json({ error: "Nao autorizado." }, 401);
     }
+    const publishAuthMs = Date.now() - publishAuthStartedAt;
 
+    const publishParseStartedAt = Date.now();
     const body = await request.json().catch(() => ({}));
+    const publishParseMs = Date.now() - publishParseStartedAt;
+    const publishNormalizeStartedAt = Date.now();
     const incomingRounds = normalizeRoundsFromPayload(body, MAX_SERVER_ROUND_HISTORY);
-    const incomingState = readRecord(body);
+    const incomingState = readRecord(readRecord(body).dashboard || body);
+    const publishNormalizeMs = Date.now() - publishNormalizeStartedAt;
     if (incomingRounds.length && shouldIgnoreStaleDashboardPost(liveDashboardData, incomingState)) {
+      const ignoredIncomingRound = latestRoundFromRoundList(incomingRounds);
+      const ignoredCurrentRound = latestRoundFromRoundList(liveDashboardData.rounds);
+      console.info(
+        `[WORKER_PUBLISH_STALE_IGNORED] incomingRoundId=${ignoredIncomingRound?.id || ""} currentRoundId=${
+          ignoredCurrentRound?.id || ""
+        }`,
+      );
       return json({
         ok: true,
+        accepted: false,
         ignored: "stale",
         saved: "skipped",
-        dashboard: publicDashboardSnapshot(liveDashboardData),
+        roundId: ignoredIncomingRound?.id || "",
+        currentRoundId: ignoredCurrentRound?.id || "",
       });
     }
     if (incomingRounds.length) {
       liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, incomingRounds);
     }
     const dashboardBeforeUpdate = liveDashboardData;
+    const publishUpdateStartedAt = Date.now();
     liveDashboardData = updateDashboardData(liveDashboardData, body);
+    const publishUpdateMs = Date.now() - publishUpdateStartedAt;
+    const persistentEventRows = newPersistentDashboardRows(dashboardBeforeUpdate, liveDashboardData);
+    const monthlyTieStatsToPersist = changedMonthlyTieStatsForPersistence(dashboardBeforeUpdate, liveDashboardData);
+    if (persistentEventRows.length) {
+      runDeferredBackgroundTask(
+        ctx,
+        () => persistDashboardPersistentResults(env, persistentEventRows),
+        "persistir resultados diarios dos cards",
+      );
+    }
+    if (monthlyTieStatsToPersist) {
+      runDeferredBackgroundTask(
+        ctx,
+        () => persistDashboardMonthlyTieStats(env, monthlyTieStatsToPersist.monthKey, monthlyTieStatsToPersist.stats),
+        "persistir estatistica mensal do Radar de Empate",
+      );
+    }
+    const fastPathSnapshot = publicDashboardSnapshot(liveDashboardData);
+    broadcastDashboardStreamSnapshot(fastPathSnapshot);
+    const latestSnapshotRound = latestRoundFromRoundList(fastPathSnapshot.rounds);
+    const latestIncomingRound = latestRoundFromRoundList(incomingRounds);
+    const fastPathRoundId = latestIncomingRound?.id || latestSnapshotRound?.id || "";
+    console.info(
+      `[WORKER_RECEIVED] roundId=${fastPathRoundId} displayState=${fastPathSnapshot.displayState || ""} revision=${dashboardDisplayRevision(fastPathSnapshot)}`,
+    );
+    console.info(
+      `[WORKER_PUBLISH_ACCEPTED] roundId=${fastPathRoundId} rawStatus=${readString(
+        readMainSignal(incomingState),
+        "status",
+      )} latestRoundId=${latestSnapshotRound?.id || ""} revision=${dashboardDisplayRevision(
+        fastPathSnapshot,
+      )} displayState=${fastPathSnapshot.displayState || ""}`,
+    );
+    console.info(
+      `[WORKER_SNAPSHOT_SAVED] latestRoundId=${latestSnapshotRound?.id || ""} revision=${dashboardDisplayRevision(
+        fastPathSnapshot,
+      )}`,
+    );
     const monitorOptions = {
       allowInsecureTelegramFallback: isLocalDevelopmentRequest(request),
       fast: true,
@@ -3238,24 +3653,155 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
     const calendarChange = incomingRounds.length
       ? trackNeuralCalendarRounds(incomingRounds)
       : emptyNeuralCalendarChangeSet();
-    const saveStateTask = saveLiveState(env);
-    runBackgroundTask(ctx, saveStateTask, "salvar estado vivo do dashboard");
-    runBackgroundTask(
-      ctx,
-      persistDashboardRoundIngestion(
-        env,
-        incomingRounds,
-        calendarChange,
-        engineCalendarChange,
-        isLocalDevelopmentRequest(request),
-      ),
-      "persistir rodada e monitorar sinais",
-    );
     const shouldRunImmediateMonitor =
       url.pathname === "/dashboard/publish" ||
       url.pathname === "/dashboard/signal" ||
       (url.pathname === "/dashboard" && telegramV2OnlyEnabled(env));
     if (shouldRunImmediateMonitor) {
+      if (url.pathname === "/dashboard/publish" || url.pathname === "/dashboard/signal") {
+        console.warn(`[PUBLISH_BLOCKER_FOUND] dashboard_monitor_moved_to_background roundId=${fastPathRoundId}`);
+        console.warn(`[PUBLISH_FAST_PATH_200] roundId=${fastPathRoundId} monitor=queued`);
+        if (url.pathname === "/dashboard/signal") {
+          runDeferredBackgroundTask(
+            ctx,
+            () => saveDashboardSnapshotCacheState(liveDashboardData),
+            "salvar snapshot rapido do dashboard no cache",
+          );
+          runDeferredBackgroundTask(ctx, () => saveLiveState(env), "salvar estado vivo do dashboard fast signal");
+          runDeferredBackgroundTask(
+            ctx,
+            () =>
+              persistDashboardRoundIngestion(
+                env,
+                incomingRounds,
+                calendarChange,
+                engineCalendarChange,
+                isLocalDevelopmentRequest(request),
+              ),
+            "persistir rodada e monitorar sinais fast signal",
+          );
+          runDeferredBackgroundTask(
+            ctx,
+            () =>
+              withTimeout(
+                processValidatorLiveMonitoring(env, monitorOptions),
+                LIVE_STATE_IO_TIMEOUT_MS,
+                "monitorar sinais apos signal fast path",
+                false,
+              ),
+            "monitorar sinais apos signal fast path",
+          );
+          const signalTotalMs = Date.now() - publishRequestStartedAt;
+          console.info(
+            `[PUBLISH_ACK_TIMING] route=${url.pathname} roundId=${fastPathRoundId} authMs=${publishAuthMs} parseMs=${publishParseMs} normalizeMs=${publishNormalizeMs} updateMs=${publishUpdateMs} snapshotMs=0 totalMs=${signalTotalMs} cacheSaved=queued durableSaved=queued`,
+          );
+          return json({
+            ok: true,
+            accepted: true,
+            roundId: fastPathRoundId,
+            revision: dashboardDisplayRevision(fastPathSnapshot),
+            queued: true,
+            saved: "queued_signal",
+            monitor: "queued_after_fast_signal",
+            timingMs: {
+              total: signalTotalMs,
+              snapshot: 0,
+            },
+          });
+        }
+        const publishCacheStartedAt = Date.now();
+        const dashboardSnapshotState = buildDashboardSnapshotState(liveDashboardData);
+        const dashboardSnapshotCacheSavePromise = withTimeout(
+          saveDashboardSnapshotCacheState(liveDashboardData),
+          DASHBOARD_FAST_ACK_CACHE_TIMEOUT_MS,
+          "salvar snapshot rapido do dashboard no publish",
+          false,
+        );
+        const dashboardSnapshotDurableSavePromise =
+          url.pathname === "/dashboard/publish"
+            ? withTimeout(
+                saveDashboardLatestSnapshotToD1(env, dashboardSnapshotState, liveDashboardData),
+                DASHBOARD_FAST_ACK_DURABLE_TIMEOUT_MS,
+                "salvar snapshot D1 do dashboard no publish",
+                false,
+              )
+            : Promise.resolve(false);
+        const [dashboardSnapshotCacheSaved, dashboardSnapshotDurableSaved] = await Promise.all([
+          dashboardSnapshotCacheSavePromise,
+          dashboardSnapshotDurableSavePromise,
+        ]);
+        const publishCacheMs = Date.now() - publishCacheStartedAt;
+        if (!dashboardSnapshotCacheSaved) {
+          runDeferredBackgroundTask(
+            ctx,
+            () => saveDashboardSnapshotCacheState(liveDashboardData),
+            "salvar snapshot rapido do dashboard no cache",
+          );
+        }
+        if (!dashboardSnapshotDurableSaved) {
+          runDeferredBackgroundTask(ctx, () => saveDashboardSnapshotState(env, liveDashboardData), "salvar snapshot leve do dashboard");
+        }
+        runDeferredBackgroundTask(ctx, () => saveLiveState(env), "salvar estado vivo do dashboard fast publish");
+        runDeferredBackgroundTask(
+          ctx,
+          () =>
+            persistDashboardRoundIngestion(
+              env,
+              incomingRounds,
+              calendarChange,
+              engineCalendarChange,
+              isLocalDevelopmentRequest(request),
+            ),
+          "persistir rodada e monitorar sinais fast publish",
+        );
+        runDeferredBackgroundTask(
+          ctx,
+          () =>
+            withTimeout(
+              processValidatorLiveMonitoring(env, monitorOptions),
+              LIVE_STATE_IO_TIMEOUT_MS,
+              "monitorar sinais apos publish fast path",
+              false,
+            ),
+          "monitorar sinais apos publish fast path",
+        );
+        const publishTotalMs = Date.now() - publishRequestStartedAt;
+        console.info(
+          `[PUBLISH_ACK_TIMING] route=${url.pathname} roundId=${fastPathRoundId} authMs=${publishAuthMs} parseMs=${publishParseMs} normalizeMs=${publishNormalizeMs} updateMs=${publishUpdateMs} snapshotMs=${publishCacheMs} totalMs=${publishTotalMs} cacheSaved=${dashboardSnapshotCacheSaved} durableSaved=${dashboardSnapshotDurableSaved}`,
+        );
+        return json({
+          ok: true,
+          accepted: true,
+          roundId: fastPathRoundId,
+          revision: dashboardDisplayRevision(fastPathSnapshot),
+          queued: true,
+          saved: dashboardSnapshotDurableSaved
+            ? "dashboard_snapshot_durable"
+            : dashboardSnapshotCacheSaved
+              ? "dashboard_snapshot_cache"
+              : "queued",
+          monitor: "queued_after_fast_publish",
+          timingMs: {
+            total: publishTotalMs,
+            snapshot: publishCacheMs,
+          },
+        });
+      }
+      const saveStateTask = saveLiveState(env);
+      runDeferredBackgroundTask(ctx, () => saveDashboardSnapshotState(env, liveDashboardData), "salvar snapshot leve do dashboard");
+      runBackgroundTask(ctx, saveStateTask, "salvar estado vivo do dashboard");
+      runDeferredBackgroundTask(
+        ctx,
+        () =>
+          persistDashboardRoundIngestion(
+            env,
+            incomingRounds,
+            calendarChange,
+            engineCalendarChange,
+            isLocalDevelopmentRequest(request),
+          ),
+        "persistir rodada e monitorar sinais",
+      );
       const saveStatus = await saveStateTask;
       const monitorStatus = await withTimeout(
         processValidatorLiveMonitoring(env, monitorOptions),
@@ -3263,12 +3809,88 @@ async function handleDashboardRequest(request: Request, env: unknown, ctx?: unkn
         "monitorar sinais imediatamente",
         false,
       );
-      return json({ ok: true, saved: saveStatus, monitor: monitorStatus, dashboard: publicDashboardSnapshot(liveDashboardData) });
+      return json({ ok: true, saved: saveStatus, monitor: monitorStatus, dashboard: fastPathSnapshot });
     }
-    return json({ ok: true, saved: "queued", monitor: "skipped_non_publish_signal", dashboard: publicDashboardSnapshot(liveDashboardData) });
+    runDeferredBackgroundTask(ctx, () => saveLiveState(env), "salvar estado vivo do dashboard");
+    runDeferredBackgroundTask(
+      ctx,
+      () =>
+        persistDashboardRoundIngestion(
+          env,
+          incomingRounds,
+          calendarChange,
+          engineCalendarChange,
+          isLocalDevelopmentRequest(request),
+        ),
+      "persistir rodada e monitorar sinais",
+    );
+    return json({ ok: true, saved: "queued", monitor: "skipped_non_publish_signal", dashboard: fastPathSnapshot });
   }
 
   return null;
+}
+
+function broadcastDashboardStreamSnapshot(snapshot: DashboardData) {
+  if (!dashboardStreamClients.size) return;
+  const eventId = dashboardDisplayRevision(snapshot);
+  const clients = Array.from(dashboardStreamClients.values());
+  for (const client of clients) {
+    const sent = sendDashboardStreamFrame(client, "dashboard", eventId, snapshot);
+    if (!sent) {
+      closeDashboardStreamClient(client.id);
+    }
+  }
+}
+
+function sendDashboardStreamFrame(
+  client: DashboardStreamClient,
+  event: string,
+  eventId: string | number,
+  payload: unknown,
+): boolean {
+  if (client.closed || client.controller === null) return false;
+  if (event === "dashboard" && client.lastRevision === eventId) return true;
+  if (client.controller.desiredSize !== null && client.controller.desiredSize <= 0) return false;
+  let text: string | undefined = undefined;
+  try {
+    text = JSON.stringify(payload);
+  } catch {
+    return false;
+  }
+  if (text === undefined) return false;
+  const lines = text.split(/\r?\n/);
+  const chunks = [
+    ...(typeof eventId === "string" || typeof eventId === "number" ? [`id: ${String(eventId)}`] : []),
+    `event: ${event}`,
+    ...lines.map((line) => `data: ${line}`),
+    "",
+    "",
+  ].join("\n");
+  try {
+    client.controller.enqueue(new TextEncoder().encode(chunks));
+    if (event === "dashboard") {
+      client.lastRevision = eventId;
+    }
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function closeDashboardStreamClient(clientId: string) {
+  const client = dashboardStreamClients.get(clientId);
+  if (!client || client.closed) return;
+  client.closed = true;
+  client.closedAt = Date.now();
+  if (client.heartbeatTimer) {
+    clearInterval(client.heartbeatTimer);
+  }
+  try {
+    client.controller.close();
+  } catch {
+    // no-op
+  }
+  dashboardStreamClients.delete(clientId);
 }
 
 function runBackgroundTask(ctx: unknown, promise: Promise<unknown>, label: string) {
@@ -3281,6 +3903,10 @@ function runBackgroundTask(ctx: unknown, promise: Promise<unknown>, label: strin
     return;
   }
   void task;
+}
+
+function runDeferredBackgroundTask(ctx: unknown, taskFactory: () => Promise<unknown>, label: string) {
+  runBackgroundTask(ctx, Promise.resolve().then(taskFactory), label);
 }
 
 async function persistDashboardRoundIngestion(
@@ -3923,7 +4549,7 @@ function safeBackfillKey(value: unknown) {
 async function isNeuralCalendarAuthorized(request: Request, url: URL, env: unknown) {
   if (await isDashboardAuthorized(request, url, env)) return true;
 
-  const token = getBearerToken(request);
+  const token = dashboardRequestToken(request);
   if (!token) return false;
 
   const session = await verifySessionToken(env, token);
@@ -4392,10 +5018,7 @@ async function ensureEngineCalendarAggregatesAvailable(env: unknown) {
   const now = Date.now();
   const hasRows = hasEngineCalendarAggregateRows();
   if (hasRows && engineCalendarAutoBackfillCompleted) return;
-  if (engineCalendarAutoBackfillPromise) {
-    await engineCalendarAutoBackfillPromise;
-    return;
-  }
+  if (engineCalendarAutoBackfillPromise) return;
   if (engineCalendarAutoBackfillAttemptedAt && now - engineCalendarAutoBackfillAttemptedAt < 5 * 60 * 1000) {
     return;
   }
@@ -4415,7 +5038,6 @@ async function ensureEngineCalendarAggregatesAvailable(env: unknown) {
     .finally(() => {
       engineCalendarAutoBackfillPromise = null;
     });
-  await engineCalendarAutoBackfillPromise;
 }
 
 function hasEngineCalendarAggregateRows() {
@@ -5256,14 +5878,13 @@ function normalizeRoundRecordedAt(item: Record<string, unknown>) {
     readString(item, "recorded_at") ||
     readString(item, "createdAt") ||
     readString(item, "created_at");
-  if (direct && Number.isFinite(Date.parse(direct))) return new Date(direct).toISOString();
+  if (direct && Number.isFinite(Date.parse(direct))) {
+    return new Date(coerceRoundRecordedAtMs(Date.parse(direct), direct)).toISOString();
+  }
 
   const time = readString(item, "time") || readString(item, "round_time");
   if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(time)) {
-    const now = new Date();
-    const [hour, minute, second = "0"] = time.split(":");
-    now.setHours(Number(hour), Number(minute), Number(second), 0);
-    return now.toISOString();
+    return new Date(roundWallClockRecordedAtMs(time)).toISOString();
   }
 
   return new Date().toISOString();
@@ -5276,7 +5897,9 @@ function getRoundRecordedAt(round: Round) {
     readString(record, "recorded_at") ||
     readString(record, "createdAt") ||
     readString(record, "created_at");
-  return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : "";
+  return value && Number.isFinite(Date.parse(value))
+    ? new Date(coerceRoundRecordedAtMs(Date.parse(value), value)).toISOString()
+    : "";
 }
 
 function roundHourFromTimeText(value: unknown) {
@@ -5760,7 +6383,7 @@ function recomputeEngineCalendarAggregate(stat: EngineCalendarAggregateStat) {
   const validated = stat.greens + stat.reds;
   stat.accuracy = validated ? roundCalendarPercent((stat.greens / validated) * 100) : 0;
   stat.score = stat.accuracy;
-  stat.classification = classifyNeuralCalendarScore(stat.score, validated, 1);
+  stat.classification = classifyNeuralCalendarScore(stat.score, validated, engineCalendarMinSample(stat));
   stat.totalSignals = stat.greens + stat.reds + stat.ties;
   stat.updatedAt = new Date().toISOString();
 }
@@ -5771,8 +6394,14 @@ function recomputeCalendarHourlySignalStat(stat: NeuralCalendarHourlyStat) {
   const validated = stat.greens + stat.reds;
   stat.accuracy = validated ? roundCalendarPercent((stat.greens / validated) * 100) : 0;
   stat.score = stat.accuracy;
-  stat.classification = classifyNeuralCalendarScore(stat.score, validated, 1);
+  stat.classification = classifyNeuralCalendarScore(stat.score, validated, NEURAL_CALENDAR_MIN_HOURLY_SAMPLE);
   stat.updatedAt = new Date().toISOString();
+}
+
+function engineCalendarMinSample(stat: EngineCalendarAggregateStat) {
+  if (stat.periodKind === "hourly") return NEURAL_CALENDAR_MIN_HOURLY_SAMPLE;
+  if (stat.periodKind === "daily") return NEURAL_CALENDAR_MIN_DAILY_SAMPLE;
+  return NEURAL_CALENDAR_MIN_DAILY_SAMPLE;
 }
 
 function mergeEngineCalendarAggregateChange(
@@ -12248,26 +12877,560 @@ function formatServerPercent(value?: number) {
 }
 
 function publicDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
-  const safeDashboard = liveFeedLooksStale(dashboard) ? pausedDashboardSnapshot(dashboard) : dashboard;
+  const safeDashboard = finalizeRealtimeDashboardSnapshot(
+    liveFeedLooksStale(dashboard) ? pausedDashboardSnapshot(dashboard) : dashboard,
+  );
   const signal = safeDashboard.currentSignal;
-  const { lateSignalHold: _lateSignalHold, ...publicDashboard } = safeDashboard;
+  const display = resolveDashboardDisplayState(safeDashboard);
+  const {
+    lateSignalHold: _lateSignalHold,
+    revisionFingerprint: _revisionFingerprint,
+    ...publicDashboard
+  } = safeDashboard;
   return {
     ...publicDashboard,
     currentSignal: signal,
+    displayState: display.displayState,
+    displaySide: display.displaySide,
+    displayRoundId: display.displayRoundId,
+    tieRadarHistory: publicTieRadarHistory(safeDashboard.tieRadarHistory),
+    monthlyTieStats: publicTieRadarHistory(safeDashboard.monthlyTieStats ?? safeDashboard.tieRadarHistory),
+    dailyResultsByModule: publicDailyResultsByModule(safeDashboard.dailyResultsByModule),
   } as LiveDashboardData;
 }
 
+function publicTieRadarHistory(history: DashboardData["tieRadarHistory"]) {
+  if (!history) return history;
+  const { countedRoundKeys: _countedRoundKeys, ...publicHistory } = history;
+  return publicHistory;
+}
+
+function publicDailyResultsByModule(results: DashboardDailyResultsByModule | undefined) {
+  if (!results) return ensureDailyResultModuleKeys({});
+  const publicResults: DashboardDailyResultsByModule = {};
+  for (const [moduleKey, rows] of Object.entries(results)) {
+    if (!Array.isArray(rows)) continue;
+    publicResults[moduleKey] = rows.slice(0, MAX_DAILY_RESULTS_PER_MODULE).map((row) => ({
+      moduleKey: row.moduleKey,
+      dayKey: row.dayKey,
+      monthKey: row.monthKey,
+      signalId: row.signalId ?? null,
+      resultId: row.resultId,
+      roundId: row.roundId ?? null,
+      resultType: row.resultType,
+      side: row.side ?? null,
+      attempt: row.attempt ?? null,
+      tieMultiplier: row.tieMultiplier ?? null,
+      createdAt: row.createdAt,
+      displayTimeBR: row.displayTimeBR,
+      label: row.label,
+      payload: row.payload ?? {},
+    }));
+  }
+  return publicResults;
+}
+
+function dashboardDisplayRevision(dashboard: Pick<DashboardData, "revision" | "sequenceId" | "updatedAt">) {
+  return dashboard.revision ?? dashboard.sequenceId ?? dashboard.updatedAt ?? "";
+}
+
+function resolveDashboardDisplayState(dashboard: LiveDashboardData): Pick<
+  DashboardData,
+  "displayState" | "displaySide" | "displayRoundId"
+> {
+  const signal = dashboard.currentSignal;
+  const latestRound = Array.isArray(dashboard.rounds) ? dashboard.rounds.at(-1) : null;
+  const signalSide = normalizeDashboardDisplaySide(signal?.side);
+
+  if (signal && signalSide && terminalSignalStatus(signal.status)) {
+    return {
+      displayState: dashboardDisplayStateFromSignalResult(signal.status),
+      displaySide: signalSide,
+      displayRoundId: latestRound?.id ?? null,
+    };
+  }
+
+  const neuralResult = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
+  if (neuralResult && isDashboardResultStillVisible(neuralResult.finishedAt)) {
+    return {
+      displayState: dashboardDisplayStateFromNeuralOutcome(neuralResult.outcome),
+      displaySide: normalizeDashboardDisplaySide(neuralResult.expectedSide) ?? "NONE",
+      displayRoundId: latestRound?.id ?? neuralResult.resultRoundKey ?? null,
+    };
+  }
+
+  if (signal && signalSide && signal.status === "g1") {
+    return {
+      displayState: "waiting_result",
+      displaySide: signalSide,
+      displayRoundId: latestRound?.id ?? null,
+    };
+  }
+
+  if (signal && signalSide && signal.status === "pending") {
+    return {
+      displayState: "entry_confirmed",
+      displaySide: signalSide,
+      displayRoundId: latestRound?.id ?? null,
+    };
+  }
+
+  const neuralEntryState = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
+  const neuralEntrySide = normalizeDashboardDisplaySide(neuralEntryState?.expectedSide);
+  if (neuralEntryState && neuralEntrySide) {
+    return {
+      displayState: neuralEntryState.status === "awaiting_g1" ? "waiting_result" : "entry_confirmed",
+      displaySide: neuralEntrySide,
+      displayRoundId: latestRound?.id ?? neuralEntryState.triggerRoundKey ?? null,
+    };
+  }
+
+  const reading = dashboard.neuralReading;
+  const readingSide = normalizeDashboardDisplaySide(reading?.direcao ?? reading?.origem);
+  if (reading?.mode === "ACTIVE" && readingSide) {
+    return {
+      displayState: "entry_confirmed",
+      displaySide: readingSide,
+      displayRoundId: latestRound?.id ?? null,
+    };
+  }
+
+  if (reading?.mode === "OBSERVING" && (readingSide || typeof reading.numero === "number")) {
+    return {
+      displayState: "monitoring",
+      displaySide: readingSide ?? "NONE",
+      displayRoundId: latestRound?.id ?? null,
+    };
+  }
+
+  return {
+    displayState: "analyzing",
+    displaySide: "NONE",
+    displayRoundId: latestRound?.id ?? null,
+  };
+}
+
+function normalizeDashboardDisplaySide(value: unknown): DashboardData["displaySide"] | null {
+  const side = normalizeSignalSide(value);
+  if (side === "BANKER" || side === "PLAYER" || side === "TIE") return side;
+  return null;
+}
+
+function dashboardDisplayStateFromSignalResult(
+  status: NonNullable<DashboardData["currentSignal"]>["status"],
+): DashboardData["displayState"] {
+  if (status === "red") return "result_red";
+  if (status === "tie") return "result_tie";
+  return "result_green";
+}
+
+function dashboardDisplayStateFromNeuralOutcome(
+  outcome: NeuralEntryLastResult["outcome"],
+): DashboardData["displayState"] {
+  if (outcome === "RED") return "result_red";
+  if (outcome === "TIE") return "result_tie";
+  return "result_green";
+}
+
+function isDashboardResultStillVisible(finishedAt?: string | null) {
+  const time = Date.parse(String(finishedAt || ""));
+  if (!Number.isFinite(time)) return false;
+  const age = Date.now() - time;
+  return age >= -5_000 && age <= DASHBOARD_REALTIME_RESULT_VISIBLE_MS;
+}
+
+function finalizeRealtimeDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
+  const withNeuralResultClosed = closeResolvedNeuralEntry(dashboard);
+  const withLastResult = syncLastSignalResult(withNeuralResultClosed);
+  const clearedTerminal = clearFinishedSignalFromMainEntry(withLastResult);
+  const clearedStale = clearStaleActiveSignal(clearedTerminal);
+  return bumpDashboardRevisionIfChanged(clearedStale);
+}
+
+function closeResolvedNeuralEntry(dashboard: LiveDashboardData): LiveDashboardData {
+  const result = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
+  if (!result) return dashboard;
+
+  const state = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
+  let nextDashboard = dashboard;
+  if (state && neuralEntryStateResolvedByResult(state, result)) {
+    console.info("[SIGNAL_STATE] WAITING_RESULT -> GREEN/RED/EMPATE", {
+      resultId: result.id,
+      outcome: result.outcome,
+    });
+    nextDashboard = { ...nextDashboard, neuralEntryState: null };
+  }
+
+  const age = Date.now() - Date.parse(result.finishedAt);
+  if (!Number.isFinite(age) || age < DASHBOARD_REALTIME_RESULT_VISIBLE_MS) {
+    return {
+      ...nextDashboard,
+      neuralEntryLastResult: result,
+      neuralReading: neuralReadingForEntryResult(result),
+    };
+  }
+
+  if (normalizeServerNeuralEntryState(nextDashboard.neuralEntryState)) return nextDashboard;
+
+  return {
+    ...nextDashboard,
+    neuralEntryLastResult: result,
+    neuralReading: scanningNeuralReadingAfterResult(nextDashboard.neuralReading),
+  };
+}
+
+function syncLastSignalResult(dashboard: LiveDashboardData): LiveDashboardData {
+  const currentResult = normalizeServerLastSignalResult(dashboard.currentSignal?.lastResult);
+  const existingResult = normalizeServerLastSignalResult(dashboard.lastSignalResult);
+  const lastSignalResult = newestSignalResult(currentResult, existingResult);
+  if (sameServerLastSignalResult(lastSignalResult, dashboard.lastSignalResult)) return dashboard;
+  return { ...dashboard, lastSignalResult };
+}
+
+function clearFinishedSignalFromMainEntry(dashboard: LiveDashboardData): LiveDashboardData {
+  const signal = dashboard.currentSignal;
+  const result = normalizeServerLastSignalResult(signal?.lastResult ?? dashboard.lastSignalResult);
+  if (!signal || !terminalSignalStatus(signal.status) || !result) return dashboard;
+  const age = Date.now() - Date.parse(result.finishedAt ?? "");
+  if (Number.isFinite(age) && age < 0) return dashboard;
+  if (Number.isFinite(age) && age < DASHBOARD_REALTIME_RESULT_VISIBLE_MS) {
+    return { ...dashboard, lastSignalResult: result };
+  }
+
+  console.info("[SIGNAL_STATE] RESULT -> ANALYZING", {
+    resultId: result.id,
+    status: result.status,
+  });
+
+  return {
+    ...dashboard,
+    currentSignal: buildWaitingSignal(result),
+    lastSignalResult: result,
+  };
+}
+
+function clearStaleActiveSignal(dashboard: LiveDashboardData): LiveDashboardData {
+  const signal = dashboard.currentSignal;
+  if (!signal || !isServerEntrySide(signal.side) || (signal.status !== "pending" && signal.status !== "g1")) {
+    return dashboard;
+  }
+
+  const startedAt = Date.parse(String(signal.startedAt || ""));
+  if (!Number.isFinite(startedAt)) return dashboard;
+  const age = Date.now() - startedAt;
+  if (age < DASHBOARD_STALE_SIGNAL_MS) return dashboard;
+
+  console.info("[STALE_SIGNAL_CLEAR] limpou sinal travado", {
+    signalId: signal.id,
+    status: signal.status,
+    ageMs: age,
+  });
+
+  return {
+    ...dashboard,
+    currentSignal: {
+      id: "waiting",
+      side: "NONE",
+      status: "waiting",
+      protection: "-",
+      strength: 0,
+      lastResult: dashboard.lastSignalResult ?? signal.lastResult ?? null,
+    },
+  };
+}
+
+function bumpDashboardRevisionIfChanged(dashboard: LiveDashboardData): LiveDashboardData {
+  const fingerprint = dashboardRevisionFingerprint(dashboard);
+  if (dashboard.revisionFingerprint === fingerprint) return dashboard;
+
+  const previousRevision = serverSafeCounter(dashboard.revision);
+  const revision = previousRevision + 1;
+  const updatedAt = new Date().toISOString();
+  console.info("[DASHBOARD_PUSH] revision atualizada", {
+    previousRevision,
+    revision,
+    signalStatus: dashboard.currentSignal?.status,
+    signalSide: dashboard.currentSignal?.side,
+  });
+
+  return {
+    ...dashboard,
+    revision,
+    sequenceId: revision,
+    revisionFingerprint: fingerprint,
+    updatedAt,
+  };
+}
+
+function dashboardRevisionFingerprint(dashboard: LiveDashboardData) {
+  const latestRound = Array.isArray(dashboard.rounds) ? dashboard.rounds.at(-1) : null;
+  return JSON.stringify({
+    round: latestRound ? roundHistoryKey(latestRound) : "",
+    currentSignal: dashboard.currentSignal
+      ? {
+          id: dashboard.currentSignal.id,
+          side: dashboard.currentSignal.side,
+          status: dashboard.currentSignal.status,
+          protection: dashboard.currentSignal.protection,
+          strength: dashboard.currentSignal.strength,
+          startedAt: dashboard.currentSignal.startedAt ?? "",
+          lastResult: normalizeServerLastSignalResult(dashboard.currentSignal.lastResult),
+        }
+      : null,
+    lastSignalResult: normalizeServerLastSignalResult(dashboard.lastSignalResult),
+    neuralReading: dashboard.neuralReading
+      ? {
+          mode: dashboard.neuralReading.mode,
+          numero: dashboard.neuralReading.numero ?? null,
+          origem: dashboard.neuralReading.origem ?? null,
+          origemTipo: dashboard.neuralReading.origemTipo ?? null,
+          direcao: dashboard.neuralReading.direcao ?? null,
+          validade: dashboard.neuralReading.validade ?? null,
+          paganteStatus: dashboard.neuralReading.paganteStatus ?? null,
+          paganteAlert: dashboard.neuralReading.paganteAlert ?? null,
+        }
+      : null,
+    neuralEntryState: dashboard.neuralEntryState
+      ? {
+          key: dashboard.neuralEntryState.key,
+          status: dashboard.neuralEntryState.status,
+          expectedSide: dashboard.neuralEntryState.expectedSide ?? null,
+          triggerRoundKey: dashboard.neuralEntryState.triggerRoundKey,
+          sgRoundKey: dashboard.neuralEntryState.sgRoundKey ?? null,
+        }
+      : null,
+    neuralEntryLastResult: dashboard.neuralEntryLastResult
+      ? {
+          id: dashboard.neuralEntryLastResult.id,
+          kind: dashboard.neuralEntryLastResult.kind,
+          outcome: dashboard.neuralEntryLastResult.outcome,
+          resultRoundKey: dashboard.neuralEntryLastResult.resultRoundKey,
+          finishedAt: dashboard.neuralEntryLastResult.finishedAt,
+        }
+      : null,
+    surf: dashboard.currentSurfAlert
+      ? {
+          alert: dashboard.currentSurfAlert.surf_alert,
+          phase: dashboard.currentSurfAlert.surf_phase,
+          side: dashboard.currentSurfAlert.surf_side,
+          risk: dashboard.currentSurfAlert.surf_risk,
+          confidence: dashboard.currentSurfAlert.surf_confidence,
+        }
+      : null,
+    tie: dashboard.currentTieAlert
+      ? {
+          id: dashboard.currentTieAlert.id,
+          level: dashboard.currentTieAlert.level,
+          confidence: dashboard.currentTieAlert.confidence,
+          status: dashboard.currentTieAlert.status,
+        }
+      : null,
+    dailyResults: dashboardDailyResultsRevisionFingerprint(dashboard.dailyResultsByModule),
+    patternIaServerCycle: dashboard.patternIaServerCycle
+      ? dashboardPatternIaCycleRevisionFingerprint(dashboard.patternIaServerCycle)
+      : null,
+  });
+}
+
+function dashboardDailyResultsRevisionFingerprint(value: unknown) {
+  const record = readRecord(value);
+  return Object.fromEntries(
+    Object.entries(record)
+      .map(([moduleKey, rows]) => [
+        moduleKey,
+        Array.isArray(rows)
+          ? rows.slice(0, MAX_DAILY_RESULTS_PER_MODULE).map((row) => {
+              const item = readRecord(row);
+              return {
+                resultId: readString(item, "resultId"),
+                roundId: readString(item, "roundId"),
+                resultType: readString(item, "resultType"),
+                side: readString(item, "side"),
+                attempt: readString(item, "attempt"),
+                tieMultiplier: readString(item, "tieMultiplier"),
+                createdAt: readString(item, "createdAt"),
+              };
+            })
+          : [],
+      ])
+      .filter(([, rows]) => Array.isArray(rows) && rows.length),
+  );
+}
+
+function dashboardPatternIaCycleRevisionFingerprint(value: unknown) {
+  const cycle = readRecord(value);
+  return {
+    cycleStatus: readString(cycle, "cycleStatus"),
+    attempt: readString(cycle, "attempt"),
+    signalId: readString(cycle, "signalId"),
+    eventId: readString(cycle, "eventId"),
+    entryRoundId: readString(cycle, "entryRoundId"),
+    g1RoundId: readString(cycle, "g1RoundId"),
+    result: readString(cycle, "result"),
+    tieMultiplier: readString(cycle, "tieMultiplier"),
+    openedAt: readString(cycle, "openedAt"),
+    closedAt: readString(cycle, "closedAt"),
+  };
+}
+
+function buildWaitingSignal(result: NonNullable<DashboardData["lastSignalResult"]>): DashboardData["currentSignal"] {
+  return {
+    id: "waiting",
+    side: "NONE",
+    status: "waiting",
+    protection: "-",
+    strength: 0,
+    lastResult: result,
+  };
+}
+
+function normalizeServerLastSignalResult(value: unknown): DashboardData["lastSignalResult"] {
+  const record = readRecord(value);
+  const id = readString(record, "id");
+  const side = normalizeSignalSide(record.side);
+  const status = terminalSignalStatus(
+    normalizeSignalStatus(record.status || record.resultado || record.state || record.estado, side),
+  );
+  const finishedAt = readString(record, "finishedAt");
+  if (!id || !status || (side !== "BANKER" && side !== "PLAYER") || !finishedAt) return null;
+  return {
+    id,
+    side,
+    status,
+    protection: String(record.protection || record.protecao || record.validade || record.gale || "G1"),
+    finishedAt,
+  };
+}
+
+function newestSignalResult(
+  a: DashboardData["lastSignalResult"],
+  b: DashboardData["lastSignalResult"],
+): DashboardData["lastSignalResult"] {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  const aTime = Date.parse(a.finishedAt ?? "");
+  const bTime = Date.parse(b.finishedAt ?? "");
+  if (!Number.isFinite(aTime)) return b;
+  if (!Number.isFinite(bTime)) return a;
+  return aTime >= bTime ? a : b;
+}
+
+function sameServerLastSignalResult(a: DashboardData["lastSignalResult"], b: DashboardData["lastSignalResult"]) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return (
+    a.id === b.id &&
+    a.side === b.side &&
+    a.status === b.status &&
+    a.protection === b.protection &&
+    a.finishedAt === b.finishedAt
+  );
+}
+
 function liveFeedLooksStale(dashboard: LiveDashboardData) {
+  if (isTrustedCollectorDashboard(dashboard)) return false;
+
   const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
   // Hotfix produção: não transformar um dashboard com rodada/dados reais em
   // FEED_PAUSADO apenas porque o timestamp do publicador ficou preso. Isso era
   // exatamente o que deixava o site em "SEM ENTRADA" mesmo com leitura neural
   // e mesa online. Só pausa quando realmente não existe histórico para exibir.
-  if (rounds.length > 0) return false;
+  if (rounds.length > 0) {
+    const latestRoundAgeMs = dashboardLatestRoundAgeMs(rounds[rounds.length - 1]);
+    if (Number.isFinite(latestRoundAgeMs)) return latestRoundAgeMs > LIVE_ROUND_TIME_STALE_MS;
+  }
 
   const updatedAt = Date.parse(readString(dashboard, "updatedAt"));
   if (!Number.isFinite(updatedAt)) return true;
   return Date.now() - updatedAt > LIVE_FEED_STALE_MS;
+}
+
+function isTrustedCollectorDashboard(dashboard: Record<string, unknown>) {
+  if (dashboard.mockMode !== false) return false;
+
+  const collectorStatus = normalizeDashboardConnectionStatus(readString(dashboard, "collectorStatus"));
+  const websocketStatus = normalizeDashboardConnectionStatus(readString(dashboard, "websocketStatus"));
+  const rounds = Array.isArray(dashboard.rounds) ? dashboard.rounds : [];
+  const latestRound = latestRoundFromRoundList(rounds as Round[]);
+  const hasRecentRound =
+    Boolean(latestRound) &&
+    (!Number.isFinite(dashboardLatestRoundAgeMs(latestRound)) ||
+      dashboardLatestRoundAgeMs(latestRound) <= LIVE_ROUND_TIME_STALE_MS);
+  const validatorStats = readRecord(dashboard.validatorStats ?? dashboard.validator_stats);
+  const hasCollectorStats =
+    hasRecordFields(validatorStats) &&
+    (readString(validatorStats, "source").toLowerCase() === "collector" ||
+      Number(validatorStats.rounds || 0) > 0 ||
+      Boolean(readString(validatorStats, "lastRoundId")));
+  const hasRoundIdentity = Boolean(
+    readString(dashboard, "lastRoundId") ||
+      readString(dashboard, "last_round_id") ||
+      latestRound?.id ||
+      rounds.length,
+  );
+
+  const hasRealCards = Boolean(
+    dashboard.currentSurfAlert ||
+      dashboard.surfAlert ||
+      dashboard.currentTieAlert ||
+      dashboard.tieAlert ||
+      dashboard.neuralReading ||
+      dashboard.payingNumbers ||
+      dashboard.paying_numbers ||
+      dashboard.pressureReading ||
+      dashboard.pressure_reading,
+  );
+  const canInferLiveCollector = !collectorStatus && !websocketStatus && hasRoundIdentity && hasRecentRound && hasRealCards;
+
+  return (
+    ((collectorStatus === "online" && websocketStatus === "connected") || canInferLiveCollector) &&
+    (hasCollectorStats || (hasRoundIdentity && hasRecentRound)) &&
+    hasRealCards
+  );
+}
+
+function dashboardSnapshotNeedsFreshnessRepair(dashboard: LiveDashboardData | Record<string, unknown>) {
+  const updatedAtMs = Date.parse(readString(dashboard as Record<string, unknown>, "updatedAt"));
+  if (Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs > 15_000) return true;
+
+  const rounds = Array.isArray((dashboard as LiveDashboardData).rounds) ? (dashboard as LiveDashboardData).rounds : [];
+  const latestRound = latestRoundFromRoundList(rounds as Round[]);
+  const latestRoundAgeMs = dashboardLatestRoundAgeMs(latestRound);
+  return Number.isFinite(latestRoundAgeMs) && latestRoundAgeMs > LIVE_ROUND_TIME_STALE_MS;
+}
+
+function normalizeDashboardConnectionStatus(value: unknown) {
+  const text = readString({ value }, "value").toLowerCase();
+  if (text === "conectado" || text === "conectada") return "connected";
+  if (text === "desconectado" || text === "desconectada") return "disconnected";
+  return text;
+}
+
+function dashboardLatestRoundAgeMs(round: Round | undefined) {
+  if (!round) return Number.NaN;
+
+  const recordedAt = Date.parse(String(round.recordedAt || ""));
+  if (Number.isFinite(recordedAt)) return Date.now() - recordedAt;
+
+  const timeText = String(round.time || "");
+  const match = timeText.match(/\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b/);
+  if (!match) return Number.NaN;
+
+  const nowParts = dashboardCycleDateParts(new Date());
+  const roundDay = String(round.day || nowParts.date);
+  const roundMinutes = Number(match[1]) * 60 + Number(match[2]);
+  const roundSeconds = Number(match[3] || 0);
+  const nowMinutes = Number(nowParts.hour) * 60 + Number(nowParts.minute);
+  let ageMinutes = dashboardDateDeltaDays(roundDay, nowParts.date) * 1440 + (nowMinutes - roundMinutes);
+  if (ageMinutes < 0) ageMinutes += 1440;
+  return ageMinutes * 60_000 - roundSeconds * 1000;
+}
+
+function dashboardDateDeltaDays(fromDate: string, toDate: string) {
+  const from = Date.parse(`${fromDate}T00:00:00.000Z`);
+  const to = Date.parse(`${toDate}T00:00:00.000Z`);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  return Math.round((to - from) / 86_400_000);
 }
 
 function pausedDashboardSnapshot(dashboard: LiveDashboardData): LiveDashboardData {
@@ -12543,6 +13706,1003 @@ function readNullableNumber(value: unknown) {
   return Number.isFinite(number) ? number : null;
 }
 
+function withPersistentDashboardResults(
+  dashboard: LiveDashboardData,
+  previousDashboard: LiveDashboardData,
+  incoming: Record<string, unknown>,
+): LiveDashboardData {
+  const dayKey = currentDashboardCycleDate();
+  const monthKey = dayKey.slice(0, 7);
+  const incomingDaily = incoming.dailyResultsByModule ?? incoming.daily_results_by_module;
+  let dailyResultsByModule = mergeDailyResultsByModule(
+    normalizeDailyResultsByModule(previousDashboard.dailyResultsByModule, dayKey),
+    normalizeDailyResultsByModule(dashboard.dailyResultsByModule, dayKey),
+    dayKey,
+  );
+  dailyResultsByModule = mergeDailyResultsByModule(
+    dailyResultsByModule,
+    normalizeDailyResultsByModule(incomingDaily, dayKey),
+    dayKey,
+  );
+  dailyResultsByModule = mergeDailyResultsByModule(
+    dailyResultsByModule,
+    groupPersistentResultsByModule(buildPersistentResultsFromDashboard(dashboard, dayKey), dayKey),
+    dayKey,
+  );
+
+  const monthlyTieStats = selectMonthlyTieStats(dashboard, previousDashboard, monthKey);
+  dailyResultsByModule = ensureDailyResultModuleKeys(dailyResultsByModule);
+
+  const nextDashboard = applyPersistentSurfResultsToDashboard({
+    ...dashboard,
+    dailyResultsByModule,
+    monthlyTieStats,
+    tieRadarHistory: dashboard.tieRadarHistory ?? monthlyTieStats ?? previousDashboard.tieRadarHistory,
+  });
+
+  return nextDashboard;
+}
+
+function ensureDailyResultModuleKeys(results: DashboardDailyResultsByModule): DashboardDailyResultsByModule {
+  return {
+    [DAILY_RESULT_MODULE_NEURAL]: results[DAILY_RESULT_MODULE_NEURAL] ?? [],
+    [DAILY_RESULT_MODULE_SURF]: results[DAILY_RESULT_MODULE_SURF] ?? [],
+    [DAILY_RESULT_MODULE_PATTERN]: results[DAILY_RESULT_MODULE_PATTERN] ?? [],
+    ...results,
+  };
+}
+
+function normalizeDailyResultsByModule(value: unknown, dayKey: string): DashboardDailyResultsByModule {
+  const record = readRecord(value);
+  const normalized: DashboardDailyResultsByModule = {};
+
+  for (const [moduleKey, rows] of Object.entries(record)) {
+    if (!Array.isArray(rows)) continue;
+    const moduleRows = rows
+      .map((row) => normalizeDashboardPersistentResult(row, moduleKey, dayKey))
+      .filter((row): row is DashboardPersistentResult => Boolean(row));
+    if (moduleRows.length) normalized[moduleKey] = moduleRows;
+  }
+
+  return normalized;
+}
+
+function normalizeDashboardPersistentResult(
+  value: unknown,
+  fallbackModuleKey: string,
+  fallbackDayKey: string,
+): DashboardPersistentResult | null {
+  const record = readRecord(value);
+  const moduleKey = readString(record, "moduleKey") || readString(record, "module") || fallbackModuleKey;
+  if (!moduleKey) return null;
+  const createdAt =
+    readString(record, "createdAt") ||
+    readString(record, "closedAt") ||
+    readString(record, "finishedAt") ||
+    new Date().toISOString();
+  const dayKey = readString(record, "dayKey") || dashboardDayKeyFromIso(createdAt, fallbackDayKey);
+  if (dayKey !== fallbackDayKey) return null;
+  const resultType = normalizeDashboardPersistentResultType(
+    record.resultType ?? record.result ?? record.outcome ?? record.kind,
+  );
+  if (!resultType) return null;
+  const side = normalizeDashboardPersistentSide(
+    record.side ?? record.technicalSide ?? record.expectedSide ?? record.targetSide,
+  );
+  const attempt = normalizeDashboardAttempt(record.attempt);
+  const roundId =
+    readString(record, "roundId") ||
+    readString(record, "closedRoundId") ||
+    readString(record, "resultRoundKey") ||
+    readString(record, "entryRoundId") ||
+    null;
+  const signalId = readString(record, "signalId") || readString(record, "signal_id") || null;
+  const resultId =
+    readString(record, "resultId") ||
+    readString(record, "cycleId") ||
+    readString(record, "id") ||
+    [moduleKey, signalId, roundId, resultType, attempt ?? "", readString(record, "tieMultiplier")].join(":");
+  const tieMultiplier = normalizeDashboardTieMultiplier(record.tieMultiplier ?? record.tie_multiplier);
+  const label =
+    readString(record, "label") ||
+    dashboardPersistentLabel({
+      moduleKey,
+      side,
+      resultType,
+      attempt,
+      tieMultiplier,
+    });
+
+  return {
+    moduleKey,
+    dayKey,
+    monthKey: readString(record, "monthKey") || dayKey.slice(0, 7),
+    signalId,
+    resultId,
+    roundId,
+    resultType,
+    side,
+    attempt,
+    tieMultiplier,
+    createdAt,
+    displayTimeBR: readString(record, "displayTimeBR") || formatDashboardDisplayTimeBR(createdAt),
+    label,
+    payload: readRecord(record.payload),
+  };
+}
+
+function mergeDailyResultsByModule(
+  left: DashboardDailyResultsByModule,
+  right: DashboardDailyResultsByModule,
+  dayKey: string,
+): DashboardDailyResultsByModule {
+  const merged: DashboardDailyResultsByModule = {};
+  for (const source of [left, right]) {
+    for (const [moduleKey, rows] of Object.entries(source || {})) {
+      if (!Array.isArray(rows)) continue;
+      const current = merged[moduleKey] ?? [];
+      const byKey = new Map(current.map((row) => [dashboardPersistentDedupeKey(row), row]));
+      for (const row of rows) {
+        if (!row || row.dayKey !== dayKey) continue;
+        const key = dashboardPersistentDedupeKey(row);
+        if (!byKey.has(key)) byKey.set(key, row);
+      }
+      merged[moduleKey] = [...byKey.values()]
+        .sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""))
+        .slice(0, MAX_DAILY_RESULTS_PER_MODULE);
+    }
+  }
+  return merged;
+}
+
+function groupPersistentResultsByModule(rows: DashboardPersistentResult[], dayKey: string): DashboardDailyResultsByModule {
+  const grouped: DashboardDailyResultsByModule = {};
+  for (const row of rows) {
+    if (!row || row.dayKey !== dayKey || !row.moduleKey) continue;
+    grouped[row.moduleKey] = grouped[row.moduleKey] ?? [];
+    grouped[row.moduleKey].push(row);
+  }
+  return grouped;
+}
+
+function buildPersistentResultsFromDashboard(
+  dashboard: LiveDashboardData,
+  dayKey: string,
+): DashboardPersistentResult[] {
+  return [
+    persistentResultFromNeuralEntry(dashboard.neuralEntryLastResult, dayKey),
+    ...persistentResultsFromSurfHistory(dashboard.currentSurfAlert?.surfHistory, dayKey),
+    persistentResultFromServerPatternCycle(dashboard.patternIaServerCycle, dayKey),
+  ].filter((row): row is DashboardPersistentResult => Boolean(row));
+}
+
+function persistentResultFromNeuralEntry(
+  result: NeuralEntryLastResult | null | undefined,
+  dayKey: string,
+): DashboardPersistentResult | null {
+  const normalized = normalizeServerNeuralEntryLastResult(result);
+  if (!normalized?.id || !normalized.finishedAt) return null;
+  const createdAt = normalized.finishedAt;
+  const resultDayKey = dashboardDayKeyFromIso(createdAt, dayKey);
+  if (resultDayKey !== dayKey) return null;
+  const attempt = normalizeDashboardAttempt(normalized.attempt) ?? (normalized.kind === "g1" || normalized.kind === "tie_g1" ? "G1" : "SG");
+  const resultType =
+    normalized.outcome === "TIE"
+      ? attempt === "G1"
+        ? "EMPATE_G1"
+        : "EMPATE"
+      : normalized.outcome === "GREEN"
+        ? attempt === "G1"
+          ? "GREEN_G1"
+          : "GREEN"
+        : "RED";
+  const side = normalizeDashboardPersistentSide(normalized.expectedSide);
+  const tieMultiplier = normalizeDashboardTieMultiplier(normalized.tieMultiplier);
+
+  return {
+    moduleKey: DAILY_RESULT_MODULE_NEURAL,
+    dayKey,
+    monthKey: dayKey.slice(0, 7),
+    signalId: normalized.key ?? normalized.id,
+    resultId: [
+      DAILY_RESULT_MODULE_NEURAL,
+      normalized.id,
+      normalized.resultRoundKey,
+      resultType,
+      tieMultiplier ?? "no-tie",
+    ].join(":"),
+    roundId: normalized.resultRoundKey,
+    resultType,
+    side,
+    attempt,
+    tieMultiplier,
+    createdAt,
+    displayTimeBR: formatDashboardDisplayTimeBR(createdAt),
+    label: dashboardPersistentLabel({
+      moduleKey: DAILY_RESULT_MODULE_NEURAL,
+      side,
+      resultType,
+      attempt,
+      tieMultiplier,
+    }),
+    payload: {
+      numero: normalized.numero ?? null,
+      origem: normalized.origem ?? null,
+      origemTipo: normalized.origemTipo ?? null,
+    },
+  };
+}
+
+function persistentResultsFromSurfHistory(
+  history: DashboardData["currentSurfAlert"] extends infer Alert
+    ? Alert extends { surfHistory?: infer History }
+      ? History
+      : never
+    : never,
+  dayKey: string,
+): DashboardPersistentResult[] {
+  if (!Array.isArray(history)) return [];
+  return history
+    .map((item) => persistentResultFromSurfHistoryEntry(item, dayKey))
+    .filter((row): row is DashboardPersistentResult => Boolean(row));
+}
+
+function persistentResultFromSurfHistoryEntry(item: unknown, dayKey: string): DashboardPersistentResult | null {
+  const record = readRecord(item);
+  const resultType = normalizeDashboardPersistentResultType(record.result);
+  if (!resultType) return null;
+  const createdAt = readString(record, "closedAt") || new Date().toISOString();
+  if (dashboardDayKeyFromIso(createdAt, dayKey) !== dayKey) return null;
+  const side = normalizeDashboardPersistentSide(record.technicalSide);
+  const attempt = normalizeDashboardAttempt(record.attempt) ?? "SG";
+  const tieMultiplier = normalizeDashboardTieMultiplier(record.tieMultiplier);
+  const closedRoundId = readString(record, "closedRoundId") || null;
+  const entryRoundId = readString(record, "entryRoundId") || null;
+  const resultId =
+    readString(record, "cycleId") ||
+    [
+      DAILY_RESULT_MODULE_SURF,
+      readString(record, "patternId"),
+      entryRoundId,
+      closedRoundId,
+      resultType,
+      tieMultiplier ?? "no-tie",
+    ].join(":");
+
+  return {
+    moduleKey: DAILY_RESULT_MODULE_SURF,
+    dayKey,
+    monthKey: dayKey.slice(0, 7),
+    signalId: readString(record, "patternId") || readString(record, "cycleId") || null,
+    resultId,
+    roundId: closedRoundId,
+    resultType,
+    side,
+    attempt,
+    tieMultiplier,
+    createdAt,
+    displayTimeBR: formatDashboardDisplayTimeBR(createdAt),
+    label:
+      readString(record, "label") ||
+      dashboardPersistentLabel({
+        moduleKey: DAILY_RESULT_MODULE_SURF,
+        side,
+        resultType,
+        attempt,
+        tieMultiplier,
+      }),
+    payload: {
+      entryRoundId,
+      closedRoundId,
+      statusLabel: readString(record, "statusLabel") || null,
+    },
+  };
+}
+
+function applyPersistentSurfResultsToDashboard(dashboard: LiveDashboardData): LiveDashboardData {
+  const surfRows = dashboard.dailyResultsByModule?.[DAILY_RESULT_MODULE_SURF] ?? [];
+  if (!surfRows.length || !dashboard.currentSurfAlert) return dashboard;
+  const surfHistory = surfRows
+    .map(surfHistoryEntryFromPersistentResult)
+    .filter((row): row is NonNullable<ReturnType<typeof surfHistoryEntryFromPersistentResult>> => Boolean(row));
+  const previousStats = dashboard.currentSurfAlert.surfCycleStats ?? {
+    greensSG: 0,
+    redsSG: 0,
+    empates: 0,
+    quebras: 0,
+    retomadas: 0,
+    viradas: 0,
+  };
+  const surfCycleStats = {
+    ...previousStats,
+    greensSG: surfRows.filter((row) => row.resultType === "GREEN" || row.resultType === "GREEN_G1").length,
+    redsSG: surfRows.filter((row) => row.resultType === "RED").length,
+    empates: surfRows.filter((row) => row.resultType === "EMPATE" || row.resultType === "EMPATE_G1").length,
+  };
+
+  return {
+    ...dashboard,
+    currentSurfAlert: {
+      ...dashboard.currentSurfAlert,
+      surfHistory,
+      surfCycleStats,
+    },
+  };
+}
+
+function surfHistoryEntryFromPersistentResult(row: DashboardPersistentResult) {
+  const side = row.side === "BANKER" || row.side === "PLAYER" ? row.side : null;
+  const result =
+    row.resultType === "EMPATE" || row.resultType === "EMPATE_G1"
+      ? "EMPATE"
+      : row.resultType === "RED"
+        ? "RED"
+        : "GREEN";
+  return {
+    cycleId: row.resultId,
+    patternId: row.signalId,
+    technicalSide: side,
+    result,
+    attempt: "SG",
+    tieMultiplier: typeof row.tieMultiplier === "string" ? row.tieMultiplier : row.tieMultiplier ? `${row.tieMultiplier}X` : null,
+    entryRoundId: readString(row.payload, "entryRoundId") || null,
+    closedRoundId: row.roundId ?? null,
+    closedAt: row.createdAt,
+    statusLabel: readString(row.payload, "statusLabel") || null,
+    label: row.label,
+  };
+}
+
+function selectMonthlyTieStats(
+  dashboard: LiveDashboardData,
+  previousDashboard: LiveDashboardData,
+  monthKey: string,
+): DashboardData["tieRadarHistory"] {
+  const incoming = dashboard.tieRadarHistory;
+  const previous = previousDashboard.monthlyTieStats ?? previousDashboard.tieRadarHistory;
+  if (tieHistoryMonthKey(incoming) === monthKey) return incoming;
+  if (tieHistoryMonthKey(previous) === monthKey) return previous;
+  return incoming;
+}
+
+let dashboardPersistentPeriodHydrateKey = "";
+let dashboardPersistentPeriodHydratedAt = 0;
+let dashboardPersistentPeriodHydratePromise: Promise<boolean> | null = null;
+
+async function hydrateDashboardPersistentPeriodsForFastGet(env: unknown) {
+  const dayKey = currentDashboardCycleDate();
+  const monthKey = dayKey.slice(0, 7);
+  const hydrateKey = `${dayKey}:${monthKey}`;
+  const now = Date.now();
+  if (
+    dashboardPersistentPeriodHydrateKey === hydrateKey &&
+    now - dashboardPersistentPeriodHydratedAt < DASHBOARD_FETCH_DEDUP_MS
+  ) {
+    return false;
+  }
+  if (dashboardPersistentPeriodHydratePromise) return dashboardPersistentPeriodHydratePromise;
+
+  dashboardPersistentPeriodHydratePromise = (async () => {
+    const [dailyRows, monthlyTieStats] = await withTimeout(
+      Promise.all([
+        fetchDashboardPersistentResults(env, dayKey),
+        fetchDashboardMonthlyTieStats(env, monthKey),
+      ]),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "hidratar resultados persistentes do dashboard",
+      [[], null] as [DashboardPersistentResult[], DashboardData["tieRadarHistory"] | null],
+    );
+    dashboardPersistentPeriodHydrateKey = hydrateKey;
+    dashboardPersistentPeriodHydratedAt = Date.now();
+
+    let changed = false;
+    const fetchedDaily = ensureDailyResultModuleKeys(groupPersistentResultsByModule(dailyRows, dayKey));
+    const mergedDaily = ensureDailyResultModuleKeys(
+      mergeDailyResultsByModule(
+        normalizeDailyResultsByModule(liveDashboardData.dailyResultsByModule, dayKey),
+        fetchedDaily,
+        dayKey,
+      ),
+    );
+    if (dashboardDailyResultsRevisionFingerprint(mergedDaily) !== dashboardDailyResultsRevisionFingerprint(liveDashboardData.dailyResultsByModule)) {
+      liveDashboardData = applyPersistentSurfResultsToDashboard({
+        ...liveDashboardData,
+        dailyResultsByModule: mergedDaily,
+      });
+      changed = true;
+    }
+
+    if (monthlyTieStats && tieHistoryMonthKey(monthlyTieStats) === monthKey) {
+      const currentMonthFingerprint = JSON.stringify(liveDashboardData.monthlyTieStats ?? null);
+      const fetchedMonthFingerprint = JSON.stringify(monthlyTieStats);
+      if (currentMonthFingerprint !== fetchedMonthFingerprint) {
+        liveDashboardData = {
+          ...liveDashboardData,
+          monthlyTieStats,
+          tieRadarHistory:
+            tieHistoryMonthKey(liveDashboardData.tieRadarHistory) === monthKey
+              ? liveDashboardData.tieRadarHistory
+              : monthlyTieStats,
+        };
+        changed = true;
+      }
+    }
+
+    return changed;
+  })().finally(() => {
+    dashboardPersistentPeriodHydratePromise = null;
+  });
+
+  return dashboardPersistentPeriodHydratePromise;
+}
+
+async function fetchDashboardPersistentResults(env: unknown, dayKey: string): Promise<DashboardPersistentResult[]> {
+  if (!getSupabasePersistenceConfig(env)) return [];
+  const rows = await fetchSupabaseRows(
+    env,
+    DASHBOARD_PERSISTENT_RESULTS_TABLE,
+    `select=*&day_key=eq.${encodeURIComponent(dayKey)}&order=created_at.desc&limit=500`,
+  );
+  return rows
+    .map((row) => dashboardPersistentResultFromSupabaseRow(row, dayKey))
+    .filter((row): row is DashboardPersistentResult => Boolean(row));
+}
+
+async function fetchDashboardMonthlyTieStats(env: unknown, monthKey: string) {
+  if (!getSupabasePersistenceConfig(env)) return null;
+  const rows = await fetchSupabaseRows(
+    env,
+    DASHBOARD_MONTHLY_TIE_STATS_TABLE,
+    `select=stats,updated_at&month_key=eq.${encodeURIComponent(monthKey)}&limit=1`,
+  );
+  const stats = readRecord(readRecord(rows[0]).stats);
+  return hasRecordFields(stats) ? (stats as DashboardData["tieRadarHistory"]) : null;
+}
+
+function newPersistentDashboardRows(previousDashboard: LiveDashboardData, nextDashboard: LiveDashboardData) {
+  const dayKey = currentDashboardCycleDate();
+  const previousRows = normalizeDailyResultsByModule(previousDashboard.dailyResultsByModule, dayKey);
+  const nextRows = normalizeDailyResultsByModule(nextDashboard.dailyResultsByModule, dayKey);
+  const previousKeys = new Set(
+    Object.values(previousRows)
+      .flat()
+      .map(dashboardPersistentDedupeKey),
+  );
+  return Object.values(nextRows)
+    .flat()
+    .filter((row) => row.dayKey === dayKey && !previousKeys.has(dashboardPersistentDedupeKey(row)));
+}
+
+async function persistDashboardPersistentResults(env: unknown, rows: DashboardPersistentResult[]) {
+  if (!rows.length || !getSupabasePersistenceConfig(env)) return false;
+  const normalizedRows = rows
+    .map((row) => normalizeDashboardPersistentResult(row, row.moduleKey, row.dayKey || currentDashboardCycleDate()))
+    .filter((row): row is DashboardPersistentResult => Boolean(row));
+  if (!normalizedRows.length) return false;
+  return persistSupabaseRows(
+    env,
+    DASHBOARD_PERSISTENT_RESULTS_TABLE,
+    normalizedRows.map(dashboardPersistentResultToSupabaseRow),
+    "module_key,day_key,result_id",
+  );
+}
+
+function monthlyTieStatsForPersistence(dashboard: LiveDashboardData) {
+  const monthKey = currentDashboardCycleDate().slice(0, 7);
+  const stats = dashboard.monthlyTieStats ?? dashboard.tieRadarHistory;
+  if (!stats || tieHistoryMonthKey(stats) !== monthKey) return null;
+  return { monthKey, stats };
+}
+
+function changedMonthlyTieStatsForPersistence(previousDashboard: LiveDashboardData, nextDashboard: LiveDashboardData) {
+  const next = monthlyTieStatsForPersistence(nextDashboard);
+  if (!next) return null;
+  const previousStats = previousDashboard.monthlyTieStats ?? previousDashboard.tieRadarHistory;
+  if (tieHistoryMonthKey(previousStats) !== next.monthKey) return next;
+  return JSON.stringify(previousStats) === JSON.stringify(next.stats) ? null : next;
+}
+
+async function persistDashboardMonthlyTieStats(
+  env: unknown,
+  monthKey: string,
+  stats: DashboardData["tieRadarHistory"],
+) {
+  if (!stats || !getSupabasePersistenceConfig(env)) return false;
+  return persistSupabaseRow(
+    env,
+    DASHBOARD_MONTHLY_TIE_STATS_TABLE,
+    {
+      month_key: monthKey,
+      stats,
+      updated_at: new Date().toISOString(),
+    },
+    "month_key",
+  );
+}
+
+function dashboardPersistentResultToSupabaseRow(row: DashboardPersistentResult) {
+  return {
+    module_key: row.moduleKey,
+    day_key: row.dayKey,
+    month_key: row.monthKey || String(row.dayKey || "").slice(0, 7),
+    result_id: row.resultId,
+    signal_id: row.signalId ?? null,
+    round_id: row.roundId === undefined || row.roundId === null ? null : String(row.roundId),
+    result_type: row.resultType,
+    side: row.side ?? null,
+    attempt: row.attempt ?? null,
+    tie_multiplier: row.tieMultiplier === undefined || row.tieMultiplier === null ? null : String(row.tieMultiplier),
+    created_at: row.createdAt,
+    display_time_br: row.displayTimeBR,
+    label: row.label,
+    payload: row.payload ?? {},
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function dashboardPersistentResultFromSupabaseRow(
+  row: Record<string, unknown>,
+  fallbackDayKey: string,
+): DashboardPersistentResult | null {
+  return normalizeDashboardPersistentResult(
+    {
+      moduleKey: readString(row, "module_key"),
+      dayKey: readString(row, "day_key"),
+      monthKey: readString(row, "month_key"),
+      resultId: readString(row, "result_id"),
+      signalId: readString(row, "signal_id") || null,
+      roundId: readString(row, "round_id") || null,
+      resultType: readString(row, "result_type"),
+      side: readString(row, "side") || null,
+      attempt: readString(row, "attempt") || null,
+      tieMultiplier: readString(row, "tie_multiplier") || null,
+      createdAt: readString(row, "created_at"),
+      displayTimeBR: readString(row, "display_time_br"),
+      label: readString(row, "label"),
+      payload: readRecord(row.payload),
+    },
+    readString(row, "module_key"),
+    fallbackDayKey,
+  );
+}
+
+function tieHistoryMonthKey(history: DashboardData["tieRadarHistory"] | undefined) {
+  return history?.monthly?.key || history?.recent?.[0]?.monthKey || "";
+}
+
+function preserveCurrentMonthTieStats(
+  dashboard: DashboardData & { monthlyTieStats?: DashboardData["tieRadarHistory"] },
+  cycleDate: string,
+) {
+  const monthKey = cycleDate.slice(0, 7);
+  const history = dashboard.monthlyTieStats ?? dashboard.tieRadarHistory;
+  return tieHistoryMonthKey(history) === monthKey ? history : undefined;
+}
+
+function dashboardPersistentDedupeKey(row: DashboardPersistentResult) {
+  return [
+    row.moduleKey,
+    row.dayKey ?? "",
+    row.resultId,
+    row.signalId ?? "",
+    row.roundId ?? "",
+    row.resultType,
+    row.attempt ?? "",
+  ].join(":");
+}
+
+function normalizeDashboardPersistentResultType(value: unknown) {
+  const text = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_")
+    .replace(/^TIE/, "EMPATE")
+    .replace(/^GREEN_SG$/, "GREEN")
+    .replace(/^RED_FINAL$/, "RED");
+  if (text === "G1") return "GREEN_G1";
+  if (text === "SG") return "GREEN";
+  if (text === "GREEN" || text === "GREEN_G1" || text === "RED") return text;
+  if (text === "EMPATE" || text === "EMPATE_SG") return "EMPATE";
+  if (text === "EMPATE_G1") return "EMPATE_G1";
+  if (text === "CANCELADO" || text === "EXPIRADO") return text;
+  return "";
+}
+
+function normalizeDashboardPersistentSide(value: unknown): CurrentSignalSide | null {
+  const text = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (text === "B" || text === "BANKER" || text === "BANCA") return "BANKER";
+  if (text === "P" || text === "PLAYER" || text === "JOGADOR") return "PLAYER";
+  if (text === "T" || text === "TIE" || text === "EMPATE") return "TIE";
+  if (text === "NONE" || text === "WAITING") return "NONE";
+  return null;
+}
+
+function normalizeDashboardAttempt(value: unknown) {
+  const text = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (text === "G1") return "G1";
+  if (text === "SG" || text === "SEM_GALE") return "SG";
+  return null;
+}
+
+function normalizeDashboardTieMultiplier(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const text = String(value).trim().toUpperCase();
+  if (!text || text === "0" || text === "0X" || text === "NULL") return null;
+  const number = Number(text.replace("X", ""));
+  if (!Number.isFinite(number) || number <= 0) return null;
+  return `${Math.floor(number)}X`;
+}
+
+function dashboardDayKeyFromIso(value: unknown, fallbackDayKey: string) {
+  const date = new Date(String(value || ""));
+  if (!Number.isFinite(date.getTime())) return fallbackDayKey;
+  return currentDashboardCycleDate(date);
+}
+
+function formatDashboardDisplayTimeBR(value: unknown) {
+  const date = new Date(String(value || ""));
+  if (!Number.isFinite(date.getTime())) return "--:--";
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: DASHBOARD_CYCLE_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function dashboardPersistentLabel({
+  moduleKey,
+  side,
+  resultType,
+  attempt,
+  tieMultiplier,
+}: Pick<DashboardPersistentResult, "moduleKey" | "side" | "resultType" | "attempt" | "tieMultiplier">) {
+  const sideLabel = side === "BANKER" ? "BANKER" : side === "PLAYER" ? "PLAYER" : side === "TIE" ? "TIE" : "";
+  if (resultType === "EMPATE" || resultType === "EMPATE_G1") {
+    return `EMPATE ${tieMultiplier ? String(tieMultiplier).toUpperCase() : ""}`.trim();
+  }
+  if (resultType === "GREEN_G1") return `${sideLabel} GREEN G1`.trim();
+  if (resultType === "GREEN") return `${sideLabel} GREEN ${attempt === "G1" ? "G1" : "SG"}`.trim();
+  if (resultType === "RED") return `${sideLabel} RED`.trim();
+  if (moduleKey === DAILY_RESULT_MODULE_PATTERN && (resultType === "CANCELADO" || resultType === "EXPIRADO")) {
+    return `${sideLabel} ${resultType}`.trim();
+  }
+  return `${sideLabel} ${resultType}`.trim();
+}
+
+function trackServerPatternIaCycle(
+  dashboard: LiveDashboardData,
+  previousDashboard: LiveDashboardData,
+  rounds: Round[],
+  latestRound: Round | undefined,
+): LiveDashboardData {
+  const previousCycle = normalizeServerPatternIaCycle(previousDashboard.patternIaServerCycle);
+  const resolvedPrevious = previousCycle ? resolveServerPatternIaCycle(previousCycle, rounds) : null;
+  if (resolvedPrevious && serverPatternIaCycleOpen(resolvedPrevious)) {
+    return { ...dashboard, patternIaServerCycle: resolvedPrevious };
+  }
+
+  const candidate = serverPatternCandidateFromSnapshot(dashboard.patternMinerSnapshot, latestRound);
+  if (!candidate) {
+    return { ...dashboard, patternIaServerCycle: resolvedPrevious };
+  }
+
+  if (
+    resolvedPrevious &&
+    resolvedPrevious.signalId === candidate.signalId &&
+    resolvedPrevious.eventId === candidate.eventId
+  ) {
+    return { ...dashboard, patternIaServerCycle: resolvedPrevious };
+  }
+
+  if (resolvedPrevious && shouldPreserveClosedServerPatternCycle(resolvedPrevious, candidate)) {
+    return { ...dashboard, patternIaServerCycle: resolvedPrevious };
+  }
+
+  return { ...dashboard, patternIaServerCycle: openServerPatternIaCycle(candidate) };
+}
+
+function shouldPreserveClosedServerPatternCycle(
+  cycle: Record<string, unknown>,
+  candidate: Record<string, unknown>,
+) {
+  if (cycle.cycleStatus !== "CLOSED") return false;
+  const closedAt = Date.parse(readString(cycle, "closedAt"));
+  if (!Number.isFinite(closedAt) || Date.now() - closedAt > NEURAL_RESULT_REENTRY_BLOCK_MS) return false;
+
+  const candidateSourceRoundId = Number(candidate.sourceRoundId);
+  const cycleSourceRoundId = Number(cycle.sourceRoundId);
+  const entryRoundId = Number(readString(cycle, "entryRoundId"));
+  const g1RoundId = Number(readString(cycle, "g1RoundId"));
+  const closedRoundId = Number.isFinite(g1RoundId)
+    ? g1RoundId
+    : Number.isFinite(entryRoundId)
+      ? entryRoundId
+      : cycleSourceRoundId;
+
+  if (Number.isFinite(candidateSourceRoundId) && Number.isFinite(closedRoundId) && candidateSourceRoundId <= closedRoundId) {
+    return true;
+  }
+
+  const cycleSide = normalizeDashboardPersistentSide(cycle.technicalSide);
+  const candidateSide = normalizeDashboardPersistentSide(candidate.technicalSide);
+  return Boolean(
+    cycleSide &&
+      candidateSide &&
+      cycleSide === candidateSide &&
+      Number.isFinite(candidateSourceRoundId) &&
+      Number.isFinite(cycleSourceRoundId) &&
+      candidateSourceRoundId <= cycleSourceRoundId + 2,
+  );
+}
+
+function normalizeServerPatternIaCycle(value: unknown) {
+  const record = readRecord(value);
+  if (record.module !== "PADROES_IA") return null;
+  const sideCode = normalizeRoundResult(record.sideCode);
+  const technicalSide = normalizeDashboardPersistentSide(record.technicalSide);
+  const sourceRoundId = Number(record.sourceRoundId);
+  const cycleStatus = String(record.cycleStatus || "").toUpperCase();
+  if (!sideCode || !technicalSide || !Number.isFinite(sourceRoundId)) return null;
+  if (!["AGUARDANDO_RESULTADO", "AGUARDANDO_G1", "CLOSED"].includes(cycleStatus)) return null;
+  return {
+    ...record,
+    module: "PADROES_IA",
+    cycleStatus,
+    attempt: normalizeDashboardAttempt(record.attempt) ?? "SG",
+    patternId: readString(record, "patternId") || readString(record, "signalId") || "",
+    signalId: readString(record, "signalId") || "",
+    eventId: readString(record, "eventId") || "",
+    patternName: readString(record, "patternName") || "",
+    technicalSide,
+    sideCode,
+    sourceRoundId,
+    entryRoundId: readString(record, "entryRoundId") || null,
+    g1RoundId: readString(record, "g1RoundId") || null,
+    result: normalizeDashboardPersistentResultType(record.result) || null,
+    tieMultiplier: normalizeDashboardTieMultiplier(record.tieMultiplier),
+    openedAt: readString(record, "openedAt") || new Date().toISOString(),
+    closedAt: readString(record, "closedAt") || null,
+    contract: readRecord(record.contract),
+  };
+}
+
+function serverPatternIaCycleOpen(cycle: Record<string, unknown>) {
+  return cycle.cycleStatus === "AGUARDANDO_RESULTADO" || cycle.cycleStatus === "AGUARDANDO_G1";
+}
+
+function serverPatternCandidateFromSnapshot(snapshot: unknown, latestRound: Round | undefined) {
+  const record = readRecord(snapshot);
+  const alerts = Array.isArray(record.entryAlerts) ? record.entryAlerts.map(readRecord) : [];
+  const latestRoundId = latestRound ? Number(latestRound.id) : Number.NaN;
+  const candidates = alerts
+    .filter((alert) => String(alert.kind || "").toLowerCase() === "validated")
+    .map((alert) => serverPatternCandidateFromAlert(alert, latestRoundId))
+    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
+    .sort((left, right) => {
+      if (left.recentReds !== right.recentReds) return left.recentReds - right.recentReds;
+      if (left.accuracy !== right.accuracy) return right.accuracy - left.accuracy;
+      if (left.strength !== right.strength) return right.strength - left.strength;
+      if (left.samples !== right.samples) return right.samples - left.samples;
+      return right.sourceRoundId - left.sourceRoundId;
+    });
+  return candidates[0] ?? null;
+}
+
+function serverPatternCandidateFromAlert(alert: Record<string, unknown>, latestRoundId: number) {
+  const strategy = readRecord(alert.strategy);
+  const sideCode = normalizeRoundResult(strategy.expectedResult);
+  if (!sideCode) return null;
+  const matchedRounds = Array.isArray(alert.matchedRounds)
+    ? normalizeRounds(alert.matchedRounds, 20)
+    : [];
+  const sourceRound = matchedRounds.at(-1);
+  const sourceRoundId = Number(
+    readString(alert, "round_id") ||
+      readString(alert, "roundId") ||
+      sourceRound?.id ||
+      0,
+  );
+  if (!Number.isFinite(sourceRoundId) || sourceRoundId <= 0) return null;
+  if (Number.isFinite(latestRoundId) && sourceRoundId !== latestRoundId) return null;
+  const recentReds = Math.max(0, Number(strategy.red ?? 0));
+  if (recentReds >= 3) return null;
+  const accuracy = Math.max(0, Math.min(100, Math.round(Number(strategy.assertiveness ?? 0))));
+  if (accuracy <= 0) return null;
+  const samples = Math.max(0, Number(strategy.totalValidated ?? strategy.occurrences ?? 0));
+  if (samples < 2) return null;
+  const sequence = Array.isArray(strategy.sequence)
+    ? strategy.sequence.map((token) => String(token || "").trim()).filter(Boolean)
+    : [];
+  const patternId = readString(strategy, "id") || sequence.join("-");
+  const signalId =
+    readString(alert, "signal_id") ||
+    readString(alert, "signalId") ||
+    `${patternId}:${sourceRoundId}`;
+  const eventId =
+    readString(alert, "event_id") ||
+    readString(alert, "eventId") ||
+    readString(alert, "id") ||
+    signalId;
+
+  return {
+    patternId,
+    signalId,
+    eventId,
+    sourceRoundId,
+    sideCode,
+    technicalSide: serverPatternTechnicalSide(sideCode),
+    patternName: sequence.length ? sequence.join("-") : patternId,
+    accuracy,
+    strength: Math.max(accuracy, Math.min(100, Math.round(Number(strategy.sequencePositive ?? 0) * 10))),
+    samples,
+    recentGreens: Math.max(0, Number(strategy.sg ?? 0) + Number(strategy.g1 ?? 0)),
+    recentReds,
+    patternStatus: readString(strategy, "status") || "CONFIRMADO",
+    sequence,
+  };
+}
+
+function openServerPatternIaCycle(candidate: Record<string, unknown>) {
+  return {
+    module: "PADROES_IA",
+    cycleStatus: "AGUARDANDO_RESULTADO",
+    attempt: "SG",
+    patternId: readString(candidate, "patternId"),
+    signalId: readString(candidate, "signalId"),
+    eventId: readString(candidate, "eventId"),
+    patternName: readString(candidate, "patternName"),
+    technicalSide: readString(candidate, "technicalSide"),
+    sideCode: readString(candidate, "sideCode"),
+    sourceRoundId: Number(candidate.sourceRoundId),
+    entryRoundId: null,
+    g1RoundId: null,
+    result: null,
+    tieMultiplier: null,
+    openedAt: new Date().toISOString(),
+    closedAt: null,
+    contract: {
+      accuracy: Number(candidate.accuracy ?? 0),
+      strength: Number(candidate.strength ?? 0),
+      samples: Number(candidate.samples ?? 0),
+      recentGreens: Number(candidate.recentGreens ?? 0),
+      recentReds: Number(candidate.recentReds ?? 0),
+      patternName: readString(candidate, "patternName"),
+      patternStatus: readString(candidate, "patternStatus") || "CONFIRMADO",
+      sequence: Array.isArray(candidate.sequence) ? candidate.sequence : [],
+    },
+  };
+}
+
+function resolveServerPatternIaCycle(cycle: Record<string, unknown>, rounds: Round[]) {
+  if (!serverPatternIaCycleOpen(cycle)) return cycle;
+  const sortedRounds = rounds.slice().sort(compareRoundHistory);
+  const sourceRoundId = Number(cycle.sourceRoundId);
+  const sourceIndex = sortedRounds.findIndex((round) => Number(round.id) === sourceRoundId);
+  if (sourceIndex < 0) return cycle;
+
+  const sgRound = findServerPatternCycleRound(sortedRounds, sourceRoundId, sourceIndex, 1);
+  if (!sgRound) {
+    return { ...cycle, cycleStatus: "AGUARDANDO_RESULTADO", attempt: "SG", result: null };
+  }
+
+  const sideCode = normalizeRoundResult(cycle.sideCode);
+  const sgResult = serverPatternRoundResult(sideCode, sgRound);
+  if (sgResult === "GREEN") return closeServerPatternIaCycle(cycle, "SG", "GREEN", sgRound, null);
+  if (sgResult === "EMPATE") return closeServerPatternIaCycle(cycle, "SG", "EMPATE", sgRound, serverPatternTieMultiplier(sgRound));
+
+  const g1Round = findServerPatternCycleRound(sortedRounds, sourceRoundId, sourceIndex, 2);
+  if (!g1Round) {
+    return { ...cycle, cycleStatus: "AGUARDANDO_G1", attempt: "G1", entryRoundId: String(sgRound.id), result: null };
+  }
+
+  const g1Result = serverPatternRoundResult(sideCode, g1Round);
+  const cycleWithSg = { ...cycle, entryRoundId: String(sgRound.id) };
+  if (g1Result === "GREEN") return closeServerPatternIaCycle(cycleWithSg, "G1", "GREEN_G1", g1Round, null);
+  if (g1Result === "EMPATE")
+    return closeServerPatternIaCycle(cycleWithSg, "G1", "EMPATE_G1", g1Round, serverPatternTieMultiplier(g1Round));
+  return closeServerPatternIaCycle(cycleWithSg, "G1", "RED", g1Round, null);
+}
+
+function findServerPatternCycleRound(rounds: Round[], sourceRoundId: number, sourceIndex: number, offset: 1 | 2) {
+  const byRoundId = rounds.find((round) => Number(round.id) === sourceRoundId + offset);
+  if (byRoundId) return byRoundId;
+  return rounds[sourceIndex + offset] ?? null;
+}
+
+function serverPatternRoundResult(sideCode: ReturnType<typeof normalizeRoundResult>, round: Round) {
+  if (!sideCode) return "RED";
+  if (round.result === "T") return "EMPATE";
+  return round.result === sideCode ? "GREEN" : "RED";
+}
+
+function closeServerPatternIaCycle(
+  cycle: Record<string, unknown>,
+  attempt: "SG" | "G1",
+  result: string,
+  round: Round,
+  tieMultiplier: string | null,
+) {
+  return {
+    ...cycle,
+    cycleStatus: "CLOSED",
+    attempt,
+    entryRoundId: readString(cycle, "entryRoundId") || String(round.id),
+    g1RoundId: attempt === "G1" ? String(round.id) : readString(cycle, "g1RoundId") || null,
+    result,
+    tieMultiplier,
+    closedAt: new Date().toISOString(),
+  };
+}
+
+function persistentResultFromServerPatternCycle(value: unknown, dayKey: string): DashboardPersistentResult | null {
+  const cycle = normalizeServerPatternIaCycle(value);
+  if (!cycle || cycle.cycleStatus !== "CLOSED" || !cycle.result || !cycle.closedAt) return null;
+  if (dashboardDayKeyFromIso(cycle.closedAt, dayKey) !== dayKey) return null;
+  const resultType = normalizeDashboardPersistentResultType(cycle.result);
+  if (!resultType) return null;
+  const side = normalizeDashboardPersistentSide(cycle.technicalSide);
+  const attempt = normalizeDashboardAttempt(cycle.attempt) ?? "SG";
+  const closedRoundId = attempt === "G1" ? cycle.g1RoundId : cycle.entryRoundId;
+  const tieMultiplier = normalizeDashboardTieMultiplier(cycle.tieMultiplier);
+  const resultId = [
+    DAILY_RESULT_MODULE_PATTERN,
+    cycle.patternId,
+    cycle.signalId,
+    cycle.eventId,
+    cycle.entryRoundId ?? "entry",
+    cycle.g1RoundId ?? "sg",
+    resultType,
+    tieMultiplier ?? "no-tie",
+  ].join(":");
+
+  return {
+    moduleKey: DAILY_RESULT_MODULE_PATTERN,
+    dayKey,
+    monthKey: dayKey.slice(0, 7),
+    signalId: cycle.signalId,
+    resultId,
+    roundId: closedRoundId,
+    resultType,
+    side,
+    attempt,
+    tieMultiplier,
+    createdAt: cycle.closedAt,
+    displayTimeBR: formatDashboardDisplayTimeBR(cycle.closedAt),
+    label: dashboardPersistentLabel({
+      moduleKey: DAILY_RESULT_MODULE_PATTERN,
+      side,
+      resultType,
+      attempt,
+      tieMultiplier,
+    }),
+    payload: {
+      patternId: cycle.patternId,
+      patternName: cycle.patternName,
+      eventId: cycle.eventId,
+      sourceRoundId: cycle.sourceRoundId,
+      entryRoundId: cycle.entryRoundId,
+      closedRoundId,
+      contract: cycle.contract,
+    },
+  };
+}
+
+function serverPatternTechnicalSide(sideCode: string) {
+  if (sideCode === "B") return "BANKER";
+  if (sideCode === "P") return "PLAYER";
+  return "TIE";
+}
+
+function serverPatternTieMultiplier(round: Round) {
+  const multiplier = serverTieMultiplierFromRound(round) ?? round.tieMultiplier ?? null;
+  if (!multiplier) return null;
+  return `${Math.floor(Number(multiplier))}X`;
+}
+
 function updateDashboardData(current: LiveDashboardData, body: unknown) {
   const cycle = ensureDashboardDailyCycle(current);
   const currentDashboard = cycle.dashboard;
@@ -12553,6 +14713,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
   const acceptsDailyCounters =
     acceptsCurrentCycle && (!currentDashboard.strictDailyCounters || incomingCycleDate === cycleDate);
   const pickedSections = acceptsCurrentCycle ? pickDashboardSections(incoming) : {};
+  const usesIncomingCollectorCards = acceptsCurrentCycle && isTrustedCollectorDashboard(incoming);
   if (!acceptsDailyCounters) {
     delete pickedSections.mainScoreboard;
     delete pickedSections.tieAlertScoreboard;
@@ -12583,7 +14744,7 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
         neuralPanelCycle.cycleRounds.length ? neuralPanelCycle.cycleRounds : undefined,
       )
     : null;
-  if (generatedNeural) {
+  if (generatedNeural && !usesIncomingCollectorCards) {
     pickedSections.neuralReading = generatedNeural.reading;
     pickedSections.neuralScoreboard = generatedNeural.scoreboard;
   }
@@ -12622,6 +14783,12 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
       };
     }
   }
+  if (acceptsCurrentCycle) {
+    pickedSections.tieRadarHistory = buildTieRadarHistoryAnalysis(tieRoundSource, {
+      cycleDate,
+      previous: currentDashboard.tieRadarHistory ?? pickedSections.tieRadarHistory,
+    });
+  }
 
   const patternRoundSource = surfRoundSource;
   if (acceptsCurrentCycle && patternRoundSource.length >= 6) {
@@ -12637,20 +14804,24 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     );
   }
 
-  const rounds = incomingRounds.length ? incomingRounds.slice(-30) : currentDashboard.rounds;
+  const rounds = incomingRounds.length
+    ? mergeRoundHistoryWithLimit(
+        Array.isArray(currentDashboard.rounds) ? currentDashboard.rounds : [],
+        incomingRounds,
+        30,
+      )
+    : currentDashboard.rounds;
   const currentLatestRound = latestRoundFromRoundList(currentDashboard.rounds);
   const incomingLatestRound = latestRoundFromRoundList(incomingRounds);
   const currentLatestKey = currentLatestRound ? roundHistoryKey(currentLatestRound) : "";
   const incomingLatestKey = incomingLatestRound ? roundHistoryKey(incomingLatestRound) : "";
   const receivedNewRound = Boolean(incomingLatestKey && incomingLatestKey !== currentLatestKey);
   const incomingUpdatedAt = readString(incoming, "updatedAt") || readString(incoming, "updated_at");
+  const publicationUpdatedAt = new Date().toISOString();
   const nextUpdatedAt =
-    incomingUpdatedAt ||
-    (incomingRounds.length
-      ? receivedNewRound
-        ? new Date().toISOString()
-        : currentDashboard.updatedAt || new Date().toISOString()
-      : new Date().toISOString());
+    incomingRounds.length || receivedNewRound
+      ? publicationUpdatedAt
+      : incomingUpdatedAt || publicationUpdatedAt;
   const normalizedSignal = acceptsCurrentCycle
     ? normalizeSignal(readMainSignal(incoming), currentDashboard.currentSignal)
     : currentDashboard.currentSignal;
@@ -12710,6 +14881,38 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
         ? incoming.pressureSeries
         : currentDashboard.pressureSeries,
     updatedAt: nextUpdatedAt,
+    collectorStatus:
+      readString(incoming, "collectorStatus") ||
+      readString(incoming, "collector_status") ||
+      currentDashboard.collectorStatus ||
+      (rounds.length > 0 ? "online" : undefined),
+    websocketStatus:
+      readString(incoming, "websocketStatus") ||
+      readString(incoming, "websocket_status") ||
+      readString(incoming, "wsStatus") ||
+      currentDashboard.websocketStatus ||
+      (rounds.length > 0 ? "connected" : undefined),
+    lastRoundId:
+      readString(incoming, "lastRoundId") ||
+      readString(incoming, "last_round_id") ||
+      incomingLatestRound?.id ||
+      currentDashboard.lastRoundId ||
+      null,
+    lastRoundAt: readString(incoming, "lastRoundAt") || readString(incoming, "last_round_at") || currentDashboard.lastRoundAt,
+    publisherStatus: readString(incoming, "publisherStatus") || readString(incoming, "publisher_status") || currentDashboard.publisherStatus,
+    health: readRecord(incoming.health) || currentDashboard.health,
+    payingNumbers: incoming.payingNumbers ?? incoming.paying_numbers ?? currentDashboard.payingNumbers,
+    pressureReading: Object.keys(readRecord(incoming.pressureReading ?? incoming.pressure_reading)).length
+      ? readRecord(incoming.pressureReading ?? incoming.pressure_reading)
+      : currentDashboard.pressureReading,
+    performanceStats: Object.keys(readRecord(incoming.performanceStats ?? incoming.performance_stats)).length
+      ? readRecord(incoming.performanceStats ?? incoming.performance_stats)
+      : currentDashboard.performanceStats,
+    validatorStats: Object.keys(readRecord(incoming.validatorStats ?? incoming.validator_stats)).length
+      ? readRecord(incoming.validatorStats ?? incoming.validator_stats)
+      : currentDashboard.validatorStats,
+    patternHotSignal: incoming.patternHotSignal ?? incoming.pattern_hot_signal ?? currentDashboard.patternHotSignal,
+    aiPatternSignal: incoming.aiPatternSignal ?? incoming.ai_pattern_signal ?? currentDashboard.aiPatternSignal,
     cycleDate,
     dailyCycleDate: cycleDate,
     neuralPanelCycleResetVersion: neuralPanelCycle.resetVersion ?? currentDashboard.neuralPanelCycleResetVersion,
@@ -12717,10 +14920,10 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     strictDailyCounters: currentDashboard.strictDailyCounters && incomingCycleDate !== cycleDate,
   };
 
+  const incomingNeuralLifecycleState = normalizeServerNeuralEntryState(incoming.neuralEntryState);
+  const incomingNeuralLifecycleResult = normalizeServerNeuralEntryLastResult(incoming.neuralEntryLastResult);
   const hasIncomingNeuralLifecycle =
-    acceptsCurrentCycle &&
-    (Object.prototype.hasOwnProperty.call(incoming, "neuralEntryState") ||
-      Object.prototype.hasOwnProperty.call(incoming, "neuralEntryLastResult"));
+    acceptsCurrentCycle && Boolean(incomingNeuralLifecycleState || incomingNeuralLifecycleResult);
   const dashboardWithNeuralEntry = hasIncomingNeuralLifecycle
     ? syncServerNeuralReadingFromIncomingLifecycle(nextDashboard)
     : trackServerNeuralEntryLifecycle(nextDashboard, currentDashboard, incomingLatestRound, receivedNewRound);
@@ -12736,11 +14939,92 @@ function updateDashboardData(current: LiveDashboardData, body: unknown) {
     currentDashboard,
     incomingRounds,
   );
-  return trackServerEntryModeStats(trackServerNeuralSequences(dashboardWithTieScoreboard, currentDashboard));
+  const dashboardWithTieRadarHistory = refreshServerTieRadarHistory(dashboardWithTieScoreboard, tieRoundSource);
+  const dashboardWithNeuralSequences = trackServerNeuralSequences(dashboardWithTieRadarHistory, currentDashboard);
+  const dashboardWithEntryStats = trackServerEntryModeStats(dashboardWithNeuralSequences);
+  const dashboardWithCollectorCards = usesIncomingCollectorCards
+    ? preserveIncomingCollectorCards(dashboardWithEntryStats, incoming)
+    : dashboardWithEntryStats;
+  const dashboardWithPatternIaCycle = trackServerPatternIaCycle(
+    dashboardWithCollectorCards,
+    currentDashboard,
+    surfRoundSource,
+    incomingLatestRound,
+  );
+  const dashboardWithPersistentResults = withPersistentDashboardResults(
+    dashboardWithPatternIaCycle,
+    currentDashboard,
+    incoming,
+  );
+  return finalizeRealtimeDashboardSnapshot(exposeServerNeuralEntryAsCurrentSignal(dashboardWithPersistentResults));
+}
+
+function preserveIncomingCollectorCards(dashboard: LiveDashboardData, incoming: Record<string, unknown>): LiveDashboardData {
+  const incomingNeuralLifecycleState = normalizeServerNeuralEntryState(incoming.neuralEntryState);
+  const incomingNeuralLifecycleResult = normalizeServerNeuralEntryLastResult(incoming.neuralEntryLastResult);
+
+  return {
+    ...dashboard,
+    currentSurfAlert:
+      (incoming.currentSurfAlert as DashboardData["currentSurfAlert"]) ||
+      (incoming.surfAlert as DashboardData["currentSurfAlert"]) ||
+      dashboard.currentSurfAlert,
+    currentTieAlert: normalizeTieAlert(
+      incoming.currentTieAlert || incoming.tieAlert || dashboard.currentTieAlert,
+      dashboard.currentTieAlert,
+    ),
+    neuralReading:
+      (incoming.neuralReading as DashboardData["neuralReading"]) ||
+      (incoming.neural_reading as DashboardData["neuralReading"]) ||
+      dashboard.neuralReading,
+    neuralEntryState: incomingNeuralLifecycleState ?? dashboard.neuralEntryState,
+    neuralEntryLastResult: incomingNeuralLifecycleResult ?? dashboard.neuralEntryLastResult,
+    engineDecision:
+      (incoming.engineDecision as DashboardData["engineDecision"]) ||
+      (incoming.engine_decision as DashboardData["engineDecision"]) ||
+      dashboard.engineDecision,
+    payingNumbers: incoming.payingNumbers ?? incoming.paying_numbers ?? dashboard.payingNumbers,
+    pressureReading: hasRecordFields(readRecord(incoming.pressureReading ?? incoming.pressure_reading))
+      ? readRecord(incoming.pressureReading ?? incoming.pressure_reading)
+      : dashboard.pressureReading,
+    performanceStats: hasRecordFields(readRecord(incoming.performanceStats ?? incoming.performance_stats))
+      ? readRecord(incoming.performanceStats ?? incoming.performance_stats)
+      : dashboard.performanceStats,
+    validatorStats: hasRecordFields(readRecord(incoming.validatorStats ?? incoming.validator_stats))
+      ? readRecord(incoming.validatorStats ?? incoming.validator_stats)
+      : dashboard.validatorStats,
+    collectorStatus:
+      readString(incoming, "collectorStatus") || readString(incoming, "collector_status") || dashboard.collectorStatus,
+    websocketStatus:
+      readString(incoming, "websocketStatus") ||
+      readString(incoming, "websocket_status") ||
+      readString(incoming, "wsStatus") ||
+      dashboard.websocketStatus,
+    lastRoundId:
+      readString(incoming, "lastRoundId") ||
+      readString(incoming, "last_round_id") ||
+      dashboard.lastRoundId ||
+      null,
+    lastRoundAt: readString(incoming, "lastRoundAt") || readString(incoming, "last_round_at") || dashboard.lastRoundAt,
+  };
 }
 
 function syncServerNeuralReadingFromIncomingLifecycle(dashboard: LiveDashboardData): LiveDashboardData {
   const state = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
+  const result = reconcileServerNeuralEntryLastResult(
+    normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult),
+    dashboard,
+    state,
+  );
+  if (result && (!state || neuralEntryStateResolvedByResult(state, result))) {
+    return {
+      ...dashboard,
+      neuralEntryState: null,
+      neuralEntryLastResult: result,
+      neuralReading: neuralReadingForEntryResult(result),
+    };
+  }
+
   if (state) {
     return {
       ...dashboard,
@@ -12749,7 +15033,6 @@ function syncServerNeuralReadingFromIncomingLifecycle(dashboard: LiveDashboardDa
     };
   }
 
-  const result = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
   if (!result) return dashboard;
   return {
     ...dashboard,
@@ -12773,11 +15056,39 @@ function trackServerNeuralEntryLifecycle(
   const previousState = normalizeServerNeuralEntryState(
     previousDashboard.neuralEntryState ?? dashboard.neuralEntryState,
   );
-  const incomingResult = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
+  const incomingResult = reconcileServerNeuralEntryLastResult(
+    normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult),
+    dashboard,
+    previousState,
+  );
   const previousResult =
-    incomingResult ?? normalizeServerNeuralEntryLastResult(previousDashboard.neuralEntryLastResult);
+    incomingResult ??
+    reconcileServerNeuralEntryLastResult(
+      normalizeServerNeuralEntryLastResult(previousDashboard.neuralEntryLastResult),
+      previousDashboard,
+      previousState,
+    );
+
+  if (incomingResult && (!previousState || neuralEntryStateResolvedByResult(previousState, incomingResult))) {
+    return {
+      ...dashboard,
+      neuralEntryState: null,
+      neuralEntryLastResult: incomingResult,
+      neuralReading: neuralReadingForEntryResult(incomingResult),
+    };
+  }
 
   if (previousState) {
+    if (previousResult && neuralEntryStateResolvedByResult(previousState, previousResult)) {
+      return {
+        ...dashboard,
+        neuralEntryState: null,
+        neuralEntryLastResult: previousResult,
+        neuralScoreboard: previousDashboard.neuralScoreboard ?? dashboard.neuralScoreboard,
+        neuralReading: neuralReadingForEntryResult(previousResult),
+      };
+    }
+
     let state = previousState;
 
     if (
@@ -12824,7 +15135,10 @@ function trackServerNeuralEntryLifecycle(
     };
   }
 
-  const nextState = latestRoundKey ? buildServerNeuralEntryState(dashboard.neuralReading, latestRoundKey) : null;
+  const nextState =
+    latestRoundKey && !shouldBlockNeuralReentry(dashboard.neuralReading, previousResult)
+      ? buildServerNeuralEntryState(dashboard.neuralReading, latestRoundKey)
+      : null;
   if (!nextState) {
     return {
       ...dashboard,
@@ -12843,7 +15157,46 @@ function trackServerNeuralEntryLifecycle(
 
 function exposeServerNeuralEntryAsCurrentSignal(dashboard: LiveDashboardData): LiveDashboardData {
   const state = normalizeServerNeuralEntryState(dashboard.neuralEntryState);
-  if (!state) return dashboard;
+  if (!state) {
+    const reading = dashboard.neuralReading;
+    const expectedSide = readServerNeuralSide(reading?.direcao ?? reading?.origem);
+    if (!reading || reading.mode !== "ACTIVE" || !expectedSide) return dashboard;
+    const previousResult = normalizeServerNeuralEntryLastResult(dashboard.neuralEntryLastResult);
+    if (shouldBlockNeuralReentry(reading, previousResult)) return dashboard;
+
+    const currentSignal = dashboard.currentSignal;
+    const currentSignalIsIdle =
+      !currentSignal ||
+      currentSignal.side === "NONE" ||
+      currentSignal.status === "waiting" ||
+      String(currentSignal.id || "").startsWith("neural-entry:") ||
+      String(currentSignal.id || "").startsWith("neural-reading:");
+
+    if (!currentSignalIsIdle) return dashboard;
+
+    const latestRound = Array.isArray(dashboard.rounds) ? dashboard.rounds.at(-1) : null;
+    const protection = String(reading.validade || currentSignal?.protection || "G1");
+    const strength = clampPercent(reading.assertividade ?? currentSignal?.strength ?? 0);
+    const id = `neural-reading:${latestRound?.id ?? dashboard.lastRoundId ?? "latest"}:${expectedSide}`;
+
+    console.info("[SIGNAL_STATE] NEURAL_READING -> ENTRY_CONFIRMED", {
+      signalId: id,
+      side: expectedSide,
+    });
+
+    return {
+      ...dashboard,
+      currentSignal: {
+        id,
+        side: expectedSide,
+        status: "pending",
+        protection,
+        strength,
+        startedAt: new Date().toISOString(),
+        lastResult: null,
+      },
+    };
+  }
 
   const expectedSide = readServerNeuralSide(state.expectedSide);
   if (!expectedSide) return dashboard;
@@ -12860,15 +15213,24 @@ function exposeServerNeuralEntryAsCurrentSignal(dashboard: LiveDashboardData): L
   const snapshot = state.readingSnapshot ?? dashboard.neuralReading;
   const protection = String(snapshot?.validade || currentSignal?.protection || "G1");
   const strength = clampPercent(snapshot?.assertividade ?? snapshot?.confidence ?? currentSignal?.strength ?? 0);
+  const status = state.status === "awaiting_g1" ? "g1" : "pending";
+  const id = `neural-entry:${state.key}:${state.triggerRoundKey}`;
+
+  console.info("[SIGNAL_STATE] ANALYZING -> ENTRY_CONFIRMED", {
+    signalId: id,
+    side: expectedSide,
+    status,
+  });
 
   return {
     ...dashboard,
     currentSignal: {
-      id: `neural-entry:${state.key}:${state.triggerRoundKey}`,
+      id,
       side: expectedSide,
-      status: state.status === "awaiting_g1" ? "g1" : "pending",
+      status,
       protection,
       strength,
+      startedAt: state.startedAt || new Date().toISOString(),
       lastResult: null,
     },
   };
@@ -13046,6 +15408,69 @@ function neuralReadingForEntryResult(result: NeuralEntryLastResult): NeuralReadi
   };
 }
 
+function scanningNeuralReadingAfterResult(reading?: NeuralReading | null): NeuralReading {
+  return {
+    ...(reading ?? { mode: "SCANNING" }),
+    mode: "SCANNING",
+    numero: null,
+    origem: null,
+    origemTipo: null,
+    direcao: null,
+    validade: reading?.validade ?? "G1",
+    paganteStatus: "ANALISANDO",
+    paganteAlert: "Aguardando nova confirmacao da engine.",
+    paganteWindow: null,
+    paganteCycleProgress: null,
+    paganteCycleLimit: null,
+    isSaturated: null,
+    isRedAlert: null,
+    postTie: null,
+  };
+}
+
+function neuralEntryStateResolvedByResult(
+  state: NeuralEntryState | null,
+  result: NeuralEntryLastResult | null,
+) {
+  if (!state || !result) return false;
+  if (state.key && result.key && state.key === result.key) return true;
+
+  const stateStartedAt = Date.parse(String(state.startedAt || ""));
+  const resultFinishedAt = Date.parse(result.finishedAt);
+  const resultAfterState =
+    Number.isFinite(stateStartedAt) && Number.isFinite(resultFinishedAt)
+      ? resultFinishedAt >= stateStartedAt - 1_000
+      : false;
+  if (!resultAfterState) return false;
+
+  const stateSide = readServerNeuralSide(state.expectedSide);
+  const resultSide = readServerNeuralSide(result.expectedSide ?? result.origem);
+  return Boolean(stateSide && resultSide && stateSide === resultSide);
+}
+
+function shouldBlockNeuralReentry(
+  reading: DashboardData["neuralReading"],
+  result?: NeuralEntryLastResult | null,
+) {
+  if (!reading || !result || reading.mode !== "ACTIVE") return false;
+  const finishedAt = Date.parse(result.finishedAt);
+  if (!Number.isFinite(finishedAt) || Date.now() - finishedAt > NEURAL_RESULT_REENTRY_BLOCK_MS) return false;
+
+  const readingKey = serverNeuralEntryKey(reading);
+  if (readingKey && result.key && readingKey === result.key) return true;
+
+  const readingSide = readServerNeuralSide(reading.direcao ?? reading.origem);
+  const resultSide = readServerNeuralSide(result.expectedSide ?? result.origem);
+  return Boolean(
+    readingSide &&
+      resultSide &&
+      readingSide === resultSide &&
+      reading.numero === result.numero &&
+      reading.origem === result.origem &&
+      reading.origemTipo === result.origemTipo,
+  );
+}
+
 function applyServerNeuralEntryResult(
   scoreboard: NeuralScoreboard | undefined,
   kind: NeuralEntryLastResult["kind"],
@@ -13172,6 +15597,89 @@ function readServerNeuralOutcome(value: unknown, kind: string): NeuralEntryLastR
   if (kind === "red") return "RED";
   if (kind === "tie_sg" || kind === "tie_g1") return "TIE";
   return "GREEN";
+}
+
+function reconcileServerNeuralEntryLastResult(
+  result: NeuralEntryLastResult | null,
+  dashboard: LiveDashboardData,
+  state?: NeuralEntryState | null,
+): NeuralEntryLastResult | null {
+  if (!result?.resultRoundKey) return result;
+  const expectedSide = readServerNeuralSide(result.expectedSide ?? state?.expectedSide);
+  if (!expectedSide) return result;
+
+  const round = findServerNeuralResultRound(result.resultRoundKey, dashboard);
+  if (!round) return result;
+
+  const nextOutcome: NeuralEntryLastResult["outcome"] =
+    round.result === "T" ? "TIE" : serverRoundMatchesNeuralSide(round, expectedSide) ? "GREEN" : "RED";
+  const nextKind = neuralResultKindFromRoundOutcome(result, nextOutcome, state);
+  const nextTieMultiplier = nextOutcome === "TIE" ? serverTieMultiplierFromRound(round) : null;
+
+  if (result.outcome === nextOutcome && result.kind === nextKind && result.tieMultiplier === nextTieMultiplier) {
+    return result;
+  }
+
+  console.warn("[NEURAL_RESULT_RECONCILED]", {
+    id: result.id,
+    resultRoundKey: result.resultRoundKey,
+    expectedSide,
+    roundResult: round.result,
+    bankerScore: round.bankerScore,
+    playerScore: round.playerScore,
+    previousOutcome: result.outcome,
+    nextOutcome,
+    previousKind: result.kind,
+    nextKind,
+  });
+
+  return {
+    ...result,
+    expectedSide,
+    kind: nextKind,
+    outcome: nextOutcome,
+    tieMultiplier: nextTieMultiplier,
+  };
+}
+
+function findServerNeuralResultRound(resultRoundKey: string, dashboard: LiveDashboardData) {
+  const rounds = [
+    ...(Array.isArray(dashboard.rounds) ? dashboard.rounds : []),
+    ...liveValidatorRoundHistory,
+  ];
+  const exact = rounds.find((round) => roundHistoryKey(round) === resultRoundKey);
+  if (exact) return exact;
+
+  const idText = resultRoundKey.match(/(?:^|:)(\d{3,})(?:$|:)/)?.[1];
+  if (idText) {
+    const byId = rounds
+      .slice()
+      .reverse()
+      .find((round) => String(round.id) === idText);
+    if (byId) return byId;
+  }
+
+  const timeText = resultRoundKey.match(/\b\d{1,2}:\d{2}(?::\d{2})?\b/)?.[0];
+  if (timeText) {
+    const byTime = rounds
+      .slice()
+      .reverse()
+      .find((round) => String(round.time || "").includes(timeText));
+    if (byTime) return byTime;
+  }
+
+  return null;
+}
+
+function neuralResultKindFromRoundOutcome(
+  result: NeuralEntryLastResult,
+  outcome: NeuralEntryLastResult["outcome"],
+  state?: NeuralEntryState | null,
+): NeuralEntryLastResult["kind"] {
+  const attempt = normalizeDashboardAttempt(result.attempt) ?? (state?.status === "awaiting_sg" ? "SG" : "G1");
+  if (outcome === "TIE") return attempt === "SG" ? "tie_sg" : "tie_g1";
+  if (outcome === "GREEN") return attempt === "SG" ? "sg" : "g1";
+  return "red";
 }
 
 function serverNeuralEntryKey(reading: NeuralReading) {
@@ -13341,6 +15849,12 @@ function resetDashboardDailyCycle(
       multipliers: emptyTieMultiplierCounts(),
       tiePullers: [],
     },
+    tieRadarHistory: buildTieRadarHistoryAnalysis([], {
+      cycleDate,
+      previous: dashboard.tieRadarHistory,
+    }),
+    monthlyTieStats: preserveCurrentMonthTieStats(dashboard, cycleDate),
+    dailyResultsByModule: {},
     surfAnalyzerScoreboard: {
       totalAlerts: 0,
       hits: 0,
@@ -13385,6 +15899,20 @@ function resetNeuralReadingDailyCounters(reading: DashboardData["neuralReading"]
     sequenceNegative: 0,
     maxSequencePositive: 0,
     maxSequenceNegative: 0,
+  };
+}
+
+function refreshServerTieRadarHistory(
+  dashboard: LiveDashboardData,
+  rounds: Round[] | undefined = liveValidatorRoundHistory,
+): LiveDashboardData {
+  const cycleDate = currentDashboardCycleDate();
+  return {
+    ...dashboard,
+    tieRadarHistory: buildTieRadarHistoryAnalysis(rounds, {
+      cycleDate,
+      previous: dashboard.tieRadarHistory,
+    }),
   };
 }
 
@@ -13610,6 +16138,16 @@ function pickDashboardSections(incoming: Record<string, unknown>): Partial<LiveD
   if (incoming.mainScoreboard) out.mainScoreboard = incoming.mainScoreboard as DashboardData["mainScoreboard"];
   if (incoming.tieAlertScoreboard)
     out.tieAlertScoreboard = incoming.tieAlertScoreboard as DashboardData["tieAlertScoreboard"];
+  if (incoming.tieRadarHistory)
+    out.tieRadarHistory = incoming.tieRadarHistory as DashboardData["tieRadarHistory"];
+  if (incoming.monthlyTieStats)
+    out.monthlyTieStats = incoming.monthlyTieStats as DashboardData["monthlyTieStats"];
+  if (incoming.monthly_tie_stats)
+    out.monthlyTieStats = incoming.monthly_tie_stats as DashboardData["monthlyTieStats"];
+  if (incoming.dailyResultsByModule)
+    out.dailyResultsByModule = incoming.dailyResultsByModule as DashboardData["dailyResultsByModule"];
+  if (incoming.daily_results_by_module)
+    out.dailyResultsByModule = incoming.daily_results_by_module as DashboardData["dailyResultsByModule"];
   if (incoming.surfAnalyzerScoreboard)
     out.surfAnalyzerScoreboard = incoming.surfAnalyzerScoreboard as DashboardData["surfAnalyzerScoreboard"];
   if (incoming.patternMinerSnapshot || incoming.patternMiner)
@@ -13626,6 +16164,30 @@ function pickDashboardSections(incoming: Record<string, unknown>): Partial<LiveD
   if (incoming.latestEntryModeSignalId) out.latestEntryModeSignalId = String(incoming.latestEntryModeSignalId);
   if (incoming.latestEntryModeSignalModes)
     out.latestEntryModeSignalModes = normalizeServerModeList(incoming.latestEntryModeSignalModes);
+  if (incoming.collectorStatus) out.collectorStatus = String(incoming.collectorStatus);
+  if (incoming.collector_status) out.collectorStatus = String(incoming.collector_status);
+  if (incoming.websocketStatus) out.websocketStatus = String(incoming.websocketStatus);
+  if (incoming.websocket_status) out.websocketStatus = String(incoming.websocket_status);
+  if (incoming.wsStatus) out.websocketStatus = String(incoming.wsStatus);
+  if (incoming.lastRoundId !== undefined) out.lastRoundId = String(incoming.lastRoundId);
+  if (incoming.last_round_id !== undefined) out.lastRoundId = String(incoming.last_round_id);
+  if (incoming.lastRoundAt) out.lastRoundAt = String(incoming.lastRoundAt);
+  if (incoming.last_round_at) out.lastRoundAt = String(incoming.last_round_at);
+  if (incoming.publisherStatus) out.publisherStatus = String(incoming.publisherStatus);
+  if (incoming.publisher_status) out.publisherStatus = String(incoming.publisher_status);
+  if (incoming.health) out.health = readRecord(incoming.health);
+  if (incoming.payingNumbers !== undefined) out.payingNumbers = incoming.payingNumbers;
+  if (incoming.paying_numbers !== undefined) out.payingNumbers = incoming.paying_numbers;
+  if (incoming.pressureReading) out.pressureReading = readRecord(incoming.pressureReading);
+  if (incoming.pressure_reading) out.pressureReading = readRecord(incoming.pressure_reading);
+  if (incoming.performanceStats) out.performanceStats = readRecord(incoming.performanceStats);
+  if (incoming.performance_stats) out.performanceStats = readRecord(incoming.performance_stats);
+  if (incoming.validatorStats) out.validatorStats = readRecord(incoming.validatorStats);
+  if (incoming.validator_stats) out.validatorStats = readRecord(incoming.validator_stats);
+  if (incoming.patternHotSignal !== undefined) out.patternHotSignal = incoming.patternHotSignal;
+  if (incoming.pattern_hot_signal !== undefined) out.patternHotSignal = incoming.pattern_hot_signal;
+  if (incoming.aiPatternSignal !== undefined) out.aiPatternSignal = incoming.aiPatternSignal;
+  if (incoming.ai_pattern_signal !== undefined) out.aiPatternSignal = incoming.ai_pattern_signal;
   return out;
 }
 
@@ -13659,6 +16221,8 @@ function resolveSignalImmediatelyFromRound(
 ): DashboardData["currentSignal"] {
   const preservedTerminalSignal = preserveTerminalSignalWhileStale(previousSignal, incomingSignal, receivedNewRound);
   if (preservedTerminalSignal) return preservedTerminalSignal;
+  const preservedOpenSignal = preserveOpenSignalWhileSameRound(previousSignal, incomingSignal, receivedNewRound);
+  if (preservedOpenSignal) return preservedOpenSignal;
   if (!receivedNewRound || !latestRound) return incomingSignal;
   if (terminalSignalStatus(incomingSignal.status) && incomingSignal.lastResult) return incomingSignal;
   if (!isServerEntrySide(previousSignal.side)) return incomingSignal;
@@ -13666,10 +16230,19 @@ function resolveSignalImmediatelyFromRound(
 
   const expectedResult = previousSignal.side === "BANKER" ? "B" : "P";
   if (latestRound.result === "T") {
+    console.info("[SIGNAL_STATE] WAITING_RESULT -> EMPATE", {
+      signalId: previousSignal.id,
+      roundId: latestRound.id,
+    });
     return buildResolvedSignalFromRound(previousSignal, latestRound, "tie");
   }
 
   if (latestRound.result === expectedResult) {
+    console.info("[SIGNAL_STATE] WAITING_RESULT -> GREEN", {
+      signalId: previousSignal.id,
+      roundId: latestRound.id,
+      status: previousSignal.status === "g1" ? "green_g1" : "green",
+    });
     return buildResolvedSignalFromRound(
       previousSignal,
       latestRound,
@@ -13678,6 +16251,11 @@ function resolveSignalImmediatelyFromRound(
   }
 
   if (previousSignal.status === "pending" && signalAllowsG1(previousSignal.protection)) {
+    console.info("[SIGNAL_STATE] ENTRY_CONFIRMED -> WAITING_RESULT", {
+      signalId: previousSignal.id,
+      side: previousSignal.side,
+      nextStatus: "g1",
+    });
     return {
       ...previousSignal,
       status: "g1",
@@ -13685,6 +16263,10 @@ function resolveSignalImmediatelyFromRound(
     };
   }
 
+  console.info("[SIGNAL_STATE] WAITING_RESULT -> RED", {
+    signalId: previousSignal.id,
+    roundId: latestRound.id,
+  });
   return buildResolvedSignalFromRound(previousSignal, latestRound, "red");
 }
 
@@ -13769,6 +16351,33 @@ function preserveTerminalSignalWhileStale(
   return previousSignal;
 }
 
+function preserveOpenSignalWhileSameRound(
+  previousSignal: DashboardData["currentSignal"],
+  incomingSignal: DashboardData["currentSignal"],
+  receivedNewRound: boolean,
+): DashboardData["currentSignal"] | null {
+  if (receivedNewRound) return null;
+  if (!isServerEntrySide(previousSignal.side)) return null;
+  if (previousSignal.status !== "pending" && previousSignal.status !== "g1" && previousSignal.status !== "tie_watch") {
+    return null;
+  }
+  if (terminalSignalStatus(incomingSignal.status)) return null;
+  if (isServerEntrySide(incomingSignal.side) && (incomingSignal.status === "pending" || incomingSignal.status === "g1")) {
+    return null;
+  }
+
+  const startedAt = Date.parse(String(previousSignal.startedAt || ""));
+  if (Number.isFinite(startedAt) && Date.now() - startedAt > DASHBOARD_STALE_SIGNAL_MS) return null;
+
+  console.info("[SIGNAL_STATE] active signal preserved while dashboard catches up", {
+    signalId: previousSignal.id,
+    side: previousSignal.side,
+    status: previousSignal.status,
+    incomingStatus: incomingSignal.status,
+  });
+  return previousSignal;
+}
+
 function buildResolvedSignalFromRound(
   signal: DashboardData["currentSignal"],
   round: Round,
@@ -13782,6 +16391,7 @@ function buildResolvedSignalFromRound(
     side,
     status,
     protection,
+    startedAt: signal.startedAt ?? new Date().toISOString(),
     lastResult: {
       id: resultId,
       side,
@@ -13848,6 +16458,7 @@ function normalizeSignal(
       status: incomingLastResult.status,
       protection: resolvedProtection,
       strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
+      startedAt: readString(signal, "startedAt") || fallback.startedAt || null,
       lastResult: {
         ...incomingLastResult,
         side,
@@ -13885,6 +16496,7 @@ function normalizeSignal(
       status: terminalStatus,
       protection,
       strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
+      startedAt: readString(signal, "startedAt") || fallback.startedAt || null,
       lastResult,
     };
   }
@@ -13897,6 +16509,7 @@ function normalizeSignal(
       status: incomingLastResult.status,
       protection: resolvedProtection,
       strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
+      startedAt: readString(signal, "startedAt") || fallback.startedAt || null,
       lastResult: {
         ...incomingLastResult,
         side,
@@ -13911,6 +16524,10 @@ function normalizeSignal(
     status,
     protection,
     strength: clampPercent(signal.strength ?? signal.confidence ?? signal.forca ?? fallback.strength),
+    startedAt:
+      status === "pending" || status === "g1"
+        ? readString(signal, "startedAt") || fallback.startedAt || new Date().toISOString()
+        : null,
     lastResult: null,
   };
 }
@@ -14448,11 +17065,85 @@ function roundHistoryKey(round: Round) {
 }
 
 function compareRoundHistory(a: Round, b: Round) {
+  const recordedAtCompare = compareRoundRecordedAt(a, b);
+  if (recordedAtCompare) return recordedAtCompare;
+
   const idCompare = a.id - b.id;
   if (idCompare) return idCompare;
   const timeCompare = a.time.localeCompare(b.time);
   if (timeCompare) return timeCompare;
   return `${a.result}:${a.bankerScore}:${a.playerScore}`.localeCompare(`${b.result}:${b.bankerScore}:${b.playerScore}`);
+}
+
+function compareRoundRecordedAt(a: Round, b: Round) {
+  const left = roundRecordedAtMs(a);
+  const right = roundRecordedAtMs(b);
+  if (Number.isFinite(left) && Number.isFinite(right)) {
+    const diff = left - right;
+    return Math.abs(diff) >= 1000 ? diff : 0;
+  }
+  if (Number.isFinite(left)) return 1;
+  if (Number.isFinite(right)) return -1;
+  return 0;
+}
+
+function roundRecordedAtMs(round: Round | Record<string, unknown> | null | undefined) {
+  if (!round) return Number.NaN;
+  const record = round as unknown as Record<string, unknown>;
+  const recordedAt =
+    readString(record, "recordedAt") ||
+    readString(record, "recorded_at") ||
+    readString(record, "createdAt") ||
+    readString(record, "created_at");
+  const recordedAtMs = Date.parse(recordedAt);
+  if (Number.isFinite(recordedAtMs)) return coerceRoundRecordedAtMs(recordedAtMs, recordedAt);
+
+  const time = readString(record, "time") || readString(record, "round_time");
+  const directTimeMs = Date.parse(time);
+  if (Number.isFinite(directTimeMs)) return coerceRoundRecordedAtMs(directTimeMs, time);
+  return /^\d{1,2}:\d{2}(?::\d{2})?$/.test(time) ? roundWallClockRecordedAtMs(time) : Number.NaN;
+}
+
+function coerceRoundRecordedAtMs(valueMs: number, rawValue = "") {
+  if (!Number.isFinite(valueMs)) return valueMs;
+  const maxFutureMs = Date.now() + 10 * 60_000;
+  if (valueMs > maxFutureMs) {
+    const wallClockMs = roundWallClockRecordedAtMs(rawValue);
+    if (Number.isFinite(wallClockMs)) return wallClockMs;
+  }
+  let normalized = valueMs;
+  while (normalized > maxFutureMs) normalized -= 86_400_000;
+  return normalized;
+}
+
+function roundWallClockRecordedAtMs(value: unknown) {
+  const match = String(value || "").match(/(?:T|\b)(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return Number.NaN;
+  const hour = Math.max(0, Math.min(23, Math.floor(Number(match[1]) || 0)));
+  const minute = Math.max(0, Math.min(59, Math.floor(Number(match[2]) || 0)));
+  const second = Math.max(0, Math.min(59, Math.floor(Number(match[3]) || 0)));
+  const [year, month, day] = currentDashboardCycleDate().split("-").map((part) => Math.floor(Number(part) || 0));
+  let candidate = Date.UTC(year, Math.max(0, month - 1), day, hour + 3, minute, second, 0);
+  const maxFutureMs = Date.now() + 10 * 60_000;
+  if (candidate > maxFutureMs) candidate -= 86_400_000;
+  if (Date.now() - candidate > 18 * 60 * 60_000) candidate += 86_400_000;
+  return candidate;
+}
+
+function shouldRepairDashboardFromStoredRound(storedRound: Round, currentRound: Round | null) {
+  if (!currentRound) return true;
+  if (compareRoundHistory(storedRound, currentRound) > 0) return true;
+
+  const storedRoundId = Math.floor(Number(storedRound.id) || 0);
+  const currentRoundId = Math.floor(Number(currentRound.id) || 0);
+  if (!storedRoundId || !currentRoundId || storedRoundId <= currentRoundId) return false;
+
+  const storedAt = roundRecordedAtMs(storedRound);
+  const currentAt = roundRecordedAtMs(currentRound);
+  const storedLooksRecent = !Number.isFinite(storedAt) || Math.abs(Date.now() - storedAt) <= 6 * 60 * 60_000;
+  const sameRealtimeWindow =
+    !Number.isFinite(storedAt) || !Number.isFinite(currentAt) || Math.abs(storedAt - currentAt) <= 6 * 60 * 60_000;
+  return storedLooksRecent && sameRealtimeWindow;
 }
 
 function clampRoundHistoryLimit(value: string | null) {
@@ -14477,7 +17168,7 @@ async function fetchStoredValidatorRounds(env: unknown, limit: number, tableId =
     [
       "select=id,table_id,round_id,result,banker_score,player_score,round_time,created_at",
       `table_id=eq.${encodeURIComponent(tableId)}`,
-      "order=round_id.desc",
+      "order=created_at.desc,round_id.desc",
       `limit=${Math.max(1, Math.min(MAX_SERVER_ROUND_HISTORY, limit))}`,
     ].join("&"),
   );
@@ -14626,17 +17317,17 @@ function clampPercent(value: unknown) {
 }
 
 async function isDashboardAuthorized(request: Request, _url: URL, env: unknown) {
+  const dashboardToken = dashboardRequestToken(request);
   const acceptedTokens = [
     readNamedServerSecret(env, "SNIPER_DASHBOARD_TOKEN", ""),
     readNamedServerSecret(env, "SNIPER_PUBLISHER_TOKEN", ""),
     readNamedServerSecret(env, "SNIPER_ADMIN_TOKEN", ""),
     readNamedServerSecret(env, "SNIPER_V2_DIAG_TOKEN", ""),
   ].filter(Boolean);
-  const headerToken = getBearerToken(request);
-  if (headerToken && acceptedTokens.includes(headerToken)) return true;
-  if (!headerToken) return false;
+  if (dashboardToken && acceptedTokens.includes(dashboardToken)) return true;
+  if (!dashboardToken) return false;
 
-  const session = await verifySessionToken(env, headerToken);
+  const session = await verifySessionToken(env, dashboardToken);
   if (!session) return false;
   if (session.scope !== "owner" && session.scope !== "admin_approver") return false;
   return sessionMatchesRequestBinding(env, request, session);
@@ -14713,6 +17404,81 @@ async function isDashboardReadAuthorized(request: Request, url: URL, env: unknow
   return sessionCheck.ok;
 }
 
+async function isDashboardReadAuthorizedForDashboardGet(request: Request, url: URL, env: unknown) {
+  const tokenType = dashboardRequestTokenType(request);
+  const timings = { auth: 0, profile: 0, subscription: 0 };
+  const token = dashboardRequestToken(request);
+
+  if (tokenType === "client" && token) {
+    const cacheKey = dashboardClientAuthCacheKey(request, token);
+    const cached = dashboardClientAuthCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { ok: cached.ok, tokenType: cached.tokenType, timings };
+    }
+  }
+
+  if (tokenType === "client" && token) {
+    const authStartedAt = Date.now();
+    const session = await verifySessionToken(env, token);
+    if (!session || session.scope !== "client") {
+      timings.auth = Date.now() - authStartedAt;
+      return { ok: false, tokenType, timings };
+    }
+
+    const bindingCheck = await validateClientSessionBinding(env, request, session, {});
+    timings.auth = Date.now() - authStartedAt;
+    if (!bindingCheck.ok) return { ok: false, tokenType, timings };
+
+    const profileStartedAt = Date.now();
+    const client = findClientByEmail(session.email);
+    timings.profile = Date.now() - profileStartedAt;
+    if (!client) {
+      const subscriptionStartedAt = Date.now();
+      const allowedBySignedSession = Boolean(session.approved && session.role === "user" && session.scope === "client");
+      timings.subscription = Date.now() - subscriptionStartedAt;
+      if (allowedBySignedSession) {
+        dashboardClientAuthCache.set(dashboardClientAuthCacheKey(request, token), {
+          ok: true,
+          tokenType,
+          expiresAt: Date.now() + DASHBOARD_CLIENT_AUTH_CACHE_TTL_MS,
+        });
+        pruneDashboardClientAuthCache();
+      }
+      return { ok: allowedBySignedSession, tokenType, timings };
+    }
+
+    const subscriptionStartedAt = Date.now();
+    const allowed = clientHasLiveAccess(client);
+    timings.subscription = Date.now() - subscriptionStartedAt;
+    if (allowed) {
+      dashboardClientAuthCache.set(dashboardClientAuthCacheKey(request, token), {
+        ok: true,
+        tokenType,
+        expiresAt: Date.now() + DASHBOARD_CLIENT_AUTH_CACHE_TTL_MS,
+      });
+      pruneDashboardClientAuthCache();
+    }
+    return { ok: allowed, tokenType, timings };
+  }
+
+  const authStartedAt = Date.now();
+  const ok = await isDashboardReadAuthorized(request, url, env);
+  timings.auth = Date.now() - authStartedAt;
+  return { ok, tokenType, timings };
+}
+
+function dashboardClientAuthCacheKey(request: Request, token: string) {
+  return `${token}:${request.headers.get("user-agent") || ""}`;
+}
+
+function pruneDashboardClientAuthCache() {
+  if (dashboardClientAuthCache.size < 1000) return;
+  const now = Date.now();
+  for (const [key, value] of dashboardClientAuthCache.entries()) {
+    if (value.expiresAt <= now) dashboardClientAuthCache.delete(key);
+  }
+}
+
 async function getAdminRequestRole(request: Request, env: unknown): Promise<AdminRole | null> {
   const headerToken = getBearerToken(request);
   if (!headerToken) return null;
@@ -14723,6 +17489,11 @@ async function getAdminRequestRole(request: Request, env: unknown): Promise<Admi
   if (session?.scope === "admin_approver" && (await sessionMatchesRequestBinding(env, request, session))) {
     return "admin";
   }
+  if (session?.scope === "client" && (await sessionMatchesRequestBinding(env, request, session))) {
+    const email = session.email.toLowerCase();
+    if (getAdminEmails(env).includes(email)) return "owner";
+    if (getAdminApproverEmails(env).includes(email)) return "admin";
+  }
   return null;
 }
 
@@ -14730,6 +17501,31 @@ function getBearerToken(request: Request) {
   const authorization = request.headers.get("authorization") || "";
   if (!authorization.trim().toLowerCase().startsWith("bearer ")) return "";
   return authorization.replace(/^Bearer\s+/i, "").trim();
+}
+
+function dashboardRequestQueryToken(request: Request) {
+  try {
+    const url = new URL(request.url);
+    return url.searchParams.get("access_token") || url.searchParams.get("token") || "";
+  } catch {
+    return "";
+  }
+}
+
+function dashboardRequestToken(request: Request) {
+  return getBearerToken(request) || dashboardRequestQueryToken(request);
+}
+
+function dashboardRequestTokenType(request: Request) {
+  if (request.headers.get("x-sniper-publisher-token")) return "publisher";
+  if (isOfficialDashboardPublisherRequest(request)) return "publisher";
+  const token = dashboardRequestToken(request);
+  if (!token) return "none";
+  const payload = decodeJwtPayload(token);
+  const scope = readString(payload, "scope");
+  if (scope === "client") return "client";
+  if (scope === "owner" || scope === "admin_approver") return "admin";
+  return "bearer";
 }
 
 function getAdminEmails(env: unknown) {
@@ -14833,7 +17629,7 @@ function getHublaDefaultPlan(env: unknown): BillingPlanId {
   return plan && plan !== "free" ? plan : "vip";
 }
 
-function getHublaCheckoutUrl(plan: BillingPlanId, env: unknown) {
+function getSecretHublaCheckoutUrl(plan: BillingPlanId, env: unknown) {
   if (plan === "free") return "";
   const candidates =
     plan === "premium"
@@ -14846,8 +17642,18 @@ function getHublaCheckoutUrl(plan: BillingPlanId, env: unknown) {
   return "";
 }
 
+function getHublaCheckoutUrl(plan: BillingPlanId, env: unknown) {
+  if (plan === "free") return "";
+  const offer = getPlanOffer(plan, env);
+  if (offer.isActive && offer.checkoutUrl && /^https?:\/\//i.test(offer.checkoutUrl)) {
+    return offer.checkoutUrl;
+  }
+  return offer.isActive ? getSecretHublaCheckoutUrl(plan, env) : "";
+}
+
 function getBillingPlans(env: unknown) {
-  return (["free", "premium", "vip"] as BillingPlanId[]).map((plan) => {
+  return (["free", "vip", "premium"] as BillingPlanId[])
+    .map((plan) => {
     const config = getBillingPlan(plan, env);
     const hublaCheckoutUrl = getHublaCheckoutUrl(config.id, env);
     return {
@@ -14855,13 +17661,26 @@ function getBillingPlans(env: unknown) {
       name: config.name,
       description: config.description,
       amount: config.amount,
+      oldPrice: config.oldPrice,
+      billingPeriod: config.billingPeriod,
       currency: getMercadoPagoCurrency(env),
       durationDays: config.durationDays,
       features: config.features,
-      checkoutEnabled: config.id !== "free" && (Boolean(hublaCheckoutUrl) || Boolean(getMercadoPagoAccessToken(env))),
+      isActive: config.isActive,
+      isFeatured: config.isFeatured,
+      badgeText: config.badgeText,
+      status: config.status,
+      sortOrder: config.sortOrder,
+      checkoutEnabled:
+        config.id !== "free" &&
+        config.isActive &&
+        config.status !== "sold_out" &&
+        (Boolean(hublaCheckoutUrl) || Boolean(getMercadoPagoAccessToken(env))),
       checkoutProvider: hublaCheckoutUrl ? "hubla" : getMercadoPagoAccessToken(env) ? "mercadopago" : "",
     };
-  });
+  })
+  .filter((plan) => plan.id === "free" || plan.isActive)
+  .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
 }
 
 function getBillingPlan(plan: BillingPlanId, env: unknown) {
@@ -14879,21 +17698,176 @@ function getBillingPlan(plan: BillingPlanId, env: unknown) {
     vip: {
       id: "vip" as const,
       name: "VIP",
-      description: "Acesso VIP mensal ao painel operacional.",
+      description: "Porta de entrada para a plataforma, dashboards analiticos, calendario, historico, relatorios e area de estudos.",
       amount: vipAmount,
       durationDays: 30,
-      features: ["Painel ao vivo", "Sinais protegidos", "Surf, Tie e numero pagante", "Assistente IA"],
+      features: [
+        "Acesso a plataforma",
+        "Dashboards analiticos",
+        "Calendario de historico",
+        "Relatorios de leitura",
+        "Area de estudos",
+        "Atualizacoes da plataforma",
+      ],
     },
     premium: {
       id: "premium" as const,
       name: "Premium",
-      description: "Acesso Premium mensal com recursos completos.",
+      description: "Plano mais completo com tudo do VIP, comunidade educacional premium, aulas, estudos de caso e suporte prioritario.",
       amount: premiumAmount,
       durationDays: 30,
-      features: ["Tudo do VIP", "Narracao IA", "Leituras completas", "Prioridade operacional"],
+      features: [
+        "Tudo do plano VIP",
+        "Comunidade educacional premium",
+        "Aulas e estudos de caso",
+        "Suporte prioritario",
+        "Conteudos avancados",
+        "Prioridade em novas funcoes",
+        "Acompanhamento completo",
+      ],
     },
   };
-  return plans[plan];
+  const config = plans[plan];
+  if (plan === "free") {
+    return {
+      ...config,
+      oldPrice: 0,
+      billingPeriod: "monthly" as const,
+      isActive: true,
+      isFeatured: false,
+      badgeText: "",
+      status: "active" as const,
+      sortOrder: 0,
+    };
+  }
+  const offer = getPlanOffer(plan, env);
+  return {
+    ...config,
+    name: offer.name || config.name,
+    description: offer.description || config.description,
+    amount: offer.price,
+    oldPrice: offer.oldPrice,
+    billingPeriod: offer.billingPeriod,
+    features: offer.benefits.length ? offer.benefits : config.features,
+    isActive: offer.isActive,
+    isFeatured: offer.isFeatured,
+    badgeText: offer.badgeText,
+    status: offer.status,
+    sortOrder: offer.sortOrder,
+  };
+}
+
+function createDefaultPlanOffers(env?: unknown): Record<BillingPlanOfferId, PlanOfferSettings> {
+  const now = "";
+  return {
+    vip: {
+      id: "vip",
+      name: "VIP",
+      slug: "vip",
+      description: "Porta de entrada para a plataforma, dashboards analiticos, calendario, historico, relatorios e area de estudos.",
+      price: readServerNumber(env, "MERCADOPAGO_VIP_PRICE", 297),
+      oldPrice: 497,
+      billingPeriod: "monthly",
+      isActive: true,
+      isFeatured: false,
+      badgeText: "Oferta ativa",
+      checkoutUrl: getSecretHublaCheckoutUrl("vip", env),
+      benefits: [
+        "Acesso a plataforma",
+        "Dashboards analiticos",
+        "Calendario de historico",
+        "Relatorios de leitura",
+        "Area de estudos",
+        "Atualizacoes da plataforma",
+      ],
+      sortOrder: 1,
+      accessLevel: "vip",
+      status: "promo",
+      updatedAt: now,
+      updatedBy: "",
+    },
+    premium: {
+      id: "premium",
+      name: "Premium",
+      slug: "premium",
+      description: "Plano mais completo com tudo do VIP, comunidade educacional premium, aulas, estudos de caso e suporte prioritario.",
+      price: readServerNumber(env, "MERCADOPAGO_PREMIUM_PRICE", 497),
+      oldPrice: 697,
+      billingPeriod: "monthly",
+      isActive: true,
+      isFeatured: true,
+      badgeText: "Com salas de sinais",
+      checkoutUrl: getSecretHublaCheckoutUrl("premium", env),
+      benefits: [
+        "Tudo do plano VIP",
+        "Comunidade educacional premium",
+        "Aulas e estudos de caso",
+        "Suporte prioritario",
+        "Conteudos avancados",
+        "Prioridade em novas funcoes",
+        "Acompanhamento completo",
+      ],
+      sortOrder: 2,
+      accessLevel: "premium",
+      status: "promo",
+      updatedAt: now,
+      updatedBy: "",
+    },
+  };
+}
+
+function getPlanOffer(plan: BillingPlanId, env: unknown): PlanOfferSettings {
+  if (plan === "free") return createDefaultPlanOffers(env).vip;
+  const defaults = createDefaultPlanOffers(env)[plan];
+  const current = livePlanOffers[plan] || defaults;
+  return normalizePlanOffer(plan, current, defaults);
+}
+
+function normalizePlanOffer(
+  plan: BillingPlanOfferId,
+  value: Record<string, unknown> | PlanOfferSettings,
+  fallback = createDefaultPlanOffers()[plan],
+): PlanOfferSettings {
+  const record = readRecord(value);
+  const status = normalizePlanOfferStatus(readString(record, "status"), fallback.status);
+  const benefitsValue = Array.isArray(record.benefits) ? record.benefits : Array.isArray(record.features) ? record.features : [];
+  const benefits = benefitsValue
+    .map((item) => readString(item))
+    .filter(Boolean)
+    .slice(0, 12);
+  const price = readOfferNumber(record.price, fallback.price, 0, 50000);
+  const oldPrice = readOfferNumber(record.oldPrice ?? record.old_price, fallback.oldPrice, 0, 50000);
+  return {
+    id: plan,
+    name: readString(record, "name") || fallback.name,
+    slug: plan,
+    description: readString(record, "description") || fallback.description,
+    price,
+    oldPrice,
+    billingPeriod: "monthly",
+    isActive: typeof record.isActive === "boolean" ? record.isActive : status !== "inactive" && status !== "sold_out",
+    isFeatured: typeof record.isFeatured === "boolean" ? record.isFeatured : fallback.isFeatured,
+    badgeText: readString(record, "badgeText") || readString(record, "badge_text") || fallback.badgeText,
+    checkoutUrl: readString(record, "checkoutUrl") || readString(record, "checkout_url") || fallback.checkoutUrl,
+    benefits: benefits.length ? benefits : fallback.benefits,
+    sortOrder: Math.round(readOfferNumber(record.sortOrder ?? record.sort_order, fallback.sortOrder, 1, 50)),
+    accessLevel: plan,
+    status,
+    updatedAt: readString(record, "updatedAt") || readString(record, "updated_at") || fallback.updatedAt,
+    updatedBy: readString(record, "updatedBy") || readString(record, "updated_by") || fallback.updatedBy,
+  };
+}
+
+function normalizePlanOfferStatus(value: string, fallback: PlanOfferStatus): PlanOfferStatus {
+  const text = value.trim().toLowerCase();
+  if (text === "active" || text === "inactive" || text === "promo" || text === "sold_out") return text;
+  return fallback;
+}
+
+function readOfferNumber(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number(String(value ?? "").replace(",", "."));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
 }
 
 function readServerNumber(env: unknown, key: string, fallback: number) {
@@ -14910,6 +17884,11 @@ function normalizeBillingPlanId(value: unknown): BillingPlanId | null {
   if (text === "free" || text === "premium" || text === "vip") return text;
   if (text === "mensal" || text === "monthly") return "vip";
   return null;
+}
+
+function normalizeBillingPlanOfferId(value: unknown): BillingPlanOfferId | null {
+  const plan = normalizeBillingPlanId(value);
+  return plan === "premium" || plan === "vip" ? plan : null;
 }
 
 function normalizeHublaWebhookPayload(payload: Record<string, unknown>, request: Request, env: unknown) {
@@ -15661,7 +18640,7 @@ async function hydrateClientFromBilling(env: unknown, email: string) {
     detail: "Cliente reconstruido a partir das tabelas de assinatura/pagamento.",
   });
   await saveLiveState(env);
-  return findClientByEmail(email) || client;
+  return client;
 }
 
 async function loadBillingClientByEmail(env: unknown, email: string) {
@@ -15692,19 +18671,53 @@ async function loadBillingClientByEmail(env: unknown, email: string) {
 async function hydrateClientsFromBillingUsers(env: unknown) {
   if (!getSupabasePersistenceConfig(env)) return false;
 
-  const users = await fetchSupabaseRowsPaged(env, "users", "select=*&order=created_at.desc.nullslast");
-  if (!users.length) return false;
+  const [users, subscriptions, payments] = await Promise.all([
+    fetchSupabaseRowsPaged(env, "users", "select=*&order=created_at.desc.nullslast"),
+    fetchSupabaseRowsPaged(env, "subscriptions", "select=*&order=updated_at.desc.nullslast"),
+    fetchSupabaseRowsPaged(env, "payments", "select=*&order=updated_at.desc.nullslast"),
+  ]);
+  if (!users.length && !subscriptions.length && !payments.length) return false;
+
+  const usersByEmail = groupBillingRowsByEmail(users);
+  const subscriptionsByEmail = groupBillingRowsByEmail(subscriptions);
+  const paymentsByEmail = groupBillingRowsByEmail(payments);
+  const emails = new Set([
+    ...usersByEmail.keys(),
+    ...subscriptionsByEmail.keys(),
+    ...paymentsByEmail.keys(),
+  ]);
 
   let changed = false;
-  for (const user of users) {
-    const email = readString(user, "email").toLowerCase();
-    if (!email || isEntityDeleted(user)) continue;
-    const client = billingClientFromPersistedRows(env, email, user, {}, {});
+  for (const email of emails) {
+    const user = sortBillingRows(usersByEmail.get(email) || []).find((row) => !isEntityDeleted(row)) || {};
+    const subscription = pickBillingSubscription(subscriptionsByEmail.get(email) || []);
+    const payment = pickBillingPayment(paymentsByEmail.get(email) || []);
+    if (!hasRecordFields(user) && !hasRecordFields(subscription) && !hasRecordFields(payment)) continue;
+
+    const client = billingClientFromPersistedRows(env, email, user, subscription, payment);
     if (!client || isEntityDeleted(client)) continue;
     upsertLiveClient(client);
     upsertRecipientFromClient(client);
     changed = true;
   }
+  return changed;
+}
+
+function groupBillingRowsByEmail(rows: Record<string, unknown>[]) {
+  const grouped = new Map<string, Record<string, unknown>[]>();
+  for (const row of rows) {
+    const email = readString(row, "email").toLowerCase();
+    if (!email) continue;
+    const existing = grouped.get(email) || [];
+    existing.push(row);
+    grouped.set(email, existing);
+  }
+  return grouped;
+}
+
+async function hydrateClientsFromBillingUsersAndSave(env: unknown) {
+  const changed = await hydrateClientsFromBillingUsers(env);
+  if (changed) await saveLiveState(env);
   return changed;
 }
 
@@ -15736,7 +18749,13 @@ async function recoverClientRegistryForAuth(env: unknown, email: string, reason:
   }
 
   if (!findClientByEmail(cleanEmail) && !findRecipientByEmail(cleanEmail)) {
-    recovered = (await hydrateClientsFromBillingUsers(env)) || recovered;
+    recovered =
+      (await withTimeout(
+        hydrateClientsFromBillingUsers(env),
+        LIVE_STATE_IO_TIMEOUT_MS,
+        "hidratar usuarios persistidos para auth",
+        false,
+      )) || recovered;
   }
 
   const client =
@@ -15764,24 +18783,39 @@ function billingClientFromPersistedRows(
   payment: Record<string, unknown>,
 ) {
   const paidAt = readString(payment, "paid_at") || readString(payment, "created_at");
+  const userPlan = normalizeBillingPlanId(readString(user, "plan"));
+  const subscriptionPlan = normalizeBillingPlanId(readString(subscription, "plan"));
+  const paymentPlan = normalizeBillingPlanId(readString(payment, "plan"));
+  const userExpiresAt = readString(user, "expires_at");
+  const subscriptionExpiresAt = readString(subscription, "expires_at");
+  const paymentExpiresAt = readString(payment, "expires_at");
+  const subscriptionActive = billingSubscriptionIsActive(subscription, subscriptionExpiresAt);
+  const paymentActive =
+    billingPaymentIsPaid(payment) &&
+    Boolean(paymentExpiresAt || subscriptionExpiresAt || userExpiresAt) &&
+    !isExpiredIso(paymentExpiresAt || subscriptionExpiresAt || userExpiresAt);
+  const plan =
+    (subscriptionActive && subscriptionPlan) ||
+    (paymentActive && paymentPlan) ||
+    userPlan ||
+    subscriptionPlan ||
+    paymentPlan ||
+    "free";
+  const planConfig = getBillingPlan(plan, env);
   const startsAt =
+    (subscriptionActive ? readString(subscription, "starts_at") : "") ||
+    (paymentActive ? paidAt.slice(0, 10) : "") ||
     readString(user, "starts_at") ||
     readString(subscription, "starts_at") ||
     paidAt.slice(0, 10) ||
     readString(user, "created_at") ||
     todayIso();
-  const plan =
-    normalizeBillingPlanId(readString(user, "plan")) ||
-    normalizeBillingPlanId(readString(subscription, "plan")) ||
-    normalizeBillingPlanId(readString(payment, "plan")) ||
-    "free";
-  const planConfig = getBillingPlan(plan, env);
   const expiresAt =
-    readString(user, "expires_at") ||
-    readString(subscription, "expires_at") ||
+    (subscriptionActive ? subscriptionExpiresAt : "") ||
+    (paymentActive ? paymentExpiresAt || subscriptionExpiresAt || userExpiresAt : "") ||
+    userExpiresAt ||
+    subscriptionExpiresAt ||
     (billingPaymentIsPaid(payment) ? addDaysIso(startsAt, planConfig.durationDays) : "");
-  const subscriptionActive = billingSubscriptionIsActive(subscription, expiresAt);
-  const paymentActive = billingPaymentIsPaid(payment) && Boolean(expiresAt) && !isExpiredIso(expiresAt);
   const persistedStatus = readString(user, "access_status").toLowerCase();
   const trialActive = persistedStatus === "trial" && Boolean(expiresAt) && !isExpiredIso(expiresAt);
   const enabled =
@@ -15791,7 +18825,9 @@ function billingClientFromPersistedRows(
     trialActive ||
     ["approved", "active", "manual_vip"].includes(persistedStatus);
   const accessStatus =
-    persistedStatus === "trial" && isExpiredIso(expiresAt)
+    subscriptionActive || paymentActive
+      ? "approved"
+      : persistedStatus === "trial" && isExpiredIso(expiresAt)
       ? "expired"
       : persistedStatus ||
         (enabled
@@ -15939,10 +18975,38 @@ async function persistBillingUser(env: unknown, client: Record<string, unknown>)
   return persistSupabaseRow(env, "users", baseRow);
 }
 
-async function persistClientRegistryAfterClientChange(env: unknown, client: Record<string, unknown>, reason: string) {
-  const userPersisted = await persistBillingUser(env, client);
-  const saveStatus = await saveLiveState(env);
+async function persistClientRegistryAfterClientChange(
+  env: unknown,
+  client: Record<string, unknown>,
+  reason: string,
+  ctx?: ExecutionContext,
+) {
   const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
+  const saveStatusPromise = saveLiveState(env);
+  const userPersisted = await withTimeout(
+    persistBillingUser(env, client),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    `persistir usuario alterado (${reason})`,
+    false,
+  );
+  const saveStatus = userPersisted
+    ? await withTimeout(
+        saveStatusPromise,
+        DASHBOARD_EMPTY_SNAPSHOT_REPAIR_TIMEOUT_MS,
+        `salvar snapshot de clientes (${reason})`,
+        liveStateSaveStatus,
+      )
+    : await withTimeout(
+        saveStatusPromise,
+        LIVE_STATE_IO_TIMEOUT_MS,
+        `salvar snapshot de clientes (${reason})`,
+        liveStateSaveStatus,
+      );
+
+  if (userPersisted && !saveStatus.durable) {
+    runBackgroundTask(ctx, saveStatusPromise, `finalizar snapshot de clientes (${reason})`);
+  }
+
   const ok = !durableConfigured || saveStatus.durable || userPersisted;
 
   if (!ok) {
@@ -16376,6 +19440,11 @@ function findClientByEmail(email: string) {
   return liveClients.find((item) => readString(item, "email").toLowerCase() === cleanEmail) || null;
 }
 
+function findClientsByEmail(email: string) {
+  const cleanEmail = email.trim().toLowerCase();
+  return liveClients.filter((item) => readString(item, "email").toLowerCase() === cleanEmail);
+}
+
 function findRecipientByEmail(email: string) {
   const cleanEmail = email.trim().toLowerCase();
   return liveRecipients.find((item) => readString(item, "email").toLowerCase() === cleanEmail) || null;
@@ -16403,17 +19472,36 @@ async function resolveClientForAuth(env: unknown, email: string, reason: string)
   if (!cleanEmail) return null;
 
   let client = bestClientForAuth([
-    findClientByEmail(cleanEmail),
+    ...findClientsByEmail(cleanEmail),
     syncClientFromRecipientEmail(cleanEmail),
     syncClientFromAdminUserEmail(env, cleanEmail),
   ]);
   if (clientHasPaidLiveAccess(client)) return client;
 
-  const billingClient = await hydrateClientFromBilling(env, cleanEmail);
+  const localPlan = readString(client || {}, "plan").toLowerCase();
+  const hasLocalPassword = Boolean(readString(client || {}, "password_hash") || readString(client || {}, "password"));
+  const localStatus = readString(client || {}, "access_status").toLowerCase();
+  if (
+    client &&
+    hasLocalPassword &&
+    localPlan !== "premium" &&
+    localPlan !== "vip" &&
+    localStatus !== "expired" &&
+    !isExpiredIso(readString(client, "expires_at"))
+  ) {
+    return client;
+  }
+
+  const billingClient = await withTimeout(
+    hydrateClientFromBilling(env, cleanEmail),
+    LIVE_STATE_IO_TIMEOUT_MS,
+    `hidratar cliente para auth (${reason})`,
+    null,
+  );
   client = bestClientForAuth([
     client,
     billingClient,
-    findClientByEmail(cleanEmail),
+    ...findClientsByEmail(cleanEmail),
     syncClientFromRecipientEmail(cleanEmail),
     syncClientFromAdminUserEmail(env, cleanEmail),
   ]);
@@ -16422,7 +19510,7 @@ async function resolveClientForAuth(env: unknown, email: string, reason: string)
   await recoverClientRegistryForAuth(env, cleanEmail, `${reason}_premium_registry`, true);
   client = bestClientForAuth([
     client,
-    findClientByEmail(cleanEmail),
+    ...findClientsByEmail(cleanEmail),
     syncClientFromRecipientEmail(cleanEmail),
     syncClientFromAdminUserEmail(env, cleanEmail),
   ]);
@@ -17073,10 +20161,24 @@ async function validateClientSessionBinding(
   const binding = await requestSessionBinding(env, request);
 
   if (session.ua && session.ua !== binding.userAgentHash) {
+    if (clientSessionAllowsUserAgentRefresh(session, client)) {
+      return { ok: true, reason: "approved_client_user_agent_changed", ...binding };
+    }
     return { ok: false, reason: "user_agent_changed", ...binding };
   }
 
   return { ok: true, reason: "", ...binding };
+}
+
+function clientSessionAllowsUserAgentRefresh(session: SessionPayload, client: Record<string, unknown>) {
+  if (session.scope !== "client" || session.role !== "user" || !session.approved) return false;
+
+  const sessionPlan = String(session.plan || "").toLowerCase();
+  const clientPlan = readString(client, "plan").toLowerCase();
+  const plan = clientPlan || sessionPlan;
+  if (plan !== "premium" && plan !== "vip") return false;
+
+  return Object.keys(client).length === 0 || clientHasLiveAccess(client);
 }
 
 async function sessionMatchesRequestBinding(env: unknown, request: Request, session: SessionPayload) {
@@ -17266,10 +20368,28 @@ function recordAccessEvent(type: string, source: Record<string, unknown>) {
     country: readString(source, "country"),
     risk: readString(source, "risk"),
     detail: readString(source, "detail"),
+    route: readString(source, "route"),
+    method: readString(source, "method"),
+    token_type: readString(source, "token_type"),
     ip_hash: readString(source, "ip_hash"),
     user_agent_hash: readString(source, "user_agent_hash"),
   };
   liveAccessEvents = [event, ...liveAccessEvents].slice(0, 200);
+}
+
+async function recordDeniedDashboardAccess(env: unknown, request: Request, url: URL, type: string) {
+  const binding = await requestSessionBinding(env, request);
+  const tokenType = dashboardRequestTokenType(request);
+  recordAccessEvent(type, {
+    risk: url.pathname === "/dashboard/publish" || request.method !== "GET" ? "high" : "medium",
+    detail: `Acesso negado em ${request.method} ${url.pathname}.`,
+    route: url.pathname,
+    method: request.method,
+    token_type: tokenType,
+    ip_hash: binding.ipHash,
+    user_agent_hash: binding.userAgentHash,
+  });
+  void saveLiveState(env);
 }
 
 function summarizeSecurityEvents() {
@@ -17374,13 +20494,35 @@ function syncAdminManagedUsers(env?: unknown) {
   for (const user of liveAdminUsers) {
     const normalized = normalizeAdminManagedUser(user, env);
     const email = readString(normalized, "email").toLowerCase();
-    if (email) byEmail.set(email, { ...(byEmail.get(email) || {}), ...normalized });
+    if (email) byEmail.set(email, mergeAdminManagedUserRecords(byEmail.get(email), normalized, env));
+  }
+
+  const subscriptionsByEmail = new Map<string, Record<string, unknown>[]>();
+  for (const row of liveSubscriptions) {
+    const email = readString(row, "email").toLowerCase();
+    if (!email || isEntityDeleted(row)) continue;
+    subscriptionsByEmail.set(email, [...(subscriptionsByEmail.get(email) || []), row]);
+  }
+
+  const paymentsByEmail = new Map<string, Record<string, unknown>[]>();
+  for (const row of livePayments) {
+    const email = readString(row, "email").toLowerCase();
+    if (!email || isEntityDeleted(row)) continue;
+    paymentsByEmail.set(email, [...(paymentsByEmail.get(email) || []), row]);
+  }
+
+  for (const email of new Set([...subscriptionsByEmail.keys(), ...paymentsByEmail.keys()])) {
+    const subscription = pickBillingSubscription(subscriptionsByEmail.get(email) || []);
+    const payment = pickBillingPayment(paymentsByEmail.get(email) || []);
+    const client = billingClientFromPersistedRows(env, email, {}, subscription, payment);
+    const user = adminManagedUserFromClient(client, env);
+    if (email) byEmail.set(email, mergeAdminManagedUserRecords(byEmail.get(email), user, env));
   }
 
   for (const client of [...liveRecipients, ...liveClients]) {
     const user = adminManagedUserFromClient(client, env);
     const email = readString(user, "email").toLowerCase();
-    if (email) byEmail.set(email, { ...(byEmail.get(email) || {}), ...user });
+    if (email) byEmail.set(email, mergeAdminManagedUserRecords(byEmail.get(email), user, env));
   }
 
   for (const email of getAdminEmails(env)) {
@@ -17434,6 +20576,56 @@ function syncAdminManagedUsers(env?: unknown) {
     .sort((a, b) => readString(a, "name").localeCompare(readString(b, "name")));
   liveAdminUsers = users;
   return users;
+}
+
+function mergeAdminManagedUserRecords(
+  existing: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown>,
+  env?: unknown,
+) {
+  if (!existing) return normalizeAdminManagedUser(incoming, env);
+  const current = normalizeAdminManagedUser(existing, env);
+  const next = normalizeAdminManagedUser(incoming, env);
+  const score = (user: Record<string, unknown>) => {
+    if (Boolean(user.isBlocked)) return -1000;
+    const plan = readString(user, "plan");
+    const status = readString(user, "subscriptionStatus");
+    const active = ["active", "manual_vip", "trial"].includes(status) && !isExpiredIso(readString(user, "currentPeriodEnd"));
+    const planScore = plan === "vip_manual" ? 40 : plan === "premium" ? 30 : plan === "trial" ? 10 : 0;
+    const statusScore = status === "manual_vip" ? 50 : status === "active" ? 40 : status === "trial" ? 20 : 0;
+    return (active ? 100 : 0) + planScore + statusScore;
+  };
+  const pickDate = (a: string, b: string, latest: boolean) => {
+    const aTime = Date.parse(a);
+    const bTime = Date.parse(b);
+    if (!Number.isFinite(aTime)) return b;
+    if (!Number.isFinite(bTime)) return a;
+    return latest === bTime > aTime ? b : a;
+  };
+  const roleRank: Record<AdminManagedUserRole, number> = { owner: 3, admin: 2, user: 1 };
+  const currentRole = normalizeManagedUserRole(current.role);
+  const nextRole = normalizeManagedUserRole(next.role);
+  const preferred = score(next) >= score(current) ? next : current;
+  const fallback = preferred === next ? current : next;
+  return normalizeAdminManagedUser(
+    {
+      ...fallback,
+      ...preferred,
+      role: roleRank[currentRole] >= roleRank[nextRole] ? currentRole : nextRole,
+      email: readString(preferred, "email") || readString(fallback, "email"),
+      name: readString(preferred, "name") || readString(fallback, "name"),
+      phone: readString(preferred, "phone") || readString(fallback, "phone"),
+      phoneFull: readString(preferred, "phoneFull") || readString(fallback, "phoneFull"),
+      city: readString(preferred, "city") || readString(fallback, "city"),
+      country: readString(preferred, "country") || readString(fallback, "country"),
+      countryCode: readString(preferred, "countryCode") || readString(fallback, "countryCode"),
+      currentPeriodEnd: pickDate(readString(current, "currentPeriodEnd"), readString(next, "currentPeriodEnd"), true),
+      isBlocked: Boolean(current.isBlocked) && Boolean(next.isBlocked),
+      createdAt: pickDate(readString(current, "createdAt"), readString(next, "createdAt"), false),
+      lastAccessAt: pickDate(readString(current, "lastAccessAt"), readString(next, "lastAccessAt"), true),
+    },
+    env,
+  );
 }
 
 function findAdminManagedUser(id: string, env?: unknown) {
@@ -17546,6 +20738,7 @@ async function updateAdminManagedUser(
   target: Record<string, unknown>,
   body: Record<string, unknown>,
   preferredAction: AdminActionType,
+  ctx?: ExecutionContext,
 ): Promise<{ ok: true; user: Record<string, unknown> } | { ok: false; status: number; error: string }> {
   const before = normalizeAdminManagedUser(target, env);
   const actorEmail = adminActorEmailFromRequest(request, env, adminRole);
@@ -17654,7 +20847,7 @@ async function updateAdminManagedUser(
     afterJson: updated,
     reason: readString(body, "reason"),
   });
-  const persisted = await persistAdminManagedUserChange(env, updated, preferredAction);
+  const persisted = await persistAdminManagedUserChange(env, updated, preferredAction, ctx);
   if (!persisted.ok) {
     return {
       ok: false,
@@ -17665,11 +20858,16 @@ async function updateAdminManagedUser(
   return { ok: true, user: updated };
 }
 
-async function persistAdminManagedUserChange(env: unknown, user: Record<string, unknown>, reason: string) {
+async function persistAdminManagedUserChange(
+  env: unknown,
+  user: Record<string, unknown>,
+  reason: string,
+  ctx?: ExecutionContext,
+) {
   const email = readString(user, "email").toLowerCase();
   const client = email ? findClientByEmail(email) || syncClientFromAdminUserEmail(env, email) : null;
   if (client) {
-    return persistClientRegistryAfterClientChange(env, client, `admin_${reason}`);
+    return persistClientRegistryAfterClientChange(env, client, `admin_${reason}`, ctx);
   }
 
   const saveStatus = await saveLiveState(env);
@@ -17688,6 +20886,7 @@ async function extendAdminManagedUser(
   target: Record<string, unknown>,
   days: number,
   reason: string,
+  ctx?: ExecutionContext,
 ) {
   if (!Number.isFinite(days) || days <= 0 || days > 365) {
     return { ok: false as const, status: 400, error: "Quantidade de dias invalida." };
@@ -17714,6 +20913,7 @@ async function extendAdminManagedUser(
       reason: reason || `Prorrogacao de ${days} dias`,
     },
     "EXTEND_ACCESS",
+    ctx,
   );
 }
 
@@ -17723,6 +20923,7 @@ async function blockAdminManagedUser(
   request: Request,
   target: Record<string, unknown>,
   reason: string,
+  ctx?: ExecutionContext,
 ) {
   return updateAdminManagedUser(
     env,
@@ -17735,6 +20936,7 @@ async function blockAdminManagedUser(
       reason: reason || "Bloqueio manual",
     },
     "BLOCK_USER",
+    ctx,
   );
 }
 
@@ -17744,6 +20946,7 @@ async function unblockAdminManagedUser(
   request: Request,
   target: Record<string, unknown>,
   reason: string,
+  ctx?: ExecutionContext,
 ) {
   const before = normalizeAdminManagedUser(target, env);
   const nextStatus = isExpiredIso(before.currentPeriodEnd)
@@ -17764,6 +20967,7 @@ async function unblockAdminManagedUser(
       reason: reason || "Reativacao manual",
     },
     "UNBLOCK_USER",
+    ctx,
   );
 }
 
@@ -18504,6 +21708,10 @@ function liveStateCacheRequest() {
   return new Request(LIVE_STATE_CACHE_URL, { method: "GET" });
 }
 
+function dashboardSnapshotCacheRequest() {
+  return new Request(DASHBOARD_SNAPSHOT_CACHE_URL, { method: "GET" });
+}
+
 async function loadLiveState(env: unknown) {
   const now = Date.now();
   if (liveStateLoadedAt && now - liveStateLoadedAt < LIVE_STATE_LOAD_MIN_INTERVAL_MS) {
@@ -18521,20 +21729,209 @@ async function loadLiveState(env: unknown) {
 }
 
 async function syncDashboardReadState(env: unknown) {
-  const [durableState, cacheState] = await withTimeout(
-    Promise.all([loadDurableLiveState(env), loadLiveStateCache()]),
+  const [durableState, dashboardSnapshotState, dashboardSnapshotCacheState, dashboardSnapshotD1State] = await withTimeout(
+    Promise.all([
+      loadDurableLiveState(env),
+      loadDurableLiveStateById(env, DASHBOARD_SNAPSHOT_LATEST_ID),
+      loadDashboardSnapshotCacheState(),
+      loadDashboardLatestSnapshotFromD1(env),
+    ]),
     LIVE_STATE_IO_TIMEOUT_MS,
     "sincronizar dashboard",
-    [null, null] as [Record<string, unknown> | null, Record<string, unknown> | null],
+    [null, null, null, null] as Array<Record<string, unknown> | null>,
   );
-  const mergedDashboard = readRecord(mergeLiveStates(durableState, cacheState)?.dashboard);
+  const fallbackCacheState = !durableState && !getSupabasePersistenceConfig(env) ? await loadLiveStateCache() : null;
+  const mergedState = durableState || fallbackCacheState;
+  const mergedDashboard = pickDashboardState(
+    pickDashboardState(
+      pickDashboardState(readRecord(dashboardSnapshotState?.dashboard), readRecord(dashboardSnapshotCacheState?.dashboard)),
+      readRecord(dashboardSnapshotD1State?.dashboard),
+    ),
+    readRecord(mergedState?.dashboard),
+  );
   if (!hasRecordFields(mergedDashboard)) return;
   if (compareDashboardStateFreshness(mergedDashboard, liveDashboardData as unknown as Record<string, unknown>) > 0) {
     liveDashboardData = restoreDashboardData(mergedDashboard);
   }
 }
+
+async function syncDashboardReadStateFromD1(env: unknown) {
+  const dashboardSnapshotD1State = await withTimeout(
+    loadDashboardLatestSnapshotFromD1(env),
+    DASHBOARD_INLINE_REPAIR_TIMEOUT_MS,
+    "sincronizar snapshot D1 do dashboard no GET rapido",
+    null,
+  );
+  const d1Dashboard = readRecord(dashboardSnapshotD1State?.dashboard);
+  if (!hasRecordFields(d1Dashboard)) return false;
+  if (compareDashboardStateFreshness(d1Dashboard, liveDashboardData as unknown as Record<string, unknown>) <= 0) {
+    return false;
+  }
+  liveDashboardData = restoreDashboardData(d1Dashboard);
+  const latestRound = latestRoundFromRoundList(liveDashboardData.rounds);
+  console.info(
+    `[WORKER_DASHBOARD_REPAIR] from=d1_latest_snapshot latestRoundId=${latestRound?.id || ""} displayState=${
+      publicDashboardSnapshot(liveDashboardData).displayState || ""
+    }`,
+  );
+  return true;
+}
+
+async function syncDashboardReadStateForFastDashboardGet(env: unknown, force = false) {
+  if (force && (await syncDashboardReadStateFromD1(env)) && !dashboardSnapshotNeedsFreshnessRepair(liveDashboardData)) {
+    return true;
+  }
+
+  const now = Date.now();
+  if (
+    !force &&
+    dashboardReadStateSyncedAt &&
+    now - dashboardReadStateSyncedAt < DASHBOARD_READ_STATE_SYNC_INTERVAL_MS
+  ) {
+    return false;
+  }
+  if (dashboardReadStateSyncPromise) return false;
+  dashboardReadStateSyncedAt = now;
+  dashboardReadStateSyncPromise = syncDashboardReadState(env).finally(() => {
+    dashboardReadStateSyncPromise = null;
+  });
+  await withTimeout(
+    dashboardReadStateSyncPromise,
+    DASHBOARD_INLINE_REPAIR_TIMEOUT_MS,
+    "sincronizar dashboard no GET rapido",
+    undefined,
+  );
+  return true;
+}
+
+async function repairDashboardSnapshotForFastDashboardGet(env: unknown, ctx?: unknown) {
+  const cycle = ensureDashboardDailyCycle(liveDashboardData);
+  if (cycle.changed) {
+    liveDashboardData = cycle.dashboard;
+  }
+
+  if (
+    isTrustedCollectorDashboard(liveDashboardData as unknown as Record<string, unknown>) &&
+    !dashboardSnapshotNeedsFreshnessRepair(liveDashboardData)
+  ) {
+    return false;
+  }
+
+  if (repairDashboardSnapshotFromMemoryRoundHistory()) return true;
+
+  const currentLatestRound = latestRoundFromRoundList(liveDashboardData.rounds);
+  const repairPromise = repairDashboardSnapshotFromStoredRounds(env);
+  const saveAfterRepairPromise = repairPromise.then(async (repaired) => {
+    if (repaired) await saveLiveState(env);
+    return repaired;
+  });
+
+  if (!currentLatestRound) {
+    const repairedInline = await withTimeout(
+      saveAfterRepairPromise,
+      DASHBOARD_EMPTY_SNAPSHOT_REPAIR_TIMEOUT_MS,
+      "reparar dashboard no GET rapido",
+      false,
+    );
+    if (!repairedInline) {
+      runBackgroundTask(ctx, saveAfterRepairPromise, "finalizar reparo do snapshot vazio do dashboard");
+    }
+    return repairedInline;
+  }
+
+  runBackgroundTask(
+    ctx,
+    saveAfterRepairPromise,
+    "reparar dashboard fora do caminho quente",
+  );
+  return false;
+}
+
+function repairDashboardSnapshotFromMemoryRoundHistory() {
+  if (
+    isTrustedCollectorDashboard(liveDashboardData as unknown as Record<string, unknown>) &&
+    !dashboardSnapshotNeedsFreshnessRepair(liveDashboardData)
+  ) {
+    return false;
+  }
+
+  const currentLatestRound = latestRoundFromRoundList(liveDashboardData.rounds);
+  const latestMemoryRound = latestRoundFromRoundList(liveValidatorRoundHistory);
+  if (!latestMemoryRound || !shouldRepairDashboardFromStoredRound(latestMemoryRound, currentLatestRound)) {
+    return false;
+  }
+
+  const memoryRounds = liveValidatorRoundHistory.slice(-DASHBOARD_STORED_ROUND_REPAIR_LIMIT);
+  liveDashboardData = updateDashboardData(liveDashboardData, {
+    rounds: memoryRounds,
+    updatedAt: getRoundRecordedAt(latestMemoryRound) || liveDashboardData.updatedAt || new Date().toISOString(),
+  });
+  const afterMemoryRound = latestRoundFromRoundList(liveDashboardData.rounds);
+  console.info(
+    `[WORKER_DASHBOARD_REPAIR] fromRound=${currentLatestRound?.id || ""} toRound=${
+      afterMemoryRound?.id || ""
+    } source=memory_round_history displayState=${publicDashboardSnapshot(liveDashboardData).displayState || ""}`,
+  );
+  return Boolean(afterMemoryRound && (!currentLatestRound || compareRoundHistory(afterMemoryRound, currentLatestRound) > 0));
+}
+
+async function repairDashboardSnapshotFromStoredRounds(env: unknown) {
+  const now = Date.now();
+  if (dashboardStoredRoundRepairPromise) return dashboardStoredRoundRepairPromise;
+  if (
+    isTrustedCollectorDashboard(liveDashboardData as unknown as Record<string, unknown>) &&
+    !dashboardSnapshotNeedsFreshnessRepair(liveDashboardData)
+  ) {
+    return false;
+  }
+  if (repairDashboardSnapshotFromMemoryRoundHistory()) return true;
+  if (
+    dashboardStoredRoundRepairCheckedAt &&
+    now - dashboardStoredRoundRepairCheckedAt < DASHBOARD_STORED_ROUND_REPAIR_INTERVAL_MS
+  ) {
+    return false;
+  }
+  dashboardStoredRoundRepairCheckedAt = now;
+
+  dashboardStoredRoundRepairPromise = (async () => {
+    const currentLatestRound = latestRoundFromRoundList(liveDashboardData.rounds);
+    const loadStartedAt = Date.now();
+    const storedRounds = await withTimeout(
+      fetchStoredValidatorRounds(env, DASHBOARD_STORED_ROUND_REPAIR_LIMIT),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "carregar rodadas persistidas para reparar dashboard",
+      [] as Round[],
+    );
+    console.info(
+      `[DASHBOARD_TIMING] step=repairLoadRounds durationMs=${Date.now() - loadStartedAt} count=${storedRounds.length}`,
+    );
+    const latestStoredRound = latestRoundFromRoundList(storedRounds);
+    if (!latestStoredRound) return false;
+    if (!shouldRepairDashboardFromStoredRound(latestStoredRound, currentLatestRound)) return false;
+
+    const beforeRound = currentLatestRound;
+    liveValidatorRoundHistory = mergeMonitorRoundHistory(liveValidatorRoundHistory, storedRounds);
+    const latestStoredRecordedAt = getRoundRecordedAt(latestRoundFromRoundList(storedRounds) ?? latestStoredRound);
+    liveDashboardData = updateDashboardData(liveDashboardData, {
+      rounds: storedRounds,
+      updatedAt: latestStoredRecordedAt || liveDashboardData.updatedAt || new Date().toISOString(),
+    });
+    const afterRound = latestRoundFromRoundList(liveDashboardData.rounds);
+    console.info(
+      `[WORKER_DASHBOARD_REPAIR] fromRound=${beforeRound?.id || ""} toRound=${
+        afterRound?.id || ""
+      } source=stored_round_history displayState=${publicDashboardSnapshot(liveDashboardData).displayState || ""}`,
+    );
+    return Boolean(afterRound && (!beforeRound || compareRoundHistory(afterRound, beforeRound) > 0));
+  })().finally(() => {
+    dashboardStoredRoundRepairPromise = null;
+  });
+
+  return dashboardStoredRoundRepairPromise;
+}
 async function loadLiveStateFresh(env: unknown) {
   const currentSalesSettings = liveSalesSettings;
+  const currentPlanOffers = livePlanOffers;
   const currentSiteContentSettings = liveSiteContentSettings;
   try {
     const [durableState, cacheState] = await withTimeout(
@@ -18550,6 +21947,7 @@ async function loadLiveStateFresh(env: unknown) {
       if (isSalesSettingsNewer(currentSalesSettings, liveSalesSettings)) {
         liveSalesSettings = currentSalesSettings;
       }
+      livePlanOffers = restorePlanOffers(pickPlanOffersState(livePlanOffers, currentPlanOffers));
       if (isSiteContentSettingsNewer(currentSiteContentSettings, liveSiteContentSettings)) {
         liveSiteContentSettings = currentSiteContentSettings;
       }
@@ -18610,6 +22008,26 @@ async function loadLiveStateCache() {
     return readRecord(await response.json().catch(() => null));
   } catch (error) {
     console.warn("Nao foi possivel carregar estado vivo do cache.", error);
+    return null;
+  }
+}
+
+async function loadDashboardSnapshotCacheState() {
+  const cache = getLiveStateCache();
+  if (!cache) return null;
+
+  try {
+    const response = await withTimeout(
+      cache.match(dashboardSnapshotCacheRequest()),
+      DASHBOARD_INLINE_REPAIR_TIMEOUT_MS,
+      "carregar cache rapido do dashboard",
+      undefined,
+    );
+    if (!response) return null;
+
+    return readRecord(await response.json().catch(() => null));
+  } catch (error) {
+    console.warn("Nao foi possivel carregar snapshot rapido do dashboard no cache.", error);
     return null;
   }
 }
@@ -18736,6 +22154,11 @@ function applyLiveState(state: Record<string, unknown>) {
   const salesSettings = readRecord(state.salesSettings);
   if (Object.keys(salesSettings).length > 0) {
     liveSalesSettings = restoreSalesSettings(salesSettings);
+  }
+
+  const planOffers = readRecord(state.planOffers);
+  if (Object.keys(planOffers).length > 0) {
+    livePlanOffers = restorePlanOffers(planOffers);
   }
 
   const siteContent = readRecord(state.siteContent);
@@ -18902,6 +22325,7 @@ function mergeLiveStates(durableState: Record<string, unknown> | null, cacheStat
     deletedEntities,
     moduleToggles: pickStateObject(durable.moduleToggles, cache.moduleToggles),
     salesSettings: pickStateObjectByUpdatedAt(durable.salesSettings, cache.salesSettings),
+    planOffers: pickPlanOffersState(durable.planOffers, cache.planOffers),
     siteContent: pickStateObjectByUpdatedAt(durable.siteContent, cache.siteContent),
     savedAt: readString(durable, "savedAt") || readString(cache, "savedAt") || new Date().toISOString(),
   };
@@ -18922,6 +22346,18 @@ function pickStateObjectByUpdatedAt(primary: unknown, secondary: unknown) {
   const firstTime = stateEntityUpdatedAtMs(first);
   const secondTime = stateEntityUpdatedAtMs(second);
   return firstTime >= secondTime ? first : second;
+}
+
+function pickPlanOffersState(primary: unknown, secondary: unknown) {
+  const first = readRecord(primary);
+  const second = readRecord(secondary);
+  if (!hasRecordFields(first)) return second;
+  if (!hasRecordFields(second)) return first;
+  const merged: Record<string, unknown> = {};
+  for (const plan of ["vip", "premium"] as BillingPlanOfferId[]) {
+    merged[plan] = pickStateObjectByUpdatedAt(first[plan], second[plan]);
+  }
+  return merged;
 }
 
 function isSalesSettingsNewer(left: SalesSettings, right: SalesSettings) {
@@ -18966,7 +22402,40 @@ function compareDashboardStateFreshness(left: Record<string, unknown>, right: Re
 
 function shouldIgnoreStaleDashboardPost(current: LiveDashboardData, incoming: Record<string, unknown>) {
   const currentState = current as unknown as Record<string, unknown>;
+  if (isDefaultMockDashboardState(currentState) && incoming.mockMode === false && dashboardRoundCount(incoming) > 0) {
+    return false;
+  }
+
   if (compareDashboardStateFreshness(currentState, incoming) <= 0) return false;
+
+  const currentLatestRound = latestRoundFromDashboardState(currentState);
+  const incomingLatestRound = latestRoundFromDashboardState(incoming);
+  const incomingIsBehindCurrentRound =
+    Boolean(currentLatestRound && incomingLatestRound) &&
+    compareRoundHistory(incomingLatestRound as Round, currentLatestRound as Round) < 0;
+  if (incomingLatestRound) {
+    const currentLatestRoundId = Number(readString(currentLatestRound as unknown as Record<string, unknown>, "id") || currentLatestRound?.id || 0);
+    const incomingLatestRoundId = Number(readString(incomingLatestRound as unknown as Record<string, unknown>, "id") || incomingLatestRound.id || 0);
+    if (
+      incoming.mockMode === false &&
+      dashboardRoundCount(incoming) > 0 &&
+      currentLatestRoundId >= 1600 &&
+      incomingLatestRoundId > 0 &&
+      incomingLatestRoundId < 1000
+    ) {
+      return false;
+    }
+
+    if (shouldRepairDashboardFromStoredRound(incomingLatestRound, currentLatestRound)) return false;
+    const incomingRecordedAtMs = roundRecordedAtMs(incomingLatestRound);
+    const currentRecordedAtMs = roundRecordedAtMs(currentLatestRound);
+    if (
+      Number.isFinite(incomingRecordedAtMs) &&
+      (!Number.isFinite(currentRecordedAtMs) || incomingRecordedAtMs > currentRecordedAtMs + 1_000)
+    ) {
+      return false;
+    }
+  }
 
   // Hotfix: after rollback/restart the upstream round id can go backwards even
   // while the signal/update is newer. Do not keep production frozen on the old
@@ -18974,11 +22443,15 @@ function shouldIgnoreStaleDashboardPost(current: LiveDashboardData, incoming: Re
   const currentUpdatedAtMs = Date.parse(readString(currentState, "updatedAt") || "");
   const incomingUpdatedAtMs = Date.parse(readString(incoming, "updatedAt") || readString(incoming, "updated_at") || "");
   if (Number.isFinite(incomingUpdatedAtMs) && Number.isFinite(currentUpdatedAtMs)) {
-    if (incomingUpdatedAtMs > currentUpdatedAtMs + 1_000) return false;
+    if (!incomingIsBehindCurrentRound && incomingUpdatedAtMs > currentUpdatedAtMs + 1_000) return false;
   }
 
   const incomingSignal = normalizeSignal(readMainSignal(incoming), current.currentSignal);
-  if (isServerEntrySide(incomingSignal.side) && (incomingSignal.status === "pending" || incomingSignal.status === "g1")) {
+  if (
+    !incomingIsBehindCurrentRound &&
+    isServerEntrySide(incomingSignal.side) &&
+    (incomingSignal.status === "pending" || incomingSignal.status === "g1")
+  ) {
     return false;
   }
 
@@ -18989,20 +22462,47 @@ function shouldIgnoreStaleDashboardPost(current: LiveDashboardData, incoming: Re
   const neuralSide = readServerNeuralSide(
     incomingNeural.direcao || incomingNeural.direction || incomingNeural.puxando || incomingNeural.side,
   );
-  if (["ACTIVE", "ATIVO", "VALIDO", "VALID"].includes(neuralMode) && neuralSide) return false;
+  if (!incomingIsBehindCurrentRound && ["ACTIVE", "ATIVO", "VALIDO", "VALID"].includes(neuralMode) && neuralSide) {
+    return false;
+  }
 
   return true;
+}
+
+function latestRoundFromDashboardState(state: Record<string, unknown>) {
+  const rounds = Array.isArray(state.rounds) ? state.rounds.map(readRecord) : [];
+  return rounds
+    .map((round) => normalizeRounds([round], 1)[0])
+    .filter((round): round is Round => Boolean(round))
+    .sort(compareRoundHistory)
+    .at(-1) ?? null;
 }
 
 function dashboardStateFreshnessScore(state: Record<string, unknown>) {
   const cycleDate = currentDashboardCycleDate();
   const rounds = Array.isArray(state.rounds) ? state.rounds.map(readRecord) : [];
-  const lastRound = rounds[rounds.length - 1] ?? {};
-  const lastRoundId = Number(readString(lastRound, "id") || lastRound.id || 0) || 0;
+  const lastRound = latestRoundFromDashboardState(state);
+  const lastRoundRecord = lastRound ? (lastRound as unknown as Record<string, unknown>) : {};
+  const lastRoundId = Number(readString(lastRoundRecord, "id") || lastRound?.id || 0) || 0;
+  const revision = dashboardRevisionNumber(state);
   const updatedAtMs = Date.parse(readString(state, "updatedAt") || "");
+  const lastRoundRecordedAtMs = roundRecordedAtMs(lastRound);
   const hasCurrentCycle = readDashboardCycleDate(state) === cycleDate ? 1 : 0;
   const hasLiveRounds = rounds.length > 0 ? 1 : 0;
-  return [hasCurrentCycle, hasLiveRounds, lastRoundId, Number.isFinite(updatedAtMs) ? updatedAtMs : 0, rounds.length];
+  return [
+    lastRoundId,
+    Number.isFinite(lastRoundRecordedAtMs) ? lastRoundRecordedAtMs : 0,
+    revision,
+    Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
+    hasCurrentCycle,
+    hasLiveRounds,
+    rounds.length,
+  ];
+}
+
+function dashboardRevisionNumber(state: Record<string, unknown>) {
+  const revision = Number(readString(state, "revision") || readString(state, "sequenceId") || 0);
+  return Number.isFinite(revision) ? revision : 0;
 }
 
 function pickStateArray(primary: unknown, secondary: unknown) {
@@ -19273,6 +22773,7 @@ function buildLiveStateSnapshot(env?: unknown) {
     deletedEntities: liveDeletedEntities,
     moduleToggles: liveModuleToggles,
     salesSettings: liveSalesSettings,
+    planOffers: livePlanOffers,
     siteContent: liveSiteContentSettings,
     localAiSettings: liveLocalAiSettings,
     localAiLogs: liveLocalAiLogs.slice(0, 250),
@@ -19299,6 +22800,135 @@ async function saveLiveState(env: unknown): Promise<LiveStateSaveStatus> {
     if (liveStateSavePending) void saveLiveState(env);
   });
   return liveStateSavePromise;
+}
+
+async function saveDashboardSnapshotState(env: unknown, dashboard: LiveDashboardData = liveDashboardData) {
+  const state = buildDashboardSnapshotState(dashboard);
+  const saves: Array<Promise<boolean>> = [saveDashboardLatestSnapshotToD1(env, state, dashboard)];
+  if (getSupabasePersistenceConfig(env)) {
+    saves.push(saveDurableLiveStateById(env, DASHBOARD_SNAPSHOT_LATEST_ID, state));
+  }
+  const results = await Promise.allSettled(saves);
+  return results.some((result) => result.status === "fulfilled" && result.value);
+}
+
+function buildDashboardSnapshotState(dashboard: LiveDashboardData = liveDashboardData) {
+  return {
+    snapshotType: "dashboard_latest",
+    dashboard,
+    validatorRoundHistory: liveValidatorRoundHistory.slice(-MAX_MONITOR_ROUND_HISTORY),
+    savedAt: new Date().toISOString(),
+  };
+}
+
+async function saveDashboardSnapshotCacheState(dashboard: LiveDashboardData = liveDashboardData) {
+  const cache = getLiveStateCache();
+  if (!cache) return false;
+
+  try {
+    await cache.put(
+      dashboardSnapshotCacheRequest(),
+      new Response(JSON.stringify(buildDashboardSnapshotState(dashboard)), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store, no-cache, must-revalidate",
+          pragma: "no-cache",
+        },
+      }),
+    );
+    return true;
+  } catch (error) {
+    console.warn("Nao foi possivel salvar snapshot rapido do dashboard no cache.", error);
+    return false;
+  }
+}
+
+function getDashboardResultsD1(env: unknown) {
+  const globalEnv = (globalThis as { __env__?: unknown }).__env__;
+  const candidates = [
+    env,
+    (env as { env?: unknown } | null | undefined)?.env,
+    (env as { cloudflare?: { env?: unknown } } | null | undefined)?.cloudflare?.env,
+    (env as { runtime?: { cloudflare?: { env?: unknown } } } | null | undefined)?.runtime?.cloudflare?.env,
+    globalEnv,
+    (globalEnv as { env?: unknown } | null | undefined)?.env,
+    (globalEnv as { cloudflare?: { env?: unknown } } | null | undefined)?.cloudflare?.env,
+  ];
+  const db = candidates
+    .map((candidate) => (candidate as { DASHBOARD_RESULTS_DB?: unknown } | null | undefined)?.DASHBOARD_RESULTS_DB)
+    .find((candidate) => candidate && typeof (candidate as { prepare?: unknown }).prepare === "function") as
+    | {
+        prepare?: (sql: string) => {
+          bind: (...values: unknown[]) => {
+            run?: () => Promise<unknown>;
+            first?: () => Promise<unknown>;
+          };
+        };
+      }
+    | undefined;
+  return db && typeof db.prepare === "function" ? db : null;
+}
+
+async function loadDashboardLatestSnapshotFromD1(env: unknown) {
+  const db = getDashboardResultsD1(env);
+  if (!db) return null;
+  try {
+    const row = readRecord(
+      await db
+        .prepare?.(
+          "SELECT payload, updated_at, latest_round_id FROM dashboard_latest_snapshot WHERE id = ? LIMIT 1",
+        )
+        .bind("official")
+        .first?.(),
+    );
+    const payloadText = readString(row, "payload");
+    if (!payloadText) return null;
+    const state = readRecord(JSON.parse(payloadText));
+    return hasRecordFields(state) ? state : null;
+  } catch (error) {
+    console.warn("Nao foi possivel carregar snapshot latest do dashboard no D1.", error);
+    return null;
+  }
+}
+
+async function saveDashboardLatestSnapshotToD1(
+  env: unknown,
+  state: Record<string, unknown>,
+  dashboard: LiveDashboardData = liveDashboardData,
+) {
+  const db = getDashboardResultsD1(env);
+  if (!db) return false;
+  const snapshot = publicDashboardSnapshot(dashboard);
+  const compactState = {
+    snapshotType: "dashboard_latest",
+    snapshotStorage: "d1_compact",
+    dashboard: snapshot,
+    validatorRoundHistory: Array.isArray(snapshot.rounds) ? snapshot.rounds.slice(-MAX_MONITOR_ROUND_HISTORY) : [],
+    savedAt: readString(state, "savedAt") || new Date().toISOString(),
+  };
+  const latestRound = latestRoundFromRoundList(snapshot.rounds);
+  const latestRoundId = String(latestRound?.id || snapshot.lastRoundId || snapshot.displayRoundId || "");
+  const revision = String(dashboardDisplayRevision(snapshot) || dashboard.revision || dashboard.sequenceId || "");
+  const nowIso = new Date().toISOString();
+
+  try {
+    await db
+      .prepare?.(
+        `INSERT INTO dashboard_latest_snapshot (id, latest_round_id, updated_at, revision, payload, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           latest_round_id = excluded.latest_round_id,
+           updated_at = excluded.updated_at,
+           revision = excluded.revision,
+           payload = excluded.payload`,
+      )
+      .bind("official", latestRoundId, nowIso, revision, JSON.stringify(compactState), nowIso)
+      .run?.();
+    return true;
+  } catch (error) {
+    console.warn("Nao foi possivel salvar snapshot latest do dashboard no D1.", error);
+    return false;
+  }
 }
 
 async function protectClientRegistryBeforeSave(
@@ -19532,7 +23162,9 @@ async function loadDurableLiveStateById(env: unknown, id: string) {
 
   try {
     const response = await fetch(
-      `${config.url}/rest/v1/${LIVE_STATE_TABLE}?id=eq.${encodeURIComponent(id)}&select=state`,
+      `${config.url}/rest/v1/${LIVE_STATE_TABLE}?id=eq.${encodeURIComponent(
+        id,
+      )}&select=state,updated_at&order=updated_at.desc&limit=1`,
       {
         headers: supabasePersistenceHeaders(config.key),
         signal: controller.signal,
@@ -19563,6 +23195,7 @@ async function saveDurableLiveState(env: unknown, state: Record<string, unknown>
 async function saveDurableLiveStateById(env: unknown, id: string, state: Record<string, unknown>) {
   const config = getSupabasePersistenceConfig(env);
   if (!config) return false;
+  const protectedState = await protectFresherDurableDashboardBeforeSave(env, id, state);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LIVE_STATE_IO_TIMEOUT_MS);
 
@@ -19576,7 +23209,7 @@ async function saveDurableLiveStateById(env: unknown, id: string, state: Record<
       },
       body: JSON.stringify({
         id,
-        state,
+        state: protectedState,
         updated_at: new Date().toISOString(),
       }),
       signal: controller.signal,
@@ -19592,6 +23225,45 @@ async function saveDurableLiveStateById(env: unknown, id: string, state: Record<
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function protectFresherDurableDashboardBeforeSave(
+  env: unknown,
+  id: string,
+  state: Record<string, unknown>,
+) {
+  if (id !== LIVE_STATE_ID) return state;
+
+  const outgoingDashboard = readRecord(state.dashboard);
+  if (!hasRecordFields(outgoingDashboard)) return state;
+
+  const currentDurableState = await withTimeout(
+    loadDurableLiveStateById(env, id),
+    1_200,
+    "proteger dashboard duravel antes de salvar",
+    null as Record<string, unknown> | null,
+  );
+  const durableDashboard = readRecord(currentDurableState?.dashboard);
+  if (!hasRecordFields(durableDashboard)) return state;
+
+  if (compareDashboardStateFreshness(durableDashboard, outgoingDashboard) <= 0) return state;
+
+  const outgoingRound = latestRoundFromDashboardState(outgoingDashboard);
+  const durableRound = latestRoundFromDashboardState(durableDashboard);
+  console.warn(
+    `[DURABLE_SAVE_STALE_DASHBOARD_PROTECTED] outgoingRound=${outgoingRound?.id || ""} durableRound=${
+      durableRound?.id || ""
+    }`,
+  );
+
+  return {
+    ...state,
+    dashboard: durableDashboard,
+    validatorRoundHistory: mergeMonitorRoundHistory(
+      normalizeStoredRoundHistory(state.validatorRoundHistory),
+      normalizeStoredRoundHistory(currentDurableState?.validatorRoundHistory),
+    ),
+  };
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string, fallback: T): Promise<T> {
@@ -19893,6 +23565,14 @@ function restoreSalesSettings(value: Record<string, unknown>): SalesSettings {
   };
 }
 
+function restorePlanOffers(value: Record<string, unknown>): Record<BillingPlanOfferId, PlanOfferSettings> {
+  const defaults = createDefaultPlanOffers();
+  return {
+    vip: normalizePlanOffer("vip", readRecord(value.vip), defaults.vip),
+    premium: normalizePlanOffer("premium", readRecord(value.premium), defaults.premium),
+  };
+}
+
 function restoreSiteContentSettings(value: Record<string, unknown>): SiteContentSettings {
   return normalizeSiteContentSettings(value, liveSiteContentSettings);
 }
@@ -19911,8 +23591,19 @@ function publicSiteContentSettings() {
   };
 }
 
+function adminPersistenceStatus(env: unknown, saveStatus = liveStateSaveStatus) {
+  const durableConfigured = Boolean(getSupabasePersistenceConfig(env)) || saveStatus.durableConfigured || saveStatus.durable;
+  return {
+    ...saveStatus,
+    durableConfigured,
+    durable: saveStatus.durable || durableConfigured,
+  };
+}
+
 function adminSalesSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
-  const durableConfigured = env ? Boolean(getSupabasePersistenceConfig(env)) : saveStatus.durableConfigured;
+  const durableConfigured = env
+    ? Boolean(getSupabasePersistenceConfig(env)) || saveStatus.durableConfigured || saveStatus.durable
+    : saveStatus.durableConfigured;
   const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
   const warning = !durableConfigured
     ? "Persistencia fixa nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para a chave nao voltar sozinha."
@@ -19929,8 +23620,14 @@ function adminSalesSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
   };
 }
 
+function adminPlanOffers(env: unknown) {
+  return (["vip", "premium"] as BillingPlanOfferId[]).map((plan) => getPlanOffer(plan, env));
+}
+
 function adminSiteContentSettings(env?: unknown, saveStatus = liveStateSaveStatus) {
-  const durableConfigured = env ? Boolean(getSupabasePersistenceConfig(env)) : saveStatus.durableConfigured;
+  const durableConfigured = env
+    ? Boolean(getSupabasePersistenceConfig(env)) || saveStatus.durableConfigured || saveStatus.durable
+    : saveStatus.durableConfigured;
   const durableReady = saveStatus.durable || (durableConfigured && !saveStatus.saved_at);
   const warning = !durableConfigured
     ? "Persistencia fixa nao configurada. Configure SUPABASE_SERVICE_ROLE_KEY no Lovable para salvar definitivo."
@@ -20059,7 +23756,7 @@ function json(data: unknown, status = 200) {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
       "access-control-allow-headers":
-        "Content-Type,Authorization,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature,x-sniper-admin-email,x-sniper-admin-password,x-sniper-publisher-token",
+        "Accept,Cache-Control,Content-Type,Pragma,Authorization,x-signature,x-request-id,x-hubla-token,x-hubla-idempotency,x-hubla-signature,x-sniper-admin-email,x-sniper-admin-password,x-sniper-publisher-token",
     },
   });
 }

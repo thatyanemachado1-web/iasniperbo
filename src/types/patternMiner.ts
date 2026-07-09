@@ -45,6 +45,16 @@ export interface PatternMinerStrategy {
 
 export interface PatternMinerAlert {
   id: string;
+  signal_id?: string;
+  signalId?: string;
+  event_id?: string;
+  eventId?: string;
+  round_id?: number | string;
+  roundId?: number | string;
+  generated_at?: string;
+  generatedAt?: string;
+  blocked_reason?: string;
+  blockedReason?: string;
   kind: PatternMinerAlertKind;
   strategy: PatternMinerStrategy;
   matchedRounds: Round[];

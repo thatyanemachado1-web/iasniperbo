@@ -1,4 +1,5 @@
 const MODULE_KEYS = ["ai_patterns", "paying_numbers", "surf_alert", "ties_only", "validator"];
+const OFFICIAL_GLOBAL_MODULE_KEYS = new Set(["ai_patterns", "paying_numbers", "surf_alert", "ties_only"]);
 const MAX_TELEGRAM_BUTTONS = 4;
 const DEFAULT_BUTTON_LABEL = "Abrir Sniper Bo IA";
 const ENGINE_SECRET_NAMES = [
@@ -250,7 +251,19 @@ export class TelegramEngine {
       }
 
       if (request.method === "POST" && url.pathname === "/engine/signal") {
-        return this.dispatchSignal(await readJson(request));
+        const body = await readJson(request);
+        const moduleKey = normalizeModuleKey(body.moduleKey || body.type);
+        if (isOfficialGlobalModule(moduleKey)) {
+          return json(
+            {
+              error: "global_modules_site_first_only",
+              detail: "Global card modules must be emitted by the dashboard monitor after /dashboard is accepted.",
+            },
+            409,
+            this.env,
+          );
+        }
+        return this.dispatchSignal(body);
       }
 
       if ((request.method === "POST" || request.method === "GET") && url.pathname === "/engine/monitor") {
@@ -534,6 +547,7 @@ export class TelegramEngine {
     );
     const signalKind = classifySignalKind(body, signalKey);
     const notificationResult = String(body.result || variables.result || "Aguardando resultado").trim() || "Aguardando resultado";
+    const messageType = telegramDeliveryMessageType(signalKind, notificationResult, signalKey);
     const notificationProtection = String(body.protection || variables.gale || "").trim();
     const channels = (targetUserId ? await this.channelsForUser(targetUserId) : await this.activeChannels())
       .filter((channel) => !targetChannelId || channel.id === targetChannelId);
@@ -592,15 +606,16 @@ export class TelegramEngine {
         gale: finalNotificationProtection,
         protection: finalNotificationProtection,
         result: notificationResult,
+        messageType,
       };
       const renderedMessage = !forceMessage && shouldRenderSignalTemplate(template, templateVariables)
         ? renderTemplate(template, templateVariables)
         : String(body.message || "");
       const message = formatTelegramMessageText(String(renderedMessage || body.message || renderTemplate("{{entry}}", templateVariables))).slice(0, 4096);
-      const dedupeKeys = [`sent:${channel.userId}:${channel.id}:${moduleKey}:${signalKey}`];
-      const entryDedupeKey = entrySignalDedupeKey(channel, moduleKey, roundId, entry, signalKind);
+      const dedupeKeys = [`sent:${channel.userId}:${channel.id}:${moduleKey}:${messageType}:${signalKey}`];
+      const entryDedupeKey = entrySignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, messageType);
       if (entryDedupeKey) dedupeKeys.push(entryDedupeKey);
-      const resultDedupeKey = resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, notificationResult);
+      const resultDedupeKey = resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, notificationResult, messageType);
       if (resultDedupeKey) dedupeKeys.push(resultDedupeKey);
       const recentDedupeKey = await recentMessageDedupeKey(channel, signalKind, message);
       if (recentDedupeKey) dedupeKeys.push(recentDedupeKey);
@@ -640,6 +655,7 @@ export class TelegramEngine {
           moduleKey,
           signalKey,
           signalKind,
+          messageType,
           variables: templateVariables,
           entrySide: entry,
           entry: formatEntry(entry),
@@ -783,6 +799,8 @@ export class TelegramEngine {
         roundId: card.roundIdNumber,
         entry: card.entry,
         result: "Aguardando resultado",
+        forceMessage: true,
+        message: officialTelegramEntryMessage("paying_numbers", card),
         variables: card.variables,
       });
       const dispatch = await response.json().catch(() => ({}));
@@ -869,6 +887,8 @@ export class TelegramEngine {
       entry: resultCard.entry,
       result: resultCard.label,
       protection: resultCard.protection,
+      forceMessage: true,
+      message: officialTelegramResultMessage("paying_numbers", resultCard),
       variables: resultCard.variables,
     });
     const dispatch = await response.json().catch(() => ({}));
@@ -945,6 +965,11 @@ export class TelegramEngine {
         entry: resolution.entry,
         result: resolution.label,
         protection: resolution.protection,
+        forceMessage: true,
+        message: officialTelegramResultMessage(moduleKey, {
+          ...resolution,
+          variables: readRecord(payload.variables),
+        }),
         variables: {
           ...readRecord(payload.variables),
           entry: formatEntry(resolution.entry),
@@ -966,18 +991,26 @@ export class TelegramEngine {
       sentCount += currentSent;
       blockedCount += currentBlocked;
       if (currentSent || hasDuplicateSignalBlock(dispatch)) {
+        const nextPayload = {
+          ...payload,
+          result: resolution.label,
+          resultStatus: resolution.status,
+          resultRoundId: resolution.resultRoundId,
+          resultRoundKey: resolution.resultRoundKey,
+        };
+        if (resolution.intermediate) {
+          nextPayload.g1NoticeRoundIds = Array.from(new Set([
+            ...asStringArray(payload.g1NoticeRoundIds),
+            String(resolution.resultRoundId || resolution.resultRoundKey || ""),
+          ].filter(Boolean)));
+        } else {
+          nextPayload.resultSentAt = new Date().toISOString();
+        }
         await this.storeNotification({
           ...notification,
-          status: resolution.status,
+          status: resolution.intermediate ? "sent" : resolution.status,
           error: "",
-          payloadJson: {
-            ...payload,
-            result: resolution.label,
-            resultStatus: resolution.status,
-            resultRoundId: resolution.resultRoundId,
-            resultRoundKey: resolution.resultRoundKey,
-            resultSentAt: new Date().toISOString(),
-          },
+          payloadJson: nextPayload,
           updatedAt: new Date().toISOString(),
         });
       }
@@ -1053,6 +1086,8 @@ export class TelegramEngine {
       roundId: card.roundIdNumber,
       entry: card.entry,
       result: "Aguardando resultado",
+      forceMessage: true,
+      message: officialTelegramEntryMessage(card.moduleKey, card),
       variables: card.variables,
     });
     const dispatch = await response.json().catch(() => ({}));
@@ -1719,13 +1754,73 @@ function readPayingNumbersOfficialResult(dashboard) {
   };
 }
 
+function officialTelegramEntryMessage(moduleKey, card) {
+  const variables = readRecord(card.variables);
+  const entry = formatEntryLabel(card.entry || variables.side || "");
+  const number = dashboardText(variables.number || card.number || "");
+  const pattern = dashboardText(variables.pattern || "");
+  const module = moduleName(moduleKey);
+  const lines = ["💎 <b>ENTRADA CONFIRMADA</b>", ""];
+  if (moduleKey === "paying_numbers" && number) lines.push(`🔢 <b>Número:</b> ${escapeHtml(number)}`);
+  if (moduleKey !== "paying_numbers") lines.push(`🤖 <b>Módulo:</b> ${escapeHtml(module)}`);
+  if (pattern) lines.push(`🧩 <b>Padrão:</b> ${escapeHtml(pattern)}`);
+  lines.push(`🎯 <b>Entrada:</b> ${escapeHtml(entry)}`);
+  lines.push(`🛡️ <b>Proteção:</b> ${escapeHtml(dashboardText(variables.gale || variables.protection || "G1"))}`);
+  lines.push("📌 <b>Status:</b> ENTRADA_ATIVA");
+  return lines.join("\n");
+}
+
+function officialTelegramResultMessage(moduleKey, resultCard) {
+  const variables = readRecord(resultCard.variables);
+  const result = dashboardText(resultCard.label || variables.result || "");
+  const normalized = normalizeDedupeText(result);
+  const entry = formatEntryLabel(resultCard.entry || variables.side || "");
+  const number = dashboardText(variables.number || resultCard.number || "");
+  const pattern = dashboardText(variables.pattern || "");
+  const time = dashboardText(variables.time || resultCard.finishedAt || "");
+  const tieMultiplier = dashboardText(variables.tieMultiplier || (resultCard.tieMultiplier ? `${resultCard.tieMultiplier}x` : ""));
+  const module = moduleName(moduleKey);
+
+  if (normalized.includes("protecao_g1") || normalized.includes("g1_ativa")) {
+    const lines = ["🛡️ <b>PROTEÇÃO G1 ATIVA</b>", ""];
+    if (moduleKey === "paying_numbers" && number) lines.push(`🔢 <b>Número:</b> ${escapeHtml(number)}`);
+    if (moduleKey !== "paying_numbers") lines.push(`🤖 <b>Módulo:</b> ${escapeHtml(module)}`);
+    if (pattern) lines.push(`🧩 <b>Padrão:</b> ${escapeHtml(pattern)}`);
+    lines.push(`🎯 <b>Entrada mantida:</b> ${escapeHtml(entry)}`);
+    lines.push("⏳ <b>Aguardando próxima rodada</b>");
+    lines.push("📌 <b>Status:</b> G1 ATIVO");
+    return lines.join("\n");
+  }
+
+  if (normalized.includes("empate") || normalized.includes("tie")) {
+    const confirmedTie = moduleKey === "ties_only";
+    const lines = [confirmedTie ? "🟡 <b>EMPATE CONFIRMADO</b>" : "🟡 <b>EMPATE / PROTEÇÃO</b>", ""];
+    if (!confirmedTie) lines.push(`🎯 <b>Entrada:</b> ${escapeHtml(entry)}`);
+    lines.push(`✖️ <b>Multiplicador:</b> ${escapeHtml(tieMultiplier || "--")}`);
+    if (time) lines.push(`🕒 <b>Horário:</b> ${escapeHtml(time)}`);
+    lines.push(confirmedTie ? "📌 <b>Status:</b> FINALIZADO" : "📌 <b>Status:</b> PROTEGIDO / AGUARDANDO DEFINIÇÃO");
+    return lines.join("\n");
+  }
+
+  const isRed = normalized.includes("red");
+  const title = isRed ? "❌ <b>RED</b>" : `✅ <b>${escapeHtml(result || "GREEN SG")}</b>`;
+  const lines = [title, ""];
+  if (moduleKey === "paying_numbers" && number) lines.push(`🔢 <b>Número:</b> ${escapeHtml(number)}`);
+  if (moduleKey !== "paying_numbers") lines.push(`🤖 <b>Módulo:</b> ${escapeHtml(module)}`);
+  if (pattern) lines.push(`🧩 <b>Padrão:</b> ${escapeHtml(pattern)}`);
+  lines.push(`🎯 <b>Entrada:</b> ${escapeHtml(entry)}`);
+  if (time) lines.push(`🕒 <b>Horário:</b> ${escapeHtml(time)}`);
+  lines.push("📌 <b>Status:</b> FINALIZADO");
+  return lines.join("\n");
+}
+
 function payingNumbersResultLabel(outcome, kind, tieMultiplier) {
   if (outcome === "TIE" || kind === "tie_sg" || kind === "tie_g1") {
-    return tieMultiplier ? `Green no empate ${tieMultiplier}x` : "Green no empate";
+    return "EMPATE / PROTEÇÃO";
   }
-  if (outcome === "RED" || kind === "red") return "Red";
-  if (kind === "g1") return "Green G1";
-  return "Green";
+  if (outcome === "RED" || kind === "red") return "RED";
+  if (kind === "g1") return "GREEN G1";
+  return "GREEN SG";
 }
 
 function payingNumbersResultProtection(kind) {
@@ -1737,11 +1832,13 @@ function isPendingOfficialEntryNotification(notification) {
   const payload = readRecord(notification.payloadJson);
   const moduleKey = normalizeModuleKey(payload.moduleKey || String(notification.type || "").replace("module:", ""));
   if (!["ai_patterns", "paying_numbers", "surf_alert", "ties_only", "validator"].includes(moduleKey)) return false;
-  if (payload.resultSentAt || payload.resultStatus) return false;
+  const resultStatus = normalizeDedupeText(payload.resultStatus || "");
+  if (payload.resultSentAt) return false;
+  if (resultStatus && resultStatus !== "g1_active") return false;
   if (payload.signalKind && payload.signalKind !== "entry") return false;
   if (String(notification.status || "") !== "sent") return false;
   const result = normalizeDedupeText(payload.result || "");
-  return !result || result === "aguardando_resultado" || result === "aguardando";
+  return !result || result === "aguardando_resultado" || result === "aguardando" || result === "protecao_g1_ativa";
 }
 
 function resolveOfficialNotificationResult(notification, rounds, config) {
@@ -1763,6 +1860,7 @@ function resolveOfficialNotificationResult(notification, rounds, config) {
     : clampInt(payload.galeLimit ?? parseGaleLimit(payload.protection) ?? config.galeLimit ?? 1, 0, 4);
   const attempts = Math.max(1, maxGale + 1);
   const coverTie = moduleKey === "ties_only" || payload.coverTie === true || config.coverTie === true || normalizeSearchText(readRecord(payload.variables).tieProtection).includes("ATIVA");
+  const g1NoticeRoundIds = new Set(asStringArray(payload.g1NoticeRoundIds));
 
   for (let index = 0; index < Math.min(futureRounds.length, attempts); index += 1) {
     const round = futureRounds[index];
@@ -1773,7 +1871,7 @@ function resolveOfficialNotificationResult(notification, rounds, config) {
       if (entry === "TIE" || coverTie) {
         return officialResolution({
           status: "green",
-          label: tieMultiplier ? `Green no empate ${tieMultiplier}x` : "Green no empate",
+          label: moduleKey === "ties_only" ? "EMPATE CONFIRMADO" : "EMPATE / PROTEÇÃO",
           protection: index === 0 ? "SG" : `G${index}`,
           entry,
           round,
@@ -1785,10 +1883,21 @@ function resolveOfficialNotificationResult(notification, rounds, config) {
     if (entry !== "TIE" && resultSide === entry) {
       return officialResolution({
         status: index === 0 ? "green" : `green_g${index}`,
-        label: index === 0 ? "Green" : `Green G${index}`,
+        label: index === 0 ? "GREEN SG" : `GREEN G${index}`,
         protection: index === 0 ? "SG" : `G${index}`,
         entry,
         round,
+      });
+    }
+    const roundId = String(clampInt(round.id ?? round.roundId ?? round.round ?? 0, 0, Number.MAX_SAFE_INTEGER));
+    if (index === 0 && maxGale >= 1 && roundId && !g1NoticeRoundIds.has(roundId)) {
+      return officialResolution({
+        status: "g1_active",
+        label: "PROTEÇÃO G1 ATIVA",
+        protection: "G1",
+        entry,
+        round,
+        intermediate: true,
       });
     }
   }
@@ -1797,7 +1906,7 @@ function resolveOfficialNotificationResult(notification, rounds, config) {
     const round = futureRounds[attempts - 1] || futureRounds.at(-1);
     return officialResolution({
       status: "red",
-      label: "Red",
+      label: "RED",
       protection: maxGale <= 0 ? "SG" : `G${maxGale}`,
       entry,
       round,
@@ -1807,7 +1916,7 @@ function resolveOfficialNotificationResult(notification, rounds, config) {
   return { ready: false, reason: "awaiting_gale_round" };
 }
 
-function officialResolution({ status, label, protection, entry, round, tieMultiplier = "" }) {
+function officialResolution({ status, label, protection, entry, round, tieMultiplier = "", intermediate = false }) {
   return {
     ready: true,
     status,
@@ -1815,6 +1924,7 @@ function officialResolution({ status, label, protection, entry, round, tieMultip
     protection,
     entry,
     tieMultiplier,
+    intermediate,
     resultRound: readRecord(round),
     resultRoundId: clampInt(round.id ?? round.roundId ?? round.round ?? 0, 0, Number.MAX_SAFE_INTEGER),
     resultRoundKey: dashboardRoundKey(round, {}),
@@ -2345,6 +2455,10 @@ function readRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+function asStringArray(value) {
+  return Array.isArray(value) ? value.map((item) => String(item || "")).filter(Boolean) : [];
+}
+
 function readFirstString(record, keys) {
   const source = readRecord(record);
   for (const key of keys) {
@@ -2420,6 +2534,10 @@ function normalizeModuleKey(value) {
   return MODULE_KEYS.includes(text) ? text : "";
 }
 
+function isOfficialGlobalModule(moduleKey) {
+  return OFFICIAL_GLOBAL_MODULE_KEYS.has(String(moduleKey || ""));
+}
+
 function normalizeEntry(value) {
   const text = String(value || "").trim().toUpperCase();
   if (text === "B" || text === "BANKER") return "BANKER";
@@ -2467,9 +2585,23 @@ function classifySignalKind(body, signalKey) {
   return "entry";
 }
 
+function telegramDeliveryMessageType(signalKind, result, signalKey = "") {
+  if (signalKind !== "result") return "ENTRY";
+  const normalized = normalizeDedupeText(`${result} ${signalKey}`);
+  if (normalized.includes("protecao_g1") || normalized.includes("g1_ativa")) return "G1_ACTIVE";
+  if (normalized.includes("green_g1")) return "RESULT_GREEN_G1";
+  if (normalized.includes("green") || normalized.includes("sg")) return "RESULT_GREEN_SG";
+  if (normalized.includes("empate") || normalized.includes("tie")) return "RESULT_TIE";
+  if (normalized.includes("red")) return "RESULT_RED";
+  return "RESULT_UNKNOWN";
+}
+
 function selectSignalTemplate(config, signalKind, result) {
   if (signalKind !== "result") return String(config.template || "");
   const normalized = normalizeDedupeText(result);
+  if (normalized.includes("protecao_g1") || normalized.includes("g1_ativa")) {
+    return String(config.galeTemplate || config.template || "");
+  }
   if (normalized.includes("red")) return String(config.redTemplate || config.template || "");
   if (normalized.includes("empate") || normalized.includes("tie")) {
     return String(config.tieTemplate || config.greenTemplate || config.template || "");
@@ -2478,16 +2610,16 @@ function selectSignalTemplate(config, signalKind, result) {
   return String(config.greenTemplate || config.template || "");
 }
 
-function entrySignalDedupeKey(channel, moduleKey, roundId, entry, signalKind) {
+function entrySignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, messageType = "ENTRY") {
   if (signalKind !== "entry" || !roundId || !entry) return "";
-  return `sent-entry:${channel.userId}:${channel.id}:${moduleKey}:${roundId}:${entry}`;
+  return `sent-entry:${channel.userId}:${channel.id}:${moduleKey}:${messageType}:${roundId}:${entry}`;
 }
 
-function resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, result) {
+function resultSignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, result, messageType = "RESULT_UNKNOWN") {
   if (signalKind !== "result" || !roundId) return "";
   const resultKey = normalizeDedupeText(result);
   if (!resultKey) return "";
-  return `sent-result:${channel.userId}:${channel.id}:${moduleKey}:${roundId}:${entry || "AUTO"}:${resultKey}`;
+  return `sent-result:${channel.userId}:${channel.id}:${moduleKey}:${messageType}:${roundId}:${entry || "AUTO"}:${resultKey}`;
 }
 
 async function recentMessageDedupeKey(channel, signalKind, message) {

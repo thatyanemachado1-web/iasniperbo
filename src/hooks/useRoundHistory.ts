@@ -91,22 +91,24 @@ export function useRoundHistory(data: DashboardData, enabled: boolean): UseRound
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
     const yesterdayKey = localDayKey(yesterday.toISOString());
-    const lastRound = history.rounds.at(-1);
+    const officialRounds = buildOfficialRounds(data, enabled);
+    const sourceRounds = officialRounds.length ? officialRounds : history.rounds;
+    const lastRound = sourceRounds.at(-1);
     const sourceUpdatedAt = lastRound?.sourceUpdatedAt ?? null;
 
     return {
-      collectionStartedAt: history.collectionStartedAt || null,
+      collectionStartedAt: officialRounds[0]?.capturedAt ?? history.collectionStartedAt ?? null,
       lastCapturedAt: lastRound?.capturedAt ?? null,
       sourceUpdatedAt,
-      storedRounds: history.rounds.length,
-      todayRounds: history.rounds
+      storedRounds: sourceRounds.length,
+      todayRounds: sourceRounds
         .filter((round) => round.day === todayKey)
         .sort(compareStoredRounds),
-      today: summarizeDay(history.rounds, todayKey),
-      yesterday: summarizeDay(history.rounds, yesterdayKey),
+      today: summarizeDay(sourceRounds, todayKey),
+      yesterday: summarizeDay(sourceRounds, yesterdayKey),
       isSourceStale: sourceUpdatedAt ? localDayKey(sourceUpdatedAt) !== todayKey : false,
     };
-  }, [history]);
+  }, [data, enabled, history]);
 
   return { history: snapshot, resetHistory };
 }
@@ -184,6 +186,21 @@ function localDayKey(value: string) {
     return cycleDateParts(new Date(date.getTime() - 60_000)).date;
   }
   return parts.date;
+}
+
+function buildOfficialRounds(data: DashboardData, enabled: boolean): StoredRound[] {
+  if (!enabled || data.mockMode || !data.rounds.length) return [];
+  const capturedAt = validIsoDate(data.updatedAt) ? data.updatedAt : new Date().toISOString();
+  const day = localDayKey(capturedAt);
+  return data.rounds
+    .map((round) => ({
+      ...round,
+      key: buildRoundKey(round, day),
+      day,
+      capturedAt,
+      sourceUpdatedAt: validIsoDate(data.updatedAt) ? data.updatedAt : capturedAt,
+    }))
+    .sort(compareStoredRounds);
 }
 
 function cycleDateParts(value: Date) {

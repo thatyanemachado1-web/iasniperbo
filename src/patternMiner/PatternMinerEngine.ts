@@ -513,9 +513,6 @@ function matchesToken(round: Round, token: string) {
 function scoreForResult(round: Round, side: RoundResult) {
   if (side === "B") return round.bankerScore;
   if (side === "P") return round.playerScore;
-  if (typeof round.tieMultiplier === "number" && Number.isFinite(round.tieMultiplier)) {
-    return Math.round(round.tieMultiplier);
-  }
   return round.bankerScore === round.playerScore
     ? round.bankerScore
     : Math.max(round.bankerScore, round.playerScore);

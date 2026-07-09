@@ -1,4 +1,5 @@
 import type { DashboardData, Round, MainSignal, TieAlert } from "@/types/dashboard";
+import { buildTieRadarHistoryAnalysis } from "@/tieRadar/TieRadarHistoryEngine";
 import { buildPressureSeries } from "@/utils/statistics";
 
 export const MOCK_MODE = true;
@@ -39,22 +40,59 @@ const ROADMAP: Round["result"][] = [
   "P",
 ];
 
-function randScore(side: Round["result"]) {
-  const a = Math.floor(Math.random() * 10);
-  const b = Math.floor(Math.random() * 10);
+const SCORE_EXAMPLES: Array<{ bankerScore: number; playerScore: number }> = [
+  { bankerScore: 8, playerScore: 5 },
+  { bankerScore: 4, playerScore: 9 },
+  { bankerScore: 10, playerScore: 6 },
+  { bankerScore: 7, playerScore: 3 },
+  { bankerScore: 6, playerScore: 6 },
+  { bankerScore: 11, playerScore: 8 },
+  { bankerScore: 5, playerScore: 10 },
+  { bankerScore: 9, playerScore: 4 },
+  { bankerScore: 8, playerScore: 2 },
+  { bankerScore: 3, playerScore: 7 },
+  { bankerScore: 10, playerScore: 10 },
+  { bankerScore: 12, playerScore: 5 },
+  { bankerScore: 9, playerScore: 7 },
+  { bankerScore: 6, playerScore: 11 },
+  { bankerScore: 8, playerScore: 4 },
+  { bankerScore: 2, playerScore: 8 },
+  { bankerScore: 7, playerScore: 5 },
+  { bankerScore: 11, playerScore: 6 },
+  { bankerScore: 4, playerScore: 4 },
+  { bankerScore: 5, playerScore: 9 },
+  { bankerScore: 10, playerScore: 7 },
+  { bankerScore: 6, playerScore: 8 },
+  { bankerScore: 9, playerScore: 3 },
+  { bankerScore: 7, playerScore: 7 },
+  { bankerScore: 8, playerScore: 6 },
+  { bankerScore: 12, playerScore: 9 },
+  { bankerScore: 4, playerScore: 10 },
+  { bankerScore: 5, playerScore: 5 },
+  { bankerScore: 11, playerScore: 7 },
+  { bankerScore: 6, playerScore: 12 },
+];
+
+function scoreForRound(side: Round["result"], index: number) {
+  const score = SCORE_EXAMPLES[index % SCORE_EXAMPLES.length];
   if (side === "T") {
-    const v = Math.floor(Math.random() * 10);
-    return { bankerScore: v, playerScore: v };
+    const tieScore = Math.max(2, Math.min(12, score.bankerScore));
+    return { bankerScore: tieScore, playerScore: tieScore };
   }
-  if (side === "B") return { bankerScore: Math.max(a, b), playerScore: Math.min(a, b) };
-  return { bankerScore: Math.min(a, b), playerScore: Math.max(a, b) };
+  if (side === "B" && score.bankerScore <= score.playerScore) {
+    return { bankerScore: score.playerScore, playerScore: score.bankerScore };
+  }
+  if (side === "P" && score.playerScore <= score.bankerScore) {
+    return { bankerScore: score.playerScore, playerScore: score.bankerScore };
+  }
+  return score;
 }
 
 const TIE_MULTIPLIER_EXAMPLES = [4, 6, 10, 25, 4];
 
 const baseId = 1640;
 export const rounds: Round[] = ROADMAP.map((r, i) => {
-  const { bankerScore, playerScore } = randScore(r);
+  const { bankerScore, playerScore } = scoreForRound(r, i);
   return {
     id: baseId + i,
     result: r,
@@ -205,6 +243,10 @@ export const mockDashboardData: DashboardData = {
     sequencePositive: 1,
     sequenceExpired: 3,
   },
+  tieRadarHistory: buildTieRadarHistoryAnalysis(rounds, {
+    cycleDate: "2026-07-02",
+    now: "2026-07-02T15:30:00-03:00",
+  }),
   surfAnalyzerScoreboard: {
     totalAlerts: 30,
     hits: 22,

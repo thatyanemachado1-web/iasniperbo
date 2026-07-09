@@ -33,7 +33,7 @@ export function PatternSequence({
               </span>
               {!compact && (
                 <span className={cn("text-[8px] font-black uppercase leading-none", sideTextClass[side])}>
-                  {side}
+                  {patternTokenSideLabel(side)}
                 </span>
               )}
             </span>
@@ -79,12 +79,11 @@ export function StrategyConclusion({
 function pulledSideLabel(side: RoundResult) {
   if (side === "B") return "BANKER";
   if (side === "P") return "PLAYER";
-  return "TIE";
+  return "TIE/EMPATE";
 }
 
 function patternTokenValue(token: string) {
-  const value = token.slice(1);
-  return value || token[0];
+  return /^[BPT]\d+$/.test(token) ? token : token[0];
 }
 
 function patternTokenTitle(token: string) {
@@ -92,6 +91,12 @@ function patternTokenTitle(token: string) {
   const value = token.slice(1);
   if (side === "B") return value ? `Banker ${value}` : "Banker";
   if (side === "P") return value ? `Player ${value}` : "Player";
-  if (side === "T") return value ? `Tie ${value}x` : "Tie";
+  if (side === "T") return value ? `Empate ${value}` : "Empate";
   return token;
+}
+
+function patternTokenSideLabel(side: RoundResult) {
+  if (side === "B") return "BANKER";
+  if (side === "P") return "PLAYER";
+  return "EMPATE";
 }

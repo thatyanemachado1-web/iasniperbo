@@ -75,6 +75,7 @@ export class SurfAnalyzerEngine {
     incoming: SurfAlert | undefined,
   ): SurfAnalyzerResult {
     if (!incoming) return computed;
+    const runtimeFields = pickIncomingRuntimeFields(incoming);
 
     const incomingSide = resolveSurfSide(incoming);
     const computedSide = computed.surf_side;
@@ -86,7 +87,12 @@ export class SurfAnalyzerEngine {
       incomingConfidence >= 60 &&
       !["SEM_RISCO", "SEM_SURF"].includes(String(incoming.surf_status || incoming.surf_phase || ""));
 
-    if (!incomingHasActionableSurf) return computed;
+    if (!incomingHasActionableSurf) {
+      return {
+        ...computed,
+        ...runtimeFields,
+      };
+    }
 
     const sideAligned = incomingSide === computedSide;
     const confidence = sideAligned
@@ -105,9 +111,19 @@ export class SurfAnalyzerEngine {
       surf_risk: Math.max(computed.surf_risk, clampPercent(incoming.surf_risk ?? 0)),
       reason: `${computed.reason} Publisher confirmou leitura paralela.`,
       panels: hasUsefulPanels(incoming.panels) ? incoming.panels : computed.panels,
+      ...runtimeFields,
       source: "merged",
     };
   }
+}
+
+function pickIncomingRuntimeFields(incoming: SurfAlert): Partial<SurfAnalyzerResult> {
+  return {
+    dailySurfMemory: incoming.dailySurfMemory,
+    surfCycle: incoming.surfCycle,
+    surfHistory: incoming.surfHistory,
+    surfCycleStats: incoming.surfCycleStats,
+  };
 }
 
 export function surfBrasiliaDateKey(value: string | Date = new Date()) {

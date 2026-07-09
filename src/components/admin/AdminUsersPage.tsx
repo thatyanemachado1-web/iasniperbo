@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   blockAdminUser,
   changeAdminUserPlan,
-  changeAdminUserRole,
   deleteAdminUser,
   extendAdminUserAccess,
   getAdminSalesSettings,
@@ -54,6 +53,7 @@ export function AdminUsersPage() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [successNotice, setSuccessNotice] = useState("");
   const [salesSettings, setSalesSettings] = useState<SalesSettings>({
     salesClosed: false,
     mode: "open",
@@ -150,10 +150,12 @@ export function AdminUsersPage() {
     if (!session || !selected) return;
     setBusy(true);
     setError("");
+    setSuccessNotice("");
     try {
       const updated = await updateAdminUser(session, selected.id, payload);
       setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      setSelected(updated);
+      setSelected(null);
+      setSuccessNotice("Alteracoes salvas com sucesso.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao salvar usuário.");
     } finally {
@@ -205,6 +207,7 @@ export function AdminUsersPage() {
     }
     setBusy(true);
     setError("");
+    setSuccessNotice("");
     try {
       if (action === "deleteUser") {
         await deleteAdminUser(session, user.id, "Excluir cadastro sem pagamento");
@@ -215,11 +218,13 @@ export function AdminUsersPage() {
           ),
         );
         if (selected?.id === user.id) setSelected(null);
+        setSuccessNotice("Cadastro excluido com sucesso.");
         return;
       }
       const updated = await performQuickAction(session, user, action);
       setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       if (selected?.id === updated.id) setSelected(updated);
+      setSuccessNotice(successMessageForAction(action));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao executar ação.");
     } finally {
@@ -265,6 +270,8 @@ export function AdminUsersPage() {
             <button
               type="button"
               onClick={() => {
+                setError("");
+                setSuccessNotice("");
                 void load();
                 void loadSalesSettings();
               }}
@@ -323,6 +330,11 @@ export function AdminUsersPage() {
             {error}
           </div>
         )}
+        {successNotice && (
+          <div className="mt-4 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm font-semibold text-success">
+            {successNotice}
+          </div>
+        )}
         {exportNotice && (
           <div className="mt-4 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm font-semibold text-success">
             {exportNotice}
@@ -330,7 +342,7 @@ export function AdminUsersPage() {
         )}
       </GlassCard>
 
-      <div className="grid min-w-0 gap-4 2xl:grid-cols-2">
+      <div className="grid min-w-0 gap-5">
         <UserGroupSection
           title="Clientes"
           subtitle="Pagantes, aprovados ou premium com acesso ativo."
@@ -760,9 +772,25 @@ async function performQuickAction(
       reason: "Cancelar acesso",
     });
   if (action === "block") return blockAdminUser(session, user.id);
-  if (action === "unblock") return unblockAdminUser(session, user.id);
-  if (action === "makeAdmin") return changeAdminUserRole(session, user.id, "admin");
-  return changeAdminUserRole(session, user.id, "user");
+  return unblockAdminUser(session, user.id);
+}
+
+function successMessageForAction(action: QuickAction) {
+  const messages: Record<QuickAction, string> = {
+    trial7: "Trial liberado com sucesso.",
+    monthly30: "Mensal liberado com sucesso.",
+    premium30: "Premium liberado com sucesso.",
+    vip30: "VIP manual liberado com sucesso.",
+    extend7: "Acesso prorrogado com sucesso.",
+    extend15: "Acesso prorrogado com sucesso.",
+    extend30: "Acesso prorrogado com sucesso.",
+    extend90: "Acesso prorrogado com sucesso.",
+    cancel: "Acesso cancelado com sucesso.",
+    block: "Usuario bloqueado com sucesso.",
+    unblock: "Usuario reativado com sucesso.",
+    deleteUser: "Cadastro excluido com sucesso.",
+  };
+  return messages[action] || "Acao concluida com sucesso.";
 }
 
 function addDays(base: Date, days: number) {

@@ -1,8 +1,8 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
-import { AccessApiError, getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
-import { clearUserSession, hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
+import { getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
+import { hasFullAccess, isAdminOwnerEmail, readUserSession, type UserSession } from "@/lib/userSession";
 
 export const Route = createFileRoute("/app")({
   component: ProtectedAppRoute,
@@ -11,25 +11,35 @@ export const Route = createFileRoute("/app")({
 function ProtectedAppRoute() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const session = readUserSession();
+  const [session, setSession] = useState<UserSession | null>(null);
   const [salesClosed, setSalesClosed] = useState(false);
+  const isBooting = session === null;
   const isAdminRoute = pathname.startsWith("/app/admin");
   const isAccountRoute = pathname.startsWith("/app/conta");
   const isCheckoutRoute =
     pathname.startsWith("/app/planos") ||
     pathname.startsWith("/app/assinatura") ||
     pathname.startsWith("/app/pagamentos");
-  const isOwner = isAdminOwnerEmail(session.email);
-  const hasBackendSession = Boolean(session.clientToken);
-  const isAdminUser = hasBackendSession && (session.role === "admin" || session.role === "owner" || isOwner);
-  const fullAccess = hasBackendSession && hasFullAccess(session);
-  const canOpenApp = hasBackendSession && session.registered;
-  const demoExpired = session.accessMode === "demo" && isExpiredAt(session.expiresAt);
+  const isOwner = session ? isAdminOwnerEmail(session.email) : false;
+  const hasBackendSession = Boolean(session?.clientToken);
+  const isAdminUser = Boolean(
+    session && hasBackendSession && (session.role === "admin" || session.role === "owner" || isOwner),
+  );
+  const fullAccess = Boolean(session && hasBackendSession && hasFullAccess(session));
+  const canOpenApp = Boolean(session && hasBackendSession && session.registered);
+  const demoExpired = Boolean(session && session.accessMode === "demo" && isExpiredAt(session.expiresAt));
   const canOpenDashboard =
+    Boolean(
     hasBackendSession &&
-    (fullAccess ||
-      (session.accessMode === "demo" && !demoExpired) ||
-      (session.registered && session.accessMode === "pending"));
+      session &&
+      (fullAccess ||
+        (session.accessMode === "demo" && !demoExpired) ||
+        (session.registered && session.accessMode === "pending")),
+    );
+
+  useEffect(() => {
+    setSession(readUserSession());
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -46,6 +56,7 @@ function ProtectedAppRoute() {
   }, []);
 
   useEffect(() => {
+    if (!session) return;
     if (isAdminRoute) return;
     if (salesClosed && !fullAccess && !isAdminUser) {
       navigate({ to: "/" });
@@ -69,10 +80,11 @@ function ProtectedAppRoute() {
     isCheckoutRoute,
     navigate,
     salesClosed,
-    session.email,
+    session,
   ]);
 
   useEffect(() => {
+    if (!session) return;
     if (isAdminRoute || isOwner) return;
 
     let stopped = false;
@@ -104,11 +116,8 @@ function ProtectedAppRoute() {
         if (changed) {
           window.location.reload();
         }
-      } catch (error) {
-        if (shouldClearSessionAfterRefreshError(error)) {
-          clearUserSession();
-          if (!stopped) window.location.reload();
-        }
+      } catch {
+        // Keep the current app session stable; protected APIs still reject invalid tokens.
       } finally {
         refreshing = false;
       }
@@ -125,6 +134,7 @@ function ProtectedAppRoute() {
     };
   }, [isAdminRoute, isOwner]);
 
+  if (isBooting) return <AppBootSplash />;
   if (!isAdminRoute && salesClosed && !fullAccess && !isAdminUser) return null;
   if (!isAdminRoute && (!session.email || !canOpenApp)) return null;
   if (!isAdminRoute && !canOpenDashboard && !isCheckoutRoute && !isAccountRoute) return null;
@@ -136,15 +146,30 @@ function ProtectedAppRoute() {
   );
 }
 
+function AppBootSplash() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#030712] px-6 text-center">
+      <img
+        src="/assets/sniper-logo.png"
+        alt="SNIPER BO IA"
+        className="h-auto w-36 max-w-[70vw] opacity-95"
+      />
+      <div className="mt-5 max-w-xs text-[11px] text-muted-foreground/80">
+        <p>Carregando painel...</p>
+        <a
+          href="/app?reload=1"
+          className="mt-3 inline-flex rounded-full border border-neon-cyan/25 px-4 py-1.5 font-bold text-neon-cyan/90"
+        >
+          Recarregar app
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function isExpiredAt(value: string) {
   if (!value) return false;
   const expires = Date.parse(value);
   return Number.isFinite(expires) && expires <= Date.now();
 }
 
-function shouldClearSessionAfterRefreshError(error: unknown) {
-  if (error instanceof AccessApiError) {
-    return error.status === 401 || error.status === 403;
-  }
-  return false;
-}

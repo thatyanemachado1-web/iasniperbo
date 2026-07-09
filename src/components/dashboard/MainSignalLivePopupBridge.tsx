@@ -14,8 +14,8 @@ interface MainSignalPopup {
   createdAt: number;
 }
 
-const RESULT_VISIBLE_MS = 45_000;
-const POPUP_TTL_MS = 12_000;
+const RESULT_VISIBLE_MS = 2_000;
+const POPUP_TTL_MS = 900;
 
 export function MainSignalLivePopupBridge() {
   const { data, mode } = useDashboardData();

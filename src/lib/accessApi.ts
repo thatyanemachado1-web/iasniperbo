@@ -51,9 +51,16 @@ export interface BillingPlan {
   name: string;
   description: string;
   amount: number;
+  oldPrice?: number;
+  billingPeriod?: "monthly";
   currency: string;
   durationDays: number;
   features: string[];
+  isActive?: boolean;
+  isFeatured?: boolean;
+  badgeText?: string;
+  status?: "active" | "inactive" | "promo" | "sold_out";
+  sortOrder?: number;
   checkoutEnabled: boolean;
   checkoutProvider?: "hubla" | "mercadopago" | "";
 }

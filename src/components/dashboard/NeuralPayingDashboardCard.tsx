@@ -1,14 +1,12 @@
 import { LeituraNeuralResponsiveCard } from "@/components/dashboard/LeituraNeuralResponsiveCard";
 import { DASHBOARD_MODULE_CARD_ROOT } from "@/components/dashboard/dashboardModuleCardLayout";
 import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
-import { useDashboardData } from "@/hooks/useDashboardData";
 import type { DashboardData, NeuralReading } from "@/types/dashboard";
 import { useEffect, useRef, useState } from "react";
 
 const SCANNING_READING: NeuralReading = { mode: "SCANNING" };
 
-export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
-  const { mode } = useDashboardData();
+export function NeuralPayingDashboardCard({ data, mode }: { data: DashboardData; mode: "live" | "mock" | "connecting" | "fallback" }) {
   const [greenFlash, setGreenFlash] = useState(false);
   const previousResultKeyRef = useRef("");
 
@@ -22,7 +20,7 @@ export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
     setGreenFlash(false);
     window.requestAnimationFrame(() => {
       setGreenFlash(true);
-      window.setTimeout(() => setGreenFlash(false), 2100);
+      window.setTimeout(() => setGreenFlash(false), 900);
     });
   }, [data.mockMode, data.neuralEntryLastResult, mode]);
 
@@ -37,6 +35,10 @@ export function NeuralPayingDashboardCard({ data }: { data: DashboardData }) {
         neuralScoreboard={data.neuralScoreboard}
         neuralEntryState={data.neuralEntryState}
         neuralEntryLastResult={data.neuralEntryLastResult}
+        displayState={data.displayState}
+        displaySide={data.displaySide}
+        displayRevision={data.revision ?? data.sequenceId}
+        persistedResults={data.dailyResultsByModule?.LEITURA_NEURAL_NUMERO_PAGANTE ?? []}
         rounds={data.rounds}
         greenFlash={greenFlash}
         className="h-full w-full"

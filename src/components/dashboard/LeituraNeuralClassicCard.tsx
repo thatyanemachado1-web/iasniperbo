@@ -61,6 +61,8 @@ export type { LeituraNeuralClassicCardProps };
 const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
 const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
+const OFFICIAL_ENTRY_RESULT_HOLD_MS = 900;
+const RESOLVED_ENTRY_SUPPRESS_MS = 900;
 
 const SCANNING_READING: NeuralReading = {
   mode: "SCANNING",
@@ -85,7 +87,10 @@ export function LeituraNeuralClassicCard({
   neuralEntryLastResult,
   ...reading
 }: LeituraNeuralClassicCardProps) {
-  const data = { ...SCANNING_READING, ...reading };
+  const rawData = { ...SCANNING_READING, ...reading };
+  const data = shouldHideResolvedReading(rawData, neuralEntryLastResult)
+    ? scanningReadingAfterClosedEntry(rawData)
+    : rawData;
   const mode = data.mode ?? "SCANNING";
   const hasNumber = typeof data.numero === "number" && Boolean(data.origem);
   const sg = optionalNumberFrom(data.greenSemGale);
@@ -122,7 +127,7 @@ export function LeituraNeuralClassicCard({
     ? null
     : rawConfirmedEntrySide;
   const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
-  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
+  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>([]);
   const lastOfficialResultRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
   const mountedAtRef = useRef(Date.now());
@@ -132,30 +137,26 @@ export function LeituraNeuralClassicCard({
     if (!result || lastOfficialResultRef.current === result.id) return;
 
     lastOfficialResultRef.current = result.id;
+    setEntryHistory([result]);
     if (isOfficialEntryOlderThanSession(neuralEntryLastResult, mountedAtRef.current)) return;
 
     setEntryResult(result);
-    setEntryHistory((items) => {
-      if (items.some((item) => item.id === result.id)) return items;
-      return [result, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
-    });
 
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
-    entryResultTimeoutRef.current = window.setTimeout(
-      () => setEntryResult(null),
-      result.kind === "red" ? 1100 : 1650,
-    );
+    entryResultTimeoutRef.current = window.setTimeout(() => setEntryResult(null), 900);
   }, [neuralEntryLastResult]);
 
   useEffect(() => {
-    writeNeuralEntryHistory(entryHistory);
-  }, [entryHistory]);
-
-  useEffect(() => {
+    clearNeuralEntryHistoryStorage();
     return () => {
       if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
     };
   }, []);
+
+  const officialEntryResult = shouldShowOfficialEntryResult(neuralEntryLastResult, neuralEntryState)
+    ? displayResultFromOfficialEntry(neuralEntryLastResult)
+    : null;
+  const visibleEntryResult = officialEntryResult ?? entryResult;
 
   return (
     <aside
@@ -164,9 +165,9 @@ export function LeituraNeuralClassicCard({
         DASHBOARD_MODULE_CARD_ROOT,
         confirmedEntrySide && sideBorderClass(confirmedEntrySide),
         greenFlash && "result-green-flash",
-        entryResult?.kind === "red" && "neural-entry-flash-red",
-        entryResult?.kind === "tie" && "neural-entry-flash-tie",
-        entryResult?.kind === "green" && "neural-entry-flash-green",
+        visibleEntryResult?.kind === "red" && "neural-entry-flash-red",
+        visibleEntryResult?.kind === "tie" && "neural-entry-flash-tie",
+        visibleEntryResult?.kind === "green" && "neural-entry-flash-green",
         className,
       )}
       aria-label="Leitura neural de números pagantes"
@@ -215,7 +216,7 @@ export function LeituraNeuralClassicCard({
           <div className="mt-1.5">
             <NeuralEntryStatusCard
               confirmedSide={null}
-              result={entryResult}
+              result={visibleEntryResult}
               history={entryHistory}
             />
           </div>
@@ -224,7 +225,7 @@ export function LeituraNeuralClassicCard({
         <div className="relative mt-2 space-y-1">
           <NeuralEntryStatusCard
             confirmedSide={confirmedEntrySide}
-            result={entryResult}
+            result={visibleEntryResult}
             history={entryHistory}
           />
 
@@ -429,6 +430,32 @@ function displayResultFromOfficialEntry(result: NeuralEntryLastResult | null | u
   };
 }
 
+function clearNeuralEntryHistoryStorage() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(NEURAL_ENTRY_HISTORY_STORAGE_KEY);
+  } catch {
+    // The official payload is the source of truth across web and mobile.
+  }
+}
+
+function shouldShowOfficialEntryResult(
+  result: NeuralEntryLastResult | null | undefined,
+  _state: NeuralEntryState | null | undefined,
+) {
+  if (!result?.id) return false;
+  if (isOfficialEntryFreshForDisplay(result)) return true;
+  return false;
+}
+
+function isOfficialEntryFreshForDisplay(result: NeuralEntryLastResult | null | undefined) {
+  if (!result?.finishedAt) return false;
+  const finishedAt = new Date(result.finishedAt).getTime();
+  if (Number.isNaN(finishedAt)) return false;
+  const age = Date.now() - finishedAt;
+  return age >= -5_000 && age <= OFFICIAL_ENTRY_RESULT_HOLD_MS;
+}
+
 function isOfficialEntryOlderThanSession(
   result: NeuralEntryLastResult | null | undefined,
   mountedAt: number,
@@ -586,7 +613,7 @@ function neuralEntryStatusState(
   if (result?.kind === "tie") {
     return {
       kicker: "Resultado",
-      label: `GREEN EMPATE ${result.multiplier ? `${result.multiplier}X` : ""}`.trim(),
+      label: `EMPATE ${result.multiplier ? `${result.multiplier}X` : ""}`.trim(),
       description: null,
       sideClass: "text-tie",
       className: "neural-entry-flash-tie border-tie/40 bg-tie/10 text-tie",
@@ -596,8 +623,8 @@ function neuralEntryStatusState(
   if (result?.kind === "green") {
     return {
       kicker: "Resultado",
-      label: `GREEN ${sideLabel(result.side)}`,
-      description: null,
+      label: "GREEN",
+      description: `${sideLabel(result.side)} confirmado pela Leitura Neural`,
       sideClass: sideClass(result.side),
       className: "neural-entry-flash-green border-success/35 bg-success/10 text-success",
     };
@@ -635,6 +662,7 @@ function entrySideHistoryLabel(item: NeuralEntryHistoryItem) {
 
 function entryResultHistoryLabel(item: NeuralEntryHistoryItem) {
   if (item.kind === "red") return "RED";
+  if (item.kind === "tie") return "EMPATE";
   return "GREEN";
 }
 
@@ -1161,5 +1189,61 @@ function shouldHideResolvedEntry(
   if (!result.finishedAt) return true;
   const finishedAt = new Date(result.finishedAt).getTime();
   if (Number.isNaN(finishedAt)) return false;
-  return Date.now() - finishedAt < 90000;
+  return Date.now() - finishedAt < RESOLVED_ENTRY_SUPPRESS_MS;
+}
+
+function shouldHideResolvedReading(
+  reading: NeuralReading,
+  result: NeuralEntryLastResult | null | undefined,
+) {
+  if (!result?.id || !result.finishedAt || reading.mode !== "ACTIVE") return false;
+  const finishedAt = new Date(result.finishedAt).getTime();
+  if (Number.isNaN(finishedAt) || Date.now() - finishedAt >= RESOLVED_ENTRY_SUPPRESS_MS) return false;
+
+  const readingKey = neuralReadingEntryKey(reading);
+  if (readingKey && result.key && readingKey === result.key) return true;
+
+  const readingSide = reading.direcao ?? reading.origem;
+  const resultSide = normalizeEntrySide(result.expectedSide ?? result.origem);
+  return Boolean(
+    readingSide &&
+      resultSide &&
+      readingSide === resultSide &&
+      reading.numero === result.numero &&
+      reading.origem === result.origem &&
+      reading.origemTipo === result.origemTipo,
+  );
+}
+
+function neuralReadingEntryKey(reading: NeuralReading) {
+  if (typeof reading.numero !== "number") return "";
+  const origem = strictNeuralSide(reading.origem);
+  const origemTipo = reading.origemTipo;
+  const expectedSide = strictNeuralSide(reading.direcao ?? reading.origem);
+  if (!origem || !origemTipo || !expectedSide) return "";
+  return `${reading.numero}:${origem}:${origemTipo}:${expectedSide}`;
+}
+
+function strictNeuralSide(side: unknown): NeuralSide | null {
+  if (side === "BANKER" || side === "PLAYER" || side === "TIE") return side;
+  return null;
+}
+
+function scanningReadingAfterClosedEntry(reading: NeuralReading): NeuralReading {
+  return {
+    ...reading,
+    mode: "SCANNING",
+    numero: null,
+    origem: null,
+    origemTipo: null,
+    direcao: null,
+    paganteStatus: "ANALISANDO",
+    paganteAlert: "Aguardando nova confirmacao da engine.",
+    paganteWindow: null,
+    paganteCycleProgress: null,
+    paganteCycleLimit: null,
+    isSaturated: null,
+    isRedAlert: null,
+    postTie: null,
+  };
 }

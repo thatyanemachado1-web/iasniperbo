@@ -4,4 +4,27 @@
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
+  "routes": ["sniperbo.com/*", "www.sniperbo.com/*"],
+  "d1_databases": [
+    {
+      "binding": "DASHBOARD_RESULTS_DB",
+      "database_name": "sniperbo-dashboard-results",
+      "database_id": "12452654-13f8-4b28-8c82-29c77fdfdfb5"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DASHBOARD_LATEST_SNAPSHOT_DO",
+        "class_name": "DashboardLatestSnapshotDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "dashboard_latest_snapshot_do_v1",
+      "new_sqlite_classes": ["DashboardLatestSnapshotDO"]
+    }
+  ],
+  "workers_dev": false
 }

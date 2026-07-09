@@ -16,7 +16,15 @@ import {
   normalizeTieMultiplierCounts,
   tieMultiplierFromRound,
 } from "@/tieRadar/TieRadarStatsEngine";
-import type { ModuleToggles, Round, TieAlert, TieAlertScoreboard, TiePullerStat } from "@/types/dashboard";
+import type {
+  ModuleToggles,
+  Round,
+  TieAlert,
+  TieAlertScoreboard,
+  TieHistoryEntry,
+  TiePullerStat,
+  TieRadarHistoryAnalysis,
+} from "@/types/dashboard";
 import type { PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
 
 const EMPTY_TIE_MULTIPLIERS = TIE_MULTIPLIER_LABELS.map((label) => ({ label, value: 0 }));
@@ -24,6 +32,7 @@ const EMPTY_TIE_MULTIPLIERS = TIE_MULTIPLIER_LABELS.map((label) => ({ label, val
 export function TieAlertCard({
   alert,
   scoreboard,
+  history,
   rounds,
   patternMinerSnapshot,
   toggles,
@@ -34,6 +43,7 @@ export function TieAlertCard({
 }: {
   alert: TieAlert;
   scoreboard?: TieAlertScoreboard;
+  history?: TieRadarHistoryAnalysis;
   rounds?: Round[];
   patternMinerSnapshot?: PatternMinerSnapshot;
   toggles?: ModuleToggles;
@@ -110,6 +120,9 @@ export function TieAlertCard({
               </div>
             ))}
           </div>
+
+          <TieHighPressurePanel history={history} compact />
+          <TieRecentHistoryList history={history} compact />
           <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
         </div>
 
@@ -325,6 +338,9 @@ export function TieAlertCard({
           {buildTieCopy(alert)}
         </div>
 
+        <TieHighPressurePanel history={history} compact={compact} />
+        <TieRecentHistoryList history={history} compact={compact} />
+
         {tiePullers.length ? (
           <div
             className={cn(
@@ -391,6 +407,154 @@ function DisabledTieNote() {
       Radar de Empate desativado neste painel.
     </div>
   );
+}
+
+function TieHighPressurePanel({
+  history,
+  compact = false,
+}: {
+  history?: TieRadarHistoryAnalysis;
+  compact?: boolean;
+}) {
+  const high = history?.high;
+  const pressure = high?.pressure ?? "baixa";
+  const pressureClass = tiePressureClass(pressure);
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-warning/14 bg-background/24 px-2 py-1.5 text-[9px]",
+        !compact && "mt-2 rounded-xl px-3 py-2 text-[11px]",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-black uppercase tracking-[0.1em] text-warning">Empates Altos</div>
+        <div className={cn("rounded-full border px-1.5 py-0.5 text-[8px] font-black uppercase", pressureClass)}>
+          {pressure}
+        </div>
+      </div>
+      <div className={cn("mt-1 grid grid-cols-2 gap-1", !compact && "mt-1.5 gap-1.5")}>
+        <TieInfoLine label="Ultimo 88x" value={formatTieClock(high?.last88At)} tone="warning" />
+        <TieInfoLine label="Ultimo 25x" value={formatTieClock(high?.last25At)} tone="tie" />
+        <TieInfoLine label="Media 88" value={formatDuration(high?.average88IntervalMinutes)} tone="muted" />
+        <TieInfoLine label="Tempo 88" value={formatDuration(high?.sinceLast88Minutes)} tone="warning" />
+        <TieInfoLine label="Media 25" value={formatDuration(high?.average25IntervalMinutes)} tone="muted" />
+        <TieInfoLine label="Prev. 88" value={formatTieClock(high?.estimatedNext88At)} tone="muted" />
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-2 border-t border-white/5 pt-1 text-[8px] font-semibold text-muted-foreground">
+        <span>Dia {history?.daily?.totalTies ?? 0} ties</span>
+        <span>Mes {history?.monthly?.totalTies ?? 0} ties</span>
+        <span>Hora {history?.daily?.mostFrequentHour ?? "--"}</span>
+      </div>
+    </div>
+  );
+}
+
+function TieRecentHistoryList({
+  history,
+  compact = false,
+}: {
+  history?: TieRadarHistoryAnalysis;
+  compact?: boolean;
+}) {
+  const recent = history?.recent?.slice(0, 50) ?? [];
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-white/10 bg-background/18 px-2 py-1.5 text-[9px]",
+        !compact && "mt-2 rounded-xl px-3 py-2 text-[11px]",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-black uppercase tracking-[0.1em] text-muted-foreground">Historico de Empates</div>
+        <div className="text-[8px] font-black text-warning">{recent.length}/50</div>
+      </div>
+      {recent.length ? (
+        <div className={cn("mt-1 max-h-[74px] space-y-1 overflow-y-auto pr-1", !compact && "max-h-28")}>
+          {recent.map((entry) => (
+            <TieRecentHistoryLine key={entry.id} entry={entry} />
+          ))}
+        </div>
+      ) : (
+        <div className="mt-1 rounded-md border border-white/5 bg-secondary/15 px-2 py-1 text-muted-foreground">
+          Aguardando empate real da mesa.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TieInfoLine({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "warning" | "tie" | "muted";
+}) {
+  const toneClass = {
+    warning: "text-warning",
+    tie: "text-tie",
+    muted: "text-foreground",
+  }[tone];
+
+  return (
+    <div className="min-w-0 rounded-md border border-white/5 bg-secondary/15 px-1.5 py-1">
+      <div className="truncate text-[8px] font-black uppercase tracking-[0.06em] text-muted-foreground">{label}</div>
+      <div className={cn("truncate text-[10px] font-black leading-tight", toneClass)}>{value}</div>
+    </div>
+  );
+}
+
+function TieRecentHistoryLine({ entry }: { entry: TieHistoryEntry }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border border-white/5 bg-secondary/15 px-1.5 py-0.5">
+      <div className="min-w-0 truncate font-black text-foreground">{entry.hour}</div>
+      <div className={cn("shrink-0 font-black", tieMultiplierTextClass(entry.multiplierLabel))}>
+        {entry.multiplierLabel}
+      </div>
+      <div className="min-w-0 truncate text-right text-[8px] font-semibold text-muted-foreground">
+        #{entry.roundId}
+      </div>
+    </div>
+  );
+}
+
+function tiePressureClass(pressure: TieRadarHistoryAnalysis["high"]["pressure"]) {
+  if (pressure === "alta") return "border-warning/35 bg-warning/12 text-warning";
+  if (pressure === "moderada") return "border-tie/35 bg-tie/12 text-tie";
+  return "border-border/60 bg-secondary/25 text-muted-foreground";
+}
+
+function tieMultiplierTextClass(label: string) {
+  if (label === "88x") return "text-warning";
+  if (label === "25x") return "text-tie";
+  if (label === "10x") return "text-neon-cyan";
+  return "text-muted-foreground";
+}
+
+function formatTieClock(value: string | null | undefined) {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "--";
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+}
+
+function formatDuration(value: number | null | undefined) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes) || minutes <= 0) return "--";
+  if (minutes < 1) return "agora";
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = Math.round(minutes % 60);
+  return rest ? `${hours}h${String(rest).padStart(2, "0")}` : `${hours}h`;
 }
 
 function TieStatChip({

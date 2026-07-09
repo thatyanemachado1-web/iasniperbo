@@ -13,8 +13,8 @@ interface NeuralEntryPopup {
   subtitle: string;
 }
 
-const RESULT_VISIBLE_MS = 45_000;
-const POPUP_TTL_MS = 12_000;
+const RESULT_VISIBLE_MS = 2_000;
+const POPUP_TTL_MS = 900;
 
 export function NeuralEntryLivePopupBridge() {
   const { data, mode } = useDashboardData();
@@ -91,7 +91,7 @@ function buildNeuralPopup(result?: NeuralEntryLastResult | null): NeuralEntryPop
       id: `neural-tie-${result.id}`,
       kind: "tie",
       side: "TIE",
-      title: `GREEN EMPATE ${multiplier}`.trim(),
+      title: `EMPATE ${multiplier}`.trim(),
       subtitle: "Leitura Neural confirmou empate na validade",
     };
   }

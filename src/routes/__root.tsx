@@ -13,6 +13,9 @@ import appCss from "../styles.css?url";
 import { InstallAppPrompt } from "@/components/install/InstallAppPrompt";
 import { SiteAnnouncements } from "@/components/ui-app/SiteAnnouncements";
 
+const CLIENT_CACHE_RESET_VERSION = "2026-07-08-pattern-ia-terminal-results-v2";
+const MANIFEST_VERSION = "2026-07-08-pattern-ia-terminal-results-v2";
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -103,7 +106,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       {
         rel: "manifest",
-        href: "/manifest.webmanifest",
+        href: `/manifest.webmanifest?v=${MANIFEST_VERSION}`,
       },
       {
         rel: "icon",
@@ -161,6 +164,11 @@ function ClientOnlyEnhancements() {
     setMounted(true);
   }, []);
 
+  useEffect(() => {
+    if (!mounted) return;
+    clearLegacyPwaCachesOnce();
+  }, [mounted]);
+
   if (!mounted) return null;
 
   return (
@@ -169,4 +177,37 @@ function ClientOnlyEnhancements() {
       <SiteAnnouncements />
     </>
   );
+}
+
+function clearLegacyPwaCachesOnce() {
+  try {
+    const storageKey = "sniperbo:client-cache-reset-version";
+    const forceReload = new URL(window.location.href).searchParams.get("reload") === "1";
+    if (!forceReload && window.localStorage.getItem(storageKey) === CLIENT_CACHE_RESET_VERSION) return;
+    window.localStorage.setItem(storageKey, CLIENT_CACHE_RESET_VERSION);
+
+    const cacheCleanup =
+      "caches" in window
+        ? window.caches
+        .keys()
+        .then((keys) => Promise.all(keys.map((key) => window.caches.delete(key))))
+        .catch(() => undefined)
+        : Promise.resolve([]);
+
+    const workerCleanup =
+      "serviceWorker" in navigator
+        ? navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+        .catch(() => undefined)
+        : Promise.resolve([]);
+
+    if (forceReload) {
+      Promise.allSettled([cacheCleanup, workerCleanup]).finally(() => {
+        window.location.replace("/app");
+      });
+    }
+  } catch {
+    // Cache cleanup is best-effort only; never block the app boot.
+  }
 }

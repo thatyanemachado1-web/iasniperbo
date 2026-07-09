@@ -5,14 +5,22 @@ import { AdminQuickActions, type QuickAction } from "@/components/admin/AdminQui
 import type { AdminManagedUser } from "@/types/adminPanel";
 
 const roles: AdminManagedUser["role"][] = ["user", "admin", "owner"];
-const plans: AdminManagedUser["plan"][] = ["free", "trial", "monthly", "premium", "vip_manual"];
-const statuses: AdminManagedUser["subscriptionStatus"][] = [
-  "trial",
-  "active",
-  "expired",
-  "canceled",
-  "blocked",
-  "manual_vip",
+
+const planOptions: Array<{ value: AdminManagedUser["plan"]; label: string }> = [
+  { value: "free", label: "Free" },
+  { value: "trial", label: "Trial" },
+  { value: "monthly", label: "Mensal" },
+  { value: "premium", label: "Premium" },
+  { value: "vip_manual", label: "VIP manual" },
+];
+
+const statusOptions: Array<{ value: AdminManagedUser["subscriptionStatus"]; label: string }> = [
+  { value: "trial", label: "Trial" },
+  { value: "active", label: "Ativo" },
+  { value: "expired", label: "Vencido" },
+  { value: "canceled", label: "Cancelado" },
+  { value: "blocked", label: "Bloqueado" },
+  { value: "manual_vip", label: "VIP manual" },
 ];
 
 export function AdminUserEditModal({
@@ -65,8 +73,103 @@ export function AdminUserEditModal({
           </button>
         </div>
 
-        <div className="grid gap-5 p-4 lg:grid-cols-[1.1fr_0.9fr] sm:p-6">
+        <div className="grid gap-5 p-4 lg:grid-cols-[1fr_0.75fr] sm:p-6">
           <div className="space-y-4">
+            <div className="rounded-2xl border border-neon-cyan/15 bg-secondary/15 p-3">
+              <div className="text-[11px] font-black uppercase tracking-[0.18em] text-neon-cyan">Acesso</div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <Field label="Plano atual">
+                  <select
+                    className="admin-input"
+                    value={draft.plan}
+                    disabled={!adminCanEditTarget}
+                    onChange={(event) => {
+                      const plan = event.target.value as AdminManagedUser["plan"];
+                      setDraft({
+                        ...draft,
+                        plan,
+                        subscriptionStatus: plan === "free" ? "canceled" : draft.subscriptionStatus,
+                      });
+                    }}
+                  >
+                    {planOptions.map((plan) => (
+                      <option key={plan.value} value={plan.value}>
+                        {plan.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Status da assinatura">
+                  <select
+                    className="admin-input"
+                    value={draft.subscriptionStatus}
+                    disabled={!adminCanEditTarget}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        subscriptionStatus: event.target.value as AdminManagedUser["subscriptionStatus"],
+                      })
+                    }
+                  >
+                    {statusOptions.map((status) => (
+                      <option key={status.value} value={status.value}>
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Inicio">
+                  <input
+                    className="admin-input"
+                    type="date"
+                    value={toInputDate(draft.currentPeriodStart)}
+                    disabled={!adminCanEditTarget}
+                    onChange={(event) =>
+                      setDraft({ ...draft, currentPeriodStart: fromInputDate(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Vencimento">
+                  <input
+                    className="admin-input"
+                    type="date"
+                    value={toInputDate(draft.currentPeriodEnd)}
+                    disabled={!adminCanEditTarget}
+                    onChange={(event) =>
+                      setDraft({ ...draft, currentPeriodEnd: fromInputDate(event.target.value, true) })
+                    }
+                  />
+                </Field>
+                <Field label="Acesso">
+                  <label className="flex min-h-11 items-center justify-between rounded-xl border border-border/60 bg-secondary/35 px-3 text-sm">
+                    <span>{draft.isBlocked ? "Bloqueado" : "Ativo"}</span>
+                    <input
+                      type="checkbox"
+                      checked={!draft.isBlocked}
+                      disabled={!adminCanEditTarget}
+                      onChange={(event) => setDraft({ ...draft, isBlocked: !event.target.checked })}
+                    />
+                  </label>
+                </Field>
+                <Field label="Role">
+                  <select
+                    className="admin-input"
+                    value={draft.role}
+                    disabled={!adminCanChangeRole}
+                    onChange={(event) =>
+                      setDraft({ ...draft, role: event.target.value as AdminManagedUser["role"] })
+                    }
+                  >
+                    {roles.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            </div>
+
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Nome">
                 <input
@@ -118,96 +221,6 @@ export function AdminUserEditModal({
                   placeholder="Brasil"
                   onChange={(event) => setDraft({ ...draft, country: event.target.value })}
                 />
-              </Field>
-              <Field label="Role">
-                <select
-                  className="admin-input"
-                  value={draft.role}
-                  disabled={!adminCanChangeRole}
-                  onChange={(event) =>
-                    setDraft({ ...draft, role: event.target.value as AdminManagedUser["role"] })
-                  }
-                >
-                  {roles.map((role) => (
-                    <option key={role} value={role}>
-                      {role}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Plano atual">
-                <select
-                  className="admin-input"
-                  value={draft.plan}
-                  disabled={!adminCanEditTarget}
-                  onChange={(event) => {
-                    const plan = event.target.value as AdminManagedUser["plan"];
-                    setDraft({
-                      ...draft,
-                      plan,
-                      subscriptionStatus: plan === "free" ? "canceled" : draft.subscriptionStatus,
-                    });
-                  }}
-                >
-                  {plans.map((plan) => (
-                    <option key={plan} value={plan}>
-                      {plan}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Status da assinatura">
-                <select
-                  className="admin-input"
-                  value={draft.subscriptionStatus}
-                  disabled={!adminCanEditTarget}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      subscriptionStatus: event.target
-                        .value as AdminManagedUser["subscriptionStatus"],
-                    })
-                  }
-                >
-                  {statuses.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Data de inicio">
-                <input
-                  className="admin-input"
-                  type="datetime-local"
-                  value={toInputDate(draft.currentPeriodStart)}
-                  disabled={!adminCanEditTarget}
-                  onChange={(event) =>
-                    setDraft({ ...draft, currentPeriodStart: fromInputDate(event.target.value) })
-                  }
-                />
-              </Field>
-              <Field label="Data de vencimento">
-                <input
-                  className="admin-input"
-                  type="datetime-local"
-                  value={toInputDate(draft.currentPeriodEnd)}
-                  disabled={!adminCanEditTarget}
-                  onChange={(event) =>
-                    setDraft({ ...draft, currentPeriodEnd: fromInputDate(event.target.value) })
-                  }
-                />
-              </Field>
-              <Field label="Ativo / bloqueado">
-                <label className="flex min-h-11 items-center justify-between rounded-xl border border-border/60 bg-secondary/35 px-3 text-sm">
-                  <span>{draft.isBlocked ? "Bloqueado" : "Ativo"}</span>
-                  <input
-                    type="checkbox"
-                    checked={!draft.isBlocked}
-                    disabled={!adminCanEditTarget}
-                    onChange={(event) => setDraft({ ...draft, isBlocked: !event.target.checked })}
-                  />
-                </label>
               </Field>
             </div>
 
@@ -276,11 +289,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 function toInputDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 16);
+  return date.toISOString().slice(0, 10);
 }
 
-function fromInputDate(value: string) {
+function fromInputDate(value: string, endOfDay = false) {
   if (!value) return "";
-  const date = new Date(value);
+  const date = new Date(`${value}T${endOfDay ? "23:59:59" : "00:00:00"}`);
   return Number.isNaN(date.getTime()) ? value : date.toISOString();
 }

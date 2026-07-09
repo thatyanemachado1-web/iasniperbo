@@ -730,6 +730,32 @@ function AdminPage() {
         </div>
       </GlassCard>
 
+      <GlassCard className="border-gold/30">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex size-11 items-center justify-center rounded-2xl border border-gold/40 bg-gold/10 text-gold">
+              <Settings2 className="size-5" />
+            </div>
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-gold">
+                Planos e ofertas
+              </div>
+              <h2 className="mt-1 text-lg font-black">Ativar, desativar e promocional</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Controle VIP, Premium, preco antigo, selo, beneficios e checkout.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/app/admin/modules"
+            className="btn-gold-grad inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black"
+          >
+            <Settings2 className="size-4" />
+            Abrir planos
+          </Link>
+        </div>
+      </GlassCard>
+
       <div
         className={`grid gap-1 rounded-2xl border border-border/70 bg-secondary/30 p-1 ${isOwnerAdmin ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-1"}`}
       >

@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Clock, Crown } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertTriangle, CheckCircle2, ChevronRight, Clock, Crown, WifiOff } from "lucide-react";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { ModuleMiniScoreboard } from "@/components/dashboard/ModuleMiniScoreboard";
@@ -46,28 +46,26 @@ function DashboardPage() {
     d,
     mode === "live" && !d.mockMode,
   );
-  const patternMinerSourceRounds = useMemo(
-    () => [...roundHistory.todayRounds, ...d.rounds],
-    [roundHistory.todayRounds, d.rounds],
-  );
+  // Signal cards must be driven only by the official dashboard payload.
+  // Browser-local history is kept for the audit panel below, but it cannot
+  // influence live signals because desktop and mobile have different storage.
+  const patternMinerSourceRounds = d.rounds;
+  const patternMinerFeedStatus = resolvePatternMinerFeedStatus(d);
   const patternMiner = usePatternMiner({
-    rounds: patternMinerSourceRounds.length ? patternMinerSourceRounds : d.rounds,
+    rounds: patternMinerSourceRounds,
     historyLimit: 15000,
     enabled: mode === "live" && !d.mockMode,
     serverSnapshot: d.patternMinerSnapshot,
-    feedStatus: resolvePatternMinerFeedStatus(d),
-    dashboardUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
+    feedStatus: patternMinerFeedStatus,
+    dashboardUpdatedAt: d.updatedAt,
   });
-  const dailySurfSourceRounds = useMemo(
-    () => [...roundHistory.todayRounds, ...d.rounds],
-    [roundHistory.todayRounds, d.rounds],
-  );
-  const dailySurfMax = useDailySurfMax({
-    rounds: dailySurfSourceRounds,
+  const localDailySurfMax = useDailySurfMax({
+    rounds: d.rounds,
     tableId: "bac-bo",
-    sourceUpdatedAt: roundHistory.sourceUpdatedAt ?? d.updatedAt,
+    sourceUpdatedAt: d.updatedAt,
     enabled: mode === "live" && !d.mockMode,
   });
+  const dailySurfMax = officialDailySurfMax(d.currentSurfAlert, localDailySurfMax, d.updatedAt);
   const surfAlert = d.currentSurfAlert ?? mockDashboardData.currentSurfAlert;
   const surfBoard = d.surfAnalyzerScoreboard ?? mockDashboardData.surfAnalyzerScoreboard;
   const mainResult = calculateMainResult(d.mainScoreboard);
@@ -91,7 +89,6 @@ function DashboardPage() {
         ? "Conectando API"
         : "Modo demonstração";
   const dataModeTone = mode === "live" ? "green" : mode === "connecting" ? "blue" : "amber";
-  const dashboardSourceLabel = formatDashboardSource(dashboardUrl);
 
   return (
     <div className="space-y-4">
@@ -107,18 +104,7 @@ function DashboardPage() {
           {userSession.accessMode === "demo" && userSession.expiresAt && (
             <TrialCountdown expiresAt={userSession.expiresAt} />
           )}
-          <AppBadge tone="green" pulse>
-            Mesa online
-          </AppBadge>
-          <AppBadge tone="blue" pulse>
-            Engine operacional
-          </AppBadge>
-          <AppBadge tone={mode === "live" ? "green" : "amber"}>{dashboardSourceLabel}</AppBadge>
-          {fullAccess ? (
-            <AppBadge tone="green">
-              {userSession.plan === "vip" ? "Conta VIP" : "Conta Premium"}
-            </AppBadge>
-          ) : (
+          {!fullAccess && (
             <Link
               to="/app/planos"
               className="hidden sm:inline-flex items-center gap-1.5 btn-gold-grad rounded-xl px-3 py-2 text-xs font-bold shine"
@@ -129,12 +115,17 @@ function DashboardPage() {
         </div>
       </div>
 
+      <OperationalStatusCard data={d} mode={mode} dashboardUrl={dashboardUrl} />
+
       <DashboardMainCardsGrid
         data={d}
+        mode={mode}
         surfAlert={surfAlert}
         dailySurfMax={dailySurfMax}
         patternMinerSnapshot={patternMiner.snapshot}
+        patternMinerRounds={patternMinerSourceRounds}
         patternMinerIsUsingRealData={patternMiner.isUsingRealData}
+        patternMinerFeedStatus={patternMinerFeedStatus}
         onModuleTogglesChange={setModuleToggles}
       />
 
@@ -327,6 +318,26 @@ function DashboardPage() {
   );
 }
 
+function officialDailySurfMax(alert: any, fallback: any, updatedAt?: string | null) {
+  const memory = alert?.dailySurfMemory;
+  if (!memory) return fallback;
+  return {
+    currentStreak: {
+      side: memory.currentDropSide ?? null,
+      count: Number(memory.currentDropDepth) || 0,
+    },
+    dailyMaxSurf: {
+      banker: Number(memory.bankerMaxDepth) || 0,
+      player: Number(memory.playerMaxDepth) || 0,
+      tie: fallback?.dailyMaxSurf?.tie ?? 0,
+      date: memory.dateKey || fallback?.dailyMaxSurf?.date || "",
+      table_id: fallback?.dailyMaxSurf?.table_id || "bac-bo",
+      last_round_id: fallback?.dailyMaxSurf?.last_round_id ?? null,
+      updated_at: updatedAt || fallback?.dailyMaxSurf?.updated_at || new Date().toISOString(),
+    },
+  };
+}
+
 function formatCompactCount(value: number) {
   return value >= 0 && value < 10 ? `0${value}` : String(value);
 }
@@ -348,6 +359,160 @@ function formatDashboardSource(url: string) {
   } catch {
     return "API configurada";
   }
+}
+
+function OperationalStatusCard({
+  data,
+  mode,
+  dashboardUrl,
+}: {
+  data: any;
+  mode: "live" | "mock" | "connecting" | "fallback";
+  dashboardUrl: string;
+}) {
+  const latestRound = Array.isArray(data.rounds) ? data.rounds.at(-1) : null;
+  const lastRoundId = data.lastRoundId ?? latestRound?.id ?? "-";
+  const sourceUpdatedAtMs = latestDashboardSourceTimeMs(data, latestRound);
+  const sourceAgeMs = Number.isFinite(sourceUpdatedAtMs) ? Date.now() - sourceUpdatedAtMs : Number.POSITIVE_INFINITY;
+  const sourceAgeSeconds = Math.max(0, Math.round(sourceAgeMs / 1000));
+  const sourceIsStale = sourceAgeMs > 15_000;
+  const hasFreshSource = Number.isFinite(sourceUpdatedAtMs) && !sourceIsStale;
+  const hasLiveRounds = Array.isArray(data.rounds) && data.rounds.length > 0;
+  const inferredLiveFeed = !data.mockMode && hasFreshSource && hasLiveRounds;
+  const collectorStatus = normalizeStatusText(data.collectorStatus);
+  const websocketStatus = normalizeStatusText(data.websocketStatus);
+  const collectorOnline = collectorStatus === "online" || (!collectorStatus && inferredLiveFeed);
+  const websocketConnected = websocketStatus === "connected" || (!websocketStatus && inferredLiveFeed);
+  const liveMode =
+    !data.mockMode &&
+    (mode === "live" || (collectorOnline && websocketConnected && hasFreshSource));
+  const apiLabel = formatDashboardSource(dashboardUrl);
+  const issue =
+    !liveMode
+      ? mode === "connecting"
+        ? "Conectando na API de sinais."
+        : "Sincronizando dados reais."
+      : !collectorOnline
+        ? "Coletor nao esta online."
+        : !websocketConnected
+          ? "Conexao da mesa desconectada."
+          : !hasFreshSource
+            ? "Fonte atrasada. Conferir publicador/VPS."
+            : "";
+  const ok = !issue;
+  const statusLabel = ok ? "Tudo ok" : mode === "connecting" || !liveMode ? "Sincronizando" : "Verificar";
+  const Icon = ok ? CheckCircle2 : mode === "fallback" || sourceIsStale ? WifiOff : AlertTriangle;
+
+  return (
+    <GlassCard className="border-neon-cyan/10 bg-background/30 px-2.5 py-1.5 shadow-none sm:px-3 sm:py-2">
+      <div className="flex min-w-0 items-center gap-2 lg:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <div
+            className={`grid size-5 shrink-0 place-items-center rounded-md border sm:size-6 ${
+              ok
+                ? "border-emerald-400/30 bg-emerald-400/5 text-emerald-300/90"
+                : "border-amber-400/30 bg-amber-400/5 text-amber-300/90"
+            }`}
+          >
+            <Icon className="size-3 sm:size-3.5" />
+          </div>
+          <div className="min-w-0 truncate text-[9px] leading-none text-muted-foreground sm:text-[10px]">
+            <span className="font-black uppercase tracking-[0.12em] text-foreground/80">Status</span>
+            <span className={`ml-1 font-bold ${ok ? "text-emerald-300/90" : "text-amber-300/90"}`}>
+              {statusLabel}
+            </span>
+            <span className="mx-1 text-muted-foreground/50">-</span>
+            <span className="truncate">
+              {ok ? `VPS online, round ${lastRoundId}, ${formatAge(sourceAgeSeconds)}.` : issue}
+            </span>
+          </div>
+        </div>
+
+        <div className="hidden grid-cols-4 gap-1.5 text-[9px] sm:grid lg:min-w-[430px]">
+          <StatusMetric label="API" value={apiLabel} tone={liveMode ? "green" : "amber"} />
+          <StatusMetric
+            label="Coletor"
+            value={collectorOnline ? "online" : data.collectorStatus || "sem status"}
+            tone={collectorOnline ? "green" : "amber"}
+          />
+          <StatusMetric
+            label="Mesa"
+            value={websocketConnected ? "conectada" : data.websocketStatus || "sem status"}
+            tone={websocketConnected ? "green" : "amber"}
+          />
+          <StatusMetric
+            label="Fonte"
+            value={Number.isFinite(sourceUpdatedAtMs) ? `${formatAge(sourceAgeSeconds)} atras` : "sem horario"}
+            tone={hasFreshSource ? "green" : "amber"}
+          />
+        </div>
+      </div>
+    </GlassCard>
+  );
+}
+
+function latestDashboardSourceTimeMs(data: any, latestRound: any) {
+  const candidates = [
+    data?.updatedAt,
+    data?.updated_at,
+    data?.lastRoundAt,
+    data?.last_round_at,
+    data?.bettingTiming?.updatedAt,
+    data?.bettingTiming?.updated_at,
+    latestRound?.recordedAt,
+    latestRound?.recorded_at,
+    latestRound?.capturedAt,
+    latestRound?.captured_at,
+    latestRound?.sourceUpdatedAt,
+    latestRound?.source_updated_at,
+  ];
+  return candidates.reduce((best, value) => {
+    const parsed = parseDashboardSourceTimeMs(value);
+    return Number.isFinite(parsed) && parsed > best ? parsed : best;
+  }, Number.NEGATIVE_INFINITY);
+}
+
+function parseDashboardSourceTimeMs(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return Number.NaN;
+  const normalized = /(?:z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw : `${raw}Z`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function StatusMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "green" | "amber";
+}) {
+  return (
+    <div className="min-w-0 rounded-md border border-border/40 bg-background/35 px-2.5 py-1.5">
+      <div className="text-[8px] font-bold uppercase tracking-[0.14em] text-muted-foreground/80">{label}</div>
+      <div className={`mt-0.5 truncate text-[10px] font-bold ${tone === "green" ? "text-emerald-300/90" : "text-amber-300/90"}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function normalizeStatusText(value: unknown) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "conectado" || text === "conectada") return "connected";
+  if (text === "desconectado" || text === "desconectada") return "disconnected";
+  return text;
+}
+
+function formatAge(seconds: number) {
+  if (seconds < 5) return "agora";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}min`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h`;
 }
 
 function TrialCountdown({ expiresAt }: { expiresAt: string }) {

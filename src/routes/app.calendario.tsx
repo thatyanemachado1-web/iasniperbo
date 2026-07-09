@@ -15,6 +15,7 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { Button } from "@/components/ui/button";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { useRoundHistory } from "@/hooks/useRoundHistory";
+import { buildLocalNeuralCalendar } from "@/lib/neuralCalendarLocalFallback";
 import { fetchNeuralCalendar } from "@/lib/neuralCalendarApi";
 import type {
   NeuralCalendarClassification,
@@ -83,6 +84,7 @@ function NeuralCalendarPage() {
   const [month, setMonth] = useState(today.month);
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
+  const [detailsDismissed, setDetailsDismissed] = useState(false);
   const [calendar, setCalendar] = useState<NeuralCalendarPayload | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -119,18 +121,34 @@ function NeuralCalendarPage() {
       .then((payload) => {
         if (!active) return;
         setCalendar(payload);
+        if (!detailsDismissed && (!selectedDate || !selectedDate.startsWith(`${payload.selected.year}-${String(payload.selected.month).padStart(2, "0")}`))) {
+          setSelectedDate(payload.selected.date);
+        }
         setSelectedHour(null);
         setStatus("ready");
       })
       .catch((err) => {
         if (!active) return;
+        const localPayload = buildLocalNeuralCalendar({
+          year,
+          month,
+          date: selectedDate || undefined,
+          range: "este_mes",
+        });
+        if (localPayload) {
+          setCalendar(localPayload);
+          if (!detailsDismissed && !selectedDate) setSelectedDate(localPayload.selected.date);
+          setSelectedHour(null);
+          setStatus("ready");
+          return;
+        }
         setError(err instanceof Error ? err.message : "Nao foi possivel carregar o Calendario Neural agora.");
         setStatus("error");
       });
     return () => {
       active = false;
     };
-  }, [engineMode, engineParam, month, selectedDate, selectedEngineKeys, year]);
+  }, [detailsDismissed, engineMode, engineParam, month, selectedDate, selectedEngineKeys, year]);
 
   const selectedDay = useMemo(() => {
     if (!calendar || !selectedDate) return null;
@@ -149,7 +167,8 @@ function NeuralCalendarPage() {
   const canMovePrevious = canMoveMonth(-1, year, month, allowedYears);
   const canMoveNext = canMoveMonth(1, year, month, allowedYears);
 
-  function clearDetailSelection() {
+  function clearDetailSelection(dismiss = false) {
+    setDetailsDismissed(dismiss);
     setSelectedDate("");
     setSelectedHour(null);
   }
@@ -168,6 +187,7 @@ function NeuralCalendarPage() {
   function goToday() {
     setYear(today.year);
     setMonth(today.month);
+    setDetailsDismissed(false);
     setSelectedDate(today.date);
     setSelectedHour(null);
   }
@@ -229,6 +249,7 @@ function NeuralCalendarPage() {
                 calendar={calendar}
                 selectedDate={selectedDate}
                 onSelectDate={(date) => {
+                  setDetailsDismissed(false);
                   setSelectedDate(date);
                   setSelectedHour(null);
                 }}
@@ -252,7 +273,7 @@ function NeuralCalendarPage() {
           selectedHourStat={selectedHourStat}
           engineLabel={engineLabel}
           onSelectHour={setSelectedHour}
-          onClear={clearDetailSelection}
+          onClear={() => clearDetailSelection(true)}
         />
       </div>
 
@@ -651,7 +672,7 @@ function CalendarHoursOverview({
             Horarios organizados
           </div>
           <div className="text-xs text-muted-foreground">
-            Mapa leve por hora usando apenas agregados do calendario.
+            Mostra a semana do dia selecionado. "-" significa sem dado naquele horario.
           </div>
         </div>
         <div className="text-[9px] font-bold uppercase leading-tight text-muted-foreground sm:text-[10px]">
@@ -684,7 +705,7 @@ function CalendarHoursOverview({
 
       <div className="hidden lg:block">
         <div className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">
-          Semana real do dia selecionado
+          Semana do dia selecionado (domingo a sabado)
         </div>
         <div
           className="grid items-center gap-0.5 text-center"
@@ -1025,6 +1046,9 @@ function MonthOverview({ calendar, engineLabel }: { calendar: NeuralCalendarPayl
 function DayPanelContent({ day, hours }: { day: NeuralCalendarDailyStat; hours: NeuralCalendarHourlyStat[] }) {
   const visualClass = classifyScore(day.score, day.totalRounds);
   const hasSample = visualClass !== "sem_amostra";
+  const sampledHours = hours.filter((hour) => hour.totalRounds > 0);
+  const bestHour = [...sampledHours].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
+  const worstHour = [...sampledHours].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -1054,8 +1078,8 @@ function DayPanelContent({ day, hours }: { day: NeuralCalendarDailyStat; hours: 
         <Metric label="Reds" value={formatNumber(day.reds)} tone="red" />
         <Metric label="Empates" value={formatNumber(day.ties)} tone="amber" />
         <Metric label="Assertividade" value={day.totalRounds ? formatPercent(day.accuracy) : "Sem amostra"} />
-        <Metric label="Melhor hora" value={day.bestHour || "Sem dados"} />
-        <Metric label="Pior hora" value={day.worstHour || "Sem dados"} />
+        <Metric label="Melhor hora" value={bestHour ? `${String(bestHour.hour).padStart(2, "0")}:00 (${formatPercent(bestHour.score)})` : day.bestHour || "Sem dados"} />
+        <Metric label="Pior hora" value={worstHour ? `${String(worstHour.hour).padStart(2, "0")}:00 (${formatPercent(worstHour.score)})` : day.worstHour || "Sem dados"} />
         <Metric label="Melhor forca" value={forceLabel(day.bestForce)} />
       </div>
       <div className="rounded-xl border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground">
@@ -1212,13 +1236,14 @@ function ScoreSparkline({
 }
 
 function Rankings({ calendar }: { calendar: NeuralCalendarPayload }) {
+  const topWeeks = buildTopWeeks(calendar);
   return (
     <GlassCard className="p-4">
       <div className="mb-3 flex items-center gap-2 text-sm font-black">
         <BarChart3 className="size-4 text-neon-cyan" />
         Rankings do periodo
       </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <VisualRankingList
           title="Top 5 horarios"
           rows={calendar.rankings.topHours.slice(0, 5).map((item) => ({
@@ -1228,7 +1253,15 @@ function Rankings({ calendar }: { calendar: NeuralCalendarPayload }) {
           }))}
         />
         <VisualRankingList
-          title="Top 5 dias da semana"
+          title="Top semanas"
+          rows={topWeeks.slice(0, 5).map((item) => ({
+            label: item.label,
+            value: formatPercent(item.score),
+            detail: `${item.sampledDays} dias com amostra`,
+          }))}
+        />
+        <VisualRankingList
+          title="Top dias da semana"
           rows={calendar.rankings.topWeekdays.slice(0, 5).map((item) => ({
             label: item.weekday,
             value: formatPercent(item.score),
@@ -1236,7 +1269,7 @@ function Rankings({ calendar }: { calendar: NeuralCalendarPayload }) {
           }))}
         />
         <VisualRankingList
-          title="Top 5 dias do mes"
+          title="Top dias do mes"
           rows={calendar.rankings.topMonthDays.slice(0, 5).map((item) => ({
             label: item.label,
             value: formatPercent(item.score),
@@ -1673,6 +1706,52 @@ function visualMonthCounts(calendar: NeuralCalendarPayload) {
       sem_amostra: 0,
     } as Record<NeuralCalendarClassification, number>,
   );
+}
+
+function buildTopWeeks(calendar: NeuralCalendarPayload) {
+  const byWeek = new Map<
+    string,
+    {
+      label: string;
+      startDate: string;
+      totalScore: number;
+      sampledDays: number;
+      totalRounds: number;
+    }
+  >();
+
+  for (const day of calendar.month.days) {
+    if (!day.totalRounds || day.classification === "sem_amostra") continue;
+    const weekStart = startOfCalendarWeek(day.date);
+    const label = `Semana ${formatDateShort(weekStart)}`;
+    const current =
+      byWeek.get(weekStart) || {
+        label,
+        startDate: weekStart,
+        totalScore: 0,
+        sampledDays: 0,
+        totalRounds: 0,
+      };
+    current.totalScore += day.score;
+    current.sampledDays += 1;
+    current.totalRounds += day.totalRounds;
+    byWeek.set(weekStart, current);
+  }
+
+  return [...byWeek.values()]
+    .map((week) => ({
+      ...week,
+      score: week.sampledDays ? week.totalScore / week.sampledDays : 0,
+    }))
+    .sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)
+    .slice(0, 8);
+}
+
+function startOfCalendarWeek(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year || 1970, (month || 1) - 1, day || 1));
+  parsed.setUTCDate(parsed.getUTCDate() - parsed.getUTCDay());
+  return calendarDateKey(parsed);
 }
 
 function formatPercent(value: number) {

@@ -102,9 +102,9 @@ class DirectTelegramSignalTests(unittest.TestCase):
         self.assertEqual(source, "published")
         self.assertIsNotNone(outcome)
         self.assertEqual(outcome["status"], "GREEN")
-        self.assertEqual(outcome["label"], "Green")
+        self.assertEqual(outcome["label"], "GREEN SG")
 
-    def test_result_outcome_confirms_red_and_tie(self):
+    def test_result_outcome_waits_g1_before_final_red(self):
         red_pending = {
             "moduleKey": "paying_numbers",
             "signalKey": "publisher:paying:2301:BANKER:7",
@@ -112,7 +112,7 @@ class DirectTelegramSignalTests(unittest.TestCase):
             "entry": "BANKER",
             "maxGale": 1,
         }
-        red_outcome = publisher.resolve_direct_telegram_outcome(
+        g1_outcome = publisher.resolve_direct_telegram_outcome(
             red_pending,
             {
                 "rounds": [
@@ -122,8 +122,64 @@ class DirectTelegramSignalTests(unittest.TestCase):
                 ],
             },
         )
-        tie_outcome = publisher.resolve_direct_telegram_outcome(
-            {**red_pending, "signalKey": "publisher:paying:2401:BANKER:7", "roundId": 2401},
+        red_after_g1_notice = publisher.resolve_direct_telegram_outcome(
+            {**red_pending, "g1NoticeRoundIds": ["2302"]},
+            {
+                "rounds": [
+                    {"id": 2301, "result": "B"},
+                    {"id": 2302, "result": "P"},
+                    {"id": 2303, "result": "P"},
+                ],
+            },
+        )
+
+        self.assertEqual(g1_outcome["status"], "G1_ACTIVE")
+        self.assertIn("PROTEÇÃO G1 ATIVA", publisher.direct_result_message(red_pending, g1_outcome))
+        self.assertEqual(red_after_g1_notice["status"], "RED")
+
+    def test_result_outcome_confirms_green_g1_after_notice(self):
+        pending = {
+            "moduleKey": "paying_numbers",
+            "signalKey": "publisher:paying:2501:BANKER:7",
+            "roundId": 2501,
+            "entry": "BANKER",
+            "maxGale": 1,
+            "g1NoticeRoundIds": ["2502"],
+        }
+        outcome = publisher.resolve_direct_telegram_outcome(
+            pending,
+            {
+                "rounds": [
+                    {"id": 2501, "result": "B"},
+                    {"id": 2502, "result": "P"},
+                    {"id": 2503, "result": "B"},
+                ],
+            },
+        )
+
+        self.assertEqual(outcome["status"], "GREEN")
+        self.assertEqual(outcome["label"], "GREEN G1")
+        self.assertIn("GREEN G1", publisher.direct_result_message(pending, outcome))
+
+    def test_tie_protects_normal_entry_and_confirms_tie_radar(self):
+        normal_pending = {
+            "moduleKey": "paying_numbers",
+            "signalKey": "publisher:paying:2401:BANKER:7",
+            "roundId": 2401,
+            "entry": "BANKER",
+            "maxGale": 1,
+        }
+        tie_protection = publisher.resolve_direct_telegram_outcome(
+            normal_pending,
+            {
+                "rounds": [
+                    {"id": 2401, "result": "B"},
+                    {"id": 2402, "result": "T", "bankerScore": 6, "playerScore": 6},
+                ],
+            },
+        )
+        tie_radar_outcome = publisher.resolve_direct_telegram_outcome(
+            {**normal_pending, "moduleKey": "ties_only"},
             {
                 "rounds": [
                     {"id": 2401, "result": "B"},
@@ -132,9 +188,10 @@ class DirectTelegramSignalTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(red_outcome["status"], "RED")
-        self.assertEqual(tie_outcome["status"], "TIE")
-        self.assertIn("Empate confirmado", publisher.direct_result_message(red_pending, tie_outcome))
+        self.assertEqual(tie_protection["status"], "TIE_PROTECTION")
+        self.assertIn("PROTEGIDO / AGUARDANDO DEFINIÇÃO", publisher.direct_result_message(normal_pending, tie_protection))
+        self.assertEqual(tie_radar_outcome["status"], "TIE")
+        self.assertIn("EMPATE CONFIRMADO", publisher.direct_result_message(normal_pending, tie_radar_outcome))
 
 
 if __name__ == "__main__":

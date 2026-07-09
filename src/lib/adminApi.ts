@@ -55,11 +55,33 @@ export interface LocalAiAdminLog {
   timestamp: string;
 }
 
+export type AdminPlanOfferStatus = "active" | "inactive" | "promo" | "sold_out";
+
+export interface AdminPlanOffer {
+  id: "vip" | "premium";
+  name: string;
+  slug: string;
+  description: string;
+  price: number;
+  oldPrice: number;
+  billingPeriod: "monthly";
+  isActive: boolean;
+  isFeatured: boolean;
+  badgeText: string;
+  checkoutUrl: string;
+  benefits: string[];
+  sortOrder: number;
+  accessLevel: "vip" | "premium";
+  status: AdminPlanOfferStatus;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
 export const LOCAL_ADMIN_API_URL = LOCAL_SIGNALS_API_BASE_URL;
 export const PUBLIC_ADMIN_API_URL = "https://sniperbo.com";
-const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 20_000;
 const ALLOWED_REMOTE_API_HOSTS = new Set(["sniperbo.com", "www.sniperbo.com"]);
 
 const defaultApiUrl = () =>
@@ -237,8 +259,25 @@ export async function updateAdminSalesSettings(
   return data.salesSettings;
 }
 
+export async function getAdminPlanOffers(session: AdminSession) {
+  const data = await request<{ plans: AdminPlanOffer[] }>(session, "/admin/plan-offers");
+  return data.plans ?? [];
+}
+
+export async function updateAdminPlanOffer(
+  session: AdminSession,
+  planId: AdminPlanOffer["id"],
+  patch: Partial<AdminPlanOffer>,
+) {
+  const data = await request<{ plan: AdminPlanOffer; plans: AdminPlanOffer[] }>(session, "/admin/plan-offers", {
+    method: "POST",
+    body: JSON.stringify({ planId, patch }),
+  });
+  return data;
+}
+
 export async function getAdminSiteContent(session: AdminSession) {
-  const data = await request<{ siteContent: SiteContentSettings }>(session, "/admin/site-content");
+  const data = await request<{ siteContent: SiteContentSettings }>(session, "/admin/site-content", {}, 12_000);
   return data.siteContent;
 }
 
@@ -249,7 +288,7 @@ export async function updateAdminSiteContent(
   const data = await request<{ siteContent: SiteContentSettings }>(session, "/admin/site-content", {
     method: "POST",
     body: JSON.stringify(payload),
-  });
+  }, 12_000);
   return data.siteContent;
 }
 
@@ -266,7 +305,7 @@ export async function getAdminSummary(session: AdminSession) {
 }
 
 export async function listAdminUsers(session: AdminSession) {
-  return request<AdminUsersResponse>(session, "/admin/users");
+  return request<AdminUsersResponse>(session, "/admin/users", {}, 25_000);
 }
 
 export async function getAdminCrm(session: AdminSession) {
@@ -520,15 +559,19 @@ function normalizeAdminRole(role: unknown): NonNullable<AdminSession["role"]> {
   return value === "admin" || value === "approver" ? "admin" : "owner";
 }
 
-async function request<T>(session: AdminSession, path: string, init: RequestInit = {}) {
-  const response = await fetchWithTimeout(`${normalizeMaybeUrl(session.apiUrl)}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.token}`,
-      ...(init.headers ?? {}),
+async function request<T>(session: AdminSession, path: string, init: RequestInit = {}, timeoutMs = DEFAULT_ADMIN_REQUEST_TIMEOUT_MS) {
+  const response = await fetchWithTimeout(
+    `${normalizeMaybeUrl(session.apiUrl)}${path}`,
+    {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.token}`,
+        ...(init.headers ?? {}),
+      },
     },
-  });
+    timeoutMs,
+  );
   if (!response.ok) {
     if (response.status === 401) {
       clearAdminSession();

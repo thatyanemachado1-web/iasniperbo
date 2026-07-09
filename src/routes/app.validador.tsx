@@ -1019,7 +1019,7 @@ function NeuralValidatorPage() {
             <AppBadge tone="green">Motor independente</AppBadge>
           </div>
           <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
-            Monte, valide, salve e monitore estrategias usando apenas historico real coletado pela plataforma.
+            Veja quais padroes ja bateram no historico, salve os melhores e monitore entrada ao vivo.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1231,10 +1231,10 @@ function DashboardTab({
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
         <Metric label="Padroes salvos" value={savedPatterns.length} icon={<Layers3 className="size-4" />} />
-        <Metric label="Ativos" value={activePatterns.length} icon={<Eye className="size-4" />} tone="text-neon-cyan" />
-        <Metric label="Canais" value={channels.length} icon={<Send className="size-4" />} />
-        <Metric label="Rodadas reais" value={historyRounds.length} icon={<History className="size-4" />} tone="text-success" />
-        <Metric label="Assertividade" value={formatPercent(accuracy)} icon={<Trophy className="size-4" />} tone="text-neon-cyan" />
+        <Metric label="Monitorando" value={activePatterns.length} icon={<Eye className="size-4" />} tone="text-neon-cyan" />
+        <Metric label="Telegram" value={channels.length} icon={<Send className="size-4" />} />
+        <Metric label="Rodadas analisadas" value={historyRounds.length} icon={<History className="size-4" />} tone="text-success" />
+        <Metric label="Acerto salvo" value={formatPercent(accuracy)} icon={<Trophy className="size-4" />} tone="text-neon-cyan" />
       </div>
 
       {liveHits.length ? (
@@ -1268,11 +1268,11 @@ function DashboardTab({
           <div className="flex items-start gap-3">
             <Bot className="mt-0.5 size-5 text-neon-cyan" />
             <div>
-              <div className="text-sm font-black">Monitoramento ao vivo</div>
+              <div className="text-sm font-black">Nenhum padrao ativo agora</div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {hasHistory
-                  ? "Nenhum padrao salvo apareceu nas ultimas rodadas."
-                  : "Aguardando historico real para monitorar os padroes salvos."}
+                  ? "Quando um padrao salvo aparecer nas ultimas rodadas, a entrada sera mostrada aqui."
+                  : "Aguardando rodadas reais para ativar o monitoramento."}
               </p>
             </div>
           </div>
@@ -1281,7 +1281,7 @@ function DashboardTab({
 
       <div className="grid gap-4 xl:grid-cols-2">
         <GlassCard>
-          <SectionTitle title="Estrategias quentes da IA" subtitle="Top sugestoes calculadas com o historico real disponivel." />
+          <SectionTitle title="Melhores padroes encontrados" subtitle="Sequencia historica, entrada sugerida e taxa de acerto." />
           <div className="mt-4 space-y-2">
             {suggestions.slice(0, 4).map((suggestion, index) => (
               <SuggestionRow key={suggestion.id} suggestion={suggestion} rank={index + 1} />
@@ -1295,7 +1295,7 @@ function DashboardTab({
         </GlassCard>
 
         <GlassCard>
-          <SectionTitle title="Ultimos padroes salvos" subtitle="Contadores proprios, separados dos outros motores." />
+          <SectionTitle title="Padroes que voce salvou" subtitle="Somente esses padroes podem aparecer no monitoramento ao vivo." />
           <div className="mt-4 space-y-2">
             {savedPatterns.slice(0, 4).map((pattern) => (
               <div key={pattern.id} className="rounded-xl border border-border/70 bg-secondary/20 p-3">
@@ -1857,6 +1857,7 @@ function CentralTelegramTab({
   const selectedChannelModules = selectedChannel ? channelSignalModules(selectedChannel) : defaultTelegramModuleConfigs();
   const connected = telegramChannelCanUpdateModules(selectedChannel);
   const engineActive = connected && TELEGRAM_MODULE_OPTIONS.some((option) => selectedChannelModules[option.key]?.enabled);
+  const preparedModulesCount = TELEGRAM_MODULE_OPTIONS.filter((option) => selectedChannelModules[option.key]?.enabled).length;
   const activeConfigModuleKey = configuringModuleKey || selectedModuleKey;
 
   function patchChannelModule(key: ValidatorTelegramModuleKey, patch: Partial<ValidatorTelegramModuleConfig>) {
@@ -1883,11 +1884,20 @@ function CentralTelegramTab({
         <div className="space-y-4">
           <GlassCard>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <SectionTitle title="Central Telegram" subtitle="Disparo direto pela API, sem precisar deixar o site aberto." />
+              <SectionTitle title="Central Telegram" subtitle="Crie a sala, envie um teste e depois ative os motores de sinais." />
               <div className="flex flex-wrap gap-2">
                 <AppBadge tone={connected ? "green" : "amber"}>{connected ? "Canal conectado" : "Canal pendente"}</AppBadge>
                 <AppBadge tone={engineActive ? "green" : "amber"}>{engineActive ? "Motor ativo" : "Motor inativo"}</AppBadge>
               </div>
+            </div>
+            <div className="mt-3 rounded-xl border border-border/60 bg-secondary/15 px-3 py-2 text-xs text-muted-foreground">
+              {connected
+                ? engineActive
+                  ? "Pronto: os motores ativos podem enviar sinais para esta sala."
+                  : "Canal conectado. Agora ative pelo menos um motor para enviar sinais."
+                : preparedModulesCount
+                  ? "Motores preparados, mas ainda nao enviam. Valide e salve o Telegram primeiro."
+                  : "Passo 1: valide o Bot Token e o Chat ID. Passo 2: salve o canal. Passo 3: ative os motores."}
             </div>
           </GlassCard>
 
@@ -1906,7 +1916,8 @@ function CentralTelegramTab({
                   name={option.label}
                   description={telegramModuleDescription(option.key)}
                   active={Boolean(moduleConfig.enabled)}
-                  disabled={!telegramEnabled || !selectedChannel}
+                  ready={connected}
+                  disabled={!telegramEnabled || !selectedChannel || !connected}
                   selected={selectedModuleKey === option.key}
                   onToggle={() => patchChannelModule(option.key, { enabled: !moduleConfig.enabled })}
                   onConfigure={() => {
@@ -1925,6 +1936,11 @@ function CentralTelegramTab({
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
               <MiniStat label="Canal" value={connected ? "Conectado" : "Pendente"} tone={connected ? "text-success" : "text-warning"} />
               <MiniStat label="Motor" value={engineActive ? "Ativo" : "Inativo"} tone={engineActive ? "text-success" : "text-warning"} />
+            </div>
+            <div className="mt-3 rounded-xl border border-border/60 bg-background/35 p-3 text-xs text-muted-foreground">
+              {connected
+                ? "Canal validado com teste real. Os motores ativos enviam sinais para esta sala."
+                : "Pendente: nenhum sinal sera enviado enquanto o canal nao for validado e salvo."}
             </div>
             {channels.length > 0 && (
               <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
@@ -1961,8 +1977,14 @@ function CentralTelegramTab({
           </GlassCard>
 
           {!channels.length ? (
-            <GlassCard>
-              <SectionTitle title="Conectar Telegram" subtitle="Cadastre e valide o grupo primeiro." />
+            <GlassCard className="relative border-2 border-neon-cyan/80 bg-neon-cyan/5 shadow-[0_0_28px_rgba(0,229,255,0.16)]">
+              <div className="absolute -top-3 left-4 rounded-full border border-neon-cyan/60 bg-background px-3 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-neon-cyan shadow-[0_0_16px_rgba(0,229,255,0.2)]">
+                Conecte aqui
+              </div>
+              <SectionTitle title="Conectar Telegram" subtitle="Use o Chat ID numerico do grupo ou canal. Ex: -1001234567890." />
+              <div className="mt-3 rounded-xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-2 text-xs font-bold text-neon-cyan">
+                Primeiro envie o teste. Depois salve o canal conectado.
+              </div>
               <div className="mt-4 space-y-3">
                 <Field label="Nome do canal">
                   <Input value={channelForm.name} onChange={(event) => setChannelForm({ ...channelForm, name: event.target.value })} />
@@ -1977,7 +1999,11 @@ function CentralTelegramTab({
                   />
                 </Field>
                 <Field label="Chat ID">
-                  <Input value={channelForm.chatId} onChange={(event) => setChannelForm({ ...channelForm, chatId: event.target.value })} />
+                  <Input
+                    value={channelForm.chatId}
+                    onChange={(event) => setChannelForm({ ...channelForm, chatId: event.target.value })}
+                    placeholder="-1001234567890"
+                  />
                 </Field>
                 {(validatingChannelForm || isChannelFormValidated) && (
                   <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold ${
@@ -1998,7 +2024,7 @@ function CentralTelegramTab({
                     disabled={!telegramEnabled || validatingChannelForm || savingChannel}
                   >
                     {validatingChannelForm ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-                    {isChannelFormValidated ? "Conexao validada" : "Procurar grupo"}
+                    {isChannelFormValidated ? "Teste validado" : "Enviar teste"}
                   </Button>
                   <Button
                     type="button"
@@ -2007,7 +2033,7 @@ function CentralTelegramTab({
                     disabled={!telegramEnabled || savingChannel || validatingChannelForm || saveBlockedByValidation}
                   >
                     {savingChannel ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                    Salvar canal
+                    Salvar canal conectado
                   </Button>
                 </div>
               </div>
@@ -2051,6 +2077,7 @@ function TelegramModeCard({
   name,
   description,
   active,
+  ready,
   disabled,
   selected,
   onToggle,
@@ -2059,11 +2086,14 @@ function TelegramModeCard({
   name: string;
   description: string;
   active: boolean;
+  ready: boolean;
   disabled: boolean;
   selected: boolean;
   onToggle: () => void;
   onConfigure: () => void;
 }) {
+  const statusLabel = active ? (ready ? "Enviando" : "Preparado") : "Inativo";
+  const statusTone = active ? (ready ? "green" : "amber") : "muted";
   return (
     <GlassCard className={`rounded-xl p-4 ${selected ? "border-neon-cyan/45" : ""}`}>
       <div className="flex items-start justify-between gap-3">
@@ -2071,11 +2101,16 @@ function TelegramModeCard({
           <div className="text-sm font-black">{name}</div>
           <div className="mt-1 text-xs text-muted-foreground">{description}</div>
         </div>
-        <AppBadge tone={active ? "green" : "amber"}>{active ? "Ativo" : "Inativo"}</AppBadge>
+        <AppBadge tone={statusTone}>{statusLabel}</AppBadge>
       </div>
+      {!ready && active && (
+        <div className="mt-3 rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-[11px] font-bold text-warning">
+          Preparado, mas nao envia ate conectar o Telegram.
+        </div>
+      )}
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <Button type="button" className="h-10 w-full" variant={active ? "secondary" : "default"} onClick={onToggle} disabled={disabled}>
-          {active ? "Desativar" : "Ativar"}
+          {active ? "Desativar" : ready ? "Ativar envio" : "Conecte o canal"}
         </Button>
         <Button type="button" className="h-10 w-full" variant="secondary" onClick={onConfigure}>
           Configurar
@@ -2597,22 +2632,22 @@ function PatternLine({
 }) {
   return (
     <div className={`flex min-w-0 flex-wrap items-end gap-x-1.5 gap-y-2 ${compact ? "text-xs" : "text-sm"}`}>
-      <span className="mb-3 font-semibold text-muted-foreground">Estrategia:</span>
+      <span className="mb-3 font-semibold text-muted-foreground">Sequencia:</span>
       {pattern.map((token, index) => (
         <span key={`${formatToken(token)}-${index}`} className="inline-flex items-start gap-1">
           <TokenPill token={token} />
           {index < pattern.length - 1 && <span className="mt-2 text-muted-foreground">&rarr;</span>}
         </span>
       ))}
-      <span className="mb-3 text-muted-foreground">= puxou</span>
+      <span className="mb-3 text-muted-foreground">= entrada</span>
       {pulledSide === undefined ? (
-        <span className="mb-3 text-muted-foreground">aguardando validacao</span>
+        <span className="mb-3 text-muted-foreground">aguardando teste</span>
       ) : pulledSide ? (
         <span className="mb-3">
           <SideLabel side={pulledSide} />
         </span>
       ) : (
-        <span className="mb-3 text-warning">sem amostra suficiente</span>
+        <span className="mb-3 text-warning">pouca amostra</span>
       )}
     </div>
   );

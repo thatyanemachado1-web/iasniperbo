@@ -5,11 +5,32 @@ import { DEFAULT_PATTERN_MINER_CONFIG } from "@/patternMiner/PatternMinerEngine"
 import { PatternMinerAgent } from "@/patternMiner/PatternMinerAgent";
 
 const SERVER_SNAPSHOT_MAX_LAG_MS = 120_000;
+const DASHBOARD_FEED_STALE_MS = 60_000;
 
-export function resolvePatternMinerFeedStatus(data: Pick<DashboardData, "currentSignal" | "neuralReading">) {
+export function resolvePatternMinerFeedStatus(
+  data: Partial<
+    Pick<
+      DashboardData,
+      "currentSignal" | "neuralReading" | "updatedAt" | "collectorStatus" | "websocketStatus"
+    >
+  >,
+) {
   if (data.currentSignal?.id === "feed-paused") return "paused";
   if (data.neuralReading?.paganteStatus === "FEED_PAUSADO") return "paused";
+  if (data.collectorStatus && normalizeFeedStatus(data.collectorStatus) !== "online") return "stale";
+  if (data.websocketStatus && normalizeFeedStatus(data.websocketStatus) !== "connected") return "stale";
+  const updatedAtMs = Date.parse(String(data.updatedAt || ""));
+  if (Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs > DASHBOARD_FEED_STALE_MS) {
+    return "stale";
+  }
   return null;
+}
+
+function normalizeFeedStatus(value: unknown) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "conectado" || text === "conectada") return "connected";
+  if (text === "desconectado" || text === "desconectada") return "disconnected";
+  return text;
 }
 
 interface UsePatternMinerParams {

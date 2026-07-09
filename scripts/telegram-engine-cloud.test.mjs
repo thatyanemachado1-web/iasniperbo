@@ -96,6 +96,37 @@ try {
   assert.equal(list[0].signalModules.surf_alert.enabled, false);
   assert.equal(list[0].signalModules.paying_numbers.enabled, true);
 
+  const blockedGlobal = await engine.fetch(new Request("https://internal/engine/signal", {
+    method: "POST",
+    body: JSON.stringify({
+      userId,
+      channelId: "canal-1",
+      moduleKey: "paying_numbers",
+      signalKey: "parallel-paying-entry",
+      roundId: 99,
+      entry: "PLAYER",
+      result: "Aguardando resultado",
+    }),
+  }));
+  assert.equal(blockedGlobal.status, 409);
+  assert.equal((await blockedGlobal.json()).error, "global_modules_site_first_only");
+
+  const validatorViaHttp = await engine.fetch(new Request("https://internal/engine/signal", {
+    method: "POST",
+    body: JSON.stringify({
+      userId,
+      channelId: "canal-1",
+      moduleKey: "validator",
+      signalKey: "validator-http-entry",
+      roundId: 100,
+      entry: "PLAYER",
+      result: "Aguardando resultado",
+      variables: { pattern: "B P B" },
+    }),
+  }));
+  assert.equal(validatorViaHttp.status, 200);
+  assert.equal((await validatorViaHttp.json()).sent.length, 1);
+
   await engine.patchChannel(userId, "canal-1", {
     signalModules: {
       ...list[0].signalModules,
@@ -144,12 +175,77 @@ try {
     assert.equal(body.blocked.length, 0, `${item.moduleKey} should not block`);
   }
 
-  assert.equal(sentMessages.length, 6);
-  assert.match(sentMessages[1].payload.text, /PADRAO|PADR/);
-  assert.match(sentMessages[2].payload.text, /Green/i);
-  assert.match(sentMessages[3].payload.text, /RED/i);
-  assert.match(sentMessages[4].payload.text, /Empate 8x/i);
-  assert.match(sentMessages[5].payload.text, /VALIDADOR|PLAYER/i);
+  assert.equal(sentMessages.length, 7);
+  assert.match(sentMessages[1].payload.text, /PLAYER/i);
+  assert.match(sentMessages[2].payload.text, /PADRAO|PADR/);
+  assert.match(sentMessages[3].payload.text, /Green/i);
+  assert.match(sentMessages[4].payload.text, /RED/i);
+  assert.match(sentMessages[5].payload.text, /Empate 8x/i);
+  assert.match(sentMessages[6].payload.text, /VALIDADOR|PLAYER/i);
+
+  await engine.storeNotification({
+    id: "official-paying-entry",
+    type: "module:paying_numbers",
+    userId,
+    channelId: "canal-1",
+    roundId: 200,
+    status: "sent",
+    error: "",
+    payloadJson: {
+      moduleKey: "paying_numbers",
+      signalKey: "official-paying-entry",
+      signalKind: "entry",
+      variables: {
+        number: "🔵7",
+        entry: "🔵 PLAYER",
+        entryLabel: "Player",
+        side: "PLAYER",
+        gale: "G1",
+        result: "Aguardando resultado",
+        roundId: 200,
+      },
+      entrySide: "PLAYER",
+      entry: "🔵 PLAYER",
+      result: "Aguardando resultado",
+      galeLimit: 1,
+      protection: "G1",
+    },
+    sentAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const beforeG1Messages = sentMessages.length;
+  const g1Dispatch = await engine.dispatchPendingOfficialModuleResults(
+    {
+      rounds: [
+        { id: 200, result: "B", bankerScore: 8, playerScore: 7, time: "10:00" },
+        { id: 201, result: "B", bankerScore: 9, playerScore: 5, time: "10:01" },
+      ],
+    },
+    "test",
+  );
+  assert.ok(g1Dispatch.sentCount >= 1);
+  const g1Message = sentMessages.slice(beforeG1Messages).find((item) => /Número:<\/b> 🔵7/.test(item.payload.text));
+  assert.ok(g1Message, "paying_numbers G1 message should be sent");
+  assert.match(g1Message.payload.text, /Proteção G1 ATIVA/i);
+  assert.match(g1Message.payload.text, /Status:<\/b> G1 ATIVO/);
+
+  const beforeFinalMessages = sentMessages.length;
+  const finalDispatch = await engine.dispatchPendingOfficialModuleResults(
+    {
+      rounds: [
+        { id: 200, result: "B", bankerScore: 8, playerScore: 7, time: "10:00" },
+        { id: 201, result: "B", bankerScore: 9, playerScore: 5, time: "10:01" },
+        { id: 202, result: "P", bankerScore: 4, playerScore: 7, time: "10:02" },
+      ],
+    },
+    "test",
+  );
+  assert.ok(finalDispatch.sentCount >= 1);
+  const finalMessage = sentMessages.slice(beforeFinalMessages).find((item) => /Número:<\/b> 🔵7/.test(item.payload.text));
+  assert.ok(finalMessage, "paying_numbers final message should be sent");
+  assert.match(finalMessage.payload.text, /GREEN G1/);
+  assert.match(finalMessage.payload.text, /Status:<\/b> FINALIZADO/);
 
   console.log("telegram-engine-cloud tests passed");
 } finally {
