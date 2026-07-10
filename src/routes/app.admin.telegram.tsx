@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, RadioTower, Save, Search, Send, WifiOff } from "
 import {
   createAdminTelegramRoom,
   listAdminTelegramRooms,
+  previewAdminTelegramRoom,
   readAdminSession,
   testAdminTelegramRoom,
   updateAdminTelegramRoom,
@@ -12,15 +13,21 @@ import { readEffectiveAdminSession } from "@/lib/adminSession";
 import {
   TELEGRAM_ROOM_MODULES,
   telegramRoomModuleEnabled,
+  telegramRoomSignalModulesPatch,
   type TelegramRoomModuleKey,
 } from "@/lib/telegramRooms";
+import { TelegramRoomTemplateEditor } from "@/components/telegram/TelegramRoomTemplateEditor";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import type { ValidatorNotificationChannel } from "@/types/neuralValidator";
+import type {
+  TelegramRoomEventButtonConfig,
+  TelegramRoomSignalModuleConfig,
+  ValidatorNotificationChannel,
+} from "@/types/neuralValidator";
 
 export const Route = createFileRoute("/app/admin/telegram")({
   component: AdminTelegramRoomsPage,
@@ -119,6 +126,49 @@ function AdminTelegramRoomsPage() {
     }
   }
 
+  async function saveTemplateConfig(
+    room: ValidatorNotificationChannel,
+    moduleKey: TelegramRoomModuleKey,
+    config: TelegramRoomSignalModuleConfig,
+  ) {
+    if (!session || !searchedEmail) return;
+    const key = `${room.id}:templates`;
+    setBusyKey(key);
+    setError("");
+    setSuccess("");
+    try {
+      const data = await updateAdminTelegramRoom(session, searchedEmail, room.id, {
+        signalModules: telegramRoomSignalModulesPatch(room, moduleKey, config),
+      });
+      replaceRoom(data.channel);
+      setSuccess(`Mensagens de ${room.name} salvas.`);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function previewTemplate(
+    room: ValidatorNotificationChannel,
+    message: string,
+    button: TelegramRoomEventButtonConfig,
+  ) {
+    if (!session || !searchedEmail) return;
+    const key = `${room.id}:templates`;
+    setBusyKey(key);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await previewAdminTelegramRoom(session, searchedEmail, room.id, message, button);
+      setSuccess(result.messageId ? `Teste enviado. message_id ${result.messageId}.` : "Teste enviado.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
   function replaceRoom(saved: ValidatorNotificationChannel) {
     setRooms((current) => current.map((room) => (room.id === saved.id ? saved : room)));
   }
@@ -186,6 +236,8 @@ function AdminTelegramRoomsPage() {
                 busyKey={busyKey}
                 onUpdate={updateRoom}
                 onTest={testRoom}
+                onSaveTemplate={saveTemplateConfig}
+                onPreviewTemplate={previewTemplate}
               />
             ))}
           </div>
@@ -225,12 +277,24 @@ function AdminRoomCard({
   busyKey,
   onUpdate,
   onTest,
+  onSaveTemplate,
+  onPreviewTemplate,
 }: {
   room: ValidatorNotificationChannel;
   slot: number;
   busyKey: string;
   onUpdate: (room: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>, action: string) => Promise<void>;
   onTest: (room: ValidatorNotificationChannel) => Promise<void>;
+  onSaveTemplate: (
+    room: ValidatorNotificationChannel,
+    moduleKey: TelegramRoomModuleKey,
+    config: TelegramRoomSignalModuleConfig,
+  ) => Promise<void>;
+  onPreviewTemplate: (
+    room: ValidatorNotificationChannel,
+    message: string,
+    button: TelegramRoomEventButtonConfig,
+  ) => Promise<void>;
 }) {
   const [name, setName] = useState(room.name);
   const [chatId, setChatId] = useState(room.chatId);
@@ -313,6 +377,13 @@ function AdminRoomCard({
         {busyKey === `${room.id}:test` ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
         Testar conexao
       </Button>
+
+      <TelegramRoomTemplateEditor
+        room={room}
+        busy={busyKey === `${room.id}:templates`}
+        onSave={(moduleKey, config) => onSaveTemplate(room, moduleKey, config)}
+        onPreview={(message, button) => onPreviewTemplate(room, message, button)}
+      />
     </GlassCard>
   );
 }

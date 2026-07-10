@@ -27,6 +27,8 @@ class MemoryStorage {
 const originalFetch = globalThis.fetch;
 const sentMessages = [];
 let dashboardPayload = null;
+let failNextEdit = false;
+let failNextDelete = false;
 globalThis.fetch = async (url, init = {}) => {
   const endpoint = String(url);
   if (endpoint === "https://dashboard.test/dashboard" && dashboardPayload) {
@@ -41,6 +43,20 @@ globalThis.fetch = async (url, init = {}) => {
 
   const payload = JSON.parse(String(init.body || "{}"));
   sentMessages.push({ endpoint, payload });
+  if (endpoint.includes("/editMessageText") && failNextEdit) {
+    failNextEdit = false;
+    return new Response(JSON.stringify({ ok: false, description: "Bad Request: not enough rights" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  if (endpoint.includes("/deleteMessage") && failNextDelete) {
+    failNextDelete = false;
+    return new Response(JSON.stringify({ ok: false, description: "Bad Request: not enough rights" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
   return new Response(JSON.stringify({ ok: true, result: { message_id: sentMessages.length } }), {
     status: 200,
     headers: { "content-type": "application/json" },
@@ -380,6 +396,296 @@ try {
   }));
   assert.equal(publisherGlobal.status, 200);
   assert.equal((await publisherGlobal.json()).sent.length, 1);
+
+  const channelBeforeTemplateTests = (await engine.publicChannelsForUser(userId)).find((channel) => channel.id === "canal-1");
+  assert.ok(channelBeforeTemplateTests);
+  const allResultTypesOff = {
+    ...channelBeforeTemplateTests.signalModules.validator,
+    enabled: true,
+    cooldownSeconds: 0,
+    sendEntry: false,
+    sendG1Active: false,
+    sendGreenSG: false,
+    sendGreenG1: false,
+    sendRed: false,
+    sendTieProtection: false,
+    sendTieConfirmed: false,
+    sendTie4x: false,
+    sendTie6x: false,
+    sendTie10x: false,
+    sendTie25x: false,
+    sendTie88x: false,
+  };
+  const disabledTypesPatch = await engine.patchChannel(userId, "canal-1", {
+    signalModules: {
+      ...channelBeforeTemplateTests.signalModules,
+      validator: allResultTypesOff,
+    },
+  });
+  assert.equal(disabledTypesPatch.status, 200);
+
+  const disabledTypeCases = [
+    { id: "entry", result: "Aguardando resultado", entry: "BANKER" },
+    { id: "g1", result: "PROTECAO G1 ATIVA", entry: "BANKER" },
+    { id: "green-sg", result: "GREEN SG", entry: "BANKER" },
+    { id: "green-g1", result: "GREEN G1", entry: "BANKER" },
+    { id: "red", result: "RED", entry: "BANKER" },
+    { id: "tie-protection", result: "EMPATE 4x", entry: "BANKER", tieMultiplier: "4x" },
+    { id: "tie-4", result: "EMPATE 4x", entry: "TIE", tieMultiplier: "4x" },
+    { id: "tie-6", result: "EMPATE 6x", entry: "TIE", tieMultiplier: "6x" },
+    { id: "tie-10", result: "EMPATE 10x", entry: "TIE", tieMultiplier: "10x" },
+    { id: "tie-25", result: "EMPATE 25x", entry: "TIE", tieMultiplier: "25x" },
+    { id: "tie-88", result: "EMPATE 88x", entry: "TIE", tieMultiplier: "88x" },
+  ];
+  for (const [index, item] of disabledTypeCases.entries()) {
+    const response = await engine.dispatchSignal({
+      userId,
+      channelId: "canal-1",
+      moduleKey: "validator",
+      signalKey: item.id === "entry" ? `template-filter:${item.id}:${index}` : `template-filter:${item.id}:result:${index}`,
+      roundId: 500 + index,
+      entry: item.entry,
+      result: item.result,
+      variables: { tieMultiplier: item.tieMultiplier || "" },
+    });
+    const body = await response.json();
+    assert.equal(body.sent.length, 0, `${item.id} should be disabled`);
+    assert.equal(body.blocked[0].reason, "message_type_inactive");
+  }
+
+  const customAiConfig = {
+    ...channelBeforeTemplateTests.signalModules.ai_patterns,
+    enabled: true,
+    cooldownSeconds: 0,
+    sendGreenSG: true,
+    sendRed: false,
+    greenSGTemplate: "<b>GREEN SG PERSONALIZADO</b> {{entry}}",
+    eventButtons: {
+      greenSG: {
+        enabled: true,
+        text: "Abrir painel",
+        url: "https://sniperbo.com/app",
+      },
+    },
+  };
+  const customPatch = await engine.patchChannel(userId, "canal-1", {
+    signalModules: {
+      ...channelBeforeTemplateTests.signalModules,
+      ai_patterns: customAiConfig,
+      validator: { ...allResultTypesOff, sendEntry: true },
+    },
+  });
+  assert.equal(customPatch.status, 200);
+  const reloadedCustomChannel = (await engine.publicChannelsForUser(userId)).find((channel) => channel.id === "canal-1");
+  assert.equal(reloadedCustomChannel.signalModules.ai_patterns.greenSGTemplate, customAiConfig.greenSGTemplate);
+  assert.equal(reloadedCustomChannel.signalModules.ai_patterns.sendRed, false);
+  assert.equal(reloadedCustomChannel.signalModules.ai_patterns.eventButtons.greenSG.url, "https://sniperbo.com/app");
+
+  const invalidButtonPatch = await engine.patchChannel(userId, "canal-1", {
+    signalModules: {
+      ...reloadedCustomChannel.signalModules,
+      ai_patterns: {
+        ...reloadedCustomChannel.signalModules.ai_patterns,
+        eventButtons: { entry: { enabled: true, text: "Inseguro", url: "http://sniperbo.com" } },
+      },
+    },
+  });
+  assert.equal(invalidButtonPatch.status, 400);
+  assert.match((await invalidButtonPatch.json()).error, /https:\/\//i);
+
+  const beforeCustomGreen = sentMessages.length;
+  const customGreen = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "ai_patterns",
+    signalKey: "custom-ai:result:green-sg:600",
+    roundId: 600,
+    entry: "BANKER",
+    result: "GREEN SG",
+  });
+  assert.equal((await customGreen.json()).sent.length, 1);
+  assert.equal(sentMessages.length, beforeCustomGreen + 1);
+  assert.match(sentMessages.at(-1).payload.text, /GREEN SG PERSONALIZADO/);
+  assert.equal(sentMessages.at(-1).payload.reply_markup.inline_keyboard[0][0].url, "https://sniperbo.com/app");
+
+  const redDisabled = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "ai_patterns",
+    signalKey: "custom-ai:result:red:601",
+    roundId: 601,
+    entry: "BANKER",
+    result: "RED",
+  });
+  const redDisabledBody = await redDisabled.json();
+  assert.equal(redDisabledBody.sent.length, 0);
+  assert.equal(redDisabledBody.blocked[0].reason, "message_type_inactive");
+
+  const payingBase = reloadedCustomChannel.signalModules.paying_numbers;
+  await engine.patchChannel(userId, "canal-1", {
+    signalModules: {
+      ...reloadedCustomChannel.signalModules,
+      paying_numbers: {
+        ...payingBase,
+        enabled: true,
+        cooldownSeconds: 0,
+        sendG1Active: true,
+        sendGreenG1: true,
+        g1MessageBehavior: "edit_to_final",
+        galeTemplate: "<b>G1 PERSONALIZADO</b> {{entry}}",
+        greenG1Template: "<b>GREEN G1 PERSONALIZADO</b> {{entry}}",
+      },
+    },
+  });
+  const g1Root = "publisher:paying:700:PLAYER:number-7";
+  const g1Sent = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "paying_numbers",
+    signalKey: `${g1Root}:result:G1_ACTIVE:701`,
+    roundId: 701,
+    triggerRoundId: 700,
+    entry: "PLAYER",
+    result: "PROTECAO G1 ATIVA",
+    variables: { triggerRoundId: 700 },
+  });
+  assert.equal((await g1Sent.json()).sent[0].g1Action, "stored");
+  const sendsBeforeEdit = sentMessages.filter((item) => item.endpoint.includes("/sendMessage")).length;
+  const editedFinal = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "paying_numbers",
+    signalKey: `${g1Root}:result:GREEN:702`,
+    roundId: 702,
+    triggerRoundId: 700,
+    entry: "PLAYER",
+    result: "GREEN G1",
+    variables: { triggerRoundId: 700 },
+  });
+  const editedFinalBody = await editedFinal.json();
+  assert.equal(editedFinalBody.sent[0].g1Action, "edited_to_final");
+  assert.equal(sentMessages.filter((item) => item.endpoint.includes("/sendMessage")).length, sendsBeforeEdit);
+  assert.ok(sentMessages.some((item) => item.endpoint.includes("/editMessageText") && /GREEN G1 PERSONALIZADO/.test(item.payload.text)));
+
+  const channelBeforeDelete = (await engine.publicChannelsForUser(userId)).find((channel) => channel.id === "canal-1");
+  await engine.patchChannel(userId, "canal-1", {
+    signalModules: {
+      ...channelBeforeDelete.signalModules,
+      paying_numbers: {
+        ...channelBeforeDelete.signalModules.paying_numbers,
+        g1MessageBehavior: "delete_on_final",
+        sendRed: true,
+      },
+    },
+  });
+  const deleteRoot = "publisher:paying:800:BANKER:number-8";
+  await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "paying_numbers",
+    signalKey: `${deleteRoot}:result:G1_ACTIVE:801`,
+    roundId: 801,
+    triggerRoundId: 800,
+    entry: "BANKER",
+    result: "PROTECAO G1 ATIVA",
+    variables: { triggerRoundId: 800 },
+  });
+  const deletedFinal = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "paying_numbers",
+    signalKey: `${deleteRoot}:result:RED:802`,
+    roundId: 802,
+    triggerRoundId: 800,
+    entry: "BANKER",
+    result: "RED",
+    variables: { triggerRoundId: 800 },
+  });
+  assert.equal((await deletedFinal.json()).sent[0].g1Action, "deleted_on_final");
+  assert.ok(sentMessages.some((item) => item.endpoint.includes("/deleteMessage") && item.payload.message_id));
+
+  const channelBeforeEditFallback = (await engine.publicChannelsForUser(userId)).find((channel) => channel.id === "canal-1");
+  await engine.patchChannel(userId, "canal-1", {
+    signalModules: {
+      ...channelBeforeEditFallback.signalModules,
+      paying_numbers: {
+        ...channelBeforeEditFallback.signalModules.paying_numbers,
+        g1MessageBehavior: "edit_to_final",
+        galeTemplate: "<b>G1 FALLBACK EDIT</b> {{entry}}",
+        greenG1Template: "<b>GREEN G1 FALLBACK EDIT</b> {{entry}}",
+      },
+    },
+  });
+  const editFallbackRoot = "publisher:paying:900:PLAYER:number-9";
+  await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "paying_numbers",
+    signalKey: `${editFallbackRoot}:result:G1_ACTIVE:901`,
+    roundId: 901,
+    triggerRoundId: 900,
+    entry: "PLAYER",
+    result: "PROTECAO G1 ATIVA",
+    variables: { triggerRoundId: 900 },
+  });
+  failNextEdit = true;
+  const editFallback = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "paying_numbers",
+    signalKey: `${editFallbackRoot}:result:GREEN:902`,
+    roundId: 902,
+    triggerRoundId: 900,
+    entry: "PLAYER",
+    result: "GREEN G1",
+    variables: { triggerRoundId: 900 },
+  });
+  const editFallbackBody = await editFallback.json();
+  assert.equal(editFallbackBody.sent[0].g1Action, "edit_failed_final_sent");
+  assert.match(editFallbackBody.sent[0].error, /Falha ao editar G1/);
+  const channelAfterEditFallback = (await engine.publicChannelsForUser(userId)).find((channel) => channel.id === "canal-1");
+  assert.match(channelAfterEditFallback.lastError, /Falha ao editar G1/);
+
+  await engine.patchChannel(userId, "canal-1", {
+    signalModules: {
+      ...channelAfterEditFallback.signalModules,
+      paying_numbers: {
+        ...channelAfterEditFallback.signalModules.paying_numbers,
+        g1MessageBehavior: "delete_on_final",
+        galeTemplate: "<b>G1 FALLBACK DELETE</b> {{entry}}",
+        redTemplate: "<b>RED FALLBACK DELETE</b> {{entry}}",
+      },
+    },
+  });
+  const deleteFallbackRoot = "publisher:paying:1000:BANKER:number-10";
+  await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "paying_numbers",
+    signalKey: `${deleteFallbackRoot}:result:G1_ACTIVE:1001`,
+    roundId: 1001,
+    triggerRoundId: 1000,
+    entry: "BANKER",
+    result: "PROTECAO G1 ATIVA",
+    variables: { triggerRoundId: 1000 },
+  });
+  failNextDelete = true;
+  const deleteFallback = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "paying_numbers",
+    signalKey: `${deleteFallbackRoot}:result:RED:1002`,
+    roundId: 1002,
+    triggerRoundId: 1000,
+    entry: "BANKER",
+    result: "RED",
+    variables: { triggerRoundId: 1000 },
+  });
+  const deleteFallbackBody = await deleteFallback.json();
+  assert.equal(deleteFallbackBody.sent[0].g1Action, "delete_failed_final_sent");
+  assert.match(deleteFallbackBody.sent[0].error, /Falha ao apagar G1/);
+  const channelAfterDeleteFallback = (await engine.publicChannelsForUser(userId)).find((channel) => channel.id === "canal-1");
+  assert.match(channelAfterDeleteFallback.lastError, /Falha ao apagar G1/);
 
   console.log("telegram-engine-cloud tests passed");
 } finally {

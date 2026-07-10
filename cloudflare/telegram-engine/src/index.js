@@ -2,6 +2,8 @@ const MODULE_KEYS = ["ai_patterns", "paying_numbers", "surf_alert", "ties_only",
 const OFFICIAL_GLOBAL_MODULE_KEYS = new Set(["ai_patterns", "paying_numbers", "surf_alert", "ties_only"]);
 const MAX_TELEGRAM_BUTTONS = 4;
 const DEFAULT_BUTTON_LABEL = "Abrir Sniper Bo IA";
+const G1_MESSAGE_BEHAVIORS = new Set(["keep", "delete_on_final", "edit_to_final"]);
+const EVENT_TEMPLATE_KEYS = ["entry", "g1", "greenSG", "greenG1", "red", "tie", "tie25x", "tie88x"];
 const ENGINE_SECRET_NAMES = [
   "ENGINE_API_SECRET",
   "TELEGRAM_ENGINE_SECRET",
@@ -14,6 +16,19 @@ const ENGINE_SECRET_NAMES = [
 ];
 const DEFAULT_MODULE_CONFIG = {
   enabled: false,
+  sendEntry: true,
+  sendG1Active: true,
+  sendGreenSG: true,
+  sendGreenG1: true,
+  sendRed: true,
+  sendTieProtection: true,
+  sendTieConfirmed: true,
+  sendTie4x: true,
+  sendTie6x: true,
+  sendTie10x: true,
+  sendTie25x: true,
+  sendTie88x: true,
+  g1MessageBehavior: "keep",
   entryType: "AUTO",
   galeLimit: 1,
   coverTie: false,
@@ -22,12 +37,17 @@ const DEFAULT_MODULE_CONFIG = {
   template: "",
   analyzingTemplate: "",
   greenTemplate: "",
+  greenSGTemplate: "",
+  greenG1Template: "",
   galeTemplate: "",
   redTemplate: "",
   tieTemplate: "",
+  tie25xTemplate: "",
+  tie88xTemplate: "",
   expiredTemplate: "",
   canceledTemplate: "",
   buttons: [],
+  eventButtons: {},
 };
 const DEFAULT_MODULE_TEMPLATES = {
   ai_patterns:
@@ -365,6 +385,9 @@ export class TelegramEngine {
 
     const channelId = String(incoming.id || crypto.randomUUID());
     const existing = await this.getChannel(userId, channelId);
+    const incomingModules = incoming.signalModules || readRecord(incoming.templates).signalModules;
+    const templateSettingsError = validateModuleTemplateSettings(incomingModules);
+    if (templateSettingsError) return json({ error: templateSettingsError }, 400, this.env);
     const incomingToken = normalizeSecret(readFirstString(incoming, ["botToken", "bot_token", "telegram_bot_token"]));
     const botToken = incomingToken || (existing ? await this.decryptToken(existing.botTokenCipher) : "");
     const chatId =
@@ -401,7 +424,7 @@ export class TelegramEngine {
       analyzingEnabled: Boolean(incoming.analyzingEnabled ?? existing?.analyzingEnabled ?? false),
       analyzingCooldownRounds: clampInt(incoming.analyzingCooldownRounds ?? existing?.analyzingCooldownRounds ?? 3, 1, 20),
       templates: sanitizeTemplateRecord(incoming.templates || existing?.templates || {}),
-      signalModules: normalizeModuleConfigs(incoming.signalModules || incoming.templates?.signalModules || existing?.signalModules || {}),
+      signalModules: normalizeModuleConfigs(incomingModules || existing?.signalModules || {}),
       connectionStatus: "connected",
       lastTestedAt: existing?.lastTestedAt || now,
       lastTestMessageId: existing?.lastTestMessageId || null,
@@ -498,6 +521,9 @@ export class TelegramEngine {
   async patchChannel(userId, channelId, patch) {
     const current = await this.getChannel(userId, channelId);
     if (!current) return json({ error: "Canal nao encontrado." }, 404, this.env);
+    const patchedModules = patch.signalModules || readRecord(patch.templates).signalModules;
+    const templateSettingsError = validateModuleTemplateSettings(patchedModules);
+    if (templateSettingsError) return json({ error: templateSettingsError }, 400, this.env);
     const incomingChatId = readFirstString(patch, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]);
     const nextChatId = incomingChatId || current.chatId;
     const merged = {
@@ -510,7 +536,7 @@ export class TelegramEngine {
       chatId: nextChatId,
       chatCode: normalizeChannelCode(nextChatId),
       templates: sanitizeTemplateRecord(patch.templates || current.templates || {}),
-      signalModules: normalizeModuleConfigs(patch.signalModules || patch.templates?.signalModules || current.signalModules || {}),
+      signalModules: normalizeModuleConfigs(patchedModules || current.signalModules || {}),
       updatedAt: new Date().toISOString(),
     };
     if (normalizeChannelCode(nextChatId) !== normalizeChannelCode(current.chatId)) {
@@ -567,7 +593,14 @@ export class TelegramEngine {
     );
     const signalKind = classifySignalKind(body, signalKey);
     const notificationResult = String(body.result || variables.result || "Aguardando resultado").trim() || "Aguardando resultado";
-    const messageType = telegramDeliveryMessageType(signalKind, notificationResult, signalKey);
+    const messageType = telegramDeliveryMessageType(
+      signalKind,
+      notificationResult,
+      signalKey,
+      moduleKey,
+      entry,
+      variables,
+    );
     const notificationProtection = String(body.protection || variables.gale || "").trim();
     const channels = (targetUserId ? await this.channelsForUser(targetUserId) : await this.activeChannels())
       .filter((channel) => !targetChannelId || channel.id === targetChannelId);
@@ -598,6 +631,11 @@ export class TelegramEngine {
         blocked.push({ channelId: channel.id, reason: "module_inactive" });
         continue;
       }
+      if (!messageTypeAllowed(config, messageType)) {
+        console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, config.enabled, "message_type_inactive", "", { messageType })));
+        blocked.push({ channelId: channel.id, reason: "message_type_inactive", messageType });
+        continue;
+      }
       if (signalKind === "entry" && entry && !moduleAllowsEntry(config, entry)) {
         console.warn(JSON.stringify(telegramWorkerLog("bloqueado", channel, moduleKey, config.enabled, "entry_not_allowed", "")));
         blocked.push({ channelId: channel.id, reason: "entry_not_allowed" });
@@ -616,7 +654,7 @@ export class TelegramEngine {
       }
 
       const finalNotificationProtection = notificationProtection || formatGale(config.galeLimit);
-      const template = selectSignalTemplate(config, signalKind, notificationResult);
+      const template = selectSignalTemplate(config, messageType);
       const templateVariables = {
         ...variables,
         entry: formatEntry(entry),
@@ -628,7 +666,8 @@ export class TelegramEngine {
         result: notificationResult,
         messageType,
       };
-      const renderedMessage = !forceMessage && shouldRenderSignalTemplate(template, templateVariables)
+      const useProvidedMessage = forceMessage && body.message && isDefaultSignalTemplate(moduleKey, messageType, template);
+      const renderedMessage = !useProvidedMessage && shouldRenderSignalTemplate(template, templateVariables)
         ? renderTemplate(template, templateVariables)
         : String(body.message || "");
       const message = formatTelegramMessageText(String(renderedMessage || body.message || renderTemplate("{{entry}}", templateVariables))).slice(0, 4096);
@@ -651,24 +690,77 @@ export class TelegramEngine {
         blocked.push({ channelId: channel.id, reason: "duplicate_signal" });
         continue;
       }
-      const buttons = telegramButtonsForSignal(config, channel, body);
+      const buttons = telegramButtonsForSignal(config, channel, body, messageType);
+      const botToken = await this.decryptToken(channel.botTokenCipher);
+      const g1StorageKey = await telegramG1StorageKey(channel, moduleKey, signalKey, entry, body, variables);
+      const storedG1 = isFinalMessageType(messageType)
+        ? readRecord(await this.state.storage.get(g1StorageKey))
+        : {};
+      const storedG1MessageId = telegramMessageId(storedG1.messageId);
+      let g1Action = "none";
+      let g1ActionError = "";
       console.info(JSON.stringify(telegramWorkerLog("enviando", channel, moduleKey, config.enabled, "", message)));
-      const result = await sendTelegramMessage({
-        botToken: await this.decryptToken(channel.botTokenCipher),
-        chatId: channel.chatId,
-        message,
-        buttonLabel: String(body.buttonLabel || DEFAULT_BUTTON_LABEL),
-        buttonUrl: channel.buttonLink,
-        buttons,
-        parseMode: "HTML",
-      });
+      let result;
+      if (isFinalMessageType(messageType) && config.g1MessageBehavior === "edit_to_final" && storedG1MessageId) {
+        const edited = await editTelegramMessage({
+          botToken,
+          chatId: channel.chatId,
+          messageId: storedG1MessageId,
+          message,
+          buttons,
+          parseMode: "HTML",
+        });
+        if (edited.ok) {
+          result = edited;
+          g1Action = "edited_to_final";
+        } else {
+          g1ActionError = `Falha ao editar G1: ${edited.error || "Telegram recusou a edicao."}`;
+          g1Action = "edit_failed_final_sent";
+        }
+      }
+      if (!result) {
+        result = await sendTelegramMessage({
+          botToken,
+          chatId: channel.chatId,
+          message,
+          buttonLabel: String(body.buttonLabel || DEFAULT_BUTTON_LABEL),
+          buttonUrl: channel.buttonLink,
+          buttons,
+          parseMode: "HTML",
+        });
+      }
+      if (result.ok && messageType === "G1_ACTIVE" && result.messageId) {
+        await this.state.storage.put(g1StorageKey, {
+          messageId: result.messageId,
+          moduleKey,
+          entry,
+          signalRoot: telegramSignalRoot(signalKey),
+          sentAt: new Date().toISOString(),
+        });
+        g1Action = "stored";
+      }
+      if (result.ok && isFinalMessageType(messageType)) {
+        if (config.g1MessageBehavior === "delete_on_final" && storedG1MessageId) {
+          const deleted = await deleteTelegramMessage({ botToken, chatId: channel.chatId, messageId: storedG1MessageId });
+          if (deleted.ok) {
+            g1Action = "deleted_on_final";
+          } else {
+            g1Action = "delete_failed_final_sent";
+            g1ActionError = `Falha ao apagar G1: ${deleted.error || "Telegram recusou a exclusao."}`;
+          }
+        } else if (config.g1MessageBehavior === "keep" && storedG1MessageId) {
+          g1Action = "kept";
+        }
+        await this.state.storage.delete(g1StorageKey);
+      }
       const deliveryAt = new Date().toISOString();
+      const deliveryError = result.ok ? g1ActionError : result.error || "Falha ao enviar sinal.";
       await this.state.storage.put(channelKey(channel.userId, channel.id), {
         ...channel,
         connectionStatus: result.ok ? "connected" : channel.connectionStatus || "invalid",
         lastSuccessAt: result.ok ? deliveryAt : channel.lastSuccessAt || "",
-        lastErrorAt: result.ok ? channel.lastErrorAt || "" : deliveryAt,
-        lastError: result.ok ? "" : result.error || "Falha ao enviar sinal.",
+        lastErrorAt: deliveryError ? deliveryAt : channel.lastErrorAt || "",
+        lastError: deliveryError || "",
         updatedAt: deliveryAt,
       });
       const signalHash = await hashText(signalKey);
@@ -695,6 +787,9 @@ export class TelegramEngine {
           result: notificationResult,
           telegramMessageId: result.messageId || null,
           buttonCount: buttons.length,
+          g1MessageBehavior: config.g1MessageBehavior,
+          g1Action,
+          g1ActionError,
           cloudflare: true,
           forceMessage,
         },
@@ -716,7 +811,10 @@ export class TelegramEngine {
         notificationId: notification.id,
         reason: result.ok ? "sent_to_telegram" : "telegram_error",
         buttonCount: buttons.length,
-        error: result.error || "",
+        messageId: result.messageId || null,
+        messageType,
+        g1Action,
+        error: deliveryError || "",
       });
     }
 
@@ -2167,6 +2265,19 @@ function normalizeModuleConfigs(value) {
     acc[key] = {
       ...DEFAULT_MODULE_CONFIG,
       enabled: Object.prototype.hasOwnProperty.call(raw, "enabled") ? Boolean(raw.enabled) : key === "validator",
+      sendEntry: moduleBoolean(raw, "sendEntry", true),
+      sendG1Active: moduleBoolean(raw, "sendG1Active", true),
+      sendGreenSG: moduleBoolean(raw, "sendGreenSG", true),
+      sendGreenG1: moduleBoolean(raw, "sendGreenG1", true),
+      sendRed: moduleBoolean(raw, "sendRed", true),
+      sendTieProtection: moduleBoolean(raw, "sendTieProtection", true),
+      sendTieConfirmed: moduleBoolean(raw, "sendTieConfirmed", true),
+      sendTie4x: moduleBoolean(raw, "sendTie4x", true),
+      sendTie6x: moduleBoolean(raw, "sendTie6x", true),
+      sendTie10x: moduleBoolean(raw, "sendTie10x", true),
+      sendTie25x: moduleBoolean(raw, "sendTie25x", true),
+      sendTie88x: moduleBoolean(raw, "sendTie88x", true),
+      g1MessageBehavior: normalizeG1MessageBehavior(raw.g1MessageBehavior),
       entryType: normalizeModuleEntry(raw.entryType),
       galeLimit: clampInt(raw.galeLimit ?? (key === "ties_only" ? 0 : 1), 0, 4),
       coverTie: Object.prototype.hasOwnProperty.call(raw, "coverTie") ? Boolean(raw.coverTie) : key === "ties_only",
@@ -2175,15 +2286,64 @@ function normalizeModuleConfigs(value) {
       template: resolveModuleTemplate(key, raw.template, defaultTemplate),
       analyzingTemplate: repairTelegramEncodingArtifacts(raw.analyzingTemplate || defaultAnalyzingTemplate),
       greenTemplate: repairTelegramEncodingArtifacts(raw.greenTemplate || defaultGreenTemplate),
+      greenSGTemplate: repairTelegramEncodingArtifacts(raw.greenSGTemplate || raw.greenTemplate || defaultGreenTemplate),
+      greenG1Template: repairTelegramEncodingArtifacts(raw.greenG1Template || raw.greenTemplate || defaultGreenTemplate),
       galeTemplate: repairTelegramEncodingArtifacts(raw.galeTemplate || defaultGaleTemplate),
       redTemplate: repairTelegramEncodingArtifacts(raw.redTemplate || defaultRedTemplate),
       tieTemplate: repairTelegramEncodingArtifacts(raw.tieTemplate || defaultTieTemplate),
+      tie25xTemplate: repairTelegramEncodingArtifacts(raw.tie25xTemplate || raw.tieTemplate || defaultTieTemplate),
+      tie88xTemplate: repairTelegramEncodingArtifacts(raw.tie88xTemplate || raw.tieTemplate || defaultTieTemplate),
       expiredTemplate: repairTelegramEncodingArtifacts(raw.expiredTemplate || defaultExpiredTemplate),
       canceledTemplate: repairTelegramEncodingArtifacts(raw.canceledTemplate || defaultCanceledTemplate),
       buttons: normalizeModuleButtons(raw.buttons, raw),
+      eventButtons: normalizeEventButtons(raw.eventButtons),
     };
     return acc;
   }, {});
+}
+
+function moduleBoolean(record, key, fallback) {
+  return Object.prototype.hasOwnProperty.call(record, key) ? Boolean(record[key]) : fallback;
+}
+
+function normalizeG1MessageBehavior(value) {
+  const behavior = String(value || "").trim().toLowerCase();
+  return G1_MESSAGE_BEHAVIORS.has(behavior) ? behavior : "keep";
+}
+
+function normalizeEventButtons(value) {
+  const record = readRecord(value);
+  const next = {};
+  for (const key of EVENT_TEMPLATE_KEYS) {
+    const raw = readRecord(record[key]);
+    if (!Object.keys(raw).length) continue;
+    next[key] = {
+      enabled: Boolean(raw.enabled),
+      text: String(raw.text || raw.label || DEFAULT_BUTTON_LABEL).trim().slice(0, 64),
+      url: normalizeHttpsUrl(raw.url),
+    };
+  }
+  return next;
+}
+
+function validateModuleTemplateSettings(value) {
+  const modules = readRecord(value);
+  for (const moduleKey of MODULE_KEYS) {
+    const moduleConfig = readRecord(modules[moduleKey]);
+    const eventButtons = readRecord(moduleConfig.eventButtons);
+    for (const templateKey of EVENT_TEMPLATE_KEYS) {
+      const button = readRecord(eventButtons[templateKey]);
+      if (!button.enabled) continue;
+      const rawUrl = String(button.url || "").trim();
+      if (!rawUrl || !normalizeHttpsUrl(rawUrl)) {
+        return `O botao de ${templateKey} em ${moduleKey} precisa usar uma URL https:// valida.`;
+      }
+      if (!String(button.text || button.label || "").trim()) {
+        return `O botao de ${templateKey} em ${moduleKey} precisa de um texto.`;
+      }
+    }
+  }
+  return "";
 }
 
 function resolveModuleTemplate(key, value, defaultTemplate) {
@@ -2250,7 +2410,16 @@ function normalizeModuleButtons(value, legacyRecord = {}, fallback = defaultModu
   return normalized.slice(0, MAX_TELEGRAM_BUTTONS);
 }
 
-function telegramButtonsForSignal(config, channel, body) {
+function telegramButtonsForSignal(config, channel, body, messageType = "ENTRY") {
+  const eventKey = templateEventKey(messageType);
+  const configuredEventButtons = readRecord(config.eventButtons);
+  if (Object.prototype.hasOwnProperty.call(configuredEventButtons, eventKey)) {
+    const eventButton = readRecord(configuredEventButtons[eventKey]);
+    if (!eventButton.enabled) return [];
+    const url = normalizeHttpsUrl(eventButton.url);
+    const label = String(eventButton.text || eventButton.label || DEFAULT_BUTTON_LABEL).trim().slice(0, 64);
+    return label && url ? [{ label, url }] : [];
+  }
   const bodyButtons = normalizeModuleButtons(body.buttons, body, []);
   const source = bodyButtons.some((button) => button.enabled)
     ? bodyButtons
@@ -2263,6 +2432,17 @@ function telegramButtonsForSignal(config, channel, body) {
     }))
     .filter((button) => button.label && button.url)
     .slice(0, MAX_TELEGRAM_BUTTONS);
+}
+
+function templateEventKey(messageType) {
+  if (messageType === "G1_ACTIVE") return "g1";
+  if (messageType === "RESULT_GREEN_SG") return "greenSG";
+  if (messageType === "RESULT_GREEN_G1") return "greenG1";
+  if (messageType === "RESULT_RED") return "red";
+  if (messageType === "RESULT_TIE_25X") return "tie25x";
+  if (messageType === "RESULT_TIE_88X") return "tie88x";
+  if (String(messageType || "").startsWith("RESULT_TIE")) return "tie";
+  return "entry";
 }
 
 function sanitizeTemplateRecord(value) {
@@ -2337,6 +2517,68 @@ async function sendTelegramMessage({ botToken, chatId, message, buttonLabel = ""
     };
   }
   return { ok: true, status: 200, messageId: data.result?.message_id || null };
+}
+
+async function editTelegramMessage({ botToken, chatId, messageId, message, buttons = [], parseMode = "HTML" }) {
+  if (!botToken || !chatId || !telegramMessageId(messageId)) {
+    return { ok: false, status: 400, error: "Mensagem G1 sem identificador valido." };
+  }
+  const payload = {
+    chat_id: chatId,
+    message_id: telegramMessageId(messageId),
+    text: sanitizeTelegramOutgoingMessage(message).slice(0, 4096),
+    disable_web_page_preview: true,
+    parse_mode: parseMode,
+  };
+  const inlineButtons = telegramInlineButtons(buttons);
+  payload.reply_markup = { inline_keyboard: inlineButtons.length ? [inlineButtons] : [] };
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  const description = String(data.description || "");
+  if ((!response.ok || data.ok === false) && !description.toLowerCase().includes("message is not modified")) {
+    return {
+      ok: false,
+      status: telegramStatus(response.status),
+      error: friendlyTelegramError(response.status, description),
+    };
+  }
+  return { ok: true, status: 200, messageId: telegramMessageId(data.result?.message_id) || telegramMessageId(messageId) };
+}
+
+async function deleteTelegramMessage({ botToken, chatId, messageId }) {
+  if (!botToken || !chatId || !telegramMessageId(messageId)) {
+    return { ok: false, status: 400, error: "Mensagem G1 sem identificador valido." };
+  }
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/deleteMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ chat_id: chatId, message_id: telegramMessageId(messageId) }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    return {
+      ok: false,
+      status: telegramStatus(response.status),
+      error: friendlyTelegramError(response.status, String(data.description || "")),
+    };
+  }
+  return { ok: true, status: 200, messageId: telegramMessageId(messageId) };
+}
+
+function telegramInlineButtons(buttons = []) {
+  return Array.isArray(buttons)
+    ? buttons
+        .map((button) => ({
+          text: String(button.label || button.text || DEFAULT_BUTTON_LABEL).trim().slice(0, 64),
+          url: normalizeUrl(String(button.url || "")),
+        }))
+        .filter((button) => button.text && button.url)
+        .slice(0, MAX_TELEGRAM_BUTTONS)
+    : [];
 }
 
 async function getTelegramChat({ botToken, chatId }) {
@@ -2622,6 +2864,17 @@ function normalizeUrl(value) {
   }
 }
 
+function normalizeHttpsUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 function normalizeModuleKey(value) {
   const text = String(value || "").trim();
   return MODULE_KEYS.includes(text) ? text : "";
@@ -2678,29 +2931,103 @@ function classifySignalKind(body, signalKey) {
   return "entry";
 }
 
-function telegramDeliveryMessageType(signalKind, result, signalKey = "") {
+function telegramDeliveryMessageType(signalKind, result, signalKey = "", moduleKey = "", entry = "", variables = {}) {
   if (signalKind !== "result") return "ENTRY";
   const normalized = normalizeDedupeText(`${result} ${signalKey}`);
-  if (normalized.includes("protecao_g1") || normalized.includes("g1_ativa")) return "G1_ACTIVE";
-  if (normalized.includes("green_g1")) return "RESULT_GREEN_G1";
-  if (normalized.includes("green") || normalized.includes("sg")) return "RESULT_GREEN_SG";
-  if (normalized.includes("empate") || normalized.includes("tie")) return "RESULT_TIE";
+  if (normalized.includes("protecao_g1") || normalized.includes("g1_ativa") || normalized.includes("g1_active")) {
+    return "G1_ACTIVE";
+  }
+  if (normalized.includes("empate") || normalized.includes("tie")) {
+    if (moduleKey !== "ties_only" && entry !== "TIE") return "RESULT_TIE_PROTECTION";
+    const multiplier = normalizeTieMultiplier(variables.tieMultiplier || variables.tie_multiplier || result);
+    return multiplier ? `RESULT_TIE_${multiplier}` : "RESULT_TIE_CONFIRMED";
+  }
   if (normalized.includes("red")) return "RESULT_RED";
+  if (/green_g[1-4]/.test(normalized) || normalized.includes("green_1") || normalized.includes("g1_green")) {
+    return "RESULT_GREEN_G1";
+  }
+  if (normalized.includes("green") || normalized.includes("sg")) return "RESULT_GREEN_SG";
   return "RESULT_UNKNOWN";
 }
 
-function selectSignalTemplate(config, signalKind, result) {
-  if (signalKind !== "result") return String(config.template || "");
-  const normalized = normalizeDedupeText(result);
-  if (normalized.includes("protecao_g1") || normalized.includes("g1_ativa")) {
-    return String(config.galeTemplate || config.template || "");
+function normalizeTieMultiplier(value) {
+  const match = String(value || "").toUpperCase().match(/(?:^|\D)(4|6|10|25|88)\s*X?(?:\D|$)/);
+  return match ? `${match[1]}X` : "";
+}
+
+function messageTypeAllowed(config, messageType) {
+  if (messageType === "ENTRY") return config.sendEntry !== false;
+  if (messageType === "G1_ACTIVE") return config.sendG1Active !== false;
+  if (messageType === "RESULT_GREEN_SG") return config.sendGreenSG !== false;
+  if (messageType === "RESULT_GREEN_G1") return config.sendGreenG1 !== false;
+  if (messageType === "RESULT_RED") return config.sendRed !== false;
+  if (messageType === "RESULT_TIE_PROTECTION") return config.sendTieProtection !== false;
+  if (messageType === "RESULT_TIE_4X") return config.sendTieConfirmed !== false && config.sendTie4x !== false;
+  if (messageType === "RESULT_TIE_6X") return config.sendTieConfirmed !== false && config.sendTie6x !== false;
+  if (messageType === "RESULT_TIE_10X") return config.sendTieConfirmed !== false && config.sendTie10x !== false;
+  if (messageType === "RESULT_TIE_25X") return config.sendTieConfirmed !== false && config.sendTie25x !== false;
+  if (messageType === "RESULT_TIE_88X") return config.sendTieConfirmed !== false && config.sendTie88x !== false;
+  if (messageType === "RESULT_TIE_CONFIRMED") return config.sendTieConfirmed !== false;
+  return true;
+}
+
+function selectSignalTemplate(config, messageType) {
+  if (messageType === "ENTRY") return String(config.template || "");
+  if (messageType === "G1_ACTIVE") return String(config.galeTemplate || config.template || "");
+  if (messageType === "RESULT_GREEN_SG") {
+    return String(config.greenSGTemplate || config.greenTemplate || config.template || "");
   }
-  if (normalized.includes("red")) return String(config.redTemplate || config.template || "");
-  if (normalized.includes("empate") || normalized.includes("tie")) {
+  if (messageType === "RESULT_GREEN_G1") {
+    return String(config.greenG1Template || config.greenTemplate || config.template || "");
+  }
+  if (messageType === "RESULT_RED") return String(config.redTemplate || config.template || "");
+  if (messageType === "RESULT_TIE_25X") {
+    return String(config.tie25xTemplate || config.tieTemplate || config.greenTemplate || config.template || "");
+  }
+  if (messageType === "RESULT_TIE_88X") {
+    return String(config.tie88xTemplate || config.tieTemplate || config.greenTemplate || config.template || "");
+  }
+  if (String(messageType || "").startsWith("RESULT_TIE")) {
     return String(config.tieTemplate || config.greenTemplate || config.template || "");
   }
-  if (normalized.includes("green")) return String(config.greenTemplate || config.template || "");
   return String(config.greenTemplate || config.template || "");
+}
+
+function isDefaultSignalTemplate(moduleKey, messageType, template) {
+  let defaultTemplate = DEFAULT_MODULE_TEMPLATES[moduleKey] || "";
+  if (messageType === "G1_ACTIVE") defaultTemplate = DEFAULT_MODULE_GALE_TEMPLATES[moduleKey] || defaultTemplate;
+  else if (messageType === "RESULT_GREEN_SG" || messageType === "RESULT_GREEN_G1") {
+    defaultTemplate = DEFAULT_MODULE_GREEN_TEMPLATES[moduleKey] || defaultTemplate;
+  } else if (messageType === "RESULT_RED") {
+    defaultTemplate = DEFAULT_MODULE_RED_TEMPLATES[moduleKey] || defaultTemplate;
+  } else if (String(messageType || "").startsWith("RESULT_TIE")) {
+    defaultTemplate = DEFAULT_MODULE_TIE_TEMPLATES[moduleKey] || defaultTemplate;
+  }
+  return repairTelegramEncodingArtifacts(template) === repairTelegramEncodingArtifacts(defaultTemplate);
+}
+
+function isFinalMessageType(messageType) {
+  return String(messageType || "").startsWith("RESULT_") && messageType !== "RESULT_UNKNOWN";
+}
+
+function telegramSignalRoot(signalKey) {
+  const value = String(signalKey || "").trim();
+  const marker = value.toLowerCase().indexOf(":result:");
+  return marker >= 0 ? value.slice(0, marker) : value;
+}
+
+async function telegramG1StorageKey(channel, moduleKey, signalKey, entry, body = {}, variables = {}) {
+  const triggerRoundId = String(
+    body.triggerRoundId || variables.triggerRoundId || variables.entryRoundId || "",
+  ).trim();
+  const root = telegramSignalRoot(signalKey) || `${moduleKey}:${triggerRoundId}:${entry}`;
+  const cycleHash = await hashText(`${moduleKey}:${entry || "AUTO"}:${root}:${triggerRoundId}`);
+  return `g1-message:${channel.userId}:${channel.id}:${cycleHash}`;
+}
+
+function telegramMessageId(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : 0;
 }
 
 function entrySignalDedupeKey(channel, moduleKey, roundId, entry, signalKind, messageType = "ENTRY") {
@@ -3062,11 +3389,7 @@ function renderTemplate(template, variables) {
 
 function shouldRenderSignalTemplate(template, variables) {
   const text = String(template || "");
-  if (!text) return false;
-  const names = [...text.matchAll(/{{\s*([a-zA-Z_]+)\s*}}/g)].map((match) => match[1]).filter(Boolean);
-  if (!names.length) return true;
-  const record = readRecord(variables);
-  return names.every((name) => Object.prototype.hasOwnProperty.call(record, name));
+  return Boolean(text && readRecord(variables));
 }
 
 function maskToken(token) {

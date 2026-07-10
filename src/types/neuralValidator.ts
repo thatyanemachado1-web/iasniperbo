@@ -110,6 +110,50 @@ export interface ValidatorMessageTemplates {
   analyzing: string;
 }
 
+export type TelegramRoomTemplateKey =
+  | "entry"
+  | "g1"
+  | "greenSG"
+  | "greenG1"
+  | "red"
+  | "tie"
+  | "tie25x"
+  | "tie88x";
+
+export interface TelegramRoomEventButtonConfig {
+  enabled: boolean;
+  text: string;
+  url: string;
+}
+
+export interface TelegramRoomSignalModuleConfig {
+  enabled: boolean;
+  sendEntry: boolean;
+  sendG1Active: boolean;
+  sendGreenSG: boolean;
+  sendGreenG1: boolean;
+  sendRed: boolean;
+  sendTieProtection: boolean;
+  sendTieConfirmed: boolean;
+  sendTie4x: boolean;
+  sendTie6x: boolean;
+  sendTie10x: boolean;
+  sendTie25x: boolean;
+  sendTie88x: boolean;
+  g1MessageBehavior: "keep" | "delete_on_final" | "edit_to_final";
+  template: string;
+  galeTemplate: string;
+  greenTemplate?: string;
+  greenSGTemplate: string;
+  greenG1Template: string;
+  redTemplate: string;
+  tieTemplate: string;
+  tie25xTemplate: string;
+  tie88xTemplate: string;
+  eventButtons: Partial<Record<TelegramRoomTemplateKey, TelegramRoomEventButtonConfig>>;
+  [key: string]: unknown;
+}
+
 export interface ValidatorNotificationChannel {
   id: string;
   userId: string;
@@ -122,7 +166,7 @@ export interface ValidatorNotificationChannel {
   analyzingEnabled?: boolean;
   analyzingCooldownRounds?: number;
   templates: ValidatorMessageTemplates;
-  signalModules?: Record<string, unknown>;
+  signalModules?: Record<string, TelegramRoomSignalModuleConfig | unknown>;
   connectionStatus?: "pending" | "connected" | "invalid";
   lastTestedAt?: string;
   lastTestMessageId?: number | string | null;

@@ -17,7 +17,7 @@ import type { ModuleToggles } from "@/types/dashboard";
 import type { SalesSettings } from "@/lib/accessApi";
 import { LOCAL_SIGNALS_API_BASE_URL } from "@/lib/runtimePorts";
 import type { AnnouncementTone, SiteContentSettings } from "@/lib/siteContent";
-import type { ValidatorNotificationChannel } from "@/types/neuralValidator";
+import type { TelegramRoomEventButtonConfig, ValidatorNotificationChannel } from "@/types/neuralValidator";
 
 export interface LocalAiAdminSettings {
   enabled: boolean;
@@ -307,6 +307,28 @@ export async function testAdminTelegramRoom(session: AdminSession, userId: strin
     {
       method: "POST",
       body: JSON.stringify({ userId, channelId }),
+    },
+  );
+}
+
+export async function previewAdminTelegramRoom(
+  session: AdminSession,
+  userId: string,
+  channelId: string,
+  message: string,
+  button?: TelegramRoomEventButtonConfig,
+) {
+  return request<{ ok: boolean; channelId: string; messageId: number | string | null }>(
+    session,
+    "/admin/telegram/channels/preview",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        userId,
+        channelId,
+        message,
+        buttons: button?.enabled ? [{ label: button.text, url: button.url }] : [],
+      }),
     },
   );
 }

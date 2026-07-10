@@ -153,7 +153,7 @@ if (-not $adminEmail -or -not $adminPassword -or -not $adminToken) {
 
 $startInfo = New-Object System.Diagnostics.ProcessStartInfo
 $startInfo.FileName = $pythonExe
-$startInfo.Arguments = "scripts\official_dashboard_publisher.py --env-file `"$sourceEnvFile`" --local-url `"$localDashboardUrl`" --interval $interval --repeat-interval 12.0 --full-dashboard --log-file official_dashboard_publisher.log"
+$startInfo.Arguments = "scripts\official_dashboard_publisher.py --env-file `"$sourceEnvFile`" --local-url `"$localDashboardUrl`" --interval $interval --repeat-interval 2.0 --remote-timeout 2.0 --urgent-signal --urgent-retry-interval 0.9 --non-entry-urgent-interval 0.35 --full-dashboard --log-file official_dashboard_publisher.log"
 $startInfo.WorkingDirectory = $ProjectRoot
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true

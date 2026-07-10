@@ -34,7 +34,8 @@ else:
 
 
 USER_AGENT = "Mozilla/5.0 SNIPERBO-Official-Publisher/1.0"
-POST_TIMEOUT = (3.0, 5.0)
+POST_TIMEOUT = (1.0, 2.0)
+URGENT_SIGNAL_TIMEOUT = 1.0
 UPLOAD_WARNING_MS = 2000.0
 DIRECT_TELEGRAM_TARGET_MS = 300.0
 DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 1.2
@@ -44,6 +45,7 @@ DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS = {
     "duplicate_signal",
     "entry_not_allowed",
     "module_inactive",
+    "message_type_inactive",
     "channel_inactive",
     "duplicate_chat_id",
 }
@@ -547,7 +549,7 @@ def publish_urgent_signal(
         token=token,
         extra_headers=publisher_headers,
         payload=build_urgent_signal_payload(local_payload),
-        timeout=min(args.remote_timeout, 3.2),
+        timeout=min(args.remote_timeout, URGENT_SIGNAL_TIMEOUT),
     )
     return (body if isinstance(body, dict) else {}, status_code, upload_ms)
 
@@ -1669,7 +1671,7 @@ def publish_direct_site_signal(
         token=token,
         extra_headers=publisher_headers,
         payload=build_direct_site_signal_payload(base_payload, signal),
-        timeout=(0.25, min(args.remote_timeout, 3.2)),
+        timeout=(0.25, min(args.remote_timeout, 2.0)),
     )
     if 200 <= status_code < 300:
         return True, status_code, upload_ms, "sent"
@@ -1734,6 +1736,14 @@ def direct_result_message(pending: dict[str, Any], outcome: dict[str, Any]) -> s
     variables = pending.get("variables") if isinstance(pending.get("variables"), dict) else {}
     pattern = str(variables.get("pattern") or pending.get("pattern") or "").strip()
     pattern_line = [f"🧩 <b>Padrão:</b> {pattern}"] if pattern else []
+    if status == "G1_ACTIVE":
+        return "\n".join([
+            "🛡️ <b>PROTEÇÃO G1 ATIVA</b>",
+            "",
+            *pattern_line,
+            f"🎯 <b>Entrada mantida:</b> {entry}",
+            "⏳ <b>Aguardando próxima rodada</b>",
+        ])
     if status == "RED":
         return "\n".join([
             "❌ <b>RED</b>",
@@ -1792,6 +1802,7 @@ def resolve_direct_telegram_outcome(pending: dict[str, Any], payload: dict[str, 
     entry = str(pending.get("entry") or "")
     max_gale = int(pending.get("maxGale") or 1)
     attempts = 0
+    last_attempt_round_id = 0
     for round_item in rounds[trigger_index + 1:]:
         if not isinstance(round_item, dict):
             continue
@@ -1818,6 +1829,7 @@ def resolve_direct_telegram_outcome(pending: dict[str, Any], payload: dict[str, 
                 "tieMultiplier": "",
             }
         attempts += 1
+        last_attempt_round_id = round_id
         if attempts > max_gale:
             return {
                 "status": "RED",
@@ -1825,6 +1837,20 @@ def resolve_direct_telegram_outcome(pending: dict[str, Any], payload: dict[str, 
                 "roundId": round_id,
                 "gale": f"G{max_gale}" if max_gale > 0 else "SG",
                 "tieMultiplier": "",
+            }
+    if attempts > 0 and attempts <= max_gale and last_attempt_round_id:
+        try:
+            notified_round_id = int(pending.get("g1NotifiedRoundId") or 0)
+        except (TypeError, ValueError):
+            notified_round_id = 0
+        if notified_round_id != last_attempt_round_id:
+            return {
+                "status": "G1_ACTIVE",
+                "label": "PROTECAO G1 ATIVA",
+                "roundId": last_attempt_round_id,
+                "gale": "G1",
+                "tieMultiplier": "",
+                "intermediate": True,
             }
     return None
 
@@ -1848,10 +1874,10 @@ def main() -> int:
     parser.add_argument("--signal-url", default="")
     parser.add_argument("--interval", type=float, default=0.7)
     parser.add_argument("--local-timeout", type=float, default=2.0)
-    parser.add_argument("--remote-timeout", type=float, default=12.0)
-    parser.add_argument("--repeat-interval", type=float, default=12.0)
-    parser.add_argument("--urgent-retry-interval", type=float, default=0.8)
-    parser.add_argument("--non-entry-urgent-interval", type=float, default=12.0)
+    parser.add_argument("--remote-timeout", type=float, default=2.0)
+    parser.add_argument("--repeat-interval", type=float, default=2.0)
+    parser.add_argument("--urgent-retry-interval", type=float, default=0.9)
+    parser.add_argument("--non-entry-urgent-interval", type=float, default=0.35)
     parser.add_argument("--urgent-signal", action="store_true", default=True, help="Publish a minimal signal payload before the full dashboard.")
     parser.add_argument("--no-urgent-signal", dest="urgent_signal", action="store_false", help="Disable urgent signal publishing.")
     parser.add_argument("--skip-full-publish", action="store_true", help="Only publish urgent signal payloads; do not POST the heavy full dashboard.")
@@ -1992,6 +2018,74 @@ def main() -> int:
 
             signal_fingerprint = dashboard_signal_fingerprint(local_payload)
             signal_changed = bool(args.urgent_signal and signal_fingerprint and signal_fingerprint != last_signal_fingerprint)
+            urgent_published = False
+            if signal_changed:
+                now_signal = time.monotonic()
+                if now_signal < urgent_backoff_until:
+                    logging.info("Urgent signal in backoff; publishing full dashboard with latest payload instead.")
+                    signal_changed = False
+                min_urgent_interval = urgent_signal_min_interval(local_payload, args)
+                if signal_changed and (now_signal - last_signal_attempt_at) >= min_urgent_interval:
+                    last_signal_attempt_at = now_signal
+                    try:
+                        t1_perf = time.perf_counter()
+                        signal_response, signal_status_code, signal_upload_ms = publish_urgent_signal(
+                            args,
+                            token,
+                            local_payload,
+                            admin_email,
+                            admin_password,
+                        )
+                        log_publish_timing(
+                            "urgent",
+                            local_payload,
+                            t0_iso,
+                            (t1_perf - t0_perf) * 1000.0,
+                            signal_upload_ms,
+                            signal_status_code,
+                        )
+                        signal_dashboard = signal_response.get("dashboard") if isinstance(signal_response, dict) else {}
+                        signal = (signal_dashboard or local_payload).get("currentSignal") or {}
+                        neural_result = (signal_dashboard or local_payload).get("neuralEntryLastResult") or {}
+                        logging.info(
+                            "Published urgent signal: signal=%s side=%s neural=%s result=%s:%s",
+                            signal.get("status"),
+                            signal.get("side"),
+                            ((signal_dashboard or local_payload).get("neuralEntryState") or {}).get("status"),
+                            neural_result.get("outcome"),
+                            neural_result.get("kind"),
+                        )
+                        last_signal_fingerprint = signal_fingerprint
+                        last_published_payload = signal_dashboard or local_payload
+                        urgent_failures = 0
+                        urgent_backoff_until = 0.0
+                        urgent_published = True
+                    except HTTPError as exc:
+                        if requests is not None and hasattr(exc, "response"):
+                            status_code = exc.response.status_code if exc.response is not None else 0
+                            body = exc.response.text[:180] if exc.response is not None else str(exc)[:180]
+                        else:
+                            status_code = getattr(exc, "code", 0)
+                            body = exc.read().decode("utf-8", errors="replace")[:180] if hasattr(exc, "read") else str(exc)[:180]
+                        urgent_failures += 1
+                        if status_code == 429:
+                            urgent_backoff_seconds = min(60.0, max(10.0, 10.0 * urgent_failures))
+                            urgent_backoff_until = time.monotonic() + urgent_backoff_seconds
+                            logging.warning(
+                                "Urgent signal HTTP 429; backing off urgent channel for %.1fs: %s",
+                                urgent_backoff_seconds,
+                                body,
+                            )
+                        else:
+                            urgent_backoff_until = time.monotonic() + min(30.0, max(2.0, 2.0 * urgent_failures))
+                            logging.warning("Urgent signal HTTP %s: %s", status_code, body)
+                    except (URLError, TimeoutError, OSError, RuntimeError) as exc:
+                        urgent_failures += 1
+                        urgent_backoff_until = time.monotonic() + min(8.0, max(1.0, 1.5 * urgent_failures))
+                        logging.warning(
+                            "Urgent signal publish failed once for this signal: %s; publishing full dashboard with latest payload instead.",
+                            exc,
+                        )
             telegram_result_payload, _telegram_result_source = direct_telegram_payload(last_published_payload, local_payload)
             telegram_result_round_id = direct_round_id(telegram_result_payload) if telegram_result_payload else 0
             next_direct_pending: list[dict[str, Any]] = []
@@ -2011,7 +2105,13 @@ def main() -> int:
                     continue
                 result_key = f"{pending.get('signalKey')}:result:{outcome.get('status')}:{outcome.get('roundId')}"
                 aggregate_result_key = direct_result_dedupe_key(pending, outcome)
+                intermediate = bool(outcome.get("intermediate"))
                 if result_key in direct_telegram_result_keys or aggregate_result_key in direct_telegram_result_keys:
+                    if intermediate:
+                        next_direct_pending.append({
+                            **pending,
+                            "g1NotifiedRoundId": outcome.get("roundId"),
+                        })
                     continue
                 result_signal = {
                     "moduleKey": pending.get("moduleKey"),
@@ -2049,14 +2149,20 @@ def main() -> int:
                         result_reason,
                         outcome.get("label"),
                     )
-                    if result_ok or result_reason == "duplicate_signal":
+                    if result_ok or direct_telegram_block_handled(result_reason):
                         direct_telegram_result_keys.add(result_key)
                         direct_telegram_result_keys.add(aggregate_result_key)
-                        module_key = str(pending.get("moduleKey") or "")
-                        if module_key:
-                            direct_telegram_module_hold_until[module_key] = (
-                                time.monotonic() + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
-                            )
+                        if intermediate:
+                            next_direct_pending.append({
+                                **pending,
+                                "g1NotifiedRoundId": outcome.get("roundId"),
+                            })
+                        else:
+                            module_key = str(pending.get("moduleKey") or "")
+                            if module_key:
+                                direct_telegram_module_hold_until[module_key] = (
+                                    time.monotonic() + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
+                                )
                     else:
                         next_direct_pending.append(pending)
                 except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
@@ -2185,8 +2291,7 @@ def main() -> int:
                             direct_telegram_result_keys = set(list(direct_telegram_result_keys)[-250:])
                 except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
                     logging.warning("direct telegram publish failed: %s", exc)
-            urgent_published = False
-            if signal_changed:
+            if signal_changed and not urgent_published:
                 now_signal = time.monotonic()
                 if now_signal < urgent_backoff_until:
                     logging.info("Urgent signal in backoff; publishing full dashboard with latest payload instead.")

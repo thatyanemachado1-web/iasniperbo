@@ -4,19 +4,22 @@ import { CheckCircle2, Loader2, RadioTower, RefreshCw, Save, Send, WifiOff } fro
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
+import { TelegramRoomTemplateEditor } from "@/components/telegram/TelegramRoomTemplateEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
   TELEGRAM_ROOM_MODULES,
   listTelegramRooms,
+  previewTelegramRoom,
   telegramRoomModuleEnabled,
+  telegramRoomSignalModulesPatch,
   testTelegramRoom,
   toggleTelegramRoomModule,
   updateTelegramRoom,
   type TelegramRoomModuleKey,
 } from "@/lib/telegramRooms";
-import type { ValidatorNotificationChannel } from "@/types/neuralValidator";
+import type { TelegramRoomSignalModuleConfig, ValidatorNotificationChannel } from "@/types/neuralValidator";
 
 export const Route = createFileRoute("/app/salas")({
   component: TelegramRoomsPage,
@@ -101,6 +104,48 @@ function TelegramRoomsPage() {
     }
   }
 
+  async function saveTemplateConfig(
+    room: ValidatorNotificationChannel,
+    moduleKey: TelegramRoomModuleKey,
+    config: TelegramRoomSignalModuleConfig,
+  ) {
+    const key = `${room.id}:templates`;
+    setBusyKey(key);
+    setError("");
+    setSuccess("");
+    try {
+      const saved = await updateTelegramRoom(room.id, {
+        signalModules: telegramRoomSignalModulesPatch(room, moduleKey, config),
+      });
+      replaceRoom(saved);
+      setSuccess(`Mensagens de ${moduleLabel(moduleKey)} salvas.`);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function previewTemplate(
+    room: ValidatorNotificationChannel,
+    message: string,
+    button: Parameters<typeof previewTelegramRoom>[2],
+  ) {
+    const key = `${room.id}:templates`;
+    setBusyKey(key);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await previewTelegramRoom(room.id, message, button);
+      setSuccess(result.messageId ? `Teste enviado. message_id ${result.messageId}.` : "Teste enviado.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+      await refreshRooms();
+    } finally {
+      setBusyKey("");
+    }
+  }
+
   function replaceRoom(saved: ValidatorNotificationChannel) {
     setRooms((current) => current.map((room) => (room.id === saved.id ? saved : room)));
   }
@@ -145,6 +190,8 @@ function TelegramRoomsPage() {
               onPatch={patchRoom}
               onToggleModule={toggleModule}
               onTest={testRoom}
+              onSaveTemplate={saveTemplateConfig}
+              onPreviewTemplate={previewTemplate}
             />
           ))}
         </div>
@@ -170,6 +217,8 @@ function TelegramRoomCard({
   onPatch,
   onToggleModule,
   onTest,
+  onSaveTemplate,
+  onPreviewTemplate,
 }: {
   room: ValidatorNotificationChannel;
   slot: number;
@@ -177,6 +226,16 @@ function TelegramRoomCard({
   onPatch: (room: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>) => Promise<void>;
   onToggleModule: (room: ValidatorNotificationChannel, key: TelegramRoomModuleKey, enabled: boolean) => Promise<void>;
   onTest: (room: ValidatorNotificationChannel) => Promise<void>;
+  onSaveTemplate: (
+    room: ValidatorNotificationChannel,
+    key: TelegramRoomModuleKey,
+    config: TelegramRoomSignalModuleConfig,
+  ) => Promise<void>;
+  onPreviewTemplate: (
+    room: ValidatorNotificationChannel,
+    message: string,
+    button: Parameters<typeof previewTelegramRoom>[2],
+  ) => Promise<void>;
 }) {
   const [name, setName] = useState(room.name);
   const connected = room.connectionStatus === "connected";
@@ -263,6 +322,13 @@ function TelegramRoomCard({
         {busyKey === `${room.id}:test` ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
         Testar conexao
       </Button>
+
+      <TelegramRoomTemplateEditor
+        room={room}
+        busy={busyKey === `${room.id}:templates`}
+        onSave={(moduleKey, config) => onSaveTemplate(room, moduleKey, config)}
+        onPreview={(message, button) => onPreviewTemplate(room, message, button)}
+      />
     </GlassCard>
   );
 }

@@ -493,8 +493,27 @@ type ValidatorTelegramButtonConfig = {
   label: string;
   url: string;
 };
+type ValidatorTelegramEventButtonConfig = {
+  enabled: boolean;
+  text: string;
+  url: string;
+};
+type ValidatorTelegramTemplateKey = "entry" | "g1" | "greenSG" | "greenG1" | "red" | "tie" | "tie25x" | "tie88x";
 type ValidatorTelegramModuleConfig = {
   enabled: boolean;
+  sendEntry: boolean;
+  sendG1Active: boolean;
+  sendGreenSG: boolean;
+  sendGreenG1: boolean;
+  sendRed: boolean;
+  sendTieProtection: boolean;
+  sendTieConfirmed: boolean;
+  sendTie4x: boolean;
+  sendTie6x: boolean;
+  sendTie10x: boolean;
+  sendTie25x: boolean;
+  sendTie88x: boolean;
+  g1MessageBehavior: "keep" | "delete_on_final" | "edit_to_final";
   entryType: "AUTO" | "BANKER" | "PLAYER" | "TIE";
   galeLimit: number;
   coverTie: boolean;
@@ -503,12 +522,17 @@ type ValidatorTelegramModuleConfig = {
   template: string;
   analyzingTemplate: string;
   greenTemplate: string;
+  greenSGTemplate: string;
+  greenG1Template: string;
   galeTemplate: string;
   redTemplate: string;
   tieTemplate: string;
+  tie25xTemplate: string;
+  tie88xTemplate: string;
   expiredTemplate: string;
   canceledTemplate: string;
   buttons: ValidatorTelegramButtonConfig[];
+  eventButtons: Partial<Record<ValidatorTelegramTemplateKey, ValidatorTelegramEventButtonConfig>>;
 };
 type ValidatorChannelWithModules = ValidatorNotificationChannel & {
   signalModules?: Partial<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>;
@@ -6986,6 +7010,28 @@ async function handleAdminTelegramRoomsRequest(
     return json({ ok: true, channelId, messageId: readTelegramMessageId(readRecord(result.data)) });
   }
 
+  if (request.method === "POST" && url.pathname === "/admin/telegram/channels/preview") {
+    const channelId = readString(body, "channelId");
+    const message = normalizeTelegramMessage(readString(body, "message"));
+    const buttons = Array.isArray(body.buttons)
+      ? body.buttons.map(readRecord).map((button) => ({
+          label: readString(button, "label"),
+          url: readString(button, "url"),
+        }))
+      : [];
+    if (!channelId) return json({ error: "Sala obrigatoria." }, 400);
+    if (!message) return json({ error: "Mensagem de previa obrigatoria." }, 400);
+    const result = await callCloudValidatorChannelEndpoint(
+      env,
+      userId,
+      "/validator/channels/preview",
+      { channelId, message, buttons },
+      "POST",
+    );
+    if (!result.ok) return json({ error: result.error }, result.status || 502);
+    return json({ ok: true, channelId, messageId: readTelegramMessageId(readRecord(result.data)) });
+  }
+
   if (request.method === "POST" && url.pathname === "/admin/telegram/channels") {
     const existingChannels = await fetchCloudValidatorChannels(env, userId);
     if (existingChannels.length >= MAX_TELEGRAM_ROOMS_PER_CLIENT) {
@@ -7057,15 +7103,18 @@ async function handleAdminTelegramRoomsRequest(
     const patchInput = readRecord(body.channel || body);
     const nextChatId = readFirstString(patchInput, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]) || current.chatId;
     const chatChanged = normalizeValidatorChannelCode(nextChatId) !== normalizeValidatorChannelCode(current.chatId);
+    const nextSignalModules = hasRecordFields(readRecord(patchInput.signalModules))
+      ? normalizeValidatorChannelSignalModules(patchInput.signalModules)
+      : validatorChannelSignalModules(current);
+    const templateSettingsError = validateValidatorTelegramTemplateSettings(nextSignalModules);
+    if (templateSettingsError) return json({ error: templateSettingsError }, 400);
     const patch = {
       name: readString(patchInput, "name") || current.name,
       chatId: nextChatId,
       isActive: Object.prototype.hasOwnProperty.call(patchInput, "isActive")
         ? patchInput.isActive !== false
         : current.isActive,
-      signalModules: hasRecordFields(readRecord(patchInput.signalModules))
-        ? normalizeValidatorChannelSignalModules(patchInput.signalModules)
-        : validatorChannelSignalModules(current),
+      signalModules: nextSignalModules,
       ...(chatChanged ? { connectionStatus: "pending", lastError: "", lastConnectionError: "" } : {}),
     };
     const saved = await callCloudValidatorChannelEndpoint(
@@ -7169,6 +7218,8 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
     const nextModules = hasRecordFields(readRecord(patch.signalModules))
       ? normalizeValidatorChannelSignalModules(patch.signalModules)
       : validatorChannelSignalModules(existing);
+    const templateSettingsError = validateValidatorTelegramTemplateSettings(nextModules);
+    if (templateSettingsError) return json({ error: templateSettingsError }, 400);
     const next = {
       ...existing,
       ...patch,
@@ -9093,6 +9144,19 @@ function normalizeValidatorChannelSignalModules(value: unknown) {
       const hasEnabled = Object.prototype.hasOwnProperty.call(raw, "enabled");
       acc[key] = {
         enabled: hasEnabled ? readBooleanField(raw, "enabled") : defaults.enabled,
+        sendEntry: validatorModuleBoolean(raw, "sendEntry", defaults.sendEntry),
+        sendG1Active: validatorModuleBoolean(raw, "sendG1Active", defaults.sendG1Active),
+        sendGreenSG: validatorModuleBoolean(raw, "sendGreenSG", defaults.sendGreenSG),
+        sendGreenG1: validatorModuleBoolean(raw, "sendGreenG1", defaults.sendGreenG1),
+        sendRed: validatorModuleBoolean(raw, "sendRed", defaults.sendRed),
+        sendTieProtection: validatorModuleBoolean(raw, "sendTieProtection", defaults.sendTieProtection),
+        sendTieConfirmed: validatorModuleBoolean(raw, "sendTieConfirmed", defaults.sendTieConfirmed),
+        sendTie4x: validatorModuleBoolean(raw, "sendTie4x", defaults.sendTie4x),
+        sendTie6x: validatorModuleBoolean(raw, "sendTie6x", defaults.sendTie6x),
+        sendTie10x: validatorModuleBoolean(raw, "sendTie10x", defaults.sendTie10x),
+        sendTie25x: validatorModuleBoolean(raw, "sendTie25x", defaults.sendTie25x),
+        sendTie88x: validatorModuleBoolean(raw, "sendTie88x", defaults.sendTie88x),
+        g1MessageBehavior: normalizeValidatorG1MessageBehavior(raw.g1MessageBehavior),
         entryType: normalizeValidatorModuleEntryType(raw.entryType, defaults.entryType),
         galeLimit: clampValidatorModuleNumber(raw.galeLimit, defaults.galeLimit, 0, 4),
         coverTie: Object.prototype.hasOwnProperty.call(raw, "coverTie")
@@ -9103,17 +9167,73 @@ function normalizeValidatorChannelSignalModules(value: unknown) {
         template: resolveValidatorModuleTemplate(key, raw.template, defaults.template),
         analyzingTemplate: readString(raw, "analyzingTemplate") || defaults.analyzingTemplate,
         greenTemplate: readString(raw, "greenTemplate") || defaults.greenTemplate,
+        greenSGTemplate: readString(raw, "greenSGTemplate") || readString(raw, "greenTemplate") || defaults.greenSGTemplate,
+        greenG1Template: readString(raw, "greenG1Template") || readString(raw, "greenTemplate") || defaults.greenG1Template,
         galeTemplate: readString(raw, "galeTemplate") || defaults.galeTemplate,
         redTemplate: readString(raw, "redTemplate") || defaults.redTemplate,
         tieTemplate: readString(raw, "tieTemplate") || defaults.tieTemplate,
+        tie25xTemplate: readString(raw, "tie25xTemplate") || readString(raw, "tieTemplate") || defaults.tie25xTemplate,
+        tie88xTemplate: readString(raw, "tie88xTemplate") || readString(raw, "tieTemplate") || defaults.tie88xTemplate,
         expiredTemplate: readString(raw, "expiredTemplate") || defaults.expiredTemplate,
         canceledTemplate: readString(raw, "canceledTemplate") || defaults.canceledTemplate,
         buttons: normalizeValidatorTelegramButtons(raw.buttons, raw, defaults.buttons),
+        eventButtons: normalizeValidatorTelegramEventButtons(raw.eventButtons),
       };
       return acc;
     },
     {} as Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>,
   );
+}
+
+function normalizeTelegramHttpsButtonUrl(value: string) {
+  const clean = value.trim();
+  if (!clean) return "";
+  try {
+    const url = new URL(clean);
+    return url.protocol === "https:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function validatorModuleBoolean(record: Record<string, unknown>, key: string, fallback: boolean) {
+  return Object.prototype.hasOwnProperty.call(record, key) ? readBooleanField(record, key) : fallback;
+}
+
+function normalizeValidatorG1MessageBehavior(value: unknown): ValidatorTelegramModuleConfig["g1MessageBehavior"] {
+  const behavior = String(value || "").trim().toLowerCase();
+  return behavior === "delete_on_final" || behavior === "edit_to_final" ? behavior : "keep";
+}
+
+function normalizeValidatorTelegramEventButtons(value: unknown) {
+  const record = readRecord(value);
+  const keys: ValidatorTelegramTemplateKey[] = ["entry", "g1", "greenSG", "greenG1", "red", "tie", "tie25x", "tie88x"];
+  return keys.reduce<Partial<Record<ValidatorTelegramTemplateKey, ValidatorTelegramEventButtonConfig>>>((acc, key) => {
+    const raw = readRecord(record[key]);
+    if (!hasRecordFields(raw)) return acc;
+    acc[key] = {
+      enabled: readBooleanField(raw, "enabled"),
+      text: (readString(raw, "text") || readString(raw, "label") || DEFAULT_VALIDATOR_TELEGRAM_BUTTON_LABEL).slice(0, 64),
+      url: normalizeTelegramHttpsButtonUrl(readString(raw, "url")),
+    };
+    return acc;
+  }, {});
+}
+
+function validateValidatorTelegramTemplateSettings(
+  modules: Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>,
+) {
+  for (const moduleKey of VALIDATOR_TELEGRAM_MODULE_KEYS) {
+    const config = modules[moduleKey];
+    for (const [templateKey, button] of Object.entries(config.eventButtons || {})) {
+      if (!button?.enabled) continue;
+      if (!button.text.trim()) return `O botao de ${templateKey} em ${moduleKey} precisa de um texto.`;
+      if (!button.url || !normalizeTelegramHttpsButtonUrl(button.url)) {
+        return `O botao de ${templateKey} em ${moduleKey} precisa usar uma URL https:// valida.`;
+      }
+    }
+  }
+  return "";
 }
 
 function resolveValidatorModuleTemplate(key: ValidatorTelegramModuleKey, value: unknown, defaultTemplate: string) {
@@ -9140,6 +9260,19 @@ function normalizeValidatorModuleTemplateFingerprint(value: string) {
 function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
   return {
     enabled: true,
+    sendEntry: true,
+    sendG1Active: true,
+    sendGreenSG: true,
+    sendGreenG1: true,
+    sendRed: true,
+    sendTieProtection: true,
+    sendTieConfirmed: true,
+    sendTie4x: true,
+    sendTie6x: true,
+    sendTie10x: true,
+    sendTie25x: true,
+    sendTie88x: true,
+    g1MessageBehavior: "keep",
     entryType: "AUTO",
     galeLimit: key === "ties_only" ? 0 : 1,
     coverTie: key === "ties_only",
@@ -9148,12 +9281,17 @@ function defaultValidatorTelegramModuleConfig(key: ValidatorTelegramModuleKey): 
     template: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TEMPLATES[key],
     analyzingTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_ANALYZING_TEMPLATES[key],
     greenTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES[key],
+    greenSGTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES[key],
+    greenG1Template: DEFAULT_VALIDATOR_TELEGRAM_MODULE_GREEN_TEMPLATES[key],
     galeTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_GALE_TEMPLATES[key],
     redTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_RED_TEMPLATES[key],
     tieTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES[key],
+    tie25xTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES[key],
+    tie88xTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_TIE_TEMPLATES[key],
     expiredTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_EXPIRED_TEMPLATES[key],
     canceledTemplate: DEFAULT_VALIDATOR_TELEGRAM_MODULE_CANCELED_TEMPLATES[key],
     buttons: defaultValidatorTelegramButtons(),
+    eventButtons: {},
   };
 }
 
@@ -11969,10 +12107,24 @@ async function sendValidatorModuleTelegramNotification(
       message_sent: signal.message.slice(0, 240),
     }),
   );
-  let result: Awaited<ReturnType<typeof sendCloudValidatorChannelPreview>>;
+  let result:
+    | Awaited<ReturnType<typeof sendCloudValidatorChannelPreview>>
+    | Awaited<ReturnType<typeof sendTelegramEngineSignal>>;
   try {
     result = await (cloudChannel
-      ? sendCloudValidatorChannelPreview(env, signal.channel.userId, signal.channel.id, signal.message, buttons)
+      ? sendTelegramEngineSignal(env, {
+          userId: signal.channel.userId,
+          channelId: signal.channel.id,
+          moduleKey: signal.moduleKey,
+          signalKey: signal.signalKey,
+          roundId: signal.roundId,
+          entry: signal.payloadJson.entry,
+          message: signal.message,
+          protection: readString(signal.payloadJson, "protection") || readString(signal.payloadJson, "gale"),
+          variables: validatorTelegramEngineVariables(signal.payloadJson),
+          buttons,
+          forceMessage: true,
+        })
       : sendTelegramMessage({
           botToken: decodeServerToken(signal.channel.botTokenEncoded),
           chatId: signal.channel.chatId,
@@ -11988,6 +12140,7 @@ async function sendValidatorModuleTelegramNotification(
     }
     throw error;
   }
+  const handledWithoutSend = telegramEngineResultWasHandledWithoutSend(result);
   const telegramRespondedAtMs = Date.now();
   logTelegramAutoV2Event(result.ok ? "telegram enviado" : "telegram erro", {
     module_key: signal.moduleKey,
@@ -12037,12 +12190,13 @@ async function sendValidatorModuleTelegramNotification(
     userId: signal.channel.userId,
     channelId: signal.channel.id,
     roundId: signal.roundId,
-    status: result.ok ? "sent" : "error",
-    error: result.ok ? "" : result.error,
+    status: result.ok ? "sent" : handledWithoutSend ? "skipped" : "error",
+    error: result.ok || handledWithoutSend ? "" : result.error,
     payloadJson: {
       ...signal.payloadJson,
       latency,
       telegramMessageId: result.ok ? result.messageId : null,
+      deliveryStatus: result.ok ? "sent" : handledWithoutSend ? "disabled_or_duplicate" : "error",
     },
     sentAt: signal.detectedAt,
     updatedAt: new Date(telegramRespondedAtMs).toISOString(),
@@ -12140,6 +12294,7 @@ function resolveValidatorTelegramEntryOutcome(notification: Record<string, unkno
   const triggerIndex = findValidatorRoundIndexById(triggerRoundId);
   if (triggerIndex < 0) return null;
   const maxGale = readValidatorProtectionGale(payloadJson.protection || payloadJson.gale);
+  const g1NotifiedRoundId = Math.floor(Number(payloadJson.g1NotifiedRoundId) || 0);
   let attempts = 0;
   for (const round of liveValidatorRoundHistory.slice(triggerIndex + 1)) {
     if (round.result === "T") {
@@ -12163,6 +12318,15 @@ function resolveValidatorTelegramEntryOutcome(notification: Record<string, unkno
       };
     }
     attempts += 1;
+    if (attempts === 1 && maxGale >= 1 && !g1NotifiedRoundId) {
+      return {
+        status: "G1_ACTIVE",
+        label: "Protecao G1 ativa",
+        roundId: round.id,
+        galeUsed: 1,
+        tieMultiplier: "",
+      };
+    }
     if (attempts > maxGale) {
       return {
         status: "RED",
@@ -12197,21 +12361,39 @@ async function sendValidatorTelegramResultNotification(
   const buttons = validatorModuleTelegramButtons(moduleConfig, channel);
   const variables = validatorTelegramResultVariables(moduleKey, payloadJson, outcome, latestRound);
   const template =
-    outcome.status === "RED"
+    outcome.status === "G1_ACTIVE"
+      ? moduleConfig.galeTemplate
+      : outcome.status === "RED"
       ? moduleConfig.redTemplate
       : outcome.status === "TIE"
         ? moduleConfig.tieTemplate
         : moduleConfig.greenTemplate;
   const sentAt = new Date().toISOString();
   const message = renderValidatorTelegramTemplate(template, variables);
+  const originalUserId = readString(originalNotification, "userId") || readString(originalNotification, "user_id");
+  const originalSignalKey = readString(payloadJson, "signalKey") || readString(originalNotification, "id");
   const result = isCloudValidatorTelegramChannel(channel)
-    ? await sendCloudValidatorChannelPreview(
-        env,
-        readString(originalNotification, "userId") || readString(originalNotification, "user_id"),
-        channel.id,
+    ? await sendTelegramEngineSignal(env, {
+        userId: originalUserId,
+        channelId: channel.id,
+        moduleKey,
+        signalKey: `${originalSignalKey}:result:${outcome.roundId}:${outcome.status.toLowerCase()}`,
+        roundId: outcome.roundId,
+        entry: readValidatorTelegramEntrySide(payloadJson),
         message,
+        result: outcome.label,
+        protection: readString(payloadJson, "protection") || readString(payloadJson, "gale"),
+        variables: {
+          ...validatorTelegramEngineVariables(payloadJson),
+          ...variables,
+          triggerRoundId: String(originalNotification.roundId ?? originalNotification.round_id ?? ""),
+          resultRoundId: String(outcome.roundId),
+          tieMultiplier: outcome.tieMultiplier,
+          resultStatus: outcome.status,
+        },
         buttons,
-      )
+        forceMessage: true,
+      })
     : await sendTelegramMessage({
         botToken: decodeServerToken(channel.botTokenEncoded),
         chatId: channel.chatId,
@@ -12221,14 +12403,15 @@ async function sendValidatorTelegramResultNotification(
         buttons,
         allowInsecureNodeFallback: Boolean(options.allowInsecureTelegramFallback),
       });
+  const handledWithoutSend = telegramEngineResultWasHandledWithoutSend(result);
   const resultNotification = {
     id: resultNotificationKey,
-    type: `result:${moduleKey}`,
+    type: outcome.status === "G1_ACTIVE" ? `g1:${moduleKey}` : `result:${moduleKey}`,
     userId: readString(originalNotification, "userId") || readString(originalNotification, "user_id"),
     channelId: channel.id,
     roundId: outcome.roundId,
-    status: result.ok ? "sent" : "error",
-    error: result.ok ? "" : result.error,
+    status: result.ok ? "sent" : handledWithoutSend ? "skipped" : "error",
+    error: result.ok || handledWithoutSend ? "" : result.error,
     payloadJson: {
       moduleKey,
       originalNotificationId: readString(originalNotification, "id"),
@@ -12237,6 +12420,7 @@ async function sendValidatorTelegramResultNotification(
       resultRoundId: outcome.roundId,
       tieMultiplier: outcome.tieMultiplier,
       telegramMessageId: result.ok ? result.messageId : null,
+      deliveryStatus: result.ok ? "sent" : handledWithoutSend ? "disabled_or_duplicate" : "error",
     },
     sentAt,
     updatedAt: sentAt,
@@ -12246,7 +12430,29 @@ async function sendValidatorTelegramResultNotification(
     ...liveValidatorNotifications.filter((item) => readString(item, "id") !== resultNotificationKey),
   ].slice(0, 1000);
   void persistValidatorNotification(env, resultNotification);
-  if (!result.ok) return false;
+  const deliveryHandled = result.ok || handledWithoutSend;
+  if (!deliveryHandled) return false;
+
+  if (outcome.status === "G1_ACTIVE") {
+    const updatedPending = {
+      ...originalNotification,
+      payloadJson: {
+        ...payloadJson,
+        g1NotifiedRoundId: outcome.roundId,
+        g1NotificationId: resultNotificationKey,
+        g1NotifiedAt: sentAt,
+      },
+      updatedAt: sentAt,
+    };
+    liveValidatorNotifications = [
+      updatedPending,
+      ...liveValidatorNotifications.filter(
+        (item) => readString(item, "id") !== readString(originalNotification, "id"),
+      ),
+    ].slice(0, 1000);
+    void persistValidatorNotification(env, updatedPending);
+    return true;
+  }
 
   const updatedOriginal = {
     ...originalNotification,
@@ -12834,6 +13040,29 @@ async function sendTelegramEngineSignal(
     "reason",
   );
   return { ok: false, status: 409, error: reason || "Cloudflare Telegram nao enviou o sinal." };
+}
+
+function validatorTelegramEngineVariables(payload: Record<string, unknown>) {
+  const variables: Record<string, string> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      variables[key] = String(value);
+    }
+  }
+  return variables;
+}
+
+function telegramEngineResultWasHandledWithoutSend(result: { status?: number; error?: string }) {
+  if (Number(result.status) !== 409) return false;
+  return new Set([
+    "message_type_inactive",
+    "duplicate_signal",
+    "cooldown_active",
+    "module_inactive",
+    "channel_inactive",
+    "entry_not_allowed",
+    "duplicate_chat_id",
+  ]).has(String(result.error || "").trim().toLowerCase());
 }
 
 function normalizeCloudTelegramEntry(value: unknown) {
@@ -20039,7 +20268,7 @@ function notificationUpdatedAtMs(notification: Record<string, unknown> | null) {
 function telegramAutoV2InMemoryDedupeDecision(notification: Record<string, unknown> | null) {
   if (!notification) return { blocked: false, action: "in_memory_reserved" };
   const status = readString(notification, "status");
-  if (status === "sent") {
+  if (status === "sent" || status === "skipped") {
     return { blocked: true, action: "in_memory_sent_duplicate" };
   }
   if (status === "reserved") {
