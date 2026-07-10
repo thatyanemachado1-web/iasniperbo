@@ -40,7 +40,7 @@ Comando de verificacao:
 ```powershell
 npm ci --no-audit --no-fund
 npm run build
-npx wrangler deploy .output/server/index.mjs --dry-run --outdir .wrangler-dry-run --config wrangler.jsonc
+npx wrangler deploy .output/server/index.mjs --assets .output/public --dry-run --outdir .wrangler-dry-run --config wrangler.jsonc
 ```
 
 ## Worker E Persistencia
@@ -101,10 +101,33 @@ git fetch --tags origin
 git checkout tags/stable-production-signals-fast-publish-2026-07-09
 npm ci --no-audit --no-fund
 npm run build
-npx wrangler deploy .output/server/index.mjs --config wrangler.jsonc
+npx wrangler deploy .output/server/index.mjs --assets .output/public --config wrangler.jsonc
 ```
 
 Antes de publicar, conferir `wrangler.jsonc`, bindings, rotas, Worker de destino e executar o dry-run. Nunca restaurar ou corrigir editando `.output/server/index.mjs` manualmente.
+
+## Extensao Salas Telegram - 2026-07-10
+
+- Fonte do deploy: `C:\SNIPERBO\Codex\iasniperbo-lovable-publish`
+- Commit de codigo implantado: `ac5262f847bc1ce539051125b5d7913d55adc4bd`
+- Worker site: `sniper-bo-ia`
+- Versao site: `23f66da4-fc12-4e77-8ffd-3a97159a9fad`
+- Worker Telegram existente: `sniperbo-telegram-engine`
+- Versao Telegram: `a5589888-af16-44df-8f5c-5a3035c9a8f8`
+- Durable Object reutilizado: `TelegramEngine`, chave `channel:{userId}:{channelId}`
+- Limite: tres salas por cliente
+- Painel cliente: `/app/salas`
+- Painel administrativo: `/app/admin/telegram`
+- Modulos globais autorizaveis: Numeros Pagantes, Surf Analyzer, Padroes IA e Radar de Empate
+- Validador permanece individual
+- Fluxo rapido preservado: somente candidatos globais `publisher:*`, derivados do ultimo dashboard aceito, passam pelo Telegram Engine
+- Dedupe preservado por cliente, sala, modulo, tipo de mensagem, sinal, round e resultado
+- Build e `test:telegram-v2` aprovados
+- Sete rounds conferidos visualmente: `2433` a `2439`; o painel avancou ate `2442`
+- F5 preservou historicos do Surf, Padroes IA e Radar mensal; `/dashboard` respondeu HTTP 200
+- Teste da sala existente persistiu corretamente o erro externo `Bad Request: need administrator rights in the channel chat`; o bot precisa ser administrador do canal para o teste real concluir
+
+O deploy do site deve sempre incluir `--assets .output/public`. Publicar apenas o entrypoint do Worker deixa os bundles fora da versao e causa respostas 404 em `/assets/*`.
 
 ## Escopo Preservado
 
