@@ -476,10 +476,7 @@ export function useDashboardData() {
     queryFn: fetchDashboardData,
     enabled: mounted && Boolean(dashboardUrl) && typeof window !== "undefined",
     initialData: initialDashboardData,
-    refetchInterval: (activeQuery) =>
-      activeQuery.state.error || activeQuery.state.fetchFailureCount > 0
-        ? ERROR_BACKOFF_POLLING_MS
-        : DEFAULT_POLLING_MS,
+    refetchInterval: false,
     refetchIntervalInBackground: true,
     retry: false,
     staleTime: 0,
@@ -510,27 +507,55 @@ export function useDashboardData() {
     }
 
     let lastSyncAt = 0;
+    let syncInFlight = false;
+    let stopped = false;
+    let pollingTimer: ReturnType<typeof setTimeout> | null = null;
     const queryKey = ["dashboard-data", dashboardUrl] as const;
-    const syncNow = () => {
+    const pollingDelay = () => {
+      const state = queryClient.getQueryState(queryKey);
+      return state?.error || (state?.fetchFailureCount ?? 0) > 0
+        ? ERROR_BACKOFF_POLLING_MS
+        : DEFAULT_POLLING_MS;
+    };
+    const scheduleNext = (delayMs: number) => {
+      if (stopped) return;
+      if (pollingTimer) window.clearTimeout(pollingTimer);
+      pollingTimer = window.setTimeout(() => syncNow(false), Math.max(25, delayMs));
+    };
+    const syncNow = (force: boolean) => {
+      if (stopped || syncInFlight) return;
       const now = Date.now();
-      if (now - lastSyncAt < DEFAULT_POLLING_MS) return;
+      const delay = pollingDelay();
+      const remaining = lastSyncAt ? delay - (now - lastSyncAt) : 0;
+      if (!force && remaining > 0) {
+        scheduleNext(remaining);
+        return;
+      }
+      syncInFlight = true;
       lastSyncAt = now;
-      void queryClient.refetchQueries({ queryKey, type: "active" });
+      void queryClient.refetchQueries({ queryKey, type: "active" }).finally(() => {
+        syncInFlight = false;
+        const elapsed = Date.now() - lastSyncAt;
+        scheduleNext(pollingDelay() - elapsed);
+      });
     };
     const syncWhenVisible = () => {
-      if (!document.hidden) syncNow();
+      if (!document.hidden) syncNow(true);
     };
+    const forceSync = () => syncNow(true);
 
-    syncNow();
-    window.addEventListener("focus", syncNow);
-    window.addEventListener("pageshow", syncNow);
-    window.addEventListener("online", syncNow);
+    syncNow(true);
+    window.addEventListener("focus", forceSync);
+    window.addEventListener("pageshow", forceSync);
+    window.addEventListener("online", forceSync);
     document.addEventListener("visibilitychange", syncWhenVisible);
 
     return () => {
-      window.removeEventListener("focus", syncNow);
-      window.removeEventListener("pageshow", syncNow);
-      window.removeEventListener("online", syncNow);
+      stopped = true;
+      if (pollingTimer) window.clearTimeout(pollingTimer);
+      window.removeEventListener("focus", forceSync);
+      window.removeEventListener("pageshow", forceSync);
+      window.removeEventListener("online", forceSync);
       document.removeEventListener("visibilitychange", syncWhenVisible);
     };
   }, [dashboardUrl, mounted, queryClient]);
