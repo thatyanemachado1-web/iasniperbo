@@ -17,6 +17,7 @@ import type { ModuleToggles } from "@/types/dashboard";
 import type { SalesSettings } from "@/lib/accessApi";
 import { LOCAL_SIGNALS_API_BASE_URL } from "@/lib/runtimePorts";
 import type { AnnouncementTone, SiteContentSettings } from "@/lib/siteContent";
+import type { ValidatorNotificationChannel } from "@/types/neuralValidator";
 
 export interface LocalAiAdminSettings {
   enabled: boolean;
@@ -75,6 +76,12 @@ export interface AdminPlanOffer {
   status: AdminPlanOfferStatus;
   updatedAt: string;
   updatedBy: string;
+}
+
+export interface AdminTelegramRoomsResponse {
+  userId: string;
+  channels: ValidatorNotificationChannel[];
+  limit: number;
 }
 
 const API_URL_KEY = "sniper_admin_api_url";
@@ -257,6 +264,51 @@ export async function updateAdminSalesSettings(
     body: JSON.stringify(payload),
   });
   return data.salesSettings;
+}
+
+export async function listAdminTelegramRooms(session: AdminSession, userId: string) {
+  return request<AdminTelegramRoomsResponse>(
+    session,
+    `/admin/telegram/channels?userId=${encodeURIComponent(userId)}`,
+  );
+}
+
+export async function createAdminTelegramRoom(
+  session: AdminSession,
+  userId: string,
+  channel: Record<string, unknown>,
+) {
+  return request<{ channel: ValidatorNotificationChannel; limit: number }>(session, "/admin/telegram/channels", {
+    method: "POST",
+    body: JSON.stringify({ userId, channel }),
+  });
+}
+
+export async function updateAdminTelegramRoom(
+  session: AdminSession,
+  userId: string,
+  channelId: string,
+  channel: Partial<ValidatorNotificationChannel>,
+) {
+  return request<{ channel: ValidatorNotificationChannel; limit: number }>(
+    session,
+    `/admin/telegram/channels/${encodeURIComponent(channelId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ userId, channel }),
+    },
+  );
+}
+
+export async function testAdminTelegramRoom(session: AdminSession, userId: string, channelId: string) {
+  return request<{ ok: boolean; channelId: string; messageId: number | string | null }>(
+    session,
+    "/admin/telegram/channels/test",
+    {
+      method: "POST",
+      body: JSON.stringify({ userId, channelId }),
+    },
+  );
 }
 
 export async function getAdminPlanOffers(session: AdminSession) {

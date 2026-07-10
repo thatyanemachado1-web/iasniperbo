@@ -1001,6 +1001,8 @@ function rateLimitForRequest(method: string, pathname: string) {
     pathname === "/billing/subscription" ||
     pathname === "/billing/payments" ||
     pathname === "/admin/summary" ||
+    pathname === "/admin/telegram/channels" ||
+    pathname.startsWith("/admin/telegram/channels/") ||
     pathname === "/telegram-recipients" ||
     pathname.startsWith("/telegram-recipients/") ||
     pathname === "/module-toggles" ||
@@ -2488,6 +2490,8 @@ async function handleAdminApiRequest(request: Request, env: unknown, ctx?: Execu
     url.pathname.startsWith("/admin/users/") ||
     url.pathname === "/admin/logs" ||
     url.pathname === "/admin/broadcast" ||
+    url.pathname === "/admin/telegram/channels" ||
+    url.pathname.startsWith("/admin/telegram/channels/") ||
     url.pathname === "/telegram-recipients" ||
     url.pathname.startsWith("/telegram-recipients/") ||
     url.pathname === "/module-toggles" ||
@@ -2852,6 +2856,9 @@ async function handleAdminApiRequest(request: Request, env: unknown, ctx?: Execu
   if (!adminRole) {
     return json({ error: "Nao autorizado." }, 401);
   }
+
+  const adminTelegramRoomsResponse = await handleAdminTelegramRoomsRequest(request, url, env, adminRole);
+  if (adminTelegramRoomsResponse) return adminTelegramRoomsResponse;
 
   if (url.pathname === "/admin/sales-settings") {
     if (request.method === "GET") {
@@ -6934,6 +6941,158 @@ const telegramService = {
   sendValidatorSignal: telegramServiceSendValidatorSignal,
 };
 
+const MAX_TELEGRAM_ROOMS_PER_CLIENT = 3;
+
+async function handleAdminTelegramRoomsRequest(
+  request: Request,
+  url: URL,
+  env: unknown,
+  adminRole: AdminRole,
+) {
+  if (
+    url.pathname !== "/admin/telegram/channels" &&
+    !url.pathname.startsWith("/admin/telegram/channels/")
+  ) {
+    return null;
+  }
+  const body = request.method === "GET"
+    ? {}
+    : readRecord(await request.json().catch(() => ({})));
+  const userId = normalizeValidatorUserId(
+    url.searchParams.get("userId") || readString(body, "userId") || readString(body, "email"),
+  );
+  if (!userId) return json({ error: "Cliente obrigatorio." }, 400);
+
+  const client = findClientByEmail(userId);
+  if (!client) return json({ error: "Cliente nao encontrado." }, 404);
+  await syncTelegramEngineUserAccess(env, userId, client).catch(() => null);
+
+  if (request.method === "GET" && url.pathname === "/admin/telegram/channels") {
+    const channels = await fetchCloudValidatorChannels(env, userId);
+    return json({ userId, channels, limit: MAX_TELEGRAM_ROOMS_PER_CLIENT });
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/telegram/channels/test") {
+    const channelId = readString(body, "channelId");
+    if (!channelId) return json({ error: "Sala obrigatoria." }, 400);
+    const result = await callCloudValidatorChannelEndpoint(
+      env,
+      userId,
+      "/validator/channels/test",
+      { channelId },
+      "POST",
+    );
+    if (!result.ok) return json({ error: result.error }, result.status || 502);
+    return json({ ok: true, channelId, messageId: readTelegramMessageId(readRecord(result.data)) });
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/telegram/channels") {
+    const existingChannels = await fetchCloudValidatorChannels(env, userId);
+    if (existingChannels.length >= MAX_TELEGRAM_ROOMS_PER_CLIENT) {
+      return json({ error: "Limite de 3 salas por cliente atingido." }, 400);
+    }
+    const channelInput = readRecord(body.channel || body);
+    const botToken = normalizeSecretValue(
+      readFirstString(channelInput, ["botToken", "bot_token", "telegram_bot_token"]),
+    );
+    const chatId = readFirstString(channelInput, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]);
+    if (!botToken) return json({ error: "Bot Token obrigatorio para o cadastro administrativo." }, 400);
+    if (!chatId) return json({ error: "Chat ID obrigatorio." }, 400);
+
+    const validation = await callCloudValidatorChannelEndpoint(
+      env,
+      userId,
+      "/validator/channels/validate",
+      { botToken, chatId },
+      "POST",
+    );
+    if (!validation.ok) return json({ error: validation.error }, validation.status || 502);
+
+    const validationCode = readString(readRecord(validation.data), "validationCode");
+    const slotNames = ["Sala Principal", "Sala VIP / Backup", "Sala Extra"];
+    const signalModules = normalizeValidatorChannelSignalModules(
+      hasRecordFields(readRecord(channelInput.signalModules))
+        ? channelInput.signalModules
+        : Object.fromEntries(VALIDATOR_TELEGRAM_MODULE_KEYS.map((key) => [key, { enabled: false }])),
+    );
+    const saved = await callCloudValidatorChannelEndpoint(
+      env,
+      userId,
+      "/validator/channels",
+      {
+        channel: {
+          id: readString(channelInput, "id") || crypto.randomUUID(),
+          name: readString(channelInput, "name") || slotNames[existingChannels.length] || `Sala ${existingChannels.length + 1}`,
+          botToken,
+          chatId,
+          isActive: channelInput.isActive !== false,
+          signalModules,
+        },
+        validationCode,
+      },
+      "POST",
+    );
+    if (!saved.ok) return json({ error: saved.error }, saved.status || 502);
+
+    const savedChannel = normalizeCloudValidatorChannel(readRecord(saved.data).channel, userId);
+    if (!savedChannel) return json({ error: "Telegram Engine nao retornou a sala salva." }, 502);
+    recordAdminActionLog(env, request, adminRole, {
+      targetUserId: userId,
+      targetEmail: userId,
+      action: "UPDATE_USER",
+      beforeJson: { telegramRooms: existingChannels.length },
+      afterJson: { telegramRooms: existingChannels.length + 1, channelId: savedChannel.id },
+      reason: "Sala Telegram cadastrada pelo admin.",
+    });
+    return json({ channel: savedChannel, limit: MAX_TELEGRAM_ROOMS_PER_CLIENT }, 201);
+  }
+
+  const channelMatch = url.pathname.match(/^\/admin\/telegram\/channels\/([^/]+)$/);
+  if (request.method === "PATCH" && channelMatch) {
+    const channelId = decodeURIComponent(channelMatch[1] || "");
+    const channels = await fetchCloudValidatorChannels(env, userId);
+    const current = channels.find((channel) => channel.id === channelId);
+    if (!current) return json({ error: "Sala nao encontrada." }, 404);
+
+    const patchInput = readRecord(body.channel || body);
+    const nextChatId = readFirstString(patchInput, ["chatId", "chat_id", "telegram_chat_id", "channel_id", "group_id"]) || current.chatId;
+    const chatChanged = normalizeValidatorChannelCode(nextChatId) !== normalizeValidatorChannelCode(current.chatId);
+    const patch = {
+      name: readString(patchInput, "name") || current.name,
+      chatId: nextChatId,
+      isActive: Object.prototype.hasOwnProperty.call(patchInput, "isActive")
+        ? patchInput.isActive !== false
+        : current.isActive,
+      signalModules: hasRecordFields(readRecord(patchInput.signalModules))
+        ? normalizeValidatorChannelSignalModules(patchInput.signalModules)
+        : validatorChannelSignalModules(current),
+      ...(chatChanged ? { connectionStatus: "pending", lastError: "", lastConnectionError: "" } : {}),
+    };
+    const saved = await callCloudValidatorChannelEndpoint(
+      env,
+      userId,
+      `/validator/channels/${encodeURIComponent(channelId)}`,
+      patch,
+      "PATCH",
+    );
+    if (!saved.ok) return json({ error: saved.error }, saved.status || 502);
+
+    const savedChannel = normalizeCloudValidatorChannel(readRecord(saved.data).channel, userId);
+    if (!savedChannel) return json({ error: "Telegram Engine nao retornou a sala atualizada." }, 502);
+    recordAdminActionLog(env, request, adminRole, {
+      targetUserId: userId,
+      targetEmail: userId,
+      action: "UPDATE_USER",
+      beforeJson: { channelId, name: current.name, chatId: current.chatId, isActive: current.isActive },
+      afterJson: { channelId, name: savedChannel.name, chatId: nextChatId, isActive: patch.isActive },
+      reason: "Sala Telegram atualizada pelo admin.",
+    });
+    return json({ channel: savedChannel, limit: MAX_TELEGRAM_ROOMS_PER_CLIENT });
+  }
+
+  return json({ error: "Metodo nao permitido." }, 405);
+}
+
 async function handleTelegramServiceRequest(request: Request, url: URL, env: unknown) {
   if (!isTelegramServiceRoutePath(url.pathname)) return null;
 
@@ -7142,6 +7301,9 @@ async function telegramServiceCreateChannel(env: unknown, request: Request, clie
   }
 
   const existing = existingById || existingByCode || undefined;
+  if (!existing && channels.length >= MAX_TELEGRAM_ROOMS_PER_CLIENT) {
+    return json({ error: "Limite de 3 salas por cliente atingido." }, 400);
+  }
   const channel = normalizeServerNotificationChannel(incoming, clientId, existing);
   if (!channel) return json({ error: "Canal invalido." }, 400);
 
@@ -7536,6 +7698,9 @@ function cloudValidatorChannelPayload(channel: ValidatorNotificationChannel, bot
     connectionStatus: readString(channel as unknown as Record<string, unknown>, "connectionStatus"),
     lastTestedAt: readString(channel as unknown as Record<string, unknown>, "lastTestedAt"),
     lastTestMessageId: readTelegramChannelMessageId(channel),
+    lastSuccessAt: readString(channel as unknown as Record<string, unknown>, "lastSuccessAt"),
+    lastErrorAt: readString(channel as unknown as Record<string, unknown>, "lastErrorAt"),
+    lastError: readString(channel as unknown as Record<string, unknown>, "lastError"),
   };
 }
 
@@ -7713,6 +7878,9 @@ function stampTelegramChannelConnection(
     lastTestedAt: now,
     lastTestMessageId: status === "connected" ? messageId : null,
     lastConnectionError: status === "invalid" ? error : "",
+    lastSuccessAt: status === "connected" ? now : channel.lastSuccessAt || "",
+    lastErrorAt: status === "invalid" ? now : channel.lastErrorAt || "",
+    lastError: status === "invalid" ? error : "",
     updatedAt: now,
   } as ValidatorNotificationChannel;
 }
@@ -7729,6 +7897,9 @@ function publicTelegramServiceChannel(channel: ValidatorNotificationChannel) {
       telegramServiceConnectionStatus(channel) === "invalid"
         ? readString(channel as unknown as Record<string, unknown>, "lastConnectionError")
         : "",
+    lastSuccessAt: readString(channel as unknown as Record<string, unknown>, "lastSuccessAt"),
+    lastErrorAt: readString(channel as unknown as Record<string, unknown>, "lastErrorAt"),
+    lastError: readString(channel as unknown as Record<string, unknown>, "lastError"),
   } as ValidatorNotificationChannel;
 }
 
@@ -8892,6 +9063,21 @@ function normalizeServerNotificationChannel(
       readString(record, "lastConnectionError") ||
       readString(record, "last_connection_error") ||
       readString(existing as unknown as Record<string, unknown>, "lastConnectionError") ||
+      "",
+    lastSuccessAt:
+      readString(record, "lastSuccessAt") ||
+      readString(record, "last_success_at") ||
+      readString(existing as unknown as Record<string, unknown>, "lastSuccessAt") ||
+      "",
+    lastErrorAt:
+      readString(record, "lastErrorAt") ||
+      readString(record, "last_error_at") ||
+      readString(existing as unknown as Record<string, unknown>, "lastErrorAt") ||
+      "",
+    lastError:
+      readString(record, "lastError") ||
+      readString(record, "last_error") ||
+      readString(existing as unknown as Record<string, unknown>, "lastError") ||
       "",
     createdAt: readString(record, "createdAt") || now,
     updatedAt: readString(record, "updatedAt") || now,
@@ -23485,6 +23671,9 @@ function normalizeCloudValidatorChannel(value: unknown, fallbackUserId = "") {
     connectionStatus: readString(record, "connectionStatus") || undefined,
     lastTestedAt: readString(record, "lastTestedAt") || undefined,
     lastTestMessageId: readTelegramMessageId(record),
+    lastSuccessAt: readString(record, "lastSuccessAt") || undefined,
+    lastErrorAt: readString(record, "lastErrorAt") || undefined,
+    lastError: readString(record, "lastError") || undefined,
     createdAt: readString(record, "createdAt") || new Date().toISOString(),
     updatedAt: readString(record, "updatedAt") || new Date().toISOString(),
   } as ValidatorNotificationChannel;

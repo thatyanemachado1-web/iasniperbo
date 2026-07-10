@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppValidadorRouteImport } from './routes/app.validador'
+import { Route as AppSalasRouteImport } from './routes/app.salas'
 import { Route as AppPlanosRouteImport } from './routes/app.planos'
 import { Route as AppPagamentosRouteImport } from './routes/app.pagamentos'
 import { Route as AppPadroesRouteImport } from './routes/app.padroes'
@@ -24,6 +25,7 @@ import { Route as AppAssinaturaRouteImport } from './routes/app.assinatura'
 import { Route as AppAgentesRouteImport } from './routes/app.agentes'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
+import { Route as AppAdminTelegramRouteImport } from './routes/app.admin.telegram'
 import { Route as AppAdminModulesRouteImport } from './routes/app.admin.modules'
 import { Route as AppAdminLogsRouteImport } from './routes/app.admin.logs'
 import { Route as AppAdminCrmRouteImport } from './routes/app.admin.crm'
@@ -47,6 +49,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppValidadorRoute = AppValidadorRouteImport.update({
   id: '/validador',
   path: '/validador',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSalasRoute = AppSalasRouteImport.update({
+  id: '/salas',
+  path: '/salas',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPlanosRoute = AppPlanosRouteImport.update({
@@ -104,6 +111,11 @@ const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminTelegramRoute = AppAdminTelegramRouteImport.update({
+  id: '/telegram',
+  path: '/telegram',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppAdminModulesRoute = AppAdminModulesRouteImport.update({
   id: '/modules',
   path: '/modules',
@@ -138,12 +150,14 @@ export interface FileRoutesByFullPath {
   '/app/padroes': typeof AppPadroesRoute
   '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
+  '/app/salas': typeof AppSalasRoute
   '/app/validador': typeof AppValidadorRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/broadcast': typeof AppAdminBroadcastRoute
   '/app/admin/crm': typeof AppAdminCrmRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/modules': typeof AppAdminModulesRoute
+  '/app/admin/telegram': typeof AppAdminTelegramRoute
   '/app/admin/users': typeof AppAdminUsersRoute
 }
 export interface FileRoutesByTo {
@@ -158,12 +172,14 @@ export interface FileRoutesByTo {
   '/app/padroes': typeof AppPadroesRoute
   '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
+  '/app/salas': typeof AppSalasRoute
   '/app/validador': typeof AppValidadorRoute
   '/app': typeof AppIndexRoute
   '/app/admin/broadcast': typeof AppAdminBroadcastRoute
   '/app/admin/crm': typeof AppAdminCrmRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/modules': typeof AppAdminModulesRoute
+  '/app/admin/telegram': typeof AppAdminTelegramRoute
   '/app/admin/users': typeof AppAdminUsersRoute
 }
 export interface FileRoutesById {
@@ -180,12 +196,14 @@ export interface FileRoutesById {
   '/app/padroes': typeof AppPadroesRoute
   '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
+  '/app/salas': typeof AppSalasRoute
   '/app/validador': typeof AppValidadorRoute
   '/app/': typeof AppIndexRoute
   '/app/admin/broadcast': typeof AppAdminBroadcastRoute
   '/app/admin/crm': typeof AppAdminCrmRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/modules': typeof AppAdminModulesRoute
+  '/app/admin/telegram': typeof AppAdminTelegramRoute
   '/app/admin/users': typeof AppAdminUsersRoute
 }
 export interface FileRouteTypes {
@@ -203,12 +221,14 @@ export interface FileRouteTypes {
     | '/app/padroes'
     | '/app/pagamentos'
     | '/app/planos'
+    | '/app/salas'
     | '/app/validador'
     | '/app/'
     | '/app/admin/broadcast'
     | '/app/admin/crm'
     | '/app/admin/logs'
     | '/app/admin/modules'
+    | '/app/admin/telegram'
     | '/app/admin/users'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -223,12 +243,14 @@ export interface FileRouteTypes {
     | '/app/padroes'
     | '/app/pagamentos'
     | '/app/planos'
+    | '/app/salas'
     | '/app/validador'
     | '/app'
     | '/app/admin/broadcast'
     | '/app/admin/crm'
     | '/app/admin/logs'
     | '/app/admin/modules'
+    | '/app/admin/telegram'
     | '/app/admin/users'
   id:
     | '__root__'
@@ -244,12 +266,14 @@ export interface FileRouteTypes {
     | '/app/padroes'
     | '/app/pagamentos'
     | '/app/planos'
+    | '/app/salas'
     | '/app/validador'
     | '/app/'
     | '/app/admin/broadcast'
     | '/app/admin/crm'
     | '/app/admin/logs'
     | '/app/admin/modules'
+    | '/app/admin/telegram'
     | '/app/admin/users'
   fileRoutesById: FileRoutesById
 }
@@ -286,6 +310,13 @@ declare module '@tanstack/react-router' {
       path: '/validador'
       fullPath: '/app/validador'
       preLoaderRoute: typeof AppValidadorRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/salas': {
+      id: '/app/salas'
+      path: '/salas'
+      fullPath: '/app/salas'
+      preLoaderRoute: typeof AppSalasRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/planos': {
@@ -365,6 +396,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminUsersRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/telegram': {
+      id: '/app/admin/telegram'
+      path: '/telegram'
+      fullPath: '/app/admin/telegram'
+      preLoaderRoute: typeof AppAdminTelegramRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/admin/modules': {
       id: '/app/admin/modules'
       path: '/modules'
@@ -401,6 +439,7 @@ interface AppAdminRouteChildren {
   AppAdminCrmRoute: typeof AppAdminCrmRoute
   AppAdminLogsRoute: typeof AppAdminLogsRoute
   AppAdminModulesRoute: typeof AppAdminModulesRoute
+  AppAdminTelegramRoute: typeof AppAdminTelegramRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
 }
 
@@ -409,6 +448,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminCrmRoute: AppAdminCrmRoute,
   AppAdminLogsRoute: AppAdminLogsRoute,
   AppAdminModulesRoute: AppAdminModulesRoute,
+  AppAdminTelegramRoute: AppAdminTelegramRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
 }
 
@@ -427,6 +467,7 @@ interface AppRouteChildren {
   AppPadroesRoute: typeof AppPadroesRoute
   AppPagamentosRoute: typeof AppPagamentosRoute
   AppPlanosRoute: typeof AppPlanosRoute
+  AppSalasRoute: typeof AppSalasRoute
   AppValidadorRoute: typeof AppValidadorRoute
   AppIndexRoute: typeof AppIndexRoute
 }
@@ -442,6 +483,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPadroesRoute: AppPadroesRoute,
   AppPagamentosRoute: AppPagamentosRoute,
   AppPlanosRoute: AppPlanosRoute,
+  AppSalasRoute: AppSalasRoute,
   AppValidadorRoute: AppValidadorRoute,
   AppIndexRoute: AppIndexRoute,
 }

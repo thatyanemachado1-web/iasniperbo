@@ -10,7 +10,7 @@ https://sniperbo-telegram-engine.sniperboia.workers.dev
 
 ## O que ele faz
 
-- Salva canais por `userId` em Durable Object.
+- Salva ate 3 salas por `userId` no Durable Object existente.
 - Criptografa o Bot Token antes de persistir.
 - Valida canal mandando `oi` no Telegram.
 - Bloqueia canal duplicado pelo mesmo Chat ID/codigo.
@@ -23,6 +23,7 @@ https://sniperbo-telegram-engine.sniperboia.workers.dev
   - `validator`
 - Dispara sinais via `POST /engine/signal`.
 - Lista ultimos envios em `GET /validator/notifications`.
+- Registra ultimo sucesso, ultimo erro e teste de conexao por sala.
 
 ## Secrets obrigatorios
 
@@ -51,6 +52,8 @@ wrangler deploy
 - `POST /validator/channels/test`
 - `GET /validator/notifications`
 - `POST /engine/signal`
+
+O site expoe as salas ao cliente em `/app/salas` sem revelar Bot Token. O cadastro com segredo fica restrito ao painel administrativo em `/app/admin/telegram`.
 
 Todas as rotas, exceto `/health`, exigem:
 

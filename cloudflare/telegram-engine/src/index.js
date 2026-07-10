@@ -101,7 +101,7 @@ const DEFAULT_MODULE_TIE_TEMPLATES = {
   validator:
     "✅ <b>{{result}}</b>\n\n🧩 <b>Padr\u00E3o:</b> {{pattern}}\n🎯 <b>Entrada:</b> {{entry}}\n🛡️ <b>Proteção:</b> {{gale}}",
 };
-const MAX_CHANNELS_PER_USER = 20;
+const MAX_CHANNELS_PER_USER = 3;
 const MAX_NOTIFICATIONS = 1000;
 const DEFAULT_ACCESS_GRACE_DAYS = 5;
 const DASHBOARD_MONITOR_INTERVAL_MS = 30000;
@@ -253,11 +253,13 @@ export class TelegramEngine {
       if (request.method === "POST" && url.pathname === "/engine/signal") {
         const body = await readJson(request);
         const moduleKey = normalizeModuleKey(body.moduleKey || body.type);
-        if (isOfficialGlobalModule(moduleKey)) {
+        const signalKey = String(body.signalKey || body.id || "").trim();
+        const fromOfficialPublishedDashboard = signalKey.startsWith("publisher:");
+        if (isOfficialGlobalModule(moduleKey) && !fromOfficialPublishedDashboard) {
           return json(
             {
               error: "global_modules_site_first_only",
-              detail: "Global card modules must be emitted by the dashboard monitor after /dashboard is accepted.",
+              detail: "Global card modules must come from the official publisher after /dashboard is accepted.",
             },
             409,
             this.env,
@@ -281,6 +283,7 @@ export class TelegramEngine {
             last: (await this.state.storage.get("dashboard-monitor:last")) || null,
             lastAiPatterns: (await this.state.storage.get("dashboard-monitor:last:ai_patterns")) || null,
             lastSurf: (await this.state.storage.get("dashboard-monitor:last:surf_alert")) || null,
+            lastTie: (await this.state.storage.get("dashboard-monitor:last:ties_only")) || null,
             lastOfficialResults: (await this.state.storage.get("dashboard-monitor:last-official-results")) || null,
             lastResult: (await this.state.storage.get("dashboard-monitor:last-result")) || null,
             lastError: (await this.state.storage.get("dashboard-monitor:last-error")) || null,
@@ -402,6 +405,9 @@ export class TelegramEngine {
       connectionStatus: "connected",
       lastTestedAt: existing?.lastTestedAt || now,
       lastTestMessageId: existing?.lastTestMessageId || null,
+      lastSuccessAt: existing?.lastSuccessAt || now,
+      lastErrorAt: existing?.lastErrorAt || "",
+      lastError: existing?.lastError || "",
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
@@ -431,8 +437,22 @@ export class TelegramEngine {
       buttonUrl: channel.buttonLink,
       parseMode: "HTML",
     });
-    if (!result.ok) return json({ error: result.error }, result.status, this.env);
-    return json({ ok: true, messageId: result.messageId }, 200, this.env);
+    const now = new Date().toISOString();
+    const testedChannel = {
+      ...channel,
+      connectionStatus: result.ok ? "connected" : "invalid",
+      lastTestedAt: now,
+      lastTestMessageId: result.ok ? result.messageId || null : channel.lastTestMessageId || null,
+      lastSuccessAt: result.ok ? now : channel.lastSuccessAt || "",
+      lastErrorAt: result.ok ? channel.lastErrorAt || "" : now,
+      lastError: result.ok ? "" : result.error || "Falha ao testar canal.",
+      updatedAt: now,
+    };
+    await this.state.storage.put(channelKey(userId, channelId), testedChannel);
+    if (!result.ok) {
+      return json({ error: result.error, channel: publicChannel(testedChannel) }, result.status, this.env);
+    }
+    return json({ ok: true, messageId: result.messageId, channel: publicChannel(testedChannel) }, 200, this.env);
   }
 
   async previewChannel(userId, body) {
@@ -642,6 +662,15 @@ export class TelegramEngine {
         buttons,
         parseMode: "HTML",
       });
+      const deliveryAt = new Date().toISOString();
+      await this.state.storage.put(channelKey(channel.userId, channel.id), {
+        ...channel,
+        connectionStatus: result.ok ? "connected" : channel.connectionStatus || "invalid",
+        lastSuccessAt: result.ok ? deliveryAt : channel.lastSuccessAt || "",
+        lastErrorAt: result.ok ? channel.lastErrorAt || "" : deliveryAt,
+        lastError: result.ok ? "" : result.error || "Falha ao enviar sinal.",
+        updatedAt: deliveryAt,
+      });
       const signalHash = await hashText(signalKey);
       const notification = await this.storeNotification({
         id: `module:${moduleKey}:${channel.userId}:${channel.id}:${signalHash}`,
@@ -733,6 +762,7 @@ export class TelegramEngine {
       for (const officialCard of [
         readAiPatternsOfficialCard(dashboardResult.dashboard),
         readSurfOfficialCard(dashboardResult.dashboard),
+        readTieOfficialCard(dashboardResult.dashboard),
       ]) {
         officialDispatches.push(await this.dispatchOfficialDashboardSignal(officialCard, source));
       }
@@ -1627,6 +1657,66 @@ function readSurfOfficialCard(dashboard) {
   };
 }
 
+function readTieOfficialCard(dashboard) {
+  const data = readRecord(dashboard);
+  const alert = readRecord(data.currentTieAlert);
+  const latestRound = latestDashboardRound(data);
+  const roundId = dashboardRoundKey(latestRound, data);
+  const roundIdNumber = clampInt(latestRound.id ?? latestRound.roundId ?? latestRound.round ?? 0, 0, Number.MAX_SAFE_INTEGER);
+  const status = dashboardText(alert.status || "").toLowerCase();
+  const level = dashboardText(alert.level || alert.nivel || "Ativo");
+  const confidence = clampPercentValue(alert.confidence ?? alert.confianca ?? alert.strength ?? alert.forca);
+
+  if (!Object.keys(alert).length) {
+    return { moduleKey: "ties_only", confirmed: false, reason: "tie_card_missing", mode: "EMPTY", status };
+  }
+  if (status !== "active") {
+    return { moduleKey: "ties_only", confirmed: false, reason: "tie_card_not_active", mode: "WAIT", status };
+  }
+  if (!roundId) {
+    return { moduleKey: "ties_only", confirmed: false, reason: "missing_round_id", mode: "ACTIVE", status, entry: "TIE" };
+  }
+
+  const alertId = dashboardText(alert.id || roundId);
+  const signalId = ["tie", alertId, level, "round", roundId].join(":");
+  return {
+    moduleKey: "ties_only",
+    confirmed: true,
+    reason: "confirmed_tie_card",
+    mode: "ACTIVE",
+    status,
+    entry: "TIE",
+    roundId,
+    roundIdNumber,
+    signalId,
+    variables: {
+      table: "Bac Bo",
+      pattern: "",
+      number: "",
+      numbers: "",
+      entry: formatEntry("TIE"),
+      entryLabel: formatEntryLabel("TIE"),
+      entryCompact: formatEntryCompact("TIE"),
+      side: "TIE",
+      status: "ATIVO",
+      confidence: formatDashboardPercent(confidence),
+      percentage: formatDashboardPercent(confidence),
+      gale: "G4",
+      protection: "G4",
+      tieCoverage: "4",
+      tieProtection: "Ativa",
+      risk: level,
+      level,
+      score: "",
+      round: roundId,
+      roundId: roundIdNumber,
+      time: dashboardText(latestRound.time || latestRound.recordedAt || latestRound.createdAt || ""),
+      module: "Somente Empates",
+      result: "Aguardando resultado",
+    },
+  };
+}
+
 function readPayingNumbersOfficialCard(dashboard) {
   const data = readRecord(dashboard);
   const reading = readRecord(data.neuralReading);
@@ -2199,8 +2289,11 @@ function publicChannel(channel) {
     analyzingCooldownRounds: channel.analyzingCooldownRounds,
     templates: sanitizeTemplateRecord(channel.templates || {}),
     signalModules: normalizeModuleConfigs(channel.signalModules || {}),
-    connectionStatus: "connected",
+    connectionStatus: channel.connectionStatus || "connected",
     lastTestMessageId: channel.lastTestMessageId || null,
+    lastSuccessAt: channel.lastSuccessAt || "",
+    lastErrorAt: channel.lastErrorAt || "",
+    lastError: channel.lastError || "",
     createdAt: channel.createdAt,
     updatedAt: channel.updatedAt,
   };

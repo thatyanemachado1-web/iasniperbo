@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Bell, BriefcaseBusiness, Cpu, Logs, Megaphone, Settings2, ShieldCheck, Users } from "lucide-react";
+import { Bell, BriefcaseBusiness, Cpu, Logs, Megaphone, RadioTower, Settings2, ShieldCheck, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
@@ -67,12 +67,13 @@ export function AdminPanelCard({
           <Metric icon={<Cpu className="size-4" />} label="Online agora" value={metricValue(stats.onlineNow)} />
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-6">
           <AdminLink to="/app/admin/users" icon={<Users className="size-4" />} label="Gerenciar usuários" />
           <AdminLink to="/app/admin/crm" icon={<BriefcaseBusiness className="size-4" />} label="CRM clientes" />
           <AdminLink to="/app/admin/logs" icon={<Logs className="size-4" />} label="Ver logs" />
           <AdminLink to="/app/admin/modules" icon={<Settings2 className="size-4" />} label="Configurar módulos" />
           <AdminLink to="/app/admin/broadcast" icon={<Megaphone className="size-4" />} label="Conteudo e avisos" />
+          <AdminLink to="/app/admin/telegram" icon={<RadioTower className="size-4" />} label="Salas Telegram" />
         </div>
       </div>
     </GlassCard>
@@ -98,7 +99,8 @@ type AdminPanelLink =
   | "/app/admin/crm"
   | "/app/admin/logs"
   | "/app/admin/modules"
-  | "/app/admin/broadcast";
+  | "/app/admin/broadcast"
+  | "/app/admin/telegram";
 
 function AdminLink({ to, icon, label }: { to: AdminPanelLink; icon: ReactNode; label: string }) {
   return (

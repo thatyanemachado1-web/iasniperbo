@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   Activity,
   BellRing,
@@ -1884,7 +1884,7 @@ function CentralTelegramTab({
         <div className="space-y-4">
           <GlassCard>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <SectionTitle title="Central Telegram" subtitle="Crie a sala, envie um teste e depois ative os motores de sinais." />
+            <SectionTitle title="Salas Telegram" subtitle="Selecione a sala individual do Validador e configure seu modulo." />
               <div className="flex flex-wrap gap-2">
                 <AppBadge tone={connected ? "green" : "amber"}>{connected ? "Canal conectado" : "Canal pendente"}</AppBadge>
                 <AppBadge tone={engineActive ? "green" : "amber"}>{engineActive ? "Motor ativo" : "Motor inativo"}</AppBadge>
@@ -1897,7 +1897,7 @@ function CentralTelegramTab({
                   : "Canal conectado. Agora ative pelo menos um motor para enviar sinais."
                 : preparedModulesCount
                   ? "Motores preparados, mas ainda nao enviam. Valide e salve o Telegram primeiro."
-                  : "Passo 1: valide o Bot Token e o Chat ID. Passo 2: salve o canal. Passo 3: ative os motores."}
+                  : "Sala ainda nao conectada. O Validador permanece sem envio externo."}
             </div>
           </GlassCard>
 
@@ -1977,66 +1977,14 @@ function CentralTelegramTab({
           </GlassCard>
 
           {!channels.length ? (
-            <GlassCard className="relative border-2 border-neon-cyan/80 bg-neon-cyan/5 shadow-[0_0_28px_rgba(0,229,255,0.16)]">
-              <div className="absolute -top-3 left-4 rounded-full border border-neon-cyan/60 bg-background px-3 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-neon-cyan shadow-[0_0_16px_rgba(0,229,255,0.2)]">
-                Conecte aqui
-              </div>
-              <SectionTitle title="Conectar Telegram" subtitle="Use o Chat ID numerico do grupo ou canal. Ex: -1001234567890." />
-              <div className="mt-3 rounded-xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-2 text-xs font-bold text-neon-cyan">
-                Primeiro envie o teste. Depois salve o canal conectado.
-              </div>
-              <div className="mt-4 space-y-3">
-                <Field label="Nome do canal">
-                  <Input value={channelForm.name} onChange={(event) => setChannelForm({ ...channelForm, name: event.target.value })} />
-                </Field>
-                <Field label="Bot Token">
-                  <Input
-                    type="password"
-                    autoComplete="off"
-                    value={channelForm.botToken}
-                    onChange={(event) => setChannelForm({ ...channelForm, botToken: event.target.value })}
-                    placeholder="8825...F69U"
-                  />
-                </Field>
-                <Field label="Chat ID">
-                  <Input
-                    value={channelForm.chatId}
-                    onChange={(event) => setChannelForm({ ...channelForm, chatId: event.target.value })}
-                    placeholder="-1001234567890"
-                  />
-                </Field>
-                {(validatingChannelForm || isChannelFormValidated) && (
-                  <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold ${
-                    isChannelFormValidated
-                      ? "border-success/35 bg-success/10 text-success"
-                      : "border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan"
-                  }`}>
-                    {validatingChannelForm ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
-                    {validatingChannelForm ? "Validando Telegram..." : "Conexao validada com teste real"}
-                  </div>
-                )}
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className={`w-full ${isChannelFormValidated ? "border-success/40 bg-success/10 text-success hover:bg-success/15" : ""}`}
-                    onClick={onTestForm}
-                    disabled={!telegramEnabled || validatingChannelForm || savingChannel}
-                  >
-                    {validatingChannelForm ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-                    {isChannelFormValidated ? "Teste validado" : "Enviar teste"}
-                  </Button>
-                  <Button
-                    type="button"
-                    className="w-full btn-primary-grad"
-                    onClick={onSave}
-                    disabled={!telegramEnabled || savingChannel || validatingChannelForm || saveBlockedByValidation}
-                  >
-                    {savingChannel ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                    Salvar canal conectado
-                  </Button>
-                </div>
-              </div>
+            <GlassCard className="border-neon-cyan/30">
+              <SectionTitle title="Nenhuma sala conectada" subtitle="O Validador aguarda uma sala individual autorizada." />
+              <Link
+                to="/app/salas"
+                className="btn-primary-grad mt-4 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-black"
+              >
+                <Send className="size-4" /> Abrir Minhas Salas
+              </Link>
             </GlassCard>
           ) : null}
 

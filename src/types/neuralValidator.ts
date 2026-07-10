@@ -127,6 +127,9 @@ export interface ValidatorNotificationChannel {
   lastTestedAt?: string;
   lastTestMessageId?: number | string | null;
   lastConnectionError?: string;
+  lastSuccessAt?: string;
+  lastErrorAt?: string;
+  lastError?: string;
   createdAt: string;
   updatedAt: string;
 }

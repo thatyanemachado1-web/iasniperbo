@@ -26,8 +26,15 @@ class MemoryStorage {
 
 const originalFetch = globalThis.fetch;
 const sentMessages = [];
+let dashboardPayload = null;
 globalThis.fetch = async (url, init = {}) => {
   const endpoint = String(url);
+  if (endpoint === "https://dashboard.test/dashboard" && dashboardPayload) {
+    return new Response(JSON.stringify(dashboardPayload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
   if (!endpoint.includes("api.telegram.org")) {
     return originalFetch(url, init);
   }
@@ -41,7 +48,13 @@ globalThis.fetch = async (url, init = {}) => {
 };
 
 try {
-  const env = { ENGINE_API_SECRET: "test-secret", TOKEN_ENCRYPTION_KEY: "test-token-key" };
+  const env = {
+    ENGINE_API_SECRET: "test-secret",
+    TOKEN_ENCRYPTION_KEY: "test-token-key",
+    TELEGRAM_ENGINE_LEGACY_MONITOR: "1",
+    SNIPER_DASHBOARD_URL: "https://dashboard.test/dashboard",
+    SNIPER_DASHBOARD_TOKEN: "test-dashboard-token",
+  };
   const engine = new TelegramEngine({ storage: new MemoryStorage() }, env);
   const userId = "cliente.telegram@example.com";
   const botToken = "123456:test-token";
@@ -95,6 +108,21 @@ try {
   assert.equal(list.length, 1);
   assert.equal(list[0].signalModules.surf_alert.enabled, false);
   assert.equal(list[0].signalModules.paying_numbers.enabled, true);
+
+  const beforeDisabledModule = sentMessages.length;
+  const disabledModule = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "surf_alert",
+    signalKey: "surf-disabled-entry",
+    roundId: 98,
+    entry: "BANKER",
+    result: "Aguardando resultado",
+  });
+  const disabledModuleBody = await disabledModule.json();
+  assert.equal(disabledModuleBody.sent.length, 0);
+  assert.equal(disabledModuleBody.blocked[0].reason, "module_inactive");
+  assert.equal(sentMessages.length, beforeDisabledModule);
 
   const blockedGlobal = await engine.fetch(new Request("https://internal/engine/signal", {
     method: "POST",
@@ -183,6 +211,66 @@ try {
   assert.match(sentMessages[5].payload.text, /Empate 8x/i);
   assert.match(sentMessages[6].payload.text, /VALIDADOR|PLAYER/i);
 
+  const testSavedRoom = await engine.testChannel(userId, "canal-1");
+  assert.equal(testSavedRoom.status, 200);
+  const testSavedRoomBody = await testSavedRoom.json();
+  assert.equal(testSavedRoomBody.channel.connectionStatus, "connected");
+  assert.ok(testSavedRoomBody.channel.lastSuccessAt);
+  assert.equal(testSavedRoomBody.channel.lastError, "");
+
+  await engine.patchChannel(userId, "canal-1", { isActive: false });
+  const inactiveRoom = await engine.dispatchSignal({
+    userId,
+    channelId: "canal-1",
+    moduleKey: "validator",
+    signalKey: "validator-inactive-room",
+    roundId: 106,
+    entry: "PLAYER",
+    result: "Aguardando resultado",
+  });
+  const inactiveRoomBody = await inactiveRoom.json();
+  assert.equal(inactiveRoomBody.sent.length, 0);
+  assert.equal(inactiveRoomBody.blocked[0].reason, "channel_inactive");
+  await engine.patchChannel(userId, "canal-1", { isActive: true });
+
+  const dedupeSignal = {
+    userId,
+    channelId: "canal-1",
+    moduleKey: "validator",
+    signalKey: "validator-dedupe-entry",
+    roundId: 107,
+    entry: "BANKER",
+    result: "Aguardando resultado",
+    variables: { pattern: "P B P" },
+  };
+  const firstDedupe = await engine.dispatchSignal(dedupeSignal);
+  assert.equal((await firstDedupe.json()).sent.length, 1);
+  const secondDedupe = await engine.dispatchSignal(dedupeSignal);
+  const secondDedupeBody = await secondDedupe.json();
+  assert.equal(secondDedupeBody.sent.length, 0);
+  assert.equal(secondDedupeBody.blocked[0].reason, "duplicate_signal");
+
+  dashboardPayload = {
+    rounds: [{ id: 300, result: "B", bankerScore: 8, playerScore: 6, time: "10:10" }],
+    currentTieAlert: { id: "tie-monitor-1", status: "waiting", level: "Alto", confidence: 92 },
+  };
+  const tieBaseline = await engine.runDashboardMonitor({ source: "test" });
+  assert.equal(tieBaseline.status, 200);
+
+  dashboardPayload = {
+    rounds: [{ id: 301, result: "P", bankerScore: 6, playerScore: 8, time: "10:11" }],
+    currentTieAlert: { id: "tie-monitor-1", status: "active", level: "Alto", confidence: 92 },
+  };
+  const beforeTieMonitor = sentMessages.length;
+  const tieMonitor = await engine.runDashboardMonitor({ source: "test" });
+  assert.equal(tieMonitor.status, 200);
+  const tieMonitorBody = await tieMonitor.json();
+  const tieDispatch = tieMonitorBody.officialDispatches.find((item) => item.moduleKey === "ties_only");
+  assert.equal(tieDispatch.confirmed, true);
+  assert.equal(tieDispatch.sentCount, 1);
+  assert.equal(sentMessages.length, beforeTieMonitor + 1);
+  assert.match(sentMessages.at(-1).payload.text, /Empate|TIE/i);
+
   await engine.storeNotification({
     id: "official-paying-entry",
     type: "module:paying_numbers",
@@ -246,6 +334,52 @@ try {
   assert.ok(finalMessage, "paying_numbers final message should be sent");
   assert.match(finalMessage.payload.text, /GREEN G1/);
   assert.match(finalMessage.payload.text, /Status:<\/b> FINALIZADO/);
+
+  for (const [id, roomChatId] of [["canal-2", "-1001234567891"], ["canal-3", "-1001234567892"]]) {
+    const roomValidation = await engine.validateChannel(userId, {
+      bot_token: botToken,
+      telegram_chat_id: roomChatId,
+    });
+    assert.equal(roomValidation.status, 200);
+    const roomValidationBody = await roomValidation.json();
+    const roomSave = await engine.saveChannel(
+      userId,
+      { id, name: id, bot_token: botToken, group_id: roomChatId },
+      roomValidationBody.validationCode,
+    );
+    assert.equal(roomSave.status, 201);
+  }
+
+  const fourthValidation = await engine.validateChannel(userId, {
+    bot_token: botToken,
+    telegram_chat_id: "-1001234567893",
+  });
+  const fourthValidationBody = await fourthValidation.json();
+  const fourthRoom = await engine.saveChannel(
+    userId,
+    { id: "canal-4", name: "canal-4", bot_token: botToken, group_id: "-1001234567893" },
+    fourthValidationBody.validationCode,
+  );
+  assert.equal(fourthRoom.status, 400);
+  assert.match((await fourthRoom.json()).error, /Limite de canais/i);
+
+  const publisherGlobal = await engine.fetch(new Request("https://internal/engine/signal", {
+    method: "POST",
+    body: JSON.stringify({
+      userId,
+      channelId: "canal-1",
+      moduleKey: "paying_numbers",
+      signalKey: "publisher:paying:401:BANKER:number-99",
+      roundId: 401,
+      entry: "BANKER",
+      result: "Aguardando resultado",
+      variables: { number: "99", table: "Bac Bo" },
+      message: "<b>PUBLISHER OFFICIAL TESTE 401</b>",
+      forceMessage: true,
+    }),
+  }));
+  assert.equal(publisherGlobal.status, 200);
+  assert.equal((await publisherGlobal.json()).sent.length, 1);
 
   console.log("telegram-engine-cloud tests passed");
 } finally {
