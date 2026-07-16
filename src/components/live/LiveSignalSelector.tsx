@@ -238,7 +238,7 @@ export function LiveSignalSelector() {
             }
           />
         ) : (
-          <div className="flex flex-col gap-2 pb-0.5 sm:flex-row sm:overflow-x-auto sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden">
+          <div className="grid grid-cols-2 items-stretch gap-2 pb-0.5 sm:flex sm:overflow-x-auto sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden">
             {visibleSignals.map((signal) => (
               <LiveCardSignalPanel key={`${signal.card.key}:${signal.signalKey}`} signal={signal} />
             ))}
@@ -294,23 +294,33 @@ function LiveCardSignalPanel({ signal }: { signal: LiveCardDisplaySignal }) {
     <div
       aria-live="polite"
       className={cn(
-        "flex w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 shadow-lg sm:min-w-[240px] sm:flex-1",
+        "flex h-full w-full min-w-0 items-start gap-1.5 rounded-lg border p-2 shadow-lg sm:min-w-[240px] sm:flex-1 sm:items-center sm:gap-2 sm:px-2.5",
         tone.panel,
       )}
     >
-      <span className={cn("grid size-7 shrink-0 place-items-center rounded-lg border", tone.icon)}>
-        <ResultIcon className="size-4" />
+      <span
+        className={cn(
+          "grid size-6 shrink-0 place-items-center rounded-lg border sm:size-7",
+          tone.icon,
+        )}
+      >
+        <ResultIcon className="size-3.5 sm:size-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[8px] font-black uppercase tracking-[0.12em] text-muted-foreground">
+        <div className="break-words text-[7px] font-black uppercase leading-tight tracking-[0.08em] text-muted-foreground sm:truncate sm:text-[8px] sm:tracking-[0.12em]">
           Card {signal.card.number} · {signal.card.label}
         </div>
         {signal.kind === "entry" ? (
           <div className="mt-0.5 min-w-0">
-            <div className={cn("text-[12px] font-black uppercase leading-tight", tone.text)}>
+            <div
+              className={cn(
+                "break-words text-[11px] font-black uppercase leading-tight sm:text-[12px]",
+                tone.text,
+              )}
+            >
               {signal.headline}
             </div>
-            <div className="mt-0.5 text-[8px] font-semibold uppercase leading-tight tracking-[0.04em] text-muted-foreground sm:text-[9px]">
+            <div className="mt-0.5 break-words text-[7px] font-semibold uppercase leading-tight tracking-[0.02em] text-muted-foreground sm:text-[9px] sm:tracking-[0.04em]">
               {signal.detail}
             </div>
           </div>
