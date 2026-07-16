@@ -109,10 +109,14 @@ function recomputeBucket(bucket: MinuteHeatBucket, minRounds: number) {
   bucket.temperature = classifyMinuteHeat(bucket.score, bucket.total, minRounds);
 }
 
-function classifyMinuteHeat(score: number, total: number, minRounds: number): MinuteHeatTemperature {
+export function classifyMinuteHeat(
+  score: number,
+  total: number,
+  minRounds: number,
+): MinuteHeatTemperature {
   if (total < minRounds) return "sem_amostra";
-  if (score >= 67) return "quente";
-  if (score >= 55) return "operavel";
+  if (score >= 89) return "quente";
+  if (score >= 88) return "operavel";
   return "frio";
 }
 
@@ -142,7 +146,11 @@ function emptyBucket(minute: number): MinuteHeatBucket {
 
 function partsForRound(round: MinuteHeatRound, fallbackDate: string) {
   const timeParts = parseRoundTime(round.time);
-  const sourceDate = round.day || dateFromIso(round.sourceUpdatedAt) || dateFromIso(round.capturedAt) || fallbackDate;
+  const sourceDate =
+    round.day ||
+    dateFromIso(round.sourceUpdatedAt) ||
+    dateFromIso(round.capturedAt) ||
+    fallbackDate;
   return {
     date: sourceDate,
     hour: timeParts.hour,

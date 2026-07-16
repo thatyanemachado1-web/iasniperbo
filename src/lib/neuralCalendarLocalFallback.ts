@@ -227,7 +227,10 @@ function emptyHourlyStat(parts: DateParts): NeuralCalendarHourlyStat {
   };
 }
 
-function incrementStat(stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat, round: StoredRound) {
+function incrementStat(
+  stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat,
+  round: StoredRound,
+) {
   stat.totalRounds += 1;
   if (round.result === "B") stat.bankerCount += 1;
   if (round.result === "P") stat.playerCount += 1;
@@ -238,7 +241,10 @@ function incrementStat(stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat,
   stat.updatedAt = new Date().toISOString();
 }
 
-function recomputeStat(stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat, minSample: number) {
+function recomputeStat(
+  stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat,
+  minSample: number,
+) {
   const best = bestForce(stat);
   const total = Math.max(0, stat.totalRounds);
   stat.bestForce = best.force;
@@ -255,7 +261,9 @@ function recomputeStat(stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat,
     stat.playerPercent = total ? roundPercent((stat.playerCount / total) * 100) : 0;
     stat.tiePercent = total ? roundPercent((stat.tieCount / total) * 100) : 0;
     stat.bestReading =
-      stat.bestForce === "NONE" ? "Aguardando amostra real." : `${forceLabel(stat.bestForce)} dominante no horario.`;
+      stat.bestForce === "NONE"
+        ? "Aguardando amostra real."
+        : `${forceLabel(stat.bestForce)} dominante no horario.`;
   }
 }
 
@@ -267,7 +275,9 @@ function refreshDailyExtremes(daily: NeuralCalendarDailyStat, hours: NeuralCalen
   daily.worstHour = rows.at(-1) ? `${String(rows.at(-1)?.hour ?? 0).padStart(2, "0")}:00` : "";
 }
 
-function bestForce(stat: Pick<NeuralCalendarDailyStat, "bankerCount" | "playerCount" | "tieCount">) {
+function bestForce(
+  stat: Pick<NeuralCalendarDailyStat, "bankerCount" | "playerCount" | "tieCount">,
+) {
   const rows: Array<{ force: NeuralCalendarForce; count: number }> = [
     { force: "BANKER", count: stat.bankerCount },
     { force: "PLAYER", count: stat.playerCount },
@@ -277,10 +287,14 @@ function bestForce(stat: Pick<NeuralCalendarDailyStat, "bankerCount" | "playerCo
   return rows[0]?.count ? rows[0] : { force: "NONE" as const, count: 0 };
 }
 
-function classifyScore(score: number, total: number, minSample: number): NeuralCalendarClassification {
+function classifyScore(
+  score: number,
+  total: number,
+  minSample: number,
+): NeuralCalendarClassification {
   if (total < minSample) return "sem_amostra";
   if (score >= 89) return "muito_pagante";
-  if (score >= 85) return "operavel";
+  if (score >= 88) return "operavel";
   return "perigoso";
 }
 
@@ -292,23 +306,24 @@ function inferModule(stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat) {
 }
 
 function observation(stat: NeuralCalendarDailyStat | NeuralCalendarHourlyStat) {
-  if (stat.classification === "sem_amostra") return "Sem amostra suficiente no historico real coletado.";
-  if (stat.classification === "muito_pagante") {
-    return "Periodo favoravel. Forca dominante apareceu com alta consistencia nas rodadas reais.";
-  }
-  if (stat.classification === "operavel") {
-    return "Periodo operavel. Existe vantagem historica, mas precisa de leitura e protecao.";
-  }
-  return "Periodo perigoso. Historico com baixa concentracao e maior risco de quebra.";
+  if (stat.classification === "sem_amostra")
+    return "Sem amostra suficiente no historico real coletado.";
+  if (stat.classification === "muito_pagante") return "Muito bom para operar.";
+  if (stat.classification === "operavel") return "Operável.";
+  return "Perigoso.";
 }
 
 function monthSummary(days: NeuralCalendarDailyStat[], selectedHours: NeuralCalendarHourlyStat[]) {
   const sampledDays = days.filter((day) => day.classification !== "sem_amostra");
   const sampledHours = selectedHours.filter((hour) => hour.classification !== "sem_amostra");
-  const bestDay = [...sampledDays].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
-  const worstDay = [...sampledDays].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
-  const bestHour = [...sampledHours].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
-  const worstHour = [...sampledHours].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
+  const bestDay =
+    [...sampledDays].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
+  const worstDay =
+    [...sampledDays].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
+  const bestHour =
+    [...sampledHours].sort((a, b) => b.score - a.score || b.totalRounds - a.totalRounds)[0] || null;
+  const worstHour =
+    [...sampledHours].sort((a, b) => a.score - b.score || b.totalRounds - a.totalRounds)[0] || null;
   return {
     averageScore: sampledDays.length
       ? roundPercent(sampledDays.reduce((sum, day) => sum + day.score, 0) / sampledDays.length)
@@ -408,8 +423,10 @@ function topMonthDays(days: NeuralCalendarDailyStat[]) {
 }
 
 function partsForRound(round: StoredRound): DateParts {
-  const baseDate = normalizeDate(round.day) || dateParts(new Date(round.sourceUpdatedAt || round.capturedAt)).date;
-  const hour = hourFromTime(round.time) ?? dateParts(new Date(round.sourceUpdatedAt || round.capturedAt)).hour;
+  const baseDate =
+    normalizeDate(round.day) || dateParts(new Date(round.sourceUpdatedAt || round.capturedAt)).date;
+  const hour =
+    hourFromTime(round.time) ?? dateParts(new Date(round.sourceUpdatedAt || round.capturedAt)).hour;
   return { ...partsFromDate(baseDate), hour };
 }
 
@@ -499,11 +516,15 @@ function monthLabel(year: number, month: number) {
 }
 
 function weekdayFromDate(date: Date) {
-  return normalizeWeekday(new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(date));
+  return normalizeWeekday(
+    new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(date),
+  );
 }
 
 function normalizeWeekday(value: unknown) {
-  const text = String(value || "").slice(0, 3).toLowerCase();
+  const text = String(value || "")
+    .slice(0, 3)
+    .toLowerCase();
   const map: Record<string, string> = {
     sun: "Domingo",
     mon: "Segunda",
