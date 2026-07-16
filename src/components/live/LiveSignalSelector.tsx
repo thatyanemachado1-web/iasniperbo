@@ -9,7 +9,7 @@ import {
 import { readUserSession } from "@/lib/userSession";
 import { cn } from "@/lib/utils";
 
-type SignalFilter = "all" | LiveSignalModuleKey;
+type LegacySignalFilter = "all" | LiveSignalModuleKey;
 
 type SignalCardDefinition = {
   key: LiveSignalModuleKey;
@@ -21,7 +21,8 @@ type SignalCardDefinition = {
 type LiveCardDisplaySignal = LiveCardSignal & { card: SignalCardDefinition };
 type HeldLiveResult = { signal: LiveCardDisplaySignal; expiresAt: number };
 
-const LIVE_SIGNAL_FILTER_STORAGE_KEY = "sniperbo:live-signal-card-filter:v1";
+const LIVE_SIGNAL_FILTERS_STORAGE_KEY = "sniperbo:live-signal-card-filters:v2";
+const LEGACY_LIVE_SIGNAL_FILTER_STORAGE_KEY = "sniperbo:live-signal-card-filter:v1";
 
 const SIGNAL_CARDS: SignalCardDefinition[] = [
   { key: "paying_numbers", number: 1, shortLabel: "Neural", label: "Leitura Neural" },
@@ -42,11 +43,15 @@ const SIGNAL_CARDS: SignalCardDefinition[] = [
   },
 ];
 
-const VALID_FILTERS = new Set<SignalFilter>(["all", ...SIGNAL_CARDS.map((card) => card.key)]);
+const ALL_SIGNAL_CARD_KEYS = SIGNAL_CARDS.map((card) => card.key);
+const VALID_SIGNAL_CARD_KEYS = new Set<LiveSignalModuleKey>(ALL_SIGNAL_CARD_KEYS);
+const VALID_LEGACY_FILTERS = new Set<LegacySignalFilter>(["all", ...ALL_SIGNAL_CARD_KEYS]);
 
 export function LiveSignalSelector() {
   const { data, mode } = useDashboardData();
-  const [selectedFilter, setSelectedFilter] = useState<SignalFilter>("all");
+  const [selectedFilters, setSelectedFilters] = useState<LiveSignalModuleKey[]>(() => [
+    ...ALL_SIGNAL_CARD_KEYS,
+  ]);
   const [preferenceLoaded, setPreferenceLoaded] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [heldResults, setHeldResults] = useState<Record<string, HeldLiveResult>>({});
@@ -59,18 +64,25 @@ export function LiveSignalSelector() {
   }, []);
 
   useEffect(() => {
-    const storageKey = liveSignalFilterStorageKey();
+    const storageKey = liveSignalFiltersStorageKey();
+    const legacyStorageKey = legacyLiveSignalFilterStorageKey();
     try {
-      const savedFilter = window.localStorage.getItem(storageKey);
-      if (isSignalFilter(savedFilter)) setSelectedFilter(savedFilter);
+      const savedFilters = parseStoredSignalFilters(window.localStorage.getItem(storageKey));
+      if (savedFilters) {
+        setSelectedFilters(savedFilters);
+      } else {
+        const legacyFilter = window.localStorage.getItem(legacyStorageKey);
+        const migratedFilters = signalFiltersFromLegacy(legacyFilter);
+        if (migratedFilters) setSelectedFilters(migratedFilters);
+      }
     } catch {
       // Keep the default when storage is unavailable in an embedded browser.
     }
 
     const syncFilter = (event: StorageEvent) => {
-      if (event.key === storageKey && isSignalFilter(event.newValue)) {
-        setSelectedFilter(event.newValue);
-      }
+      if (event.key !== storageKey) return;
+      const nextFilters = parseStoredSignalFilters(event.newValue);
+      if (nextFilters) setSelectedFilters(nextFilters);
     };
     window.addEventListener("storage", syncFilter);
     setPreferenceLoaded(true);
@@ -81,11 +93,11 @@ export function LiveSignalSelector() {
   useEffect(() => {
     if (!preferenceLoaded) return;
     try {
-      window.localStorage.setItem(liveSignalFilterStorageKey(), selectedFilter);
+      window.localStorage.setItem(liveSignalFiltersStorageKey(), JSON.stringify(selectedFilters));
     } catch {
       // The in-memory selection still works when storage is unavailable.
     }
-  }, [preferenceLoaded, selectedFilter]);
+  }, [preferenceLoaded, selectedFilters]);
 
   const rawSignals = useMemo(() => {
     if (!liveReady) return [];
@@ -134,11 +146,24 @@ export function LiveSignalSelector() {
     [heldResults, rawSignals],
   );
 
-  const visibleSignals =
-    selectedFilter === "all"
-      ? liveSignals
-      : liveSignals.filter((signal) => signal.card.key === selectedFilter);
-  const selectedCard = SIGNAL_CARDS.find((card) => card.key === selectedFilter) ?? null;
+  const selectedFilterSet = useMemo(() => new Set(selectedFilters), [selectedFilters]);
+  const selectedCards = useMemo(
+    () => SIGNAL_CARDS.filter((card) => selectedFilterSet.has(card.key)),
+    [selectedFilterSet],
+  );
+  const allCardsSelected = selectedFilters.length === ALL_SIGNAL_CARD_KEYS.length;
+  const visibleSignals = liveSignals.filter((signal) => selectedFilterSet.has(signal.card.key));
+
+  const toggleFilter = (filter: LiveSignalModuleKey) => {
+    setSelectedFilters((current) => {
+      if (current.length === ALL_SIGNAL_CARD_KEYS.length) return [filter];
+      if (current.includes(filter)) {
+        if (current.length === 1) return current;
+        return current.filter((item) => item !== filter);
+      }
+      return ALL_SIGNAL_CARD_KEYS.filter((item) => item === filter || current.includes(item));
+    });
+  };
 
   return (
     <section className="mb-2 rounded-xl border border-neon-cyan/20 bg-background/55 p-2 shadow-[0_0_24px_-20px_var(--neon-cyan)]">
@@ -163,23 +188,28 @@ export function LiveSignalSelector() {
               liveReady ? "animate-pulse bg-emerald-400" : "bg-amber-300",
             )}
           />
-          {liveReady ? "Sinais ativos" : "Sincronizando"}
+          {liveReady
+            ? selectedFilters.length === 1
+              ? "1 sinal ativo"
+              : `${selectedFilters.length} sinais ativos`
+            : "Sincronizando"}
         </span>
       </div>
 
       <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <FilterButton
-          active={selectedFilter === "all"}
+          active={allCardsSelected}
           label="Todos"
-          onClick={() => setSelectedFilter("all")}
+          title="Selecionar os seis cards"
+          onClick={() => setSelectedFilters([...ALL_SIGNAL_CARD_KEYS])}
         />
         {SIGNAL_CARDS.map((card) => (
           <FilterButton
             key={card.key}
-            active={selectedFilter === card.key}
+            active={selectedFilterSet.has(card.key)}
             label={`${card.number} · ${card.shortLabel}`}
             title={`Card ${card.number} — ${card.label}`}
-            onClick={() => setSelectedFilter(card.key)}
+            onClick={() => toggleFilter(card.key)}
           />
         ))}
       </div>
@@ -194,9 +224,9 @@ export function LiveSignalSelector() {
           <SignalWaitingState
             icon={<Radio className="size-3.5" />}
             text={
-              selectedCard
-                ? `Aguardando entrada ou resultado do Card ${selectedCard.number} — ${selectedCard.label}.`
-                : "Aguardando entrada ou resultado dos seis minicards."
+              selectedCards.length === 1
+                ? `Aguardando entrada ou resultado do Card ${selectedCards[0].number} — ${selectedCards[0].label}.`
+                : `Aguardando entrada ou resultado dos ${selectedCards.length} cards selecionados.`
             }
           />
         ) : (
@@ -343,11 +373,38 @@ function resultTone(outcome: Extract<LiveCardSignal, { kind: "result" }>["outcom
   };
 }
 
-function isSignalFilter(value: unknown): value is SignalFilter {
-  return typeof value === "string" && VALID_FILTERS.has(value as SignalFilter);
+function parseStoredSignalFilters(value: string | null): LiveSignalModuleKey[] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return null;
+    const selected = new Set(
+      parsed.filter(
+        (item): item is LiveSignalModuleKey =>
+          typeof item === "string" && VALID_SIGNAL_CARD_KEYS.has(item as LiveSignalModuleKey),
+      ),
+    );
+    const normalized = ALL_SIGNAL_CARD_KEYS.filter((item) => selected.has(item));
+    return normalized.length ? normalized : null;
+  } catch {
+    return null;
+  }
 }
 
-function liveSignalFilterStorageKey() {
+function signalFiltersFromLegacy(value: string | null): LiveSignalModuleKey[] | null {
+  if (!value || !VALID_LEGACY_FILTERS.has(value as LegacySignalFilter)) return null;
+  return value === "all" ? [...ALL_SIGNAL_CARD_KEYS] : [value as LiveSignalModuleKey];
+}
+
+function liveSignalFiltersStorageKey() {
+  return scopedLiveSignalStorageKey(LIVE_SIGNAL_FILTERS_STORAGE_KEY);
+}
+
+function legacyLiveSignalFilterStorageKey() {
+  return scopedLiveSignalStorageKey(LEGACY_LIVE_SIGNAL_FILTER_STORAGE_KEY);
+}
+
+function scopedLiveSignalStorageKey(baseKey: string) {
   const email = readUserSession().email.trim().toLowerCase();
-  return email ? `${LIVE_SIGNAL_FILTER_STORAGE_KEY}:${email}` : LIVE_SIGNAL_FILTER_STORAGE_KEY;
+  return email ? `${baseKey}:${email}` : baseKey;
 }
