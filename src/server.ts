@@ -22911,17 +22911,9 @@ async function resolveAdminClientRegistry(env: unknown): Promise<AdminClientRegi
 async function resolveAdminClientRegistryForRequest(
   env: unknown,
 ): Promise<AdminClientRegistryResolution> {
-  const resolved = await withTimeout(
-    resolveAdminClientRegistry(env),
-    8_000,
-    "resolver cadastro administrativo na requisicao",
-    null as AdminClientRegistryResolution | null,
-  );
-  if (resolved?.ok) return resolved;
-
   const d1State = await withTimeout(
     loadClientRegistrySnapshotFromD1(env),
-    2_000,
+    3_000,
     "carregar snapshot rapido do cadastro administrativo",
     null as Record<string, unknown> | null,
   );
@@ -22936,6 +22928,14 @@ async function resolveAdminClientRegistryForRequest(
       asOf: readString(fallbackRegistry, "savedAt"),
     };
   }
+
+  const resolved = await withTimeout(
+    resolveAdminClientRegistry(env),
+    8_000,
+    "resolver cadastro administrativo na requisicao",
+    null as AdminClientRegistryResolution | null,
+  );
+  if (resolved?.ok) return resolved;
 
   return resolved || {
     ok: false,
