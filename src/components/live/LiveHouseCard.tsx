@@ -1,4 +1,4 @@
-import { ExternalLink, Focus, Maximize2, Play, RefreshCw } from "lucide-react";
+import { Focus, Maximize2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { LiveSignalSelector } from "@/components/live/LiveSignalSelector";
@@ -131,28 +131,17 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
     if (!active) setBacBoFocusEnabled(false);
   }, [active]);
 
-  function openOfficialPlatform() {
-    window.open(ESPORTIVA_AFFILIATE_URL, "sniperbo-esportiva");
-  }
-
-  function openBacBo() {
-    if (!affiliatePageLoaded && !bacBoConfirmed) return;
-
-    platformUrlRef.current = ESPORTIVA_BAC_BO_URL;
-    setPlatformUrl(ESPORTIVA_BAC_BO_URL);
-    setBacBoConfirmed(true);
-    try {
-      window.localStorage.setItem(LIVE_HOUSE_TARGET_STORAGE_KEY, BAC_BO_TARGET);
-    } catch {
-      // Navigation still works for the current visit when storage is unavailable.
+  function toggleBacBoFocus() {
+    const nextFocus = !bacBoFocusEnabled;
+    if (nextFocus) {
+      setBacBoConfirmed(true);
+      try {
+        window.localStorage.setItem(LIVE_HOUSE_TARGET_STORAGE_KEY, BAC_BO_TARGET);
+      } catch {
+        // Focus still works for the current visit when storage is unavailable.
+      }
     }
-    if (!nativeMode || !viewportRef.current) return;
-
-    nativeVisibleRef.current = true;
-    void LiveHouseNative.show({
-      url: ESPORTIVA_BAC_BO_URL,
-      ...elementBounds(viewportRef.current),
-    });
+    setBacBoFocusEnabled(nextFocus);
   }
 
   function reloadPlatform() {
@@ -203,17 +192,10 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
           >
             <Maximize2 className="size-3.5" />
           </button>
-          <button
-            type="button"
-            onClick={openOfficialPlatform}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-neon-cyan/30 bg-neon-cyan/10 px-2.5 text-[10px] font-bold text-neon-cyan transition hover:bg-neon-cyan/15"
-          >
-            Abrir oficial <ExternalLink className="size-3" />
-          </button>
-          {bacBoActive && !nativeMode && (
+          {canOpenBacBo && !nativeMode && (
             <button
               type="button"
-              onClick={() => setBacBoFocusEnabled((current) => !current)}
+              onClick={toggleBacBoFocus}
               aria-pressed={bacBoFocusEnabled}
               className="inline-flex min-h-8 max-w-full items-center justify-center gap-1.5 rounded-lg border border-violet-400/40 bg-violet-400/10 px-2.5 py-1 text-center text-[10px] font-black leading-tight text-violet-200 transition hover:bg-violet-400/20"
             >
@@ -221,21 +203,6 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
               <Focus className="size-3 shrink-0" />
             </button>
           )}
-          <button
-            type="button"
-            onClick={openBacBo}
-            disabled={!canOpenBacBo}
-            aria-pressed={bacBoActive}
-            title={canOpenBacBo ? undefined : "Aguarde o seu link de afiliado terminar de carregar"}
-            className="inline-flex min-h-8 max-w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-400/40 bg-emerald-400/12 px-2.5 py-1 text-center text-[10px] font-black leading-tight text-emerald-300 transition hover:bg-emerald-400/20 disabled:cursor-wait disabled:border-border/60 disabled:bg-background/40 disabled:text-muted-foreground"
-          >
-            {bacBoActive
-              ? "Bac Bo aberto"
-              : affiliatePageLoaded
-                ? "Já concluí o cadastro/login"
-                : "Aguarde o link de afiliado carregar"}{" "}
-            <Play className="size-3 shrink-0 fill-current" />
-          </button>
         </div>
       </div>
 
