@@ -23495,7 +23495,10 @@ async function persistClientRegistryAfterClientChange(
   const saveStatusPromise = saveLiveState(env);
   const d1RegistrySavePromise = saveClientRegistrySnapshotToD1(
     env,
-    extractClientRegistryState(buildLiveStateSnapshot(env)),
+    {
+      ...extractClientRegistryState(buildLiveStateSnapshot(env)),
+      savedAt: new Date().toISOString(),
+    },
   );
   const [userPersisted, d1Persisted, saveStatus] = await Promise.all([
     withTimeout(
