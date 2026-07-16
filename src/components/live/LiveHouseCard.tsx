@@ -4,9 +4,9 @@ import { GlassCard } from "@/components/ui-app/GlassCard";
 import { LiveSignalSelector } from "@/components/live/LiveSignalSelector";
 import { elementBounds, isNativeLiveHouseAvailable, LiveHouseNative } from "@/lib/liveHouseNative";
 
-const ESPORTIVA_AFFILIATE_URL = "https://go.aff.esportiva.bet/glfml929";
-// This official host redirects to esportiva.bet.br and is also accepted by the Android WebView allowlist.
-const ESPORTIVA_BAC_BO_URL = "https://esportiva.bet/games/evolution/bac-bo";
+// Official affiliate deep link: preserves Gabriel's tracking and lands directly on Bac Bo.
+const ESPORTIVA_AFFILIATE_URL = "https://go.aff.esportiva.bet/8mnpg9ez";
+const ESPORTIVA_BAC_BO_URL = ESPORTIVA_AFFILIATE_URL;
 // v2 requires one confirmed affiliate-page load before Bac Bo can be persisted.
 const LIVE_HOUSE_TARGET_STORAGE_KEY = "sniperbo:live-house-target:v2";
 const BAC_BO_TARGET = "bac-bo";
