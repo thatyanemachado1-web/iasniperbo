@@ -1,4 +1,4 @@
-import { ExternalLink, Maximize2, Play, RefreshCw } from "lucide-react";
+import { ExternalLink, Focus, Maximize2, Play, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { LiveSignalSelector } from "@/components/live/LiveSignalSelector";
@@ -18,6 +18,7 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
   const [platformUrl, setPlatformUrl] = useState(ESPORTIVA_AFFILIATE_URL);
   const [destinationReady, setDestinationReady] = useState(false);
   const [affiliatePageLoaded, setAffiliatePageLoaded] = useState(false);
+  const [bacBoFocusEnabled, setBacBoFocusEnabled] = useState(true);
   const viewportRef = useRef<HTMLDivElement>(null);
   const nativeVisibleRef = useRef(false);
   const platformUrlRef = useRef(ESPORTIVA_AFFILIATE_URL);
@@ -202,6 +203,17 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
           >
             Abrir oficial <ExternalLink className="size-3" />
           </button>
+          {bacBoActive && !nativeMode && (
+            <button
+              type="button"
+              onClick={() => setBacBoFocusEnabled((current) => !current)}
+              aria-pressed={bacBoFocusEnabled}
+              className="inline-flex min-h-8 max-w-full items-center justify-center gap-1.5 rounded-lg border border-violet-400/40 bg-violet-400/10 px-2.5 py-1 text-center text-[10px] font-black leading-tight text-violet-200 transition hover:bg-violet-400/20"
+            >
+              {bacBoFocusEnabled ? "Mostrar Esportiva" : "Focar somente Bac Bo"}
+              <Focus className="size-3 shrink-0" />
+            </button>
+          )}
           <button
             type="button"
             onClick={openBacBo}
@@ -248,7 +260,11 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
               }
             }}
             title="Plataforma Esportiva ao vivo"
-            className="absolute inset-0 size-full border-0 bg-white"
+            className={`absolute max-w-none border-0 bg-white transition-[inset,width,height] duration-200 ${
+              bacBoActive && bacBoFocusEnabled
+                ? "-top-[58px] left-0 h-[calc(100%_+_58px)] w-full lg:-left-[72px] lg:-top-[65px] lg:h-[calc(100%_+_65px)] lg:w-[calc(100%_+_72px)]"
+                : "inset-0 size-full"
+            }`}
             allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
             referrerPolicy="strict-origin-when-cross-origin"
           />
