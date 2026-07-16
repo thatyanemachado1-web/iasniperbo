@@ -7,7 +7,8 @@ import { elementBounds, isNativeLiveHouseAvailable, LiveHouseNative } from "@/li
 const ESPORTIVA_AFFILIATE_URL = "https://go.aff.esportiva.bet/glfml929";
 // This official host redirects to esportiva.bet.br and is also accepted by the Android WebView allowlist.
 const ESPORTIVA_BAC_BO_URL = "https://esportiva.bet/games/evolution/bac-bo";
-const LIVE_HOUSE_TARGET_STORAGE_KEY = "sniperbo:live-house-target:v1";
+// v2 requires one confirmed affiliate-page load before Bac Bo can be persisted.
+const LIVE_HOUSE_TARGET_STORAGE_KEY = "sniperbo:live-house-target:v2";
 const BAC_BO_TARGET = "bac-bo";
 
 export function LiveHouseCard() {
@@ -16,6 +17,7 @@ export function LiveHouseCard() {
   const [nativeMode, setNativeMode] = useState(false);
   const [platformUrl, setPlatformUrl] = useState(ESPORTIVA_AFFILIATE_URL);
   const [destinationReady, setDestinationReady] = useState(false);
+  const [affiliatePageLoaded, setAffiliatePageLoaded] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const nativeVisibleRef = useRef(false);
   const platformUrlRef = useRef(ESPORTIVA_AFFILIATE_URL);
@@ -29,6 +31,7 @@ export function LiveHouseCard() {
       if (window.localStorage.getItem(LIVE_HOUSE_TARGET_STORAGE_KEY) === BAC_BO_TARGET) {
         platformUrlRef.current = ESPORTIVA_BAC_BO_URL;
         setPlatformUrl(ESPORTIVA_BAC_BO_URL);
+        setAffiliatePageLoaded(true);
       }
     } catch {
       // Continue with the affiliate landing page when storage is unavailable.
@@ -36,6 +39,22 @@ export function LiveHouseCard() {
       setDestinationReady(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!nativeMode) return;
+
+    let disposed = false;
+    const listener = LiveHouseNative.addListener("pageFinished", ({ requestedUrl }) => {
+      if (!disposed && requestedUrl === ESPORTIVA_AFFILIATE_URL) {
+        setAffiliatePageLoaded(true);
+      }
+    });
+
+    return () => {
+      disposed = true;
+      void listener.then((handle) => handle.remove());
+    };
+  }, [nativeMode]);
 
   useEffect(() => {
     if (!nativeMode || !viewportRef.current) return;
@@ -93,6 +112,8 @@ export function LiveHouseCard() {
   }
 
   function openBacBo() {
+    if (platformUrlRef.current !== ESPORTIVA_BAC_BO_URL && !affiliatePageLoaded) return;
+
     platformUrlRef.current = ESPORTIVA_BAC_BO_URL;
     setPlatformUrl(ESPORTIVA_BAC_BO_URL);
     try {
@@ -110,12 +131,18 @@ export function LiveHouseCard() {
   }
 
   function reloadPlatform() {
+    if (platformUrlRef.current === ESPORTIVA_AFFILIATE_URL) {
+      setAffiliatePageLoaded(false);
+    }
     if (nativeMode) {
       void LiveHouseNative.reload();
       return;
     }
     setFrameKey((current) => current + 1);
   }
+
+  const bacBoActive = platformUrl === ESPORTIVA_BAC_BO_URL;
+  const canOpenBacBo = bacBoActive || affiliatePageLoaded;
 
   return (
     <GlassCard
@@ -161,10 +188,17 @@ export function LiveHouseCard() {
           <button
             type="button"
             onClick={openBacBo}
-            aria-pressed={platformUrl === ESPORTIVA_BAC_BO_URL}
-            className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-emerald-400/40 bg-emerald-400/12 px-2.5 text-[10px] font-black text-emerald-300 transition hover:bg-emerald-400/20"
+            disabled={!canOpenBacBo}
+            aria-pressed={bacBoActive}
+            title={canOpenBacBo ? undefined : "Aguarde o seu link de afiliado terminar de carregar"}
+            className="inline-flex min-h-8 max-w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-400/40 bg-emerald-400/12 px-2.5 py-1 text-center text-[10px] font-black leading-tight text-emerald-300 transition hover:bg-emerald-400/20 disabled:cursor-wait disabled:border-border/60 disabled:bg-background/40 disabled:text-muted-foreground"
           >
-            Já entrei — abrir Bac Bo <Play className="size-3 fill-current" />
+            {bacBoActive
+              ? "Bac Bo aberto"
+              : affiliatePageLoaded
+                ? "Já concluí o cadastro/login — abrir Bac Bo"
+                : "Aguarde o link de afiliado carregar"}{" "}
+            <Play className="size-3 shrink-0 fill-current" />
           </button>
         </div>
       </div>
@@ -191,6 +225,11 @@ export function LiveHouseCard() {
           <iframe
             key={frameKey}
             src={platformUrl}
+            onLoad={() => {
+              if (platformUrl === ESPORTIVA_AFFILIATE_URL) {
+                setAffiliatePageLoaded(true);
+              }
+            }}
             title="Plataforma Esportiva ao vivo"
             className="absolute inset-0 size-full border-0 bg-white"
             allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
