@@ -80,7 +80,11 @@ export function LiveSignalSelector() {
     }
 
     const syncFilter = (event: StorageEvent) => {
-      if (event.key !== storageKey) return;
+      if (event.key !== storageKey && event.key !== null) return;
+      if (!event.newValue) {
+        setSelectedFilters([...ALL_SIGNAL_CARD_KEYS]);
+        return;
+      }
       const nextFilters = parseStoredSignalFilters(event.newValue);
       if (nextFilters) setSelectedFilters(nextFilters);
     };
@@ -190,13 +194,17 @@ export function LiveSignalSelector() {
           />
           {liveReady
             ? selectedFilters.length === 1
-              ? "1 sinal ativo"
-              : `${selectedFilters.length} sinais ativos`
+              ? "1 card ativo"
+              : `${selectedFilters.length} cards ativos`
             : "Sincronizando"}
         </span>
       </div>
 
-      <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        role="group"
+        aria-label="Escolha de quais cards receber sinais"
+        className="mt-2 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         <FilterButton
           active={allCardsSelected}
           label="Todos"
@@ -230,7 +238,7 @@ export function LiveSignalSelector() {
             }
           />
         ) : (
-          <div className="flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex flex-col gap-2 pb-0.5 sm:flex-row sm:overflow-x-auto sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden">
             {visibleSignals.map((signal) => (
               <LiveCardSignalPanel key={`${signal.card.key}:${signal.signalKey}`} signal={signal} />
             ))}
@@ -259,7 +267,7 @@ function FilterButton({
       title={title}
       onClick={onClick}
       className={cn(
-        "h-7 shrink-0 rounded-lg border px-2.5 text-[9px] font-black uppercase tracking-[0.08em] transition sm:text-[10px]",
+        "h-7 shrink-0 rounded-lg border px-2.5 text-[9px] font-black uppercase tracking-[0.08em] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neon-cyan/70 focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:text-[10px]",
         active
           ? "border-neon-cyan/55 bg-neon-cyan/15 text-neon-cyan shadow-[0_0_16px_-10px_var(--neon-cyan)]"
           : "border-border/60 bg-secondary/25 text-muted-foreground hover:border-neon-cyan/30 hover:text-foreground",
@@ -286,7 +294,7 @@ function LiveCardSignalPanel({ signal }: { signal: LiveCardDisplaySignal }) {
     <div
       aria-live="polite"
       className={cn(
-        "flex min-w-[210px] flex-1 items-center gap-2 rounded-lg border px-2.5 py-1.5 shadow-lg",
+        "flex w-full min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 shadow-lg sm:min-w-[240px] sm:flex-1",
         tone.panel,
       )}
     >
@@ -297,33 +305,28 @@ function LiveCardSignalPanel({ signal }: { signal: LiveCardDisplaySignal }) {
         <div className="truncate text-[8px] font-black uppercase tracking-[0.12em] text-muted-foreground">
           Card {signal.card.number} · {signal.card.label}
         </div>
-        <div className="flex items-baseline gap-1.5">
-          {signal.kind === "entry" ? (
-            <>
-              <span className="text-[9px] font-black uppercase text-emerald-300">
-                Entrada confirmada
+        {signal.kind === "entry" ? (
+          <div className="mt-0.5 min-w-0">
+            <div className={cn("text-[12px] font-black uppercase leading-tight", tone.text)}>
+              {signal.headline}
+            </div>
+            <div className="mt-0.5 text-[8px] font-semibold uppercase leading-tight tracking-[0.04em] text-muted-foreground sm:text-[9px]">
+              {signal.detail}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+            <span className="text-[9px] font-black uppercase text-muted-foreground">
+              Resultado confirmado
+            </span>
+            <span className={cn("text-sm font-black", tone.text)}>{signal.label}</span>
+            {signal.side !== "TIE" ? (
+              <span className="text-[8px] font-bold uppercase text-muted-foreground">
+                {signal.side}
               </span>
-              <span className={cn("text-sm font-black", tone.text)}>{signal.side}</span>
-              {signal.attempt ? (
-                <span className="text-[8px] font-bold uppercase text-muted-foreground">
-                  {signal.attempt}
-                </span>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <span className="text-[9px] font-black uppercase text-muted-foreground">
-                Resultado confirmado
-              </span>
-              <span className={cn("text-sm font-black", tone.text)}>{signal.label}</span>
-              {signal.side !== "TIE" ? (
-                <span className="text-[8px] font-bold uppercase text-muted-foreground">
-                  {signal.side}
-                </span>
-              ) : null}
-            </>
-          )}
-        </div>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   );

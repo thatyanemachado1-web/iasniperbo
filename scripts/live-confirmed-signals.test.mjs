@@ -52,6 +52,23 @@ assert.equal(
   "BANKER",
 );
 
+const neuralDetailed = resolveLiveConfirmedSignal(
+  dashboard({
+    neuralReading: {
+      mode: "ACTIVE",
+      numero: 7,
+      origem: "BANKER",
+      direcao: "BANKER",
+      validade: "G1",
+      acertos: 5,
+      erros: 1,
+    },
+  }),
+  "paying_numbers",
+);
+assert.equal(neuralDetailed?.headline, "Entrada BANKER");
+assert.equal(neuralDetailed?.detail, "Banker - ate G1 - 83%");
+
 assert.equal(
   resolveLiveConfirmedSignal(
     dashboard({
@@ -99,6 +116,13 @@ assert.equal(
     "surf_alert",
   )?.side,
   "BANKER",
+);
+assert.equal(
+  resolveLiveConfirmedSignal(
+    dashboard({ currentSurfAlert: { ...surfBase, surf_confidence: 60 } }),
+    "surf_alert",
+  )?.detail,
+  "SURF FORTE - Forca 60% - Quebra 20%",
 );
 
 assert.equal(
@@ -169,6 +193,21 @@ assert.equal(
   )?.side,
   "TIE",
 );
+assert.equal(
+  resolveLiveConfirmedSignal(
+    dashboard({
+      currentTieAlert: {
+        id: "tie-high-copy",
+        level: "Alto",
+        confidence: 83,
+        validityRounds: 2,
+        status: "active",
+      },
+    }),
+    "ties_only",
+  )?.headline,
+  "Possivel Tie",
+);
 
 assert.equal(
   resolveLiveConfirmedSignal(
@@ -187,6 +226,22 @@ assert.equal(
   )?.side,
   "PLAYER",
 );
+const officialPatternCopy = resolveLiveConfirmedSignal(
+  dashboard({
+    patternIaServerCycle: {
+      module: "PADROES_IA",
+      cycleStatus: "AGUARDANDO_RESULTADO",
+      attempt: "SG",
+      signalId: "pattern-copy",
+      technicalSide: "PLAYER",
+      sideCode: "P",
+      sourceRoundId: 500,
+    },
+  }),
+  "ai_patterns",
+);
+assert.equal(officialPatternCopy?.headline, "ENTRADA CONFIRMADA");
+assert.equal(officialPatternCopy?.detail, "PLAYER - aguardando resultado");
 
 assert.equal(
   resolveLiveConfirmedSignal(
@@ -400,6 +455,17 @@ const lateralPaying = resolveLiveCardSignals(
 );
 assert.equal(lateralPaying[0]?.kind, "result");
 assert.equal(lateralPaying[0]?.label, "GREEN SG");
+
+const lateralPayingEntryResults = lateralPayingResults.map((item) =>
+  item.slot === 3 ? { ...item, value: 7 } : item,
+);
+const lateralPayingEntry = resolveLiveCardSignals(
+  dashboard({ bacBoBeadPlate: lateralPayingEntryResults }),
+  "lateral_paying_numbers",
+  resultNow,
+).find((signal) => signal.kind === "entry");
+assert.equal(lateralPayingEntry?.headline, "Entrada BANKER");
+assert.equal(lateralPayingEntry?.detail, "BANKER • até G1 • 100% na amostra atual");
 
 const lateralTie = resolveLiveCardSignals(
   dashboard({

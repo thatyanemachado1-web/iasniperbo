@@ -5,6 +5,7 @@ import {
   buildLateralTieTimeline,
   type LateralBacBoResult,
 } from "../utils/lateralMotors.ts";
+import { buildTiePullerStats } from "../tieRadar/TieRadarStatsEngine.ts";
 import type {
   DashboardData,
   NeuralEntryLastResult,
@@ -12,6 +13,7 @@ import type {
   Round,
 } from "../types/dashboard.ts";
 import type { PatternMinerAlert, PatternMinerStrategy } from "../types/patternMiner.ts";
+import { calculateMotorAssertiveness } from "../utils/assertiveness.ts";
 
 export type LiveSignalModuleKey =
   | "paying_numbers"
@@ -26,6 +28,8 @@ export type LiveConfirmedSignal = {
   signalKey: string;
   side: "BANKER" | "PLAYER" | "TIE";
   attempt: "SG" | "G1" | "";
+  headline: string;
+  detail: string;
 };
 
 export type LiveSignalOutcome = "GREEN" | "RED" | "TIE";
@@ -41,9 +45,7 @@ export type LiveConfirmedResult = {
   tieMultiplier?: string | null;
 };
 
-export type LiveCardSignal =
-  | (LiveConfirmedSignal & { kind: "entry" })
-  | LiveConfirmedResult;
+export type LiveCardSignal = (LiveConfirmedSignal & { kind: "entry" }) | LiveConfirmedResult;
 
 const PATTERN_MIN_OCCURRENCES = 3;
 const PATTERN_MIN_VALIDATED = 2;
@@ -188,8 +190,7 @@ function resolvePatternResult(
   const outcome = normalizeOutcome(cycle.result);
   if (!outcome) return null;
   const rawResult = normalizeText(cycle.result);
-  const attempt =
-    rawResult.endsWith("_G1") || normalizeText(cycle.attempt) === "G1" ? "G1" : "SG";
+  const attempt = rawResult.endsWith("_G1") || normalizeText(cycle.attempt) === "G1" ? "G1" : "SG";
   const resultRoundId = attempt === "G1" ? cycle.g1RoundId : cycle.entryRoundId;
   if (!isCurrentOfficialResult(cycle.closedAt, resultRoundId, latestRound, nowMs)) return null;
   const side =
@@ -219,11 +220,7 @@ function resolveLateralPayingResult(data: DashboardData): LiveConfirmedResult | 
   const item = buildLateralPayingHistory(results, data.rounds).at(-1);
   if (!item || item.resultId !== String(latestResult.id)) return null;
   const outcome =
-    item.isTie || item.outcome === "TIE"
-      ? "TIE"
-      : item.outcome === "RED"
-        ? "RED"
-        : "GREEN";
+    item.isTie || item.outcome === "TIE" ? "TIE" : item.outcome === "RED" ? "RED" : "GREEN";
   const attempt = item.outcome === "G1" || item.outcome === "RED" ? "G1" : "SG";
   const tieMultiplier = item.tieLabel && item.tieLabel !== "EMPATE" ? item.tieLabel : null;
   return {
@@ -291,7 +288,9 @@ function resolveNeuralSignal(
   if (shouldHideResolvedNeuralEntry(side, data.neuralEntryLastResult)) return null;
 
   const attempt =
-    data.neuralEntryState?.status === "awaiting_g1" || cycleStatus === "AGUARDANDO_G1"
+    data.displayState === "waiting_result" ||
+    data.neuralEntryState?.status === "awaiting_g1" ||
+    cycleStatus === "AGUARDANDO_G1"
       ? "G1"
       : "SG";
   const entryStateKey = data.neuralEntryState?.key;
@@ -307,12 +306,14 @@ function resolveNeuralSignal(
     data.revision ||
     data.sequenceId ||
     "current";
+  const presentation = neuralSignalPresentation(data, reading, side, attempt, hasNumber);
 
   return {
     moduleKey: "paying_numbers" as const,
     signalKey: `live-neural:${sourceKey}:${side}:${attempt}`,
     side,
     attempt,
+    ...presentation,
   };
 }
 
@@ -326,7 +327,10 @@ function resolveSurfSignal(
   if (alert.surfCycle?.cycleStatus === "CLOSED") return null;
 
   const cycleSide = normalizeSide(alert.surfCycle?.technicalSide);
-  if (alert.surfCycle?.cycleStatus === "AGUARDANDO_RESULTADO" && cycleSide) {
+  if (
+    alert.surfCycle?.cycleStatus === "AGUARDANDO_RESULTADO" &&
+    (cycleSide === "BANKER" || cycleSide === "PLAYER")
+  ) {
     const cycleKey =
       alert.surfCycle.cycleId || alert.surfCycle.entryRoundId || latestRound?.id || "current";
     return {
@@ -334,6 +338,8 @@ function resolveSurfSignal(
       signalKey: `live-surf-cycle:${cycleKey}:${cycleSide}`,
       side: cycleSide,
       attempt: "SG" as const,
+      headline: `Seguir ${cycleSide}`,
+      detail: "Aguardando resultado SG",
     };
   }
 
@@ -342,7 +348,7 @@ function resolveSurfSignal(
       ? alert.surf_prediction_side
       : alert.surf_side,
   );
-  if (!side) return null;
+  if (side !== "BANKER" && side !== "PLAYER") return null;
 
   const memory = alert.dailySurfMemory;
   const memorySide =
@@ -361,11 +367,13 @@ function resolveSurfSignal(
     readString(record, "eventId") ||
     latestRound?.id ||
     "current";
+  const presentation = surfSignalPresentation(alert, side, confidence);
   return {
     moduleKey: "surf_alert" as const,
     signalKey: `live-surf:${sourceKey}:${side}`,
     side,
     attempt: "SG" as const,
+    ...presentation,
   };
 }
 
@@ -379,12 +387,14 @@ function resolveTieSignal(
   if (alert.status !== "active" || (!strongLevel && Number(alert.confidence) < 65)) {
     return null;
   }
+  const presentation = tieSignalPresentation(data);
 
   return {
     moduleKey: "ties_only" as const,
     signalKey: `live-tie:${alert.id || latestRound?.id || "current"}:${alert.confidence}`,
     side: "TIE" as const,
     attempt: "",
+    ...presentation,
   };
 }
 
@@ -417,6 +427,11 @@ function resolvePatternSignal(
       signalKey: `live-pattern-cycle:${sourceKey}:${officialSide}:${attempt}`,
       side: officialSide,
       attempt,
+      headline: attempt === "G1" ? "AGUARDANDO G1" : "ENTRADA CONFIRMADA",
+      detail:
+        attempt === "G1"
+          ? `Nao marcou RED ainda - proteger ${officialSide}`
+          : `${officialSide} - aguardando resultado`,
     };
   }
 
@@ -437,6 +452,8 @@ function resolvePatternSignal(
     signalKey: `live-pattern:${alert.signalId || alert.signal_id || alert.id}:${latestRoundId}:${side}`,
     side,
     attempt: "SG" as const,
+    headline: `ENTRADA ${side}`,
+    detail: `Lado tecnico: ${side}`,
   };
 }
 
@@ -449,22 +466,56 @@ function resolveLateralSignal(
   if (moduleKey === "lateral_paying_numbers") {
     const analysis = analyzeLateralPayingNumbersEntry(results);
     if (!analysis.confirmed || !analysis.signalKey || !analysis.active) return null;
+    const pattern = analysis.active.pattern;
+    const greens = pattern.sg + pattern.g1;
+    const force =
+      greens + pattern.reds > 0 ? Math.round((greens / (greens + pattern.reds)) * 100) : 0;
+    const side = pattern.target;
     return {
       moduleKey,
       signalKey: analysis.signalKey,
-      side: analysis.active.pattern.target,
+      side,
       attempt: analysis.active.attempt,
+      headline:
+        analysis.active.attempt === "G1"
+          ? `Aguardando G1 ${liveSideLabel(side)}`
+          : `Entrada ${liveSideLabel(side)}`,
+      detail: `${liveSideLabel(side)} • até G1 • ${force}% na amostra atual`,
     };
   }
 
   const analysis = analyzeLateralTiePatternEntry(results);
   if (!analysis.confirmed || !analysis.signalKey || !analysis.active) return null;
+  const timeline = buildLateralTieTimeline(results);
+  const history = timeline.history.slice(-30);
+  const tieCount = history.filter((item) => item.result === "TIE").length;
+  const reds = history.filter((item) => item.result === "RED").length;
+  const resolved = tieCount + reds;
+  const strength = resolved ? Math.round((tieCount / resolved) * 100) : 0;
+  const headline = analysis.horizontalTieRisk
+    ? analysis.active.attempt === "G1"
+      ? "Risco de empate • G1"
+      : "Risco de empate"
+    : analysis.dryTieRisk
+      ? "Risco de empate seco"
+      : analysis.active.attempt === "G1"
+        ? "Aguardando G1 Empate"
+        : "Entrada Empate";
+  const detail = analysis.horizontalTieRisk
+    ? analysis.active.attempt === "G1"
+      ? "SG não pagou • proteção EMPATE no G1"
+      : "5ª casa alinhada • entrada EMPATE liberada até G1"
+    : analysis.dryTieRisk
+      ? "Formação com 2 REDs • entrada EMPATE liberada até G1"
+      : `Empate • até G1 • ${strength || 100}% na amostra atual`;
 
   return {
     moduleKey,
     signalKey: analysis.signalKey,
     side: "TIE",
     attempt: analysis.active.attempt,
+    headline,
+    detail,
   };
 }
 
@@ -488,9 +539,7 @@ function readDashboardLateralResults(data: DashboardData): LateralBacBoResult[] 
         tieMultiplier: readOptionalNumber(record.tieMultiplier),
       });
     });
-    return results
-      .sort((left, right) => Number(left.slot) - Number(right.slot))
-      .slice(-200);
+    return results.sort((left, right) => Number(left.slot) - Number(right.slot)).slice(-200);
   }
 
   const uniqueRounds = new Map<number, Round>();
@@ -509,6 +558,122 @@ function readDashboardLateralResults(data: DashboardData): LateralBacBoResult[] 
       time: round.time || null,
       tieMultiplier: readOptionalNumber(round.tieMultiplier),
     }));
+}
+
+function neuralSignalPresentation(
+  data: DashboardData,
+  reading: NeuralReading,
+  side: LiveConfirmedSignal["side"],
+  attempt: LiveConfirmedSignal["attempt"],
+  hasNumber: boolean,
+) {
+  const strength = neuralSignalStrength(data, reading);
+  const strengthLabel =
+    reading.accuracyLabel ?? (strength === null ? "--" : `${Math.round(strength)}%`);
+  return {
+    headline:
+      attempt === "G1"
+        ? `Aguardando G1 ${entrySideToken(side)}`
+        : `Entrada ${entrySideToken(side)}`,
+    detail: hasNumber
+      ? `${neuralSideLabel(side)} - ate ${reading.validade ?? "G1"} - ${strengthLabel}`
+      : `${neuralSideLabel(side)} - entrada confirmada pela engine`,
+  };
+}
+
+function neuralSignalStrength(data: DashboardData, reading: NeuralReading) {
+  const direct = neuralAccuracyFrom(reading.assertividade, reading.acertos, reading.erros);
+  if (direct !== null) return direct;
+
+  const scoreboard = data.neuralScoreboard;
+  const sg = optionalFiniteNumber(scoreboard?.greenSemGale ?? reading.greenSemGale);
+  const g1 = optionalFiniteNumber(scoreboard?.greenG1 ?? reading.greenG1);
+  const splitGreens = sg !== null || g1 !== null ? (sg ?? 0) + (g1 ?? 0) : null;
+  const greens = optionalFiniteNumber(
+    splitGreens ?? scoreboard?.greens ?? scoreboard?.acertos ?? reading.acertos,
+  );
+  const reds = optionalFiniteNumber(
+    scoreboard?.reds ?? scoreboard?.erros ?? reading.reds ?? reading.erros,
+  );
+  return (
+    neuralAccuracyFrom(null, greens, reds) ??
+    optionalFiniteNumber(scoreboard?.assertividade ?? reading.assertividade)
+  );
+}
+
+function neuralAccuracyFrom(
+  assertiveness?: number | null,
+  greens?: number | null,
+  reds?: number | null,
+) {
+  if (typeof greens === "number" || typeof reds === "number") {
+    const total = (greens ?? 0) + (reds ?? 0);
+    return total > 0 ? calculateMotorAssertiveness(greens ?? 0, reds ?? 0) : null;
+  }
+  return optionalFiniteNumber(assertiveness);
+}
+
+function surfSignalPresentation(
+  alert: NonNullable<DashboardData["currentSurfAlert"]>,
+  side: "BANKER" | "PLAYER",
+  confidence: number,
+) {
+  const memory = alert.dailySurfMemory;
+  const memoryStatus = memory?.surfStatus;
+  const memorySide =
+    memory?.surfBias ?? memory?.stretchedSide ?? memory?.recoverySide ?? memory?.dominantSide;
+  const memoryAligned = Boolean(memorySide && memorySide === side);
+  const breakRisk = clampPercent(
+    memoryAligned && memoryStatus === "RISCO_QUEBRA"
+      ? Math.max(alert.surf_break_risk ?? alert.surf_risk, 76)
+      : memoryAligned && memoryStatus === "SURF_ESTICADO"
+        ? Math.max(alert.surf_break_risk ?? alert.surf_risk, 58)
+        : (alert.surf_break_risk ?? alert.surf_risk),
+  );
+  const statusLabel =
+    memoryAligned && memoryStatus && memoryStatus !== "SEM_SURF"
+      ? `${formatSurfStatus(memoryStatus)}${memorySide ? ` ${memorySide}` : ""}`
+      : formatSurfStatus(alert.surf_status ?? alert.surf_phase);
+  return {
+    headline: `Seguir ${side}`,
+    detail: `${statusLabel} - Forca ${confidence}% - Quebra ${breakRisk}%`,
+  };
+}
+
+function tieSignalPresentation(data: DashboardData) {
+  const alert = data.currentTieAlert;
+  const mainTiePuller =
+    data.tieAlertScoreboard?.tiePullers?.[0] ?? buildTiePullerStats(data.rounds, 7, 5)[0];
+  return {
+    headline: "Possivel Tie",
+    detail: mainTiePuller
+      ? `${tiePullerSideLabel(mainTiePuller.side)} ${mainTiePuller.score} com ${mainTiePuller.ties} Tie - Validade ${alert.validityRounds}r`
+      : `Pressao alta - Validade ${alert.validityRounds} rodadas`,
+  };
+}
+
+function neuralSideLabel(side: LiveConfirmedSignal["side"]) {
+  if (side === "BANKER") return "Banker";
+  if (side === "PLAYER") return "Player";
+  return "Empate";
+}
+
+function entrySideToken(side: LiveConfirmedSignal["side"]) {
+  return side === "TIE" ? "TIE" : side;
+}
+
+function liveSideLabel(side: LiveConfirmedSignal["side"]) {
+  return side === "TIE" ? "EMPATE" : side;
+}
+
+function tiePullerSideLabel(side: "B" | "P" | "T") {
+  if (side === "B") return "Banker";
+  if (side === "P") return "Player";
+  return "Tie";
+}
+
+function formatSurfStatus(status: string | null | undefined) {
+  return String(status ?? "ANALISANDO").replaceAll("_", " ");
 }
 
 function neuralReadingIsBlocked(reading: NeuralReading) {
@@ -607,7 +772,9 @@ function normalizeOutcome(value: unknown): LiveSignalOutcome | null {
 }
 
 function normalizeMultiplier(value: unknown) {
-  const raw = String(value ?? "").trim().toUpperCase();
+  const raw = String(value ?? "")
+    .trim()
+    .toUpperCase();
   if (!raw) return null;
   return raw.endsWith("X") ? raw : `${raw}X`;
 }
@@ -641,7 +808,7 @@ function normalizeText(value: unknown) {
 function clampPercent(value: unknown) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
-  return Math.max(0, Math.min(100, number));
+  return Math.max(0, Math.min(100, Math.round(number)));
 }
 
 function readRecord(value: unknown): Record<string, unknown> {
@@ -658,4 +825,8 @@ function readString(record: Record<string, unknown>, key: string) {
 function readOptionalNumber(value: unknown) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function optionalFiniteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
