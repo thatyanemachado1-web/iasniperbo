@@ -23497,31 +23497,26 @@ async function persistClientRegistryAfterClientChange(
     env,
     extractClientRegistryState(buildLiveStateSnapshot(env)),
   );
-  const userPersisted = await withTimeout(
-    persistBillingUser(env, client),
-    LIVE_STATE_IO_TIMEOUT_MS,
-    `persistir usuario alterado (${reason})`,
-    false,
-  );
-  const d1Persisted = await withTimeout(
-    d1RegistrySavePromise,
-    3_000,
-    `salvar cadastro administrativo no D1 (${reason})`,
-    false,
-  );
-  const saveStatus = userPersisted
-    ? await withTimeout(
-        saveStatusPromise,
-        DASHBOARD_EMPTY_SNAPSHOT_REPAIR_TIMEOUT_MS,
-        `salvar snapshot de clientes (${reason})`,
-        liveStateSaveStatus,
-      )
-    : await withTimeout(
-        saveStatusPromise,
-        LIVE_STATE_IO_TIMEOUT_MS,
-        `salvar snapshot de clientes (${reason})`,
-        liveStateSaveStatus,
-      );
+  const [userPersisted, d1Persisted, saveStatus] = await Promise.all([
+    withTimeout(
+      persistBillingUser(env, client),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      `persistir usuario alterado (${reason})`,
+      false,
+    ),
+    withTimeout(
+      d1RegistrySavePromise,
+      LIVE_STATE_IO_TIMEOUT_MS,
+      `salvar cadastro administrativo no D1 (${reason})`,
+      false,
+    ),
+    withTimeout(
+      saveStatusPromise,
+      LIVE_STATE_IO_TIMEOUT_MS,
+      `salvar snapshot de clientes (${reason})`,
+      liveStateSaveStatus,
+    ),
+  ]);
 
   if (userPersisted && !saveStatus.durable) {
     runBackgroundTask(ctx, saveStatusPromise, `finalizar snapshot de clientes (${reason})`);
