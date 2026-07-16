@@ -23493,10 +23493,20 @@ async function persistClientRegistryAfterClientChange(
 ) {
   const durableConfigured = Boolean(getSupabasePersistenceConfig(env));
   const saveStatusPromise = saveLiveState(env);
+  const d1RegistrySavePromise = saveClientRegistrySnapshotToD1(
+    env,
+    extractClientRegistryState(buildLiveStateSnapshot(env)),
+  );
   const userPersisted = await withTimeout(
     persistBillingUser(env, client),
     LIVE_STATE_IO_TIMEOUT_MS,
     `persistir usuario alterado (${reason})`,
+    false,
+  );
+  const d1Persisted = await withTimeout(
+    d1RegistrySavePromise,
+    3_000,
+    `salvar cadastro administrativo no D1 (${reason})`,
     false,
   );
   const saveStatus = userPersisted
@@ -23517,7 +23527,7 @@ async function persistClientRegistryAfterClientChange(
     runBackgroundTask(ctx, saveStatusPromise, `finalizar snapshot de clientes (${reason})`);
   }
 
-  const ok = !durableConfigured || saveStatus.durable || userPersisted;
+  const ok = !durableConfigured || saveStatus.durable || userPersisted || d1Persisted;
 
   if (!ok) {
     console.warn(`Cadastro nao foi gravado de forma duravel: ${reason}.`);
@@ -23536,7 +23546,7 @@ async function persistClientRegistryAfterClientChange(
     });
   }
 
-  return { ok, userPersisted, saveStatus };
+  return { ok, userPersisted, d1Persisted, saveStatus };
 }
 
 function clientRegistryDurableSaveError(trialDeviceCookie = "") {
