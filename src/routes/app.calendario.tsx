@@ -27,7 +27,7 @@ export const Route = createFileRoute("/app/calendario")({
 });
 
 const CALENDAR_START_DATE = "2026-06-10";
-const CALENDAR_TIMEZONE = "America/Sao_Paulo";
+const CALENDAR_TIMEZONE = "America/Campo_Grande";
 
 const engineOptions: Array<{ id: NeuralCalendarEngineKey; label: string }> = [
   { id: "todos", label: "Todos os motores" },
