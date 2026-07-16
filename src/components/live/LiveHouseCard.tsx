@@ -18,7 +18,8 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
   const [platformUrl, setPlatformUrl] = useState(ESPORTIVA_AFFILIATE_URL);
   const [destinationReady, setDestinationReady] = useState(false);
   const [affiliatePageLoaded, setAffiliatePageLoaded] = useState(false);
-  const [bacBoFocusEnabled, setBacBoFocusEnabled] = useState(true);
+  const [bacBoConfirmed, setBacBoConfirmed] = useState(false);
+  const [bacBoFocusEnabled, setBacBoFocusEnabled] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const nativeVisibleRef = useRef(false);
   const platformUrlRef = useRef(ESPORTIVA_AFFILIATE_URL);
@@ -35,6 +36,8 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
         platformUrlRef.current = ESPORTIVA_BAC_BO_URL;
         setPlatformUrl(ESPORTIVA_BAC_BO_URL);
         setAffiliatePageLoaded(true);
+        setBacBoConfirmed(true);
+        setBacBoFocusEnabled(true);
       }
     } catch {
       // Continue with the affiliate landing page when storage is unavailable.
@@ -130,10 +133,12 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
   }
 
   function openBacBo() {
-    if (platformUrlRef.current !== ESPORTIVA_BAC_BO_URL && !affiliatePageLoaded) return;
+    if (!affiliatePageLoaded && !bacBoConfirmed) return;
 
     platformUrlRef.current = ESPORTIVA_BAC_BO_URL;
     setPlatformUrl(ESPORTIVA_BAC_BO_URL);
+    setBacBoConfirmed(true);
+    setBacBoFocusEnabled(true);
     try {
       window.localStorage.setItem(LIVE_HOUSE_TARGET_STORAGE_KEY, BAC_BO_TARGET);
     } catch {
@@ -159,7 +164,7 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
     setFrameKey((current) => current + 1);
   }
 
-  const bacBoActive = platformUrl === ESPORTIVA_BAC_BO_URL;
+  const bacBoActive = bacBoConfirmed;
   const canOpenBacBo = bacBoActive || affiliatePageLoaded;
 
   return (
@@ -225,7 +230,7 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
             {bacBoActive
               ? "Bac Bo aberto"
               : affiliatePageLoaded
-                ? "Já concluí o cadastro/login — abrir Bac Bo"
+                ? "Já concluí o cadastro/login — focar Bac Bo"
                 : "Aguarde o link de afiliado carregar"}{" "}
             <Play className="size-3 shrink-0 fill-current" />
           </button>
