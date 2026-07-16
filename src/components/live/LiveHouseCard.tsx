@@ -262,7 +262,7 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
             title="Plataforma Esportiva ao vivo"
             className={`absolute max-w-none border-0 bg-white transition-[inset,width,height] duration-200 ${
               bacBoActive && bacBoFocusEnabled
-                ? "-top-[58px] left-0 h-[calc(100%_+_58px)] w-full lg:-left-[72px] lg:-top-[65px] lg:h-[calc(100%_+_65px)] lg:w-[calc(100%_+_72px)]"
+                ? "-top-[58px] left-0 h-[calc(100%_+_58px)] w-full lg:-left-[72px] lg:-top-[65px] lg:h-[calc(100%_+_65px)] lg:w-[calc(100%_+_72px)] xl:-left-[288px] xl:w-[calc(100%_+_288px)]"
                 : "inset-0 size-full"
             }`}
             allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
