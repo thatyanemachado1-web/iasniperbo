@@ -212,8 +212,8 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
         ref={viewportRef}
         className={`relative overflow-hidden rounded-xl border border-neon-cyan/20 bg-[#020712] ${
           expanded
-            ? "aspect-[7/8] min-h-0 w-full shrink-0 sm:aspect-auto sm:flex-1"
-            : "aspect-[7/8] min-h-0 w-full shrink-0 sm:aspect-auto sm:min-h-[680px] sm:flex-1"
+            ? "aspect-[15/16] min-h-0 w-full shrink-0 sm:aspect-auto sm:flex-1"
+            : "aspect-[15/16] min-h-0 w-full shrink-0 sm:aspect-auto sm:min-h-[680px] sm:flex-1"
         }`}
       >
         {nativeMode || !destinationReady ? (
