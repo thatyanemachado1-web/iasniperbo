@@ -1143,7 +1143,10 @@ function shouldLoadLiveStateForRequest(request: Request) {
     (url.pathname === "/dashboard" ||
       url.pathname === "/dashboard/stream" ||
       url.pathname === "/dashboard/round-history" ||
-      url.pathname === "/calendar/neural")
+      url.pathname === "/calendar/neural" ||
+      url.pathname === "/admin/overview" ||
+      url.pathname === "/admin/users" ||
+      /^\/admin\/users\/[^/]+$/.test(url.pathname))
   ) {
     return false;
   }
@@ -3530,6 +3533,8 @@ async function handleAdminApiRequest(request: Request, env: unknown, ctx?: Execu
   if (adminUserMatch) {
     const userId = decodeURIComponent(adminUserMatch[1]);
     const actionPath = adminUserMatch[2] || "";
+    const registry = await resolveAdminClientRegistryForRequest(env);
+    if (!registry.ok) return adminClientRegistryUnavailableResponse(registry.retryAfterSeconds);
     const target = findAdminManagedUser(userId, env);
     if (!target) return json({ error: "Usuario nao encontrado." }, 404);
 
@@ -26186,9 +26191,14 @@ async function updateAdminManagedUser(
   const actorEmail = adminActorEmailFromRequest(request, env, adminRole);
   const nextRole = Object.hasOwn(body, "role") ? normalizeManagedUserRole(body.role) : before.role;
   const changingRole = nextRole !== before.role;
+  const requestedStatus = Object.hasOwn(body, "subscriptionStatus")
+    ? normalizeAdminSubscriptionStatus(body.subscriptionStatus)
+    : before.subscriptionStatus;
   const requestedBlocked = Object.hasOwn(body, "isBlocked")
     ? Boolean(body.isBlocked)
-    : before.isBlocked;
+    : ["active", "manual_vip", "trial"].includes(requestedStatus)
+      ? false
+      : before.isBlocked;
 
   const permission = canEditAdminManagedUser(adminRole, actorEmail, before, {
     changingRole,
@@ -26198,9 +26208,7 @@ async function updateAdminManagedUser(
   if (!permission.ok) return permission;
 
   const requestedPlan = Object.hasOwn(body, "plan") ? normalizeAdminPlan(body.plan) : before.plan;
-  let status = Object.hasOwn(body, "subscriptionStatus")
-    ? normalizeAdminSubscriptionStatus(body.subscriptionStatus)
-    : before.subscriptionStatus;
+  let status = requestedStatus;
   if (requestedPlan === "free" && ["active", "manual_vip", "trial"].includes(status)) {
     status = "canceled";
   }

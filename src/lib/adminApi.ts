@@ -88,7 +88,7 @@ const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
 export const LOCAL_ADMIN_API_URL = LOCAL_SIGNALS_API_BASE_URL;
 export const PUBLIC_ADMIN_API_URL = "https://sniperbo.com";
-const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 20_000;
+const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 40_000;
 const ALLOWED_REMOTE_API_HOSTS = new Set(["sniperbo.com", "www.sniperbo.com"]);
 
 const defaultApiUrl = () =>

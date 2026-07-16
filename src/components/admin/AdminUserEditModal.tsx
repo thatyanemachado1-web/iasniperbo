@@ -104,12 +104,20 @@ export function AdminUserEditModal({
                     className="admin-input"
                     value={draft.subscriptionStatus}
                     disabled={!adminCanEditTarget}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const subscriptionStatus = event.target
+                        .value as AdminManagedUser["subscriptionStatus"];
                       setDraft({
                         ...draft,
-                        subscriptionStatus: event.target.value as AdminManagedUser["subscriptionStatus"],
-                      })
-                    }
+                        subscriptionStatus,
+                        isBlocked:
+                          subscriptionStatus === "blocked"
+                            ? true
+                            : ["active", "manual_vip", "trial"].includes(subscriptionStatus)
+                              ? false
+                              : draft.isBlocked,
+                      });
+                    }}
                   >
                     {statusOptions.map((status) => (
                       <option key={status.value} value={status.value}>
@@ -147,7 +155,18 @@ export function AdminUserEditModal({
                       type="checkbox"
                       checked={!draft.isBlocked}
                       disabled={!adminCanEditTarget}
-                      onChange={(event) => setDraft({ ...draft, isBlocked: !event.target.checked })}
+                      onChange={(event) => {
+                        const isBlocked = !event.target.checked;
+                        setDraft({
+                          ...draft,
+                          isBlocked,
+                          subscriptionStatus: isBlocked
+                            ? "blocked"
+                            : draft.subscriptionStatus === "blocked"
+                              ? activeStatusForPlan(draft.plan)
+                              : draft.subscriptionStatus,
+                        });
+                      }}
                     />
                   </label>
                 </Field>
@@ -250,7 +269,18 @@ export function AdminUserEditModal({
             <button
               type="button"
               disabled={busy || !adminCanEditTarget}
-              onClick={() => onSave({ ...draft, reason })}
+              onClick={() =>
+                onSave({
+                  ...draft,
+                  isBlocked:
+                    draft.subscriptionStatus === "blocked"
+                      ? true
+                      : ["active", "manual_vip", "trial"].includes(draft.subscriptionStatus)
+                        ? false
+                        : draft.isBlocked,
+                  reason,
+                })
+              }
               className="btn-primary-grad inline-flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-black disabled:opacity-50"
             >
               Salvar alteracoes
@@ -290,6 +320,15 @@ function toInputDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toISOString().slice(0, 10);
+}
+
+function activeStatusForPlan(
+  plan: AdminManagedUser["plan"],
+): AdminManagedUser["subscriptionStatus"] {
+  if (plan === "vip_manual") return "manual_vip";
+  if (plan === "trial") return "trial";
+  if (plan === "free") return "canceled";
+  return "active";
 }
 
 function fromInputDate(value: string, endOfDay = false) {

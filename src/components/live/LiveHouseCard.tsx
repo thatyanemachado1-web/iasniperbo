@@ -206,7 +206,7 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
         </div>
       </div>
 
-      <LiveSignalSelector />
+      {active && <LiveSignalSelector />}
 
       <div
         ref={viewportRef}

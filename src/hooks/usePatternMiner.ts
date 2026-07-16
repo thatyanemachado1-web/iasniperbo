@@ -52,15 +52,14 @@ export function usePatternMiner({
 }: UsePatternMinerParams) {
   const snapshot = useMemo(() => {
     if (!enabled || typeof window === "undefined") return buildEmptySnapshot(historyLimit);
+    if (serverSnapshot && shouldUseServerSnapshot(serverSnapshot, rounds, dashboardUpdatedAt, feedStatus)) {
+      return serverSnapshot;
+    }
     const agent = new PatternMinerAgent({
       ...DEFAULT_PATTERN_MINER_CONFIG,
       historyLimit,
     });
-    const liveSnapshot = agent.scan(rounds);
-    if (serverSnapshot && shouldUseServerSnapshot(serverSnapshot, liveSnapshot, rounds, dashboardUpdatedAt, feedStatus)) {
-      return serverSnapshot;
-    }
-    return liveSnapshot;
+    return agent.scan(rounds);
   }, [dashboardUpdatedAt, enabled, feedStatus, historyLimit, rounds, serverSnapshot]);
 
   return {
@@ -71,7 +70,6 @@ export function usePatternMiner({
 
 function shouldUseServerSnapshot(
   serverSnapshot: PatternMinerSnapshot,
-  liveSnapshot: PatternMinerSnapshot,
   rounds: Round[],
   dashboardUpdatedAt?: string | null,
   feedStatus?: string | null,
@@ -79,7 +77,6 @@ function shouldUseServerSnapshot(
   const feed = String(feedStatus || "").toLowerCase();
   if (feed === "stale" || feed === "paused") return false;
   if (!hasSharedPatternMinerBank(serverSnapshot)) return false;
-  if (hasAlerts(liveSnapshot) && !hasAlerts(serverSnapshot)) return false;
 
   const snapshotMs = Date.parse(serverSnapshot.updatedAt || "");
   const dashboardMs = Date.parse(String(dashboardUpdatedAt || ""));
@@ -93,10 +90,6 @@ function shouldUseServerSnapshot(
   }
 
   return true;
-}
-
-function hasAlerts(snapshot: PatternMinerSnapshot) {
-  return snapshotList(snapshot.entryAlerts).length > 0 || snapshotList(snapshot.formingAlerts).length > 0;
 }
 
 function hasSharedPatternMinerBank(serverSnapshot: PatternMinerSnapshot) {
