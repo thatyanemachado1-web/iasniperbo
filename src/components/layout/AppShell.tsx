@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Radio,
 } from "lucide-react";
+import { LiveHouseCard } from "@/components/live/LiveHouseCard";
 import { Logo } from "@/components/brand/Logo";
 import { MainSignalLivePopupBridge } from "@/components/dashboard/MainSignalLivePopupBridge";
 import { NeuralEntryLivePopupBridge } from "@/components/dashboard/NeuralEntryLivePopupBridge";
@@ -45,6 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
+  const [liveHouseMounted, setLiveHouseMounted] = useState(pathname === "/app/ao-vivo");
   const userSession = readUserSession();
   const canSeeAdmin = canSeeAdminUi();
   const fullAccess = hasFullAccess(userSession);
@@ -66,6 +68,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!sidebarPreferenceLoaded) return;
     window.localStorage.setItem("sniper_sidebar_collapsed", String(sidebarCollapsed));
   }, [sidebarCollapsed, sidebarPreferenceLoaded]);
+
+  useEffect(() => {
+    if (liveHousePage) setLiveHouseMounted(true);
+  }, [liveHousePage]);
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -177,7 +183,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
         </aside>
 
-        <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-28 lg:pb-8">{children}</main>
+        <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-28 lg:pb-8">
+          {liveHouseMounted && (
+            <div className={liveHousePage ? "block" : "hidden"} aria-hidden={!liveHousePage}>
+              <LiveHouseCard active={liveHousePage} />
+            </div>
+          )}
+          {!liveHousePage && children}
+        </main>
       </div>
 
       {signalAccess && !liveHousePage && <MainSignalLivePopupBridge />}

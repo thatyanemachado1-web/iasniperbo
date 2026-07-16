@@ -11,7 +11,7 @@ const ESPORTIVA_BAC_BO_URL = "https://esportiva.bet/games/evolution/bac-bo";
 const LIVE_HOUSE_TARGET_STORAGE_KEY = "sniperbo:live-house-target:v2";
 const BAC_BO_TARGET = "bac-bo";
 
-export function LiveHouseCard() {
+export function LiveHouseCard({ active = true }: { active?: boolean }) {
   const [frameKey, setFrameKey] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [nativeMode, setNativeMode] = useState(false);
@@ -21,6 +21,8 @@ export function LiveHouseCard() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const nativeVisibleRef = useRef(false);
   const platformUrlRef = useRef(ESPORTIVA_AFFILIATE_URL);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   useEffect(() => {
     setNativeMode(isNativeLiveHouseAvailable());
@@ -68,6 +70,7 @@ export function LiveHouseCard() {
         if (disposed) return;
         const bounds = elementBounds(viewport);
         const visible =
+          activeRef.current &&
           bounds.width > 1 &&
           bounds.height > 1 &&
           bounds.top < window.innerHeight &&
@@ -106,6 +109,20 @@ export function LiveHouseCard() {
       void LiveHouseNative.destroy();
     };
   }, [nativeMode]);
+
+  useEffect(() => {
+    if (!nativeMode || !viewportRef.current) return;
+    if (!active) {
+      nativeVisibleRef.current = false;
+      void LiveHouseNative.hide();
+      return;
+    }
+
+    const bounds = elementBounds(viewportRef.current);
+    if (bounds.width <= 1 || bounds.height <= 1) return;
+    nativeVisibleRef.current = true;
+    void LiveHouseNative.show({ url: platformUrlRef.current, ...bounds });
+  }, [active, nativeMode]);
 
   function openOfficialPlatform() {
     window.open(ESPORTIVA_AFFILIATE_URL, "sniperbo-esportiva");
