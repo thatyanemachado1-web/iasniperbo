@@ -3490,7 +3490,7 @@ async function handleAdminApiRequest(request: Request, env: unknown, ctx?: Execu
   }
 
   if (request.method === "GET" && url.pathname === "/admin/overview") {
-    const registry = await resolveAdminClientRegistry(env);
+    const registry = await resolveAdminClientRegistryForRequest(env);
     if (!registry.ok) return adminClientRegistryUnavailableResponse(registry.retryAfterSeconds);
     const users = syncAdminManagedUsers(env);
     return json(
@@ -3512,7 +3512,7 @@ async function handleAdminApiRequest(request: Request, env: unknown, ctx?: Execu
   }
 
   if (request.method === "GET" && url.pathname === "/admin/users") {
-    const registry = await resolveAdminClientRegistry(env);
+    const registry = await resolveAdminClientRegistryForRequest(env);
     if (!registry.ok) return adminClientRegistryUnavailableResponse(registry.retryAfterSeconds);
     const users = syncAdminManagedUsers(env);
     return json(
@@ -22906,6 +22906,41 @@ async function resolveAdminClientRegistry(env: unknown): Promise<AdminClientRegi
       adminClientRegistryResolvePromise = null;
     });
   return adminClientRegistryResolvePromise;
+}
+
+async function resolveAdminClientRegistryForRequest(
+  env: unknown,
+): Promise<AdminClientRegistryResolution> {
+  const resolved = await withTimeout(
+    resolveAdminClientRegistry(env),
+    8_000,
+    "resolver cadastro administrativo na requisicao",
+    null as AdminClientRegistryResolution | null,
+  );
+  if (resolved?.ok) return resolved;
+
+  const d1State = await withTimeout(
+    loadClientRegistrySnapshotFromD1(env),
+    2_000,
+    "carregar snapshot rapido do cadastro administrativo",
+    null as Record<string, unknown> | null,
+  );
+  const fallbackRegistry = validateClientRegistrySnapshot(d1State, 1);
+  if (fallbackRegistry) {
+    applyClientRegistryState(fallbackRegistry, env);
+    return {
+      ok: true,
+      registry: fallbackRegistry,
+      source: "client_registry_d1_snapshot",
+      stale: true,
+      asOf: readString(fallbackRegistry, "savedAt"),
+    };
+  }
+
+  return resolved || {
+    ok: false,
+    retryAfterSeconds: ADMIN_CLIENT_REGISTRY_RETRY_AFTER_SECONDS,
+  };
 }
 
 async function resolveAdminClientRegistryFresh(

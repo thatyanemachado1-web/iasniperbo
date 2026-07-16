@@ -27,7 +27,7 @@ export const Route = createFileRoute("/app/calendario")({
 });
 
 const CALENDAR_START_DATE = "2026-06-10";
-const CALENDAR_TIMEZONE = "America/Campo_Grande";
+const CALENDAR_TIMEZONE_FALLBACK = "America/Campo_Grande";
 
 const engineOptions: Array<{ id: NeuralCalendarEngineKey; label: string }> = [
   { id: "todos", label: "Todos os motores" },
@@ -204,7 +204,7 @@ function NeuralCalendarPage() {
         <GlassCard className="p-4">
           <CalendarPanelHeader
             title={calendar?.month.label || `${monthLabels[month - 1]} ${year}`}
-            subtitle={`Consulta leve por agregados - ${CALENDAR_TIMEZONE}`}
+            subtitle={`Consulta leve por agregados - ${deviceCalendarTimezone()}`}
           />
           {status === "loading" && <CalendarSkeleton />}
           {calendar && status !== "loading" && (
@@ -1504,7 +1504,7 @@ function forceLabel(value: string) {
 
 function saoPauloTodayParts() {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: CALENDAR_TIMEZONE,
+    timeZone: deviceCalendarTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -1519,6 +1519,15 @@ function saoPauloTodayParts() {
     day,
     date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
   };
+}
+
+function deviceCalendarTimezone() {
+  if (typeof window === "undefined") return CALENDAR_TIMEZONE_FALLBACK;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || CALENDAR_TIMEZONE_FALLBACK;
+  } catch {
+    return CALENDAR_TIMEZONE_FALLBACK;
+  }
 }
 
 const monthLabels = [
