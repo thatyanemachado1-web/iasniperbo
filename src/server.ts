@@ -22989,6 +22989,17 @@ async function resolveAdminClientRegistryFresh(
       clientRegistrySnapshotCandidate(id, sourceStates[index + 4], minimumIdentityCount),
     ),
   ].filter(Boolean);
+  const d1Candidate = snapshotCandidates.find((candidate) => candidate.source === "d1");
+  if (d1Candidate) {
+    applyClientRegistryState(d1Candidate.registry, env);
+    return {
+      ok: true,
+      registry: d1Candidate.registry,
+      source: "client_registry_d1_snapshot",
+      stale: Math.max(0, Date.now() - d1Candidate.savedAtMs) >= ADMIN_CLIENT_REGISTRY_FRESH_MS,
+      asOf: readString(d1Candidate.registry, "savedAt") || d1Candidate.savedAt,
+    };
+  }
   const trustedCandidates = [...snapshotCandidates, ...liveCandidates];
   const newestTrusted = [...trustedCandidates].sort(
     (left, right) => right.savedAtMs - left.savedAtMs,
