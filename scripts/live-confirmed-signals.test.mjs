@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { resolveLiveConfirmedSignal } from "../src/lib/liveConfirmedSignals.ts";
+import {
+  resolveLiveCardSignals,
+  resolveLiveConfirmedSignal,
+} from "../src/lib/liveConfirmedSignals.ts";
 
 const latestRound = {
   id: 500,
@@ -265,5 +268,150 @@ assert.equal(
   ),
   null,
 );
+
+const resultNow = Date.now();
+const recentIso = new Date(resultNow - 1_500).toISOString();
+
+const neuralLifecycle = resolveLiveCardSignals(
+  dashboard({
+    neuralReading: {
+      mode: "ACTIVE",
+      numero: 7,
+      origem: "BANKER",
+      direcao: "BANKER",
+      cycleStatus: "AGUARDANDO_RESULTADO",
+    },
+    neuralEntryState: {
+      key: "7:BANKER:PAGANTE:BANKER",
+      expectedSide: "BANKER",
+      status: "awaiting_sg",
+      triggerRoundKey: "499",
+    },
+    neuralEntryLastResult: {
+      id: "neural-result-500",
+      key: "7:BANKER:PAGANTE:BANKER",
+      expectedSide: "BANKER",
+      kind: "sg",
+      outcome: "GREEN",
+      resultRoundKey: "500",
+      finishedAt: recentIso,
+    },
+  }),
+  "paying_numbers",
+  resultNow,
+);
+assert.equal(neuralLifecycle[0]?.kind, "result");
+assert.equal(neuralLifecycle[0]?.label, "GREEN SG");
+assert.equal(neuralLifecycle[1]?.kind, "entry");
+
+const closedSurf = resolveLiveCardSignals(
+  dashboard({
+    currentSurfAlert: {
+      ...surfBase,
+      surf_confidence: 95,
+      surfCycle: {
+        module: "SURF_ANALYZER",
+        cycleStatus: "CLOSED",
+        attempt: "SG",
+        cycleId: "surf-result-500",
+        technicalSide: "PLAYER",
+        resultRoundId: "500",
+        result: "RED",
+        closedAt: recentIso,
+      },
+    },
+  }),
+  "surf_alert",
+  resultNow,
+);
+assert.equal(closedSurf.length, 1);
+assert.equal(closedSurf[0]?.kind, "result");
+assert.equal(closedSurf[0]?.label, "RED");
+
+const tieGreen = resolveLiveCardSignals(
+  dashboard({
+    currentTieAlert: {
+      id: "tie-green-500",
+      level: "Alto",
+      confidence: 90,
+      validityRounds: 2,
+      status: "green",
+    },
+  }),
+  "ties_only",
+  resultNow,
+);
+assert.equal(tieGreen.length, 1);
+assert.equal(tieGreen[0]?.kind, "result");
+assert.equal(tieGreen[0]?.label, "EMPATE CONFIRMADO");
+
+const closedPattern = resolveLiveCardSignals(
+  dashboard({
+    patternIaServerCycle: {
+      module: "PADROES_IA",
+      cycleStatus: "CLOSED",
+      attempt: "G1",
+      signalId: "pattern-result-500",
+      eventId: "event-result-500",
+      patternId: "p-result-500",
+      technicalSide: "BANKER",
+      sideCode: "B",
+      sourceRoundId: 498,
+      g1RoundId: "500",
+      result: "EMPATE_G1",
+      tieMultiplier: "10X",
+      closedAt: recentIso,
+    },
+    updatedAt: recentIso,
+    patternMinerSnapshot: {
+      updatedAt: recentIso,
+      entryAlerts: [
+        {
+          id: "validated-stale-behind-closed-cycle",
+          kind: "validated",
+          strategy: validPatternStrategy,
+          matchedRounds: [latestRound],
+        },
+      ],
+    },
+  }),
+  "ai_patterns",
+  resultNow,
+);
+assert.equal(closedPattern.length, 1);
+assert.equal(closedPattern[0]?.kind, "result");
+assert.equal(closedPattern[0]?.label, "EMPATE 10X");
+
+const lateralPayingResults = [
+  { id: "lp-0", side: "PLAYER", value: 7, slot: 0 },
+  { id: "lp-1", side: "PLAYER", value: 7, slot: 1 },
+  { id: "lp-2", side: "PLAYER", value: 7, slot: 2 },
+  { id: "lp-3", side: "PLAYER", value: 3, slot: 3 },
+  { id: "lp-4", side: "PLAYER", value: 4, slot: 4 },
+  { id: "lp-5", side: "BANKER", value: 5, slot: 5 },
+  { id: "lp-6", side: "BANKER", value: 8, slot: 6 },
+  { id: "lp-7", side: "BANKER", value: 8, slot: 7 },
+  { id: "lp-8", side: "BANKER", value: 8, slot: 8 },
+];
+const lateralPaying = resolveLiveCardSignals(
+  dashboard({ bacBoBeadPlate: lateralPayingResults }),
+  "lateral_paying_numbers",
+  resultNow,
+);
+assert.equal(lateralPaying[0]?.kind, "result");
+assert.equal(lateralPaying[0]?.label, "GREEN SG");
+
+const lateralTie = resolveLiveCardSignals(
+  dashboard({
+    bacBoBeadPlate: [
+      { id: "lt-origin", side: "TIE", value: 6, slot: 0, tieMultiplier: 4 },
+      { id: "lt-result", side: "TIE", value: 4, slot: 24, tieMultiplier: 10 },
+    ],
+  }),
+  "lateral_tie_patterns",
+  resultNow,
+);
+assert.equal(lateralTie[0]?.kind, "result");
+assert.equal(lateralTie[0]?.label, "EMPATE 10X");
 
 console.log("live confirmed signals tests passed");

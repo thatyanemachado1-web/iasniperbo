@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { replaceEqualDeep, useQuery, useQueryClient } from "@tanstack/react-query";
 import { mockDashboardData } from "@/data/mockDashboardData";
 import { refreshAccessSession } from "@/lib/accessApi";
 import { readAdminSession } from "@/lib/adminApi";
@@ -17,9 +17,10 @@ import type {
 } from "@/types/dashboard";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 
-const DEFAULT_POLLING_MS = 1500;
-const ERROR_BACKOFF_POLLING_MS = 2000;
-const DASHBOARD_FETCH_DEDUP_MS = 1000;
+const DEFAULT_POLLING_MS = 500;
+const ERROR_BACKOFF_POLLING_MS = 1500;
+const DASHBOARD_FETCH_DEDUP_MS = 250;
+const DASHBOARD_FETCH_TIMEOUT_MS = 4_000;
 const MAX_IN_FLIGHT_REQUESTS = 1;
 const STREAM_ENABLED = false;
 const DASHBOARD_AUTH_FAILURES_BEFORE_LOGOUT = 6;
@@ -403,15 +404,18 @@ function fetchDashboardResponse(url: string) {
   const userSession = readUserSession();
   const adminSession = readAdminSession();
   const token = configuredDashboardToken(url) || adminSession?.token || userSession.clientToken;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DASHBOARD_FETCH_TIMEOUT_MS);
   return fetch(liveUrl, {
     cache: "no-store",
+    signal: controller.signal,
     headers: {
       Accept: "application/json",
       "Cache-Control": "no-store, no-cache, must-revalidate",
       Pragma: "no-cache",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-  });
+  }).finally(() => clearTimeout(timeoutId));
 }
 
 function dashboardPollUrl(url: string) {
@@ -487,16 +491,16 @@ export function useDashboardData() {
     refetchOnMount: "always",
     refetchOnReconnect: "always",
     refetchOnWindowFocus: "always",
-    structuralSharing: (oldData: DashboardData | undefined, newData: DashboardData) => {
+    structuralSharing: (oldValue: unknown, newValue: unknown) => {
+      const oldData = oldValue as DashboardData | undefined;
+      const newData = newValue as DashboardData;
       if (oldData && !isDashboardSnapshotFreshEnough(newData, oldData)) return oldData;
       const mergedData = mergePersistentDashboardSnapshot(oldData, newData);
-      return oldData &&
-        !oldData.mockMode &&
-        !mergedData.mockMode &&
-        dashboardRevisionKey(oldData) === dashboardRevisionKey(mergedData) &&
-        samePersistentDashboardPayload(oldData, mergedData)
-        ? oldData
-        : mergedData;
+      // Revisions are assigned inside separate edge isolates, so two valid snapshots
+      // can share (or even regress) the same numeric revision while an individual
+      // card has already changed. Preserve equal branches, never the whole stale
+      // dashboard solely because the revision happens to match.
+      return oldData ? replaceEqualDeep(oldData, mergedData) : mergedData;
     },
   });
 
@@ -896,13 +900,23 @@ function isDashboardSnapshotFreshEnough(next: DashboardData, current?: Dashboard
   const nextFreshness = dashboardFreshness(next);
   const currentFreshness = dashboardFreshness(current);
 
+  // The result timestamp is the authoritative ordering signal and also handles
+  // a table/session round-id reset. Numeric revisions are local to an edge
+  // isolate and therefore are only a final tiebreaker.
+  if (
+    nextFreshness.roundRecordedAt >= 0 &&
+    currentFreshness.roundRecordedAt >= 0 &&
+    nextFreshness.roundRecordedAt !== currentFreshness.roundRecordedAt
+  ) {
+    return nextFreshness.roundRecordedAt >= currentFreshness.roundRecordedAt;
+  }
   if (nextFreshness.roundId !== currentFreshness.roundId) {
     return nextFreshness.roundId >= currentFreshness.roundId;
   }
-  if (nextFreshness.revision !== currentFreshness.revision) {
-    return nextFreshness.revision >= currentFreshness.revision;
+  if (nextFreshness.updatedAt !== currentFreshness.updatedAt) {
+    return nextFreshness.updatedAt >= currentFreshness.updatedAt;
   }
-  return nextFreshness.updatedAt >= currentFreshness.updatedAt;
+  return nextFreshness.revision >= currentFreshness.revision;
 }
 
 function mergePersistentDashboardSnapshot(
@@ -936,13 +950,6 @@ function mergePersistentDashboardSnapshot(
         ? currentMonthlyTieStats
         : next.tieRadarHistory,
   };
-}
-
-function samePersistentDashboardPayload(left: DashboardData, right: DashboardData) {
-  return (
-    JSON.stringify(left.dailyResultsByModule ?? {}) === JSON.stringify(right.dailyResultsByModule ?? {}) &&
-    JSON.stringify(left.monthlyTieStats ?? null) === JSON.stringify(right.monthlyTieStats ?? null)
-  );
 }
 
 function normalizeFrontendDailyResultsByModule(
@@ -979,7 +986,8 @@ function mergeFrontendDailyResultsByModule(
       for (const row of rows) {
         if (row.dayKey !== dayKey) continue;
         const key = frontendPersistentDedupeKey(row);
-        if (!byKey.has(key)) byKey.set(key, row);
+        const existing = byKey.get(key);
+        byKey.set(key, preferredFrontendPersistentResult(existing, row));
       }
       merged[moduleKey] = [...byKey.values()].sort(
         (a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""),
@@ -1025,6 +1033,19 @@ function normalizeFrontendPersistentResult(
 }
 
 function frontendPersistentDedupeKey(row: DashboardPersistentResult) {
+  if (
+    row.moduleKey === "LEITURA_NEURAL_NUMERO_PAGANTE" &&
+    (row.signalId || (row.roundId !== null && row.roundId !== undefined))
+  ) {
+    const resultType = String(row.resultType || "").trim().toUpperCase();
+    const resultFamily =
+      resultType === "GREEN" || resultType === "GREEN_G1"
+        ? "GREEN"
+        : resultType === "EMPATE" || resultType === "EMPATE_G1"
+          ? "EMPATE"
+          : resultType;
+    return [row.moduleKey, row.dayKey ?? "", row.signalId ?? "", row.roundId ?? "", resultFamily].join(":");
+  }
   return [
     row.moduleKey,
     row.dayKey ?? "",
@@ -1034,6 +1055,29 @@ function frontendPersistentDedupeKey(row: DashboardPersistentResult) {
     row.resultType,
     row.attempt ?? "",
   ].join(":");
+}
+
+function preferredFrontendPersistentResult(
+  current: DashboardPersistentResult | undefined,
+  candidate: DashboardPersistentResult,
+) {
+  if (!current) return candidate;
+  const specificity = (row: DashboardPersistentResult) => {
+    const type = String(row.resultType || "").trim().toUpperCase();
+    let score = type === "GREEN_G1" || type === "EMPATE_G1" ? 4 : 0;
+    if (String(row.attempt || "").toUpperCase() === "G1") score += 2;
+    if (row.tieMultiplier !== null && row.tieMultiplier !== undefined && row.tieMultiplier !== "") score += 1;
+    return score;
+  };
+  const currentRank = specificity(current);
+  const candidateRank = specificity(candidate);
+  if (candidateRank !== currentRank) return candidateRank > currentRank ? candidate : current;
+  const currentTime = Date.parse(current.createdAt || "");
+  const candidateTime = Date.parse(candidate.createdAt || "");
+  if (Number.isFinite(candidateTime) && (!Number.isFinite(currentTime) || candidateTime > currentTime)) {
+    return candidate;
+  }
+  return current;
 }
 
 function tieHistoryHasCurrentMonthStats(history: DashboardData["tieRadarHistory"], monthKey: string) {
@@ -1051,6 +1095,7 @@ function dashboardFreshness(data: DashboardData) {
   const latestRound = Array.isArray(data.rounds) ? data.rounds.at(-1) : undefined;
   return {
     roundId: safeFreshnessNumber(latestRound?.id),
+    roundRecordedAt: safeFreshnessTimestamp(latestRound?.recordedAt),
     revision: safeFreshnessNumber(data.revision ?? data.sequenceId),
     updatedAt: safeFreshnessTimestamp(data.updatedAt),
   };

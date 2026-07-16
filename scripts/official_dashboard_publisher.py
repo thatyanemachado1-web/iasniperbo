@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -34,10 +35,15 @@ else:
 
 
 USER_AGENT = "Mozilla/5.0 SNIPERBO-Official-Publisher/1.0"
-POST_TIMEOUT = (3.0, 5.0)
+POST_TIMEOUT = (1.0, 2.0)
+DEFAULT_TELEGRAM_ENGINE_URL = "https://sniperbo-telegram-engine.sniperboia.workers.dev"
+DEFAULT_PUBLISHER_INTERVAL_SECONDS = 0.2
+PUBLISHER_MIN_LOOP_SLEEP_SECONDS = 0.1
+URGENT_SIGNAL_CONNECT_TIMEOUT = 0.25
+URGENT_SIGNAL_READ_TIMEOUT = 0.9
 UPLOAD_WARNING_MS = 2000.0
 DIRECT_TELEGRAM_TARGET_MS = 300.0
-DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 1.2
+DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 0.0
 DIRECT_TELEGRAM_PENDING_MAX_ROUND_AGE = 8
 DIRECT_TELEGRAM_PENDING_MAX_SECONDS = 180.0
 DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS = {
@@ -476,20 +482,193 @@ def publish_payload(
     return (body if isinstance(body, dict) else {}, status_code, upload_ms)
 
 
-def dashboard_signal_fingerprint(payload: dict[str, Any]) -> str:
-    signal = payload.get("currentSignal") if isinstance(payload.get("currentSignal"), dict) else {}
-    neural_result = payload.get("neuralEntryLastResult") if isinstance(payload.get("neuralEntryLastResult"), dict) else {}
+def _dashboard_record(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _dashboard_pick(record: dict[str, Any], *keys: str) -> dict[str, Any]:
+    return {key: record.get(key) for key in keys if record.get(key) is not None}
+
+
+def _dashboard_pattern_alert_state(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    alerts = snapshot.get("entryAlerts") if isinstance(snapshot.get("entryAlerts"), list) else []
+    compact: list[dict[str, Any]] = []
+    for raw_alert in alerts[:8]:
+        alert = _dashboard_record(raw_alert)
+        strategy = _dashboard_record(alert.get("strategy"))
+        matched = alert.get("matchedRounds") if isinstance(alert.get("matchedRounds"), list) else []
+        matched_last = _dashboard_record(matched[-1]) if matched else {}
+        compact.append({
+            "id": alert.get("signalId") or alert.get("signal_id") or alert.get("id"),
+            "eventId": alert.get("eventId") or alert.get("event_id"),
+            "kind": alert.get("kind"),
+            "expected": strategy.get("expectedResult"),
+            "status": strategy.get("status"),
+            "roundId": alert.get("roundId") or alert.get("round_id") or matched_last.get("id"),
+        })
+    return compact
+
+
+def _dashboard_latest_persistent_results(payload: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    modules = _dashboard_record(payload.get("dailyResultsByModule"))
+    compact: dict[str, list[dict[str, Any]]] = {}
+    for module_key in sorted(modules):
+        rows = modules.get(module_key) if isinstance(modules.get(module_key), list) else []
+        compact[module_key] = [
+            _dashboard_pick(
+                _dashboard_record(row),
+                "resultId",
+                "signalId",
+                "roundId",
+                "resultType",
+                "attempt",
+                "createdAt",
+            )
+            for row in rows[:2]
+        ]
+    return compact
+
+
+def dashboard_realtime_state(payload: dict[str, Any]) -> dict[str, Any]:
+    signal = _dashboard_record(payload.get("currentSignal"))
+    neural_state = _dashboard_record(payload.get("neuralEntryState"))
+    neural_reading = _dashboard_record(payload.get("neuralReading"))
+    neural_result = _dashboard_record(payload.get("neuralEntryLastResult"))
+    surf = _dashboard_record(payload.get("currentSurfAlert"))
+    surf_cycle = _dashboard_record(surf.get("surfCycle"))
+    surf_history = surf.get("surfHistory") if isinstance(surf.get("surfHistory"), list) else []
+    surf_history_edges = [
+        _dashboard_pick(
+            _dashboard_record(row),
+            "cycleId",
+            "patternId",
+            "result",
+            "attempt",
+            "closedRoundId",
+            "closedAt",
+        )
+        for row in ([surf_history[0], surf_history[-1]] if surf_history else [])
+    ]
+    tie = _dashboard_record(payload.get("currentTieAlert"))
+    pattern_cycle = _dashboard_record(payload.get("patternIaServerCycle"))
+    pattern_snapshot = _dashboard_record(payload.get("patternMinerSnapshot"))
+    ai_pattern_signal = _dashboard_record(payload.get("aiPatternSignal"))
+    ai_pattern_strategy = _dashboard_record(ai_pattern_signal.get("strategy"))
     rounds = payload.get("rounds") if isinstance(payload.get("rounds"), list) else []
-    last_round = rounds[-1] if rounds and isinstance(rounds[-1], dict) else {}
-    signal_status = signal.get("status")
-    compact = {
-        "roundId": last_round.get("id"),
-        "roundResult": last_round.get("result") or last_round.get("resultado"),
-        "signalStatus": signal_status,
-        "signalSide": signal.get("side"),
-        "neuralResultId": neural_result.get("id"),
+    last_round = _dashboard_record(rounds[-1]) if rounds else {}
+    bead = payload.get("bacBoBeadPlate") if isinstance(payload.get("bacBoBeadPlate"), list) else []
+    last_bead = _dashboard_record(bead[-1]) if bead else {}
+    return {
+        "round": _dashboard_pick(last_round, "id", "result", "resultado", "playerScore", "bankerScore"),
+        "signal": _dashboard_pick(signal, "id", "status", "side", "entry", "roundId"),
+        "display": {
+            "state": payload.get("displayState"),
+            "side": payload.get("displaySide"),
+            "roundId": payload.get("displayRoundId"),
+        },
+        "neuralEntry": _dashboard_pick(
+            neural_state,
+            "key",
+            "status",
+            "expectedSide",
+            "triggerRoundKey",
+            "sgRoundKey",
+        ),
+        "neuralReading": _dashboard_pick(
+            neural_reading,
+            "mode",
+            "status",
+            "cycleStatus",
+            "attempt",
+            "strategyId",
+            "targetSide",
+            "direcao",
+            "origem",
+            "entryRoundId",
+            "g1RoundId",
+            "result",
+        ),
+        "neuralResult": _dashboard_pick(
+            neural_result,
+            "id",
+            "key",
+            "kind",
+            "outcome",
+            "resultRoundKey",
+            "finishedAt",
+        ),
+        "surf": _dashboard_pick(
+            surf,
+            "id",
+            "surf_alert",
+            "surf_phase",
+            "surf_status",
+            "surf_side",
+            "surf_prediction_side",
+            "surf_prediction_status",
+            "surf_prediction_confidence",
+        ),
+        "surfCycle": _dashboard_pick(
+            surf_cycle,
+            "cycleId",
+            "cycleStatus",
+            "technicalSide",
+            "entryRoundId",
+            "resultRoundId",
+            "result",
+            "tieMultiplier",
+            "closedAt",
+        ),
+        "surfHistory": {"length": len(surf_history), "edges": surf_history_edges},
+        "tie": _dashboard_pick(tie, "id", "status", "level", "confidence", "validityRounds"),
+        "patternCycle": _dashboard_pick(
+            pattern_cycle,
+            "module",
+            "patternId",
+            "signalId",
+            "eventId",
+            "cycleStatus",
+            "attempt",
+            "technicalSide",
+            "sideCode",
+            "sourceRoundId",
+            "entryRoundId",
+            "g1RoundId",
+            "result",
+            "tieMultiplier",
+            "closedAt",
+        ),
+        "aiPatternSignal": {
+            **_dashboard_pick(
+                ai_pattern_signal,
+                "id",
+                "signalId",
+                "eventId",
+                "status",
+                "side",
+                "expectedResult",
+                "roundId",
+                "sourceRoundId",
+                "result",
+            ),
+            "strategy": _dashboard_pick(
+                ai_pattern_strategy,
+                "id",
+                "status",
+                "expectedResult",
+            ),
+        },
+        "patternAlerts": _dashboard_pattern_alert_state(pattern_snapshot),
+        "bead": {
+            "length": len(bead),
+            **_dashboard_pick(last_bead, "id", "side", "value", "slot"),
+        },
+        "persistentResults": _dashboard_latest_persistent_results(payload),
     }
-    return json.dumps(compact, sort_keys=True, separators=(",", ":"))
+
+
+def dashboard_signal_fingerprint(payload: dict[str, Any]) -> str:
+    return json.dumps(dashboard_realtime_state(payload), sort_keys=True, separators=(",", ":"))
 
 
 def urgent_signal_min_interval(payload: dict[str, Any], args: argparse.Namespace) -> float:
@@ -497,7 +676,20 @@ def urgent_signal_min_interval(payload: dict[str, Any], args: argparse.Namespace
     neural_result = payload.get("neuralEntryLastResult") if isinstance(payload.get("neuralEntryLastResult"), dict) else {}
     status = str(signal.get("status") or "").strip().casefold()
     priority_statuses = {"pending", "g1", "green", "green_g1", "red"}
-    if status in priority_statuses or neural_result.get("id"):
+    realtime = dashboard_realtime_state(payload)
+    has_card_event = any(
+        bool(realtime.get(key))
+        for key in (
+            "neuralEntry",
+            "neuralResult",
+            "surfCycle",
+            "tie",
+            "patternCycle",
+            "patternAlerts",
+            "bead",
+        )
+    )
+    if status in priority_statuses or neural_result.get("id") or has_card_event:
         return max(0.2, float(args.urgent_retry_interval))
     return max(float(args.non_entry_urgent_interval), float(args.urgent_retry_interval))
 
@@ -508,6 +700,10 @@ def build_urgent_signal_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "cycleDate",
         "dailyCycleDate",
         "currentSignal",
+        "lastSignalResult",
+        "displayState",
+        "displaySide",
+        "displayRoundId",
         "neuralReading",
         "neuralScoreboard",
         "neuralEntryState",
@@ -516,10 +712,17 @@ def build_urgent_signal_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "engineDecision",
         "currentSurfAlert",
         "currentTieAlert",
+        "patternIaServerCycle",
+        "patternMinerSnapshot",
+        "aiPatternSignal",
+        "dailyResultsByModule",
+        "moduleToggles",
         "mainScoreboard",
         "surfAnalyzerScoreboard",
         "tieAlertScoreboard",
         "entryMode",
+        "bacBoBeadPlate",
+        "bacBoRoadStats",
     )
     urgent_payload = {key: payload[key] for key in keys if key in payload}
     rounds = payload.get("rounds")
@@ -547,7 +750,10 @@ def publish_urgent_signal(
         token=token,
         extra_headers=publisher_headers,
         payload=build_urgent_signal_payload(local_payload),
-        timeout=min(args.remote_timeout, 3.2),
+        timeout=(
+            min(float(args.remote_timeout), URGENT_SIGNAL_CONNECT_TIMEOUT),
+            min(float(args.remote_timeout), URGENT_SIGNAL_READ_TIMEOUT),
+        ),
     )
     return (body if isinstance(body, dict) else {}, status_code, upload_ms)
 
@@ -771,6 +977,7 @@ DIRECT_PATTERN_MINER_CACHE_KEY = ""
 DIRECT_PATTERN_MINER_CACHE_ALERTS: list[dict[str, Any]] = []
 DIRECT_PATTERN_MINER_SNAPSHOT_CACHE_KEY = ""
 DIRECT_PATTERN_MINER_SNAPSHOT_CACHE: dict[str, Any] | None = None
+DIRECT_PATTERN_MINER_REFRESH_THREAD: threading.Thread | None = None
 
 
 def direct_pattern_bank_path(args: argparse.Namespace, env: dict[str, str]) -> Path:
@@ -923,23 +1130,88 @@ def direct_pattern_miner_entry_alerts(rounds: list[dict[str, Any]]) -> list[dict
 def attach_direct_pattern_miner_snapshot(
     payload: dict[str, Any],
     pattern_round_bank: list[dict[str, Any]] | None = None,
+    *,
+    refresh: bool = True,
 ) -> dict[str, Any]:
+    rounds = direct_pattern_miner_rounds(payload, pattern_round_bank)
+    if not rounds:
+        return payload
+    snapshot = direct_pattern_miner_cached_snapshot(rounds)
+    if snapshot is None and refresh:
+        snapshot = direct_pattern_miner_snapshot(rounds)
+    if snapshot is None:
+        return payload
+    next_payload = dict(payload)
+    next_payload["patternMinerSnapshot"] = snapshot
+    return next_payload
+
+
+def direct_pattern_miner_rounds(
+    payload: dict[str, Any],
+    pattern_round_bank: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     payload_rounds = direct_payload_pattern_rounds(payload)
     if not payload_rounds:
-        return payload
+        return []
     payload_last_key = direct_pattern_round_key(payload_rounds[-1])
     bank_rounds = pattern_round_bank if isinstance(pattern_round_bank, list) else []
     bank_last_key = direct_pattern_round_key(bank_rounds[-1]) if bank_rounds else ""
-    rounds = bank_rounds if bank_rounds and bank_last_key == payload_last_key else payload_rounds
-    next_payload = dict(payload)
-    next_payload["patternMinerSnapshot"] = direct_pattern_miner_snapshot(rounds)
-    return next_payload
+    return bank_rounds if bank_rounds and bank_last_key == payload_last_key else payload_rounds
+
+
+def direct_pattern_miner_snapshot_cache_key(rounds: list[dict[str, Any]]) -> str:
+    last_key = direct_pattern_round_key(rounds[-1]) if rounds else ""
+    return f"{len(rounds)}:{last_key}"
+
+
+def direct_pattern_miner_cached_snapshot(rounds: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not rounds:
+        return None
+    if direct_pattern_miner_snapshot_cache_key(rounds) != DIRECT_PATTERN_MINER_SNAPSHOT_CACHE_KEY:
+        return None
+    return DIRECT_PATTERN_MINER_SNAPSHOT_CACHE
+
+
+def _refresh_direct_pattern_miner_snapshot_worker(rounds: list[dict[str, Any]], cache_key: str) -> None:
+    try:
+        started_at = time.perf_counter()
+        direct_pattern_miner_snapshot(rounds)
+        logging.info(
+            "pattern miner background refresh: key=%s elapsed_ms=%.0f",
+            cache_key,
+            (time.perf_counter() - started_at) * 1000.0,
+        )
+    except Exception:
+        logging.exception("pattern miner background refresh failed: key=%s", cache_key)
+
+
+def refresh_direct_pattern_miner_snapshot_cache(
+    payload: dict[str, Any],
+    pattern_round_bank: list[dict[str, Any]] | None = None,
+) -> bool:
+    global DIRECT_PATTERN_MINER_REFRESH_THREAD
+    rounds = direct_pattern_miner_rounds(payload, pattern_round_bank)
+    if not rounds or direct_pattern_miner_cached_snapshot(rounds) is not None:
+        return False
+    if DIRECT_PATTERN_MINER_REFRESH_THREAD and DIRECT_PATTERN_MINER_REFRESH_THREAD.is_alive():
+        return False
+    cache_key = direct_pattern_miner_snapshot_cache_key(rounds)
+    # update_direct_pattern_round_bank returns a fresh list. Copy its records so
+    # the background miner never observes a later main-loop mutation.
+    refresh_rounds = [dict(item) for item in rounds]
+    DIRECT_PATTERN_MINER_REFRESH_THREAD = threading.Thread(
+        target=_refresh_direct_pattern_miner_snapshot_worker,
+        args=(refresh_rounds, cache_key),
+        name="pattern-miner-refresh",
+        daemon=True,
+    )
+    DIRECT_PATTERN_MINER_REFRESH_THREAD.start()
+    return True
 
 
 def direct_pattern_miner_snapshot(rounds: list[dict[str, Any]]) -> dict[str, Any]:
     global DIRECT_PATTERN_MINER_SNAPSHOT_CACHE_KEY, DIRECT_PATTERN_MINER_SNAPSHOT_CACHE
-    last_key = direct_pattern_round_key(rounds[-1]) if rounds else ""
-    cache_key = f"{len(rounds)}:{last_key}"
+    cache_key = direct_pattern_miner_snapshot_cache_key(rounds)
     if cache_key == DIRECT_PATTERN_MINER_SNAPSHOT_CACHE_KEY and DIRECT_PATTERN_MINER_SNAPSHOT_CACHE:
         return DIRECT_PATTERN_MINER_SNAPSHOT_CACHE
     updated_at = iso_now_ms()
@@ -1559,6 +1831,8 @@ def publish_direct_telegram_signal(
             "variables": signal.get("variables") or {},
             **({"result": signal["result"]} if signal.get("result") else {}),
             **({"protection": signal["protection"]} if signal.get("protection") else {}),
+            **({"resolvesSignalKey": signal["resolvesSignalKey"]} if signal.get("resolvesSignalKey") else {}),
+            **({"finalResult": True} if signal.get("finalResult") is True else {}),
             "buttonLabel": "Abrir Sniper Bo IA",
         },
         timeout=(0.25, 1.0),
@@ -1590,6 +1864,51 @@ def publish_direct_telegram_signal(
     return False, status_code, upload_ms, "not_sent"
 
 
+def resolve_direct_telegram_pending_results(
+    config: dict[str, str],
+    dashboard: dict[str, Any],
+) -> tuple[bool, int, float, str]:
+    url = config.get("url", "").rstrip("/")
+    secret = config.get("secret", "")
+    if not url or not secret:
+        return False, 0, 0.0, "not_configured"
+    body, status_code, upload_ms = request_json_with_meta(
+        f"{url}/engine/results",
+        method="POST",
+        token=secret,
+        payload={"source": "official_publisher_fast_result", "dashboard": dashboard},
+        timeout=(0.2, 0.75),
+    )
+    skipped = str(body.get("skipped") or "") if isinstance(body, dict) else ""
+    if 200 <= status_code < 300 and not skipped:
+        return True, status_code, upload_ms, "resolved"
+    return False, status_code, upload_ms, skipped or "not_resolved"
+
+
+def accept_direct_telegram_result(
+    pending: dict[str, Any],
+    result_key: str,
+    aggregate_result_key: str,
+    result_keys: set[str],
+    module_hold_until: dict[str, float],
+) -> None:
+    result_keys.add(result_key)
+    result_keys.add(aggregate_result_key)
+    module_key = str(pending.get("moduleKey") or "")
+    if module_key:
+        module_hold_until[module_key] = time.monotonic() + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
+
+
+def recover_direct_telegram_pending_result(
+    config: dict[str, str],
+    dashboard: dict[str, Any],
+) -> tuple[bool, int, float, str]:
+    try:
+        return resolve_direct_telegram_pending_results(config, dashboard)
+    except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
+        return False, 0, 0.0, f"recovery_error:{type(exc).__name__}"
+
+
 def direct_site_signal_side(entry: str) -> str:
     if entry == "BANKER":
         return "BANKER"
@@ -1612,6 +1931,7 @@ def direct_site_signal_strength(signal: dict[str, Any]) -> int:
 def build_direct_site_signal_payload(base_payload: dict[str, Any], signal: dict[str, Any]) -> dict[str, Any]:
     entry = str(signal.get("entry") or "")
     side = direct_site_signal_side(entry)
+    module_key = str(signal.get("moduleKey") or "")
     status = "tie_watch" if side == "TIE" else "pending"
     variables = signal.get("variables") if isinstance(signal.get("variables"), dict) else {}
     now = iso_now_ms()
@@ -1626,9 +1946,8 @@ def build_direct_site_signal_payload(base_payload: dict[str, Any], signal: dict[
     payload = {
         "updatedAt": now,
         "publisherStatus": "direct_site_signal",
-        "currentSignal": current_signal,
         "directSiteSignal": {
-            "moduleKey": signal.get("moduleKey"),
+            "moduleKey": module_key,
             "signalKey": signal.get("signalKey"),
             "roundId": signal.get("roundId"),
             "entry": entry,
@@ -1636,7 +1955,14 @@ def build_direct_site_signal_payload(base_payload: dict[str, Any], signal: dict[
             "message": signal.get("message"),
         },
     }
-    if signal.get("moduleKey") == "paying_numbers":
+    rounds = base_payload.get("rounds") if isinstance(base_payload.get("rounds"), list) else []
+    if rounds:
+        payload["rounds"] = rounds[-8:]
+    if isinstance(base_payload.get("moduleToggles"), dict):
+        payload["moduleToggles"] = base_payload["moduleToggles"]
+
+    if module_key == "paying_numbers":
+        payload["currentSignal"] = current_signal
         payload["neuralReading"] = {
             **(base_payload.get("neuralReading") if isinstance(base_payload.get("neuralReading"), dict) else {}),
             "mode": "ACTIVE",
@@ -1646,6 +1972,28 @@ def build_direct_site_signal_payload(base_payload: dict[str, Any], signal: dict[
             "cycleStatus": "AGUARDANDO_RESULTADO",
             "updatedAt": now,
         }
+        for key in (
+            "neuralEntryState",
+            "neuralEntryLastResult",
+            "displayState",
+            "displaySide",
+            "displayRoundId",
+            "bettingTiming",
+        ):
+            if key in base_payload:
+                payload[key] = base_payload[key]
+    elif module_key == "surf_alert" and isinstance(base_payload.get("currentSurfAlert"), dict):
+        payload["currentSurfAlert"] = base_payload["currentSurfAlert"]
+    elif module_key == "ties_only" and isinstance(base_payload.get("currentTieAlert"), dict):
+        payload["currentTieAlert"] = base_payload["currentTieAlert"]
+    elif module_key == "ai_patterns":
+        for key in ("patternIaServerCycle", "patternMinerSnapshot", "aiPatternSignal"):
+            if key in base_payload:
+                payload[key] = base_payload[key]
+    elif module_key in {"lateral_paying_numbers", "lateral_tie_patterns"}:
+        for key in ("bacBoBeadPlate", "bacBoRoadStats"):
+            if key in base_payload:
+                payload[key] = base_payload[key]
     return payload
 
 
@@ -1669,7 +2017,7 @@ def publish_direct_site_signal(
         token=token,
         extra_headers=publisher_headers,
         payload=build_direct_site_signal_payload(base_payload, signal),
-        timeout=(0.25, min(args.remote_timeout, 3.2)),
+        timeout=(0.25, min(args.remote_timeout, 2.0)),
     )
     if 200 <= status_code < 300:
         return True, status_code, upload_ms, "sent"
@@ -1679,20 +2027,93 @@ def publish_direct_site_signal(
     return False, status_code, upload_ms, reason or "not_sent"
 
 
+def direct_telegram_block_reasons(reason: str) -> set[str]:
+    clean = str(reason or "").strip()
+    if clean in DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS:
+        return {clean}
+    if not clean.startswith("blocked_count="):
+        return set()
+    return {
+        token.split("=", 1)[0].strip()
+        for token in clean.split(";")[1:]
+        if "=" in token and token.split("=", 1)[0].strip()
+    }
+
+
 def direct_telegram_block_handled(reason: str) -> bool:
-    clean = str(reason or "")
-    return clean in DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS or clean.startswith("blocked_count=")
+    block_reasons = direct_telegram_block_reasons(reason)
+    return bool(block_reasons) and block_reasons.issubset(DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS)
+
+
+def direct_payload_round_id(payload: dict[str, Any] | None) -> int:
+    if not isinstance(payload, dict):
+        return 0
+    rounds = payload.get("rounds") if isinstance(payload.get("rounds"), list) else []
+    last_round = rounds[-1] if rounds and isinstance(rounds[-1], dict) else {}
+    raw = last_round.get("id") or last_round.get("round_id") or last_round.get("roundId") or 0
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        return 0
+
+
+def direct_payload_revision(payload: dict[str, Any] | None) -> int:
+    if not isinstance(payload, dict):
+        return 0
+    values = [payload.get("revision"), payload.get("sequenceId"), payload.get("sequence_id")]
+    revisions: list[int] = []
+    for value in values:
+        try:
+            revisions.append(int(float(value)))
+        except (TypeError, ValueError):
+            continue
+    return max(revisions, default=0)
 
 
 def direct_telegram_payload(
     published_payload: dict[str, Any] | None,
     local_payload: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], str]:
-    if isinstance(published_payload, dict) and published_payload:
-        return published_payload, "published"
-    if isinstance(local_payload, dict) and local_payload:
-        return local_payload, "local"
+    published = published_payload if isinstance(published_payload, dict) else {}
+    local = local_payload if isinstance(local_payload, dict) else {}
+    if published and local:
+        published_round_id = direct_payload_round_id(published)
+        local_round_id = direct_payload_round_id(local)
+        # Remote revisions are assigned per Cloudflare isolate and therefore are
+        # not comparable with the freshly-read local publisher revision. On the
+        # same round the local payload contains the newest card/result event.
+        if published_round_id > local_round_id:
+            return published, "published"
+        return local, "local"
+    if published:
+        return published, "published"
+    if local:
+        return local, "local"
     return {}, "none"
+
+
+def build_direct_telegram_config(
+    env: dict[str, str],
+    *,
+    enabled: bool,
+    single_target: bool,
+) -> dict[str, str]:
+    if not enabled:
+        return {"url": "", "secret": "", "user_id": "", "channel_id": ""}
+    return {
+        "url": (
+            env_value(env, "TELEGRAM_ENGINE_URL")
+            or env_value(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL")
+            or DEFAULT_TELEGRAM_ENGINE_URL
+        ),
+        "secret": (
+            env_value(env, "TELEGRAM_ENGINE_SECRET")
+            or env_value(env, "CLOUDFLARE_TELEGRAM_ENGINE_SECRET")
+            or env_value(env, "SNIPER_PUBLISHER_TOKEN")
+        ),
+        "user_id": env_value(env, "TELEGRAM_ENGINE_USER_ID") if single_target else "",
+        "channel_id": env_value(env, "TELEGRAM_ENGINE_CHANNEL_ID") if single_target else "",
+    }
 
 
 def direct_round_side(round_item: Any) -> str:
@@ -1830,13 +2251,9 @@ def resolve_direct_telegram_outcome(pending: dict[str, Any], payload: dict[str, 
 
 
 def dashboard_fingerprint(payload: dict[str, Any]) -> str:
-    rounds = payload.get("rounds") if isinstance(payload.get("rounds"), list) else []
-    last_round = rounds[-1] if rounds and isinstance(rounds[-1], dict) else {}
-    compact = {
-        "roundId": last_round.get("id"),
-        "roundResult": last_round.get("result") or last_round.get("resultado"),
-    }
-    return json.dumps(compact, sort_keys=True, separators=(",", ":"))
+    return json.dumps(dashboard_realtime_state(payload), sort_keys=True, separators=(",", ":"))
+
+
 def main() -> int:
     default_signals_port = os.getenv("SIGNALS_API_PORT") or os.getenv("VITE_SIGNALS_API_PORT") or "8787"
     default_local_url = os.getenv("SNIPER_LOCAL_DASHBOARD_URL") or f"http://127.0.0.1:{default_signals_port}/dashboard"
@@ -1846,15 +2263,22 @@ def main() -> int:
     parser.add_argument("--remote-base-url", default="https://sniperbo.com")
     parser.add_argument("--remote-url", default="https://sniperbo.com/dashboard/publish")
     parser.add_argument("--signal-url", default="")
-    parser.add_argument("--interval", type=float, default=0.7)
+    parser.add_argument("--interval", type=float, default=DEFAULT_PUBLISHER_INTERVAL_SECONDS)
     parser.add_argument("--local-timeout", type=float, default=2.0)
-    parser.add_argument("--remote-timeout", type=float, default=12.0)
-    parser.add_argument("--repeat-interval", type=float, default=12.0)
-    parser.add_argument("--urgent-retry-interval", type=float, default=0.8)
-    parser.add_argument("--non-entry-urgent-interval", type=float, default=12.0)
+    parser.add_argument("--remote-timeout", type=float, default=2.0)
+    parser.add_argument("--repeat-interval", type=float, default=2.0)
+    parser.add_argument("--urgent-retry-interval", type=float, default=0.2)
+    parser.add_argument("--non-entry-urgent-interval", type=float, default=0.2)
     parser.add_argument("--urgent-signal", action="store_true", default=True, help="Publish a minimal signal payload before the full dashboard.")
     parser.add_argument("--no-urgent-signal", dest="urgent_signal", action="store_false", help="Disable urgent signal publishing.")
     parser.add_argument("--skip-full-publish", action="store_true", help="Only publish urgent signal payloads; do not POST the heavy full dashboard.")
+    parser.add_argument(
+        "--full-dashboard",
+        dest="skip_full_publish",
+        action="store_false",
+        default=False,
+        help="Compatibility flag: keep full dashboard heartbeat publishing enabled.",
+    )
     parser.add_argument("--log-file", type=Path, default=Path("official_dashboard_publisher.log"))
     args = parser.parse_args()
     if not acquire_process_lock(args):
@@ -1892,12 +2316,14 @@ def main() -> int:
     direct_telegram_single_target = (
         env_value(env, "TELEGRAM_ENGINE_TARGET_SINGLE").strip().lower() in {"1", "true", "yes", "on"}
     )
-    direct_telegram_config = {
-        "url": (env_value(env, "TELEGRAM_ENGINE_URL") or env_value(env, "CLOUDFLARE_TELEGRAM_ENGINE_URL")) if direct_telegram_enabled else "",
-        "secret": (env_value(env, "TELEGRAM_ENGINE_SECRET") or env_value(env, "CLOUDFLARE_TELEGRAM_ENGINE_SECRET")) if direct_telegram_enabled else "",
-        "user_id": env_value(env, "TELEGRAM_ENGINE_USER_ID") if direct_telegram_enabled and direct_telegram_single_target else "",
-        "channel_id": env_value(env, "TELEGRAM_ENGINE_CHANNEL_ID") if direct_telegram_enabled and direct_telegram_single_target else "",
-    }
+    direct_telegram_config = build_direct_telegram_config(
+        env,
+        enabled=direct_telegram_enabled,
+        single_target=direct_telegram_single_target,
+    )
+    direct_telegram_fast_path_configured = bool(
+        direct_telegram_config.get("url") and direct_telegram_config.get("secret")
+    )
     if not local_token:
         logging.error("Missing local dashboard token in env file.")
         return 2
@@ -1934,6 +2360,14 @@ def main() -> int:
     direct_pattern_bank_last_save = 0.0
     logging.info("Pattern miner bank loaded: rounds=%s path=%s", len(direct_pattern_round_bank), direct_pattern_bank_file)
     logging.info("Official dashboard publisher started: %s -> %s", args.local_url, args.remote_url)
+    logging.info(
+        "Direct Telegram fast path: enabled=%s configured=%s engine=%s interval=%.3fs result_to_entry_delay=%.3fs",
+        direct_telegram_enabled,
+        direct_telegram_fast_path_configured,
+        direct_telegram_config.get("url") or "disabled",
+        args.interval,
+        DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS,
+    )
     while True:
         try:
             if rate_limit_sleep > 0:
@@ -1975,11 +2409,15 @@ def main() -> int:
                 raise
             local_read_backoff_until = 0.0
             local_payload, g1_blocked, blocked_round = apply_g1_publication_lock(raw_local_payload, last_published_payload)
-            local_payload = attach_direct_pattern_miner_snapshot(local_payload, direct_pattern_round_bank)
+            # Never rebuild the 15k-round pattern bank before publishing a new
+            # entry or terminal result. A matching cached snapshot is safe to
+            # attach; a cache miss is refreshed only after the critical sends.
+            local_payload = attach_direct_pattern_miner_snapshot(
+                local_payload,
+                direct_pattern_round_bank,
+                refresh=False,
+            )
             direct_pattern_round_bank = update_direct_pattern_round_bank(direct_pattern_round_bank, local_payload)
-            if time.monotonic() - direct_pattern_bank_last_save >= PATTERN_MINER_BANK_SAVE_INTERVAL:
-                save_direct_pattern_round_bank(direct_pattern_bank_file, direct_pattern_round_bank)
-                direct_pattern_bank_last_save = time.monotonic()
             if g1_blocked:
                 queued_locked_urgent_payload = raw_local_payload
                 logging.warning(
@@ -1992,9 +2430,75 @@ def main() -> int:
 
             signal_fingerprint = dashboard_signal_fingerprint(local_payload)
             signal_changed = bool(args.urgent_signal and signal_fingerprint and signal_fingerprint != last_signal_fingerprint)
+            urgent_published = False
+            if signal_changed:
+                now_signal = time.monotonic()
+                if now_signal < urgent_backoff_until:
+                    logging.info("Urgent signal in backoff; publishing full dashboard with latest payload instead.")
+                    signal_changed = False
+                min_urgent_interval = urgent_signal_min_interval(local_payload, args)
+                if signal_changed and (now_signal - last_signal_attempt_at) >= min_urgent_interval:
+                    last_signal_attempt_at = now_signal
+                    try:
+                        t1_perf = time.perf_counter()
+                        signal_response, signal_status_code, signal_upload_ms = publish_urgent_signal(
+                            args,
+                            token,
+                            local_payload,
+                            admin_email,
+                            admin_password,
+                        )
+                        log_publish_timing(
+                            "urgent",
+                            local_payload,
+                            t0_iso,
+                            (t1_perf - t0_perf) * 1000.0,
+                            signal_upload_ms,
+                            signal_status_code,
+                        )
+                        signal_dashboard = signal_response.get("dashboard") if isinstance(signal_response, dict) else {}
+                        signal = (signal_dashboard or local_payload).get("currentSignal") or {}
+                        neural_result = (signal_dashboard or local_payload).get("neuralEntryLastResult") or {}
+                        logging.info(
+                            "Published urgent signal: signal=%s side=%s neural=%s result=%s:%s",
+                            signal.get("status"),
+                            signal.get("side"),
+                            ((signal_dashboard or local_payload).get("neuralEntryState") or {}).get("status"),
+                            neural_result.get("outcome"),
+                            neural_result.get("kind"),
+                        )
+                        last_signal_fingerprint = signal_fingerprint
+                        last_published_payload = signal_dashboard or local_payload
+                        urgent_failures = 0
+                        urgent_backoff_until = 0.0
+                        urgent_published = True
+                    except HTTPError as exc:
+                        if requests is not None and hasattr(exc, "response"):
+                            status_code = exc.response.status_code if exc.response is not None else 0
+                            body = exc.response.text[:180] if exc.response is not None else str(exc)[:180]
+                        else:
+                            status_code = getattr(exc, "code", 0)
+                            body = exc.read().decode("utf-8", errors="replace")[:180] if hasattr(exc, "read") else str(exc)[:180]
+                        urgent_failures += 1
+                        if status_code == 429:
+                            urgent_backoff_seconds = min(60.0, max(10.0, 10.0 * urgent_failures))
+                            urgent_backoff_until = time.monotonic() + urgent_backoff_seconds
+                            logging.warning(
+                                "Urgent signal HTTP 429; backing off urgent channel for %.1fs: %s",
+                                urgent_backoff_seconds,
+                                body,
+                            )
+                        else:
+                            urgent_backoff_until = time.monotonic() + min(30.0, max(2.0, 2.0 * urgent_failures))
+                            logging.warning("Urgent signal HTTP %s: %s", status_code, body)
+                    except (URLError, TimeoutError, OSError, RuntimeError) as exc:
+                        urgent_failures += 1
+                        urgent_backoff_until = time.monotonic() + min(8.0, max(1.0, 1.5 * urgent_failures))
+                        logging.warning("Urgent signal publish failed once for this signal: %s; publishing full dashboard with latest payload instead.", exc)
             telegram_result_payload, _telegram_result_source = direct_telegram_payload(last_published_payload, local_payload)
             telegram_result_round_id = direct_round_id(telegram_result_payload) if telegram_result_payload else 0
             next_direct_pending: list[dict[str, Any]] = []
+            pending_result_recoveries: list[tuple[dict[str, Any], dict[str, Any]]] = []
             for pending in direct_telegram_pending:
                 if direct_pending_is_stale(pending, telegram_result_round_id):
                     logging.warning(
@@ -2016,6 +2520,8 @@ def main() -> int:
                 result_signal = {
                     "moduleKey": pending.get("moduleKey"),
                     "signalKey": result_key,
+                    "resolvesSignalKey": pending.get("signalKey"),
+                    "finalResult": True,
                     "roundId": outcome.get("roundId"),
                     "entry": pending.get("entry"),
                     "variables": {
@@ -2031,6 +2537,7 @@ def main() -> int:
                     "message": direct_result_message(pending, outcome),
                 }
                 try:
+                    result_dispatch_start_ms = (time.perf_counter() - t0_perf) * 1000.0
                     result_ok, result_status, result_ms, result_reason = publish_direct_telegram_signal(
                         direct_telegram_config,
                         result_signal,
@@ -2040,63 +2547,37 @@ def main() -> int:
                         continue
                     log_fn = logging.info if result_ok and result_ms <= DIRECT_TELEGRAM_TARGET_MS else logging.warning
                     log_fn(
-                        "direct telegram result %s: module=%s round=%s upload_ms=%.0f status_code=%s reason=%s outcome=%s",
+                        "direct telegram result %s: module=%s round=%s dispatch_start_ms=%.0f upload_ms=%.0f status_code=%s reason=%s outcome=%s",
                         "sent" if result_ok else "blocked",
                         pending.get("moduleKey"),
                         outcome.get("roundId"),
+                        result_dispatch_start_ms,
                         result_ms,
                         result_status,
                         result_reason,
                         outcome.get("label"),
                     )
-                    if result_ok or result_reason == "duplicate_signal":
-                        direct_telegram_result_keys.add(result_key)
-                        direct_telegram_result_keys.add(aggregate_result_key)
-                        module_key = str(pending.get("moduleKey") or "")
-                        if module_key:
-                            direct_telegram_module_hold_until[module_key] = (
-                                time.monotonic() + DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS
-                            )
+                    result_block_reasons = direct_telegram_block_reasons(result_reason)
+                    result_handled = direct_telegram_block_handled(result_reason)
+                    if result_ok or result_handled:
+                        # /engine/signal atomically closes the pending entry. Commit
+                        # that success locally before the recovery-only call so a
+                        # timeout in /engine/results can never re-open/re-send it.
+                        accept_direct_telegram_result(
+                            pending,
+                            result_key,
+                            aggregate_result_key,
+                            direct_telegram_result_keys,
+                            direct_telegram_module_hold_until,
+                        )
+                        if result_ok or result_block_reasons == {"duplicate_signal"}:
+                            pending_result_recoveries.append((pending, telegram_result_payload))
                     else:
                         next_direct_pending.append(pending)
                 except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
                     logging.warning("direct telegram result publish failed: %s", exc)
                     next_direct_pending.append(pending)
             direct_telegram_pending = next_direct_pending[-100:]
-
-            for site_signal in direct_telegram_signals(local_payload, direct_pattern_round_bank):
-                site_key = str(site_signal.get("signalKey") or "")
-                if not site_key or site_key in direct_site_sent_keys:
-                    continue
-                try:
-                    site_ok, site_status, site_ms, site_reason = publish_direct_site_signal(
-                        args,
-                        token,
-                        local_payload,
-                        site_signal,
-                        admin_email,
-                        admin_password,
-                    )
-                    site_log_fn = logging.info if site_ok and site_ms <= DIRECT_TELEGRAM_TARGET_MS else logging.warning
-                    site_log_fn(
-                        "direct site signal %s: module=%s entry=%s round=%s upload_ms=%.0f status_code=%s reason=%s",
-                        "sent" if site_ok else "blocked",
-                        site_signal.get("moduleKey"),
-                        site_signal.get("entry"),
-                        site_signal.get("roundId"),
-                        site_ms,
-                        site_status,
-                        site_reason,
-                    )
-                    if site_ok:
-                        direct_site_sent_keys.add(site_key)
-                        last_signal_fingerprint = dashboard_signal_fingerprint(
-                            build_direct_site_signal_payload(local_payload, site_signal)
-                        )
-                        if len(direct_site_sent_keys) > 500:
-                            direct_site_sent_keys = set(list(direct_site_sent_keys)[-250:])
-                except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
-                    logging.warning("direct site signal publish failed: %s", exc)
 
             telegram_entry_payload, telegram_entry_source = direct_telegram_payload(last_published_payload, local_payload)
             telegram_entry_round_id = direct_round_id(telegram_entry_payload) if telegram_entry_payload else 0
@@ -2140,6 +2621,7 @@ def main() -> int:
                 if direct_key in direct_telegram_sent_keys:
                     continue
                 try:
+                    entry_dispatch_start_ms = (time.perf_counter() - t0_perf) * 1000.0
                     direct_ok, direct_status, direct_ms, direct_reason = publish_direct_telegram_signal(
                         direct_telegram_config,
                         direct_signal,
@@ -2148,19 +2630,21 @@ def main() -> int:
                         continue
                     log_fn = logging.info if direct_ok and direct_ms <= DIRECT_TELEGRAM_TARGET_MS else logging.warning
                     log_fn(
-                        "direct telegram %s: module=%s entry=%s round=%s pattern=%s upload_ms=%.0f status_code=%s reason=%s",
+                        "direct telegram %s: module=%s entry=%s round=%s pattern=%s dispatch_start_ms=%.0f upload_ms=%.0f status_code=%s reason=%s",
                         "sent" if direct_ok else "blocked",
                         direct_signal.get("moduleKey"),
                         direct_signal.get("entry"),
                         direct_signal.get("roundId"),
                         (direct_signal.get("variables") if isinstance(direct_signal.get("variables"), dict) else {}).get("pattern"),
+                        entry_dispatch_start_ms,
                         direct_ms,
                         direct_status,
                         direct_reason,
                     )
+                    direct_duplicate = "duplicate_signal" in direct_telegram_block_reasons(direct_reason)
                     if direct_ok or direct_telegram_block_handled(direct_reason):
                         direct_telegram_sent_keys.add(direct_key)
-                        if direct_ok:
+                        if direct_ok or direct_duplicate:
                             direct_telegram_pending = [
                                 item for item in direct_telegram_pending
                                 if item.get("signalKey") != direct_key
@@ -2185,8 +2669,71 @@ def main() -> int:
                             direct_telegram_result_keys = set(list(direct_telegram_result_keys)[-250:])
                 except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
                     logging.warning("direct telegram publish failed: %s", exc)
-            urgent_published = False
-            if signal_changed:
+
+            # The urgent dashboard snapshot has already updated the cards. Mirror
+            # module-specific site signals only after Telegram entry dispatch, so
+            # a slow site request cannot consume the entry's one-second budget.
+            for site_signal in direct_telegram_signals(local_payload, direct_pattern_round_bank):
+                site_key = str(site_signal.get("signalKey") or "")
+                if not site_key or site_key in direct_site_sent_keys:
+                    continue
+                try:
+                    site_ok, site_status, site_ms, site_reason = publish_direct_site_signal(
+                        args,
+                        token,
+                        local_payload,
+                        site_signal,
+                        admin_email,
+                        admin_password,
+                    )
+                    site_log_fn = logging.info if site_ok and site_ms <= DIRECT_TELEGRAM_TARGET_MS else logging.warning
+                    site_log_fn(
+                        "direct site signal %s: module=%s entry=%s round=%s upload_ms=%.0f status_code=%s reason=%s",
+                        "sent" if site_ok else "blocked",
+                        site_signal.get("moduleKey"),
+                        site_signal.get("entry"),
+                        site_signal.get("roundId"),
+                        site_ms,
+                        site_status,
+                        site_reason,
+                    )
+                    if site_ok:
+                        direct_site_sent_keys.add(site_key)
+                        # Keep the fingerprint tied to the complete local snapshot.
+                        # A module-only site payload has no full round/card state and
+                        # would otherwise force a redundant urgent send next loop.
+                        last_signal_fingerprint = signal_fingerprint
+                        if len(direct_site_sent_keys) > 500:
+                            direct_site_sent_keys = set(list(direct_site_sent_keys)[-250:])
+                except (HTTPError, URLError, TimeoutError, OSError, RuntimeError) as exc:
+                    logging.warning("direct site signal publish failed: %s", exc)
+
+            # Recovery is deliberately after the site and new-entry dispatches.
+            # The terminal /engine/signal already closed the old entry atomically;
+            # this call repairs external state only and cannot re-open local pending.
+            for recovered_pending, recovery_payload in pending_result_recoveries:
+                resolution_ok, resolution_status, resolution_ms, resolution_reason = (
+                    recover_direct_telegram_pending_result(
+                        direct_telegram_config,
+                        recovery_payload,
+                    )
+                )
+                resolution_log_fn = (
+                    logging.info
+                    if resolution_ok and resolution_ms <= DIRECT_TELEGRAM_TARGET_MS
+                    else logging.warning
+                )
+                resolution_log_fn(
+                    "direct telegram pending resolution %s: module=%s trigger_round=%s upload_ms=%.0f status_code=%s reason=%s",
+                    "confirmed" if resolution_ok else "deferred",
+                    recovered_pending.get("moduleKey"),
+                    recovered_pending.get("roundId"),
+                    resolution_ms,
+                    resolution_status,
+                    resolution_reason,
+                )
+
+            if signal_changed and not urgent_published:
                 now_signal = time.monotonic()
                 if now_signal < urgent_backoff_until:
                     logging.info("Urgent signal in backoff; publishing full dashboard with latest payload instead.")
@@ -2252,18 +2799,24 @@ def main() -> int:
                         logging.warning("Urgent signal publish failed once for this signal: %s; publishing full dashboard with latest payload instead.", exc)
 
             if args.skip_full_publish:
-
-                time.sleep(max(0.25, args.interval))
-
+                if refresh_direct_pattern_miner_snapshot_cache(local_payload, direct_pattern_round_bank):
+                    logging.info(
+                        "pattern miner background refresh scheduled: round=%s",
+                        extract_round_id(local_payload),
+                    )
+                if time.monotonic() - direct_pattern_bank_last_save >= PATTERN_MINER_BANK_SAVE_INTERVAL:
+                    save_direct_pattern_round_bank(direct_pattern_bank_file, direct_pattern_round_bank)
+                    direct_pattern_bank_last_save = time.monotonic()
+                time.sleep(max(PUBLISHER_MIN_LOOP_SLEEP_SECONDS, args.interval))
                 continue
 
             fingerprint = dashboard_fingerprint(local_payload)
             now = time.monotonic()
             if now < full_publish_backoff_until:
-                time.sleep(max(0.25, args.interval))
+                time.sleep(max(PUBLISHER_MIN_LOOP_SLEEP_SECONDS, args.interval))
                 continue
             if fingerprint == last_fingerprint and (now - last_publish_at) < max(args.interval, args.repeat_interval):
-                time.sleep(max(0.25, args.interval))
+                time.sleep(max(PUBLISHER_MIN_LOOP_SLEEP_SECONDS, args.interval))
                 continue
 
             t1_perf = time.perf_counter()
@@ -2295,6 +2848,14 @@ def main() -> int:
             full_publish_failures = 0
             full_publish_backoff_until = 0.0
             rate_limit_sleep = 0.0
+            if refresh_direct_pattern_miner_snapshot_cache(local_payload, direct_pattern_round_bank):
+                logging.info(
+                    "pattern miner background refresh scheduled: round=%s",
+                    extract_round_id(local_payload),
+                )
+            if time.monotonic() - direct_pattern_bank_last_save >= PATTERN_MINER_BANK_SAVE_INTERVAL:
+                save_direct_pattern_round_bank(direct_pattern_bank_file, direct_pattern_round_bank)
+                direct_pattern_bank_last_save = time.monotonic()
         except HTTPError as exc:
             if requests is not None and hasattr(exc, "response"):
                 status_code = exc.response.status_code if exc.response is not None else 0
@@ -2324,7 +2885,7 @@ def main() -> int:
             logging.warning("Full dashboard publish backoff for %.1fs; urgent signal remains active.", full_backoff_seconds)
             # Do not mark failed payloads as published; next loop must send the latest state.
 
-        time.sleep(max(0.25, args.interval))
+        time.sleep(max(PUBLISHER_MIN_LOOP_SLEEP_SECONDS, args.interval))
 
 
 if __name__ == "__main__":

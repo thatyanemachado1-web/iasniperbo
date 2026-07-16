@@ -1,7 +1,11 @@
-import { BellRing, CheckCircle2, LoaderCircle, Radio } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { BellRing, CheckCircle2, CircleX, LoaderCircle, Radio } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardData } from "@/hooks/useDashboardData";
-import { resolveLiveConfirmedSignal, type LiveSignalModuleKey } from "@/lib/liveConfirmedSignals";
+import {
+  resolveLiveCardSignals,
+  type LiveCardSignal,
+  type LiveSignalModuleKey,
+} from "@/lib/liveConfirmedSignals";
 import { readUserSession } from "@/lib/userSession";
 import { cn } from "@/lib/utils";
 
@@ -14,12 +18,8 @@ type SignalCardDefinition = {
   label: string;
 };
 
-type ConfirmedLiveSignal = {
-  card: SignalCardDefinition;
-  signalKey: string;
-  side: "BANKER" | "PLAYER" | "TIE";
-  attempt: string;
-};
+type LiveCardDisplaySignal = LiveCardSignal & { card: SignalCardDefinition };
+type HeldLiveResult = { signal: LiveCardDisplaySignal; expiresAt: number };
 
 const LIVE_SIGNAL_FILTER_STORAGE_KEY = "sniperbo:live-signal-card-filter:v1";
 
@@ -48,7 +48,15 @@ export function LiveSignalSelector() {
   const { data, mode } = useDashboardData();
   const [selectedFilter, setSelectedFilter] = useState<SignalFilter>("all");
   const [preferenceLoaded, setPreferenceLoaded] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [heldResults, setHeldResults] = useState<Record<string, HeldLiveResult>>({});
+  const seenResultKeysRef = useRef(new Set<string>());
   const liveReady = mode === "live" && data.mockMode === false;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const storageKey = liveSignalFilterStorageKey();
@@ -79,26 +87,57 @@ export function LiveSignalSelector() {
     }
   }, [preferenceLoaded, selectedFilter]);
 
-  const confirmedSignals = useMemo(() => {
+  const rawSignals = useMemo(() => {
     if (!liveReady) return [];
 
-    return SIGNAL_CARDS.map((card): ConfirmedLiveSignal | null => {
-      const signal = resolveLiveConfirmedSignal(data, card.key);
-      if (!signal) return null;
+    return SIGNAL_CARDS.flatMap((card): LiveCardDisplaySignal[] =>
+      resolveLiveCardSignals(data, card.key, nowMs).map((signal) => ({ card, ...signal })),
+    );
+  }, [data, liveReady, nowMs]);
 
-      return {
-        card,
-        signalKey: signal.signalKey,
-        side: signal.side,
-        attempt: signal.attempt,
-      };
-    }).filter((signal): signal is ConfirmedLiveSignal => Boolean(signal));
-  }, [data, liveReady]);
+  useEffect(() => {
+    if (!liveReady) {
+      setHeldResults((current) => (Object.keys(current).length ? {} : current));
+      seenResultKeysRef.current.clear();
+      return;
+    }
+    setHeldResults((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const [key, held] of Object.entries(next)) {
+        if (held.expiresAt <= nowMs) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      for (const signal of rawSignals) {
+        if (signal.kind !== "result") continue;
+        const resultKey = `${signal.card.key}:${signal.signalKey}`;
+        if (seenResultKeysRef.current.has(resultKey)) continue;
+        seenResultKeysRef.current.add(resultKey);
+        next[resultKey] = { signal, expiresAt: nowMs + 5_000 };
+        changed = true;
+      }
+      if (seenResultKeysRef.current.size > 500) {
+        const newestKeys = [...seenResultKeysRef.current].slice(-250);
+        seenResultKeysRef.current = new Set(newestKeys);
+      }
+      return changed ? next : current;
+    });
+  }, [liveReady, nowMs, rawSignals]);
+
+  const liveSignals = useMemo(
+    () => [
+      ...Object.values(heldResults).map((held) => held.signal),
+      ...rawSignals.filter((signal) => signal.kind === "entry"),
+    ],
+    [heldResults, rawSignals],
+  );
 
   const visibleSignals =
     selectedFilter === "all"
-      ? confirmedSignals
-      : confirmedSignals.filter((signal) => signal.card.key === selectedFilter);
+      ? liveSignals
+      : liveSignals.filter((signal) => signal.card.key === selectedFilter);
   const selectedCard = SIGNAL_CARDS.find((card) => card.key === selectedFilter) ?? null;
 
   return (
@@ -156,14 +195,14 @@ export function LiveSignalSelector() {
             icon={<Radio className="size-3.5" />}
             text={
               selectedCard
-                ? `Aguardando entrada confirmada do Card ${selectedCard.number} — ${selectedCard.label}.`
-                : "Aguardando entrada confirmada dos seis minicards."
+                ? `Aguardando entrada ou resultado do Card ${selectedCard.number} — ${selectedCard.label}.`
+                : "Aguardando entrada ou resultado dos seis minicards."
             }
           />
         ) : (
           <div className="flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {visibleSignals.map((signal) => (
-              <ConfirmedSignalCard key={`${signal.card.key}:${signal.signalKey}`} signal={signal} />
+              <LiveCardSignalPanel key={`${signal.card.key}:${signal.signalKey}`} signal={signal} />
             ))}
           </div>
         )}
@@ -210,39 +249,57 @@ function SignalWaitingState({ icon, text }: { icon: React.ReactNode; text: strin
   );
 }
 
-function ConfirmedSignalCard({ signal }: { signal: ConfirmedLiveSignal }) {
-  const tone = signalTone(signal.side);
+function LiveCardSignalPanel({ signal }: { signal: LiveCardDisplaySignal }) {
+  const tone = signal.kind === "result" ? resultTone(signal.outcome) : signalTone(signal.side);
+  const ResultIcon = signal.kind === "result" && signal.outcome === "RED" ? CircleX : CheckCircle2;
   return (
     <div
+      aria-live="polite"
       className={cn(
         "flex min-w-[210px] flex-1 items-center gap-2 rounded-lg border px-2.5 py-1.5 shadow-lg",
         tone.panel,
       )}
     >
       <span className={cn("grid size-7 shrink-0 place-items-center rounded-lg border", tone.icon)}>
-        <CheckCircle2 className="size-4" />
+        <ResultIcon className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[8px] font-black uppercase tracking-[0.12em] text-muted-foreground">
           Card {signal.card.number} · {signal.card.label}
         </div>
         <div className="flex items-baseline gap-1.5">
-          <span className="text-[9px] font-black uppercase text-emerald-300">
-            Entrada confirmada
-          </span>
-          <span className={cn("text-sm font-black", tone.text)}>{signal.side}</span>
-          {signal.attempt ? (
-            <span className="text-[8px] font-bold uppercase text-muted-foreground">
-              {signal.attempt}
-            </span>
-          ) : null}
+          {signal.kind === "entry" ? (
+            <>
+              <span className="text-[9px] font-black uppercase text-emerald-300">
+                Entrada confirmada
+              </span>
+              <span className={cn("text-sm font-black", tone.text)}>{signal.side}</span>
+              {signal.attempt ? (
+                <span className="text-[8px] font-bold uppercase text-muted-foreground">
+                  {signal.attempt}
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <span className="text-[9px] font-black uppercase text-muted-foreground">
+                Resultado confirmado
+              </span>
+              <span className={cn("text-sm font-black", tone.text)}>{signal.label}</span>
+              {signal.side !== "TIE" ? (
+                <span className="text-[8px] font-bold uppercase text-muted-foreground">
+                  {signal.side}
+                </span>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function signalTone(side: ConfirmedLiveSignal["side"]) {
+function signalTone(side: LiveCardSignal["side"]) {
   if (side === "BANKER") {
     return {
       panel: "border-banker/40 bg-banker/10",
@@ -260,6 +317,28 @@ function signalTone(side: ConfirmedLiveSignal["side"]) {
   return {
     panel: "border-tie/40 bg-tie/10",
     icon: "border-tie/40 bg-tie/15 text-tie",
+    text: "text-tie",
+  };
+}
+
+function resultTone(outcome: Extract<LiveCardSignal, { kind: "result" }>["outcome"]) {
+  if (outcome === "GREEN") {
+    return {
+      panel: "border-emerald-400/45 bg-emerald-400/10",
+      icon: "border-emerald-400/45 bg-emerald-400/15 text-emerald-300",
+      text: "text-emerald-300",
+    };
+  }
+  if (outcome === "RED") {
+    return {
+      panel: "border-red-400/45 bg-red-400/10",
+      icon: "border-red-400/45 bg-red-400/15 text-red-300",
+      text: "text-red-300",
+    };
+  }
+  return {
+    panel: "border-tie/45 bg-tie/10",
+    icon: "border-tie/45 bg-tie/15 text-tie",
     text: "text-tie",
   };
 }
