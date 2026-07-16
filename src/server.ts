@@ -23499,6 +23499,7 @@ async function persistClientRegistryAfterClientChange(
       ...extractClientRegistryState(buildLiveStateSnapshot(env)),
       savedAt: new Date().toISOString(),
     },
+    true,
   );
   const [userPersisted, d1Persisted, saveStatus] = await Promise.all([
     withTimeout(
@@ -28614,7 +28615,11 @@ async function loadClientRegistrySnapshotFromD1(env: unknown) {
   }
 }
 
-async function saveClientRegistrySnapshotToD1(env: unknown, registryLike: Record<string, unknown>) {
+async function saveClientRegistrySnapshotToD1(
+  env: unknown,
+  registryLike: Record<string, unknown>,
+  replaceValidatedSnapshot = false,
+) {
   const db = getDashboardResultsD1(env);
   if (!db) return false;
 
@@ -28633,7 +28638,7 @@ async function saveClientRegistrySnapshotToD1(env: unknown, registryLike: Record
     const currentState = currentStateText
       ? readRecord(JSON.parse(currentStateText))
       : ({} as Record<string, unknown>);
-    if (hasRecordFields(currentState)) {
+    if (hasRecordFields(currentState) && !replaceValidatedSnapshot) {
       registry = extractClientRegistryState(mergeClientRegistryIntoState(currentState, registry));
       identityCount = clientRegistryIdentityCount(registry);
     }
