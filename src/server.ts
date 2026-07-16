@@ -26275,7 +26275,20 @@ async function updateAdminManagedUser(
   applyAdminManagedUserToClient(updated);
   if (shouldClearBillingAccessForAdminUpdate(updated)) {
     clearBillingStateForUser(updated);
-    await deletePersistedBillingAccess(env, updated);
+    const clearPersistedAccessPromise = deletePersistedBillingAccess(env, updated);
+    const clearedPersistedAccess = await withTimeout(
+      clearPersistedAccessPromise.then(() => true),
+      3_000,
+      "limpar acesso billing na edicao administrativa",
+      false,
+    );
+    if (!clearedPersistedAccess) {
+      runBackgroundTask(
+        ctx,
+        clearPersistedAccessPromise,
+        "finalizar limpeza de acesso billing na edicao administrativa",
+      );
+    }
   }
   recordAdminActionLog(env, request, adminRole, {
     targetUserId: readString(updated, "id"),
