@@ -1,6 +1,7 @@
 import { ExternalLink, Maximize2, RefreshCw, ShieldAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui-app/GlassCard";
+import { LiveSignalSelector } from "@/components/live/LiveSignalSelector";
 import { elementBounds, isNativeLiveHouseAvailable, LiveHouseNative } from "@/lib/liveHouseNative";
 
 const ESPORTIVA_AFFILIATE_URL = "https://go.aff.esportiva.bet/glfml929";
@@ -122,6 +123,8 @@ export function LiveHouseCard() {
           </button>
         </div>
       </div>
+
+      <LiveSignalSelector />
 
       <div
         ref={viewportRef}

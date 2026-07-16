@@ -14,6 +14,7 @@ import {
   Send,
   ChevronLeft,
   ChevronRight,
+  Radio,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { MainSignalLivePopupBridge } from "@/components/dashboard/MainSignalLivePopupBridge";
@@ -25,6 +26,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/app/ao-vivo", label: "Ao vivo", icon: Radio },
   { to: "/app/agentes", label: "Agentes IA", icon: Network },
   { to: "/app/ia", label: "Aprendizado IA", icon: Brain },
   { to: "/app/padroes", label: "Padrões IA", icon: BrainCircuit },
@@ -47,6 +49,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const canSeeAdmin = canSeeAdminUi();
   const fullAccess = hasFullAccess(userSession);
   const signalAccess = hasSignalAccess(userSession);
+  const liveHousePage = pathname === "/app/ao-vivo";
   const visibleNavItems = fullAccess
     ? navItems.filter((item) => item.to !== "/app/planos")
     : navItems;
@@ -177,9 +180,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-28 lg:pb-8">{children}</main>
       </div>
 
-      {signalAccess && <MainSignalLivePopupBridge />}
-      {signalAccess && <NeuralEntryLivePopupBridge />}
-      {fullAccess && <ValidatorLivePopupBridge />}
+      {signalAccess && !liveHousePage && <MainSignalLivePopupBridge />}
+      {signalAccess && !liveHousePage && <NeuralEntryLivePopupBridge />}
+      {fullAccess && !liveHousePage && <ValidatorLivePopupBridge />}
 
       {/* Bottom nav mobile */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 glass-strong lg:hidden">
