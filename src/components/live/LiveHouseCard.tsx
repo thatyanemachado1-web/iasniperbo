@@ -37,7 +37,6 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
         setPlatformUrl(ESPORTIVA_BAC_BO_URL);
         setAffiliatePageLoaded(true);
         setBacBoConfirmed(true);
-        setBacBoFocusEnabled(true);
       }
     } catch {
       // Continue with the affiliate landing page when storage is unavailable.
@@ -128,6 +127,10 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
     void LiveHouseNative.show({ url: platformUrlRef.current, ...bounds });
   }, [active, nativeMode]);
 
+  useEffect(() => {
+    if (!active) setBacBoFocusEnabled(false);
+  }, [active]);
+
   function openOfficialPlatform() {
     window.open(ESPORTIVA_AFFILIATE_URL, "sniperbo-esportiva");
   }
@@ -138,7 +141,6 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
     platformUrlRef.current = ESPORTIVA_BAC_BO_URL;
     setPlatformUrl(ESPORTIVA_BAC_BO_URL);
     setBacBoConfirmed(true);
-    setBacBoFocusEnabled(true);
     try {
       window.localStorage.setItem(LIVE_HOUSE_TARGET_STORAGE_KEY, BAC_BO_TARGET);
     } catch {
@@ -215,7 +217,7 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
               aria-pressed={bacBoFocusEnabled}
               className="inline-flex min-h-8 max-w-full items-center justify-center gap-1.5 rounded-lg border border-violet-400/40 bg-violet-400/10 px-2.5 py-1 text-center text-[10px] font-black leading-tight text-violet-200 transition hover:bg-violet-400/20"
             >
-              {bacBoFocusEnabled ? "Mostrar Esportiva" : "Focar somente Bac Bo"}
+              {bacBoFocusEnabled ? "Mostrar Esportiva" : "Ativar modo foco Bac Bo"}
               <Focus className="size-3 shrink-0" />
             </button>
           )}
@@ -230,7 +232,7 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
             {bacBoActive
               ? "Bac Bo aberto"
               : affiliatePageLoaded
-                ? "Já concluí o cadastro/login — focar Bac Bo"
+                ? "Já concluí o cadastro/login"
                 : "Aguarde o link de afiliado carregar"}{" "}
             <Play className="size-3 shrink-0 fill-current" />
           </button>
