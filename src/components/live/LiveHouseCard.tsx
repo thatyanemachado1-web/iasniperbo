@@ -1,4 +1,4 @@
-import { ExternalLink, Maximize2, RefreshCw, ShieldAlert } from "lucide-react";
+import { ExternalLink, Maximize2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { LiveSignalSelector } from "@/components/live/LiveSignalSelector";
@@ -153,18 +153,6 @@ export function LiveHouseCard() {
             allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
             referrerPolicy="strict-origin-when-cross-origin"
           />
-        )}
-
-        {!nativeMode && (
-          <div className="pointer-events-none absolute inset-x-2 bottom-2 flex justify-center">
-            <div className="pointer-events-auto flex max-w-xl items-start gap-2 rounded-xl border border-amber-400/25 bg-[#07101e]/95 px-3 py-2 text-[9px] leading-relaxed text-slate-300 shadow-2xl backdrop-blur-xl sm:text-[10px]">
-              <ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-amber-300" />
-              <span>
-                Se a casa bloquear esta janela no navegador, use “Abrir oficial”. No aplicativo
-                móvel, este espaço será substituído pela WebView nativa.
-              </span>
-            </div>
-          </div>
         )}
       </div>
 
