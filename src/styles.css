@@ -124,6 +124,8 @@
     color: var(--color-foreground);
     font-family: "Inter", "SF Pro Display", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
   *,
   *::before,

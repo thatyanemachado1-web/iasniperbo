@@ -163,7 +163,7 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
       className={
         expanded
           ? "fixed inset-2 z-[70] flex flex-col p-2 sm:inset-4 sm:p-3"
-          : "flex min-h-[calc(100svh-7.5rem)] flex-col p-2 sm:p-3"
+          : "flex flex-col p-2 sm:min-h-[calc(100svh-7.5rem)] sm:p-3"
       }
     >
       <div className="flex flex-col gap-2 px-1 pb-2 sm:flex-row sm:items-center sm:justify-between">
@@ -211,7 +211,9 @@ export function LiveHouseCard({ active = true }: { active?: boolean }) {
       <div
         ref={viewportRef}
         className={`relative overflow-hidden rounded-xl border border-neon-cyan/20 bg-[#020712] ${
-          expanded ? "min-h-0 flex-1" : "min-h-[560px] flex-1 sm:min-h-[680px]"
+          expanded
+            ? "aspect-[7/8] min-h-0 w-full shrink-0 sm:aspect-auto sm:flex-1"
+            : "aspect-[7/8] min-h-0 w-full shrink-0 sm:aspect-auto sm:min-h-[680px] sm:flex-1"
         }`}
       >
         {nativeMode || !destinationReady ? (
