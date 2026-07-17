@@ -545,6 +545,8 @@ const CLIENT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const ADMIN_SESSION_TTL_SECONDS = CLIENT_SESSION_TTL_SECONDS;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const LIVE_STATE_IO_TIMEOUT_MS = 8_000;
+const TELEGRAM_CHANNEL_PRIMARY_READ_TIMEOUT_MS = 5_000;
+const TELEGRAM_CHANNEL_HYDRATION_TIMEOUT_MS = 2_500;
 const AUTH_CACHE_LOOKUP_TIMEOUT_MS = 1_200;
 const AUTH_DURABLE_LOOKUP_TIMEOUT_MS = 9_000;
 const FAST_SIGNAL_SAVE_TIMEOUT_MS = 450;
@@ -10418,24 +10420,36 @@ async function loadValidatorChannelsForUser(env: unknown, userId: string) {
   const normalizedUserId = normalizeValidatorUserId(userId);
   if (!normalizedUserId) return [] as ValidatorNotificationChannel[];
 
-  const [hydratedChannels, deletedRefs] = await Promise.all([
+  const cachedChannels = liveValidatorChannels.filter(
+    (channel) => channel.userId === normalizedUserId,
+  );
+  const cachedCloudChannels = cachedChannels.filter(isCloudValidatorTelegramChannel);
+  const cloudChannelsPromise = fetchCloudValidatorChannels(env, normalizedUserId);
+  const [cloudChannels, hydratedChannels, deletedRefs] = await Promise.all([
     withTimeout(
-      fetchStoredValidatorChannels(env, normalizedUserId),
-      LIVE_STATE_IO_TIMEOUT_MS,
-      "carregar canais do Validador",
-      [] as ValidatorNotificationChannel[],
+      cloudChannelsPromise,
+      TELEGRAM_CHANNEL_PRIMARY_READ_TIMEOUT_MS,
+      "carregar canais do Telegram Engine",
+      cachedCloudChannels,
+    ),
+    withTimeout(
+      fetchStoredValidatorChannels(env, normalizedUserId, cloudChannelsPromise),
+      TELEGRAM_CHANNEL_HYDRATION_TIMEOUT_MS,
+      "hidratar canais do Validador",
+      cachedChannels,
     ),
     withTimeout(
       fetchValidatorChannelDeletedRefs(env, normalizedUserId),
-      LIVE_STATE_IO_TIMEOUT_MS,
+      TELEGRAM_CHANNEL_HYDRATION_TIMEOUT_MS,
       "carregar exclusoes de canais do Validador",
       createValidatorChannelDeletedRefLookup(liveValidatorChannelDeletedRefs, normalizedUserId),
     ),
   ]);
 
   const userChannels = mergeValidatorChannelList(
+    cloudChannels,
     hydratedChannels,
-    liveValidatorChannels.filter((channel) => channel.userId === normalizedUserId),
+    cachedChannels,
   ).filter((channel) => !isValidatorChannelDeleted(channel, deletedRefs));
   liveValidatorChannels = [
     ...userChannels,
@@ -12017,10 +12031,16 @@ async function findCloudValidatorChannelForIncoming(
   );
 }
 
-async function fetchStoredValidatorChannels(env: unknown, userId: string) {
+async function fetchStoredValidatorChannels(
+  env: unknown,
+  userId: string,
+  cloudChannelsPromise?: Promise<ValidatorNotificationChannel[]>,
+) {
   const normalizedUserId = normalizeValidatorUserId(userId);
   if (!normalizedUserId) return [];
-  const cloudChannels = await fetchCloudValidatorChannels(env, normalizedUserId);
+  const cloudChannels = await (
+    cloudChannelsPromise || fetchCloudValidatorChannels(env, normalizedUserId)
+  );
   const liveDeletedRefs = await fetchValidatorChannelDeletedRefs(env, normalizedUserId);
   if (!getSupabasePersistenceConfig(env)) {
     return cloudChannels.filter((channel) => !isValidatorChannelDeleted(channel, liveDeletedRefs));
