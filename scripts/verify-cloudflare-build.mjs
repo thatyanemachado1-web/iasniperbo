@@ -1,7 +1,15 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const artifactPath = resolve(".output/server/index.mjs");
+const artifactPaths = [
+  resolve("dist/server/index.mjs"),
+  resolve(".output/server/index.mjs"),
+];
+const artifactPath = artifactPaths.find((candidate) => existsSync(candidate));
+if (!artifactPath) {
+  throw new Error(`Cloudflare build artifact not found:\n- ${artifactPaths.join("\n- ")}`);
+}
 const wranglerPath = resolve("wrangler.jsonc");
 
 const [artifact, wrangler] = await Promise.all([
