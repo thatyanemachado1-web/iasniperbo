@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Bell, BriefcaseBusiness, Cpu, Logs, Megaphone, Settings2, ShieldCheck, Users } from "lucide-react";
+import { Bell, BriefcaseBusiness, Cpu, Logs, Megaphone, RadioTower, Settings2, ShieldCheck, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
@@ -18,14 +18,20 @@ const fallbackOverview: AdminPanelOverview = {
 };
 
 export function AdminPanelCard({
-  overview = fallbackOverview,
+  overview,
   loading = false,
+  unavailable = false,
 }: {
-  overview?: Partial<AdminPanelOverview>;
+  overview?: Partial<AdminPanelOverview> | null;
   loading?: boolean;
+  unavailable?: boolean;
 }) {
-  const stats = { ...fallbackOverview, ...overview };
-  const metricValue = (value: number) => (loading ? "..." : value);
+  const hasOverview = overview != null;
+  const stats = { ...fallbackOverview, ...(overview ?? {}) };
+  const statusValue = (value: string) =>
+    loading ? "..." : unavailable || !hasOverview ? "—" : value;
+  const metricValue = (value: number) =>
+    loading ? "..." : unavailable || !hasOverview ? "—" : value;
 
   return (
     <GlassCard className="md:col-span-2 border-neon-cyan/35">
@@ -47,14 +53,14 @@ export function AdminPanelCard({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <AppBadge tone="green" pulse>
-              Engine: {stats.engineStatus}
+            <AppBadge tone="green" pulse={hasOverview && !loading && !unavailable}>
+              Engine: {statusValue(stats.engineStatus)}
             </AppBadge>
-            <AppBadge tone="blue" pulse>
-              Mesa: {stats.tableStatus}
+            <AppBadge tone="blue" pulse={hasOverview && !loading && !unavailable}>
+              Mesa: {statusValue(stats.tableStatus)}
             </AppBadge>
             <AppBadge tone="gold">
-              Último sinal: {stats.lastSignal} - {stats.lastSignalAt}
+              Último sinal: {statusValue(stats.lastSignal)} - {statusValue(stats.lastSignalAt)}
             </AppBadge>
           </div>
         </div>
@@ -67,12 +73,13 @@ export function AdminPanelCard({
           <Metric icon={<Cpu className="size-4" />} label="Online agora" value={metricValue(stats.onlineNow)} />
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-6">
           <AdminLink to="/app/admin/users" icon={<Users className="size-4" />} label="Gerenciar usuários" />
           <AdminLink to="/app/admin/crm" icon={<BriefcaseBusiness className="size-4" />} label="CRM clientes" />
           <AdminLink to="/app/admin/logs" icon={<Logs className="size-4" />} label="Ver logs" />
           <AdminLink to="/app/admin/modules" icon={<Settings2 className="size-4" />} label="Configurar módulos" />
           <AdminLink to="/app/admin/broadcast" icon={<Megaphone className="size-4" />} label="Conteudo e avisos" />
+          <AdminLink to="/app/admin/telegram" icon={<RadioTower className="size-4" />} label="Salas Telegram" />
         </div>
       </div>
     </GlassCard>
@@ -98,7 +105,8 @@ type AdminPanelLink =
   | "/app/admin/crm"
   | "/app/admin/logs"
   | "/app/admin/modules"
-  | "/app/admin/broadcast";
+  | "/app/admin/broadcast"
+  | "/app/admin/telegram";
 
 function AdminLink({ to, icon, label }: { to: AdminPanelLink; icon: ReactNode; label: string }) {
   return (

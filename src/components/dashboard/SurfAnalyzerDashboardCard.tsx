@@ -1,6 +1,6 @@
 import { SurfAlertCard } from "@/components/dashboard/SurfAlertCard";
 import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
-import type { ModuleToggles, SurfAlert } from "@/types/dashboard";
+import type { DashboardPersistentResult, ModuleToggles, SurfAlert } from "@/types/dashboard";
 import type { DailySurfMaxSnapshot } from "@/surf/DailySurfMaxEngine";
 
 export function SurfAnalyzerDashboardCard({
@@ -8,11 +8,13 @@ export function SurfAnalyzerDashboardCard({
   dailySurfMax,
   toggles,
   onModuleTogglesChange,
+  persistedResults = [],
 }: {
   alert: SurfAlert;
   dailySurfMax: DailySurfMaxSnapshot;
   toggles?: ModuleToggles;
   onModuleTogglesChange?: (toggles: ModuleToggles) => void;
+  persistedResults?: DashboardPersistentResult[];
 }) {
   return (
     <PremiumFeature
@@ -25,6 +27,7 @@ export function SurfAnalyzerDashboardCard({
         dailySurfMax={dailySurfMax}
         toggles={toggles}
         onModuleTogglesChange={onModuleTogglesChange}
+        persistedResults={persistedResults}
         compact
         showRoadPanels={false}
       />

@@ -1,11 +1,12 @@
 import { TieAlertCard } from "@/components/dashboard/TieAlertCard";
 import { PremiumFeature } from "@/components/ui-app/PremiumFeature";
-import type { ModuleToggles, Round, TieAlert, TieAlertScoreboard } from "@/types/dashboard";
+import type { ModuleToggles, Round, TieAlert, TieAlertScoreboard, TieRadarHistoryAnalysis } from "@/types/dashboard";
 import type { PatternMinerSnapshot } from "@/types/patternMiner";
 
 export function TieRadarDashboardCard({
   alert,
   scoreboard,
+  history,
   rounds,
   patternMinerSnapshot,
   toggles,
@@ -13,6 +14,7 @@ export function TieRadarDashboardCard({
 }: {
   alert: TieAlert;
   scoreboard?: TieAlertScoreboard;
+  history?: TieRadarHistoryAnalysis;
   rounds?: Round[];
   patternMinerSnapshot?: PatternMinerSnapshot;
   toggles?: ModuleToggles;
@@ -27,6 +29,7 @@ export function TieRadarDashboardCard({
       <TieAlertCard
         alert={alert}
         scoreboard={scoreboard}
+        history={history}
         rounds={rounds}
         patternMinerSnapshot={patternMinerSnapshot}
         toggles={toggles}

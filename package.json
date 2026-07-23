@@ -6,17 +6,26 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "node --stack-size=16000 --max-old-space-size=8192 ./node_modules/vite/bin/vite.js build",
+    "build": "node --stack-size=16000 --max-old-space-size=8192 ./node_modules/vite/bin/vite.js build && node scripts/verify-cloudflare-build.mjs",
     "build:dev": "vite build --mode development",
+    "mobile:add:android": "cap add android",
+    "mobile:sync": "cap sync android",
+    "mobile:open": "cap open android",
     "preview": "vite preview",
     "ports:audit": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sniper_port_guard.ps1 -NoKill",
+    "local:pipeline": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start_local_pipeline.ps1",
     "signals:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start_official_signals_api.ps1",
     "watchdog:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/watch_sniperbo_official.ps1",
     "lint": "eslint .",
-    "test:telegram-v2": "node --experimental-strip-types scripts/telegram-auto-v2.test.mjs",
+    "test:lateral-motors": "node --experimental-strip-types scripts/lateral-motors.test.mjs",
+    "test:lateral-telegram": "node --experimental-strip-types scripts/lateral-telegram-v2.test.mjs",
+    "test:telegram-v2": "node --experimental-strip-types scripts/telegram-auto-v2.test.mjs && node scripts/telegram-engine-cloud.test.mjs && node cloudflare/telegram-engine/tests/result-only.test.mjs",
+    "test:calendar-audit": "node --experimental-strip-types scripts/neural-calendar-audit.test.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
     "@cloudflare/vite-plugin": "^1.25.5",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
@@ -76,6 +85,7 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.2",
     "@eslint/js": "^9.32.0",
     "@lovable.dev/vite-tanstack-config": "2.7.1",
     "@types/node": "^22.16.5",

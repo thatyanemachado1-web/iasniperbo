@@ -1,6 +1,6 @@
 import type { SignalSide, SurfAlert, SurfEntrySummary } from "@/types/dashboard";
 
-type BadgeTone = "blue" | "purple" | "green" | "red" | "amber" | "gold" | "muted";
+type BadgeTone = "green" | "red" | "amber";
 
 export function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));

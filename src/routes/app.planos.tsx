@@ -140,7 +140,7 @@ function PlanosPage() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {orderedPlans.map((plan) => {
-          const highlighted = plan.id === "premium";
+          const highlighted = Boolean(plan.isFeatured) || plan.id === "premium";
           const current = session.plan === plan.id && session.accessMode === "full";
           const paid = plan.id !== "free";
           return (
@@ -148,9 +148,9 @@ function PlanosPage() {
               key={plan.id}
               className={`flex flex-col ${highlighted ? "relative border-gold/60 glow-gold" : ""}`}
             >
-              {highlighted && (
+              {(highlighted || plan.badgeText) && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <AppBadge tone="gold">Mais completo</AppBadge>
+                  <AppBadge tone="gold">{plan.badgeText || "Mais completo"}</AppBadge>
                 </div>
               )}
               <div className="flex items-center justify-between gap-3">
@@ -169,6 +169,11 @@ function PlanosPage() {
                 </span>
                 {plan.amount > 0 && <span className="pb-1 text-sm text-muted-foreground">/mês</span>}
               </div>
+              {Boolean(plan.oldPrice && plan.oldPrice > plan.amount) && (
+                <div className="mt-1 text-xs font-bold text-muted-foreground">
+                  De <span className="line-through">{formatMoney(plan.oldPrice || 0, plan.currency)}</span>
+                </div>
+              )}
 
               <ul className="mt-5 flex-1 space-y-2">
                 {plan.features.map((item) => (

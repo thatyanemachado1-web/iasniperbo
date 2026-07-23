@@ -1,0 +1,148 @@
+.bacbo-bead-plate-shell {
+  max-width: 100%;
+}
+
+.bacbo-bead-plate-toggle {
+  display: flex;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-bottom: 5px;
+}
+
+.bacbo-bead-plate-toggle button {
+  box-sizing: border-box;
+  min-width: 38px;
+  height: 20px;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #4b5563;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bacbo-bead-plate-toggle button.is-active {
+  border-color: #168cf4;
+  background: #168cf4;
+  color: #ffffff;
+}
+
+.bacbo-bead-plate-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.bacbo-bead-plate {
+  --cell-size: 21px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: repeat(26, var(--cell-size));
+  grid-template-rows: repeat(6, var(--cell-size));
+  gap: 0;
+  width: 548px;
+  height: 128px;
+  overflow: hidden;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.bacbo-bead-plate__cell {
+  box-sizing: border-box;
+  display: grid;
+  width: var(--cell-size);
+  height: var(--cell-size);
+  place-items: center;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.bacbo-bead-plate__cell:nth-child(6n) {
+  border-bottom: 0;
+}
+
+.bacbo-bead-plate__cell:nth-child(n + 151) {
+  border-right: 0;
+}
+
+.bacbo-bead-plate__ball {
+  box-sizing: border-box;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.bacbo-bead-plate__ball--banker {
+  background: #ef233c;
+}
+
+.bacbo-bead-plate__ball--player {
+  background: #168cf4;
+}
+
+.bacbo-bead-plate__ball--tie {
+  background: #f6c33b;
+  color: #302400;
+}
+
+@media (min-width: 1024px) {
+  .bacbo-desktop-board-pair .bacbo-bead-plate-scroll {
+    container-type: inline-size;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .bacbo-desktop-board-pair .bacbo-bead-plate {
+    --pair-width: min(548px, 100cqw);
+    --cell-size: calc((var(--pair-width) - 2px) / 26);
+    width: var(--pair-width);
+    height: calc((var(--cell-size) * 6) + 2px);
+  }
+
+  .bacbo-desktop-board-pair .bacbo-bead-plate__ball {
+    width: min(16px, calc(var(--cell-size) * 0.78));
+    height: min(16px, calc(var(--cell-size) * 0.78));
+    font-size: clamp(6px, calc(var(--cell-size) * 0.43), 9px);
+  }
+}
+
+@media (max-width: 640px) {
+  .bacbo-bead-plate-scroll {
+    container-type: inline-size;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .bacbo-bead-plate {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 26 / 6;
+    grid-template-columns: repeat(26, minmax(0, 1fr));
+    grid-template-rows: repeat(6, minmax(0, 1fr));
+  }
+
+  .bacbo-bead-plate__cell {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .bacbo-bead-plate__ball {
+    width: min(16px, 78%);
+    height: auto;
+    aspect-ratio: 1;
+    font-size: clamp(5px, 1.8vw, 9px);
+  }
+}

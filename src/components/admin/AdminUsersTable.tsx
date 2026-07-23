@@ -1,7 +1,13 @@
 import { ChevronDown, MessageCircle, Settings2 } from "lucide-react";
 import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
-import { AdminBadge, planLabel, planTone, statusLabel, statusTone } from "@/components/admin/AdminBadge";
+import {
+  AdminBadge,
+  planLabel,
+  planTone,
+  statusLabel,
+  statusTone,
+} from "@/components/admin/AdminBadge";
 import { AdminUserDetailsPanel } from "@/components/admin/AdminUserDetailsPanel";
 import type { QuickAction } from "@/components/admin/AdminQuickActions";
 import { buildWhatsAppUrl, formatPhoneDisplay } from "@/lib/phone";
@@ -31,9 +37,15 @@ export function AdminUsersTable({
       <div className="divide-y divide-border/45">
         {users.map((user) => {
           const open = openUserId === user.id;
+          const accessBadge = accessBadgeForUser(user);
           return (
             <Fragment key={user.id}>
-              <article className={cn("px-3 py-3 transition hover:bg-neon-cyan/5", open && "bg-neon-cyan/5")}>
+              <article
+                className={cn(
+                  "px-3 py-3 transition hover:bg-neon-cyan/5",
+                  open && "bg-neon-cyan/5",
+                )}
+              >
                 <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
                   <div className="min-w-0">
                     <div className="break-words text-sm font-black leading-snug">
@@ -65,7 +77,9 @@ export function AdminUsersTable({
                     </AdminBadge>
                   </InfoPill>
                   <InfoPill label="Cadastro">
-                    <span className="text-xs font-black text-foreground">{formatDateTime(user.createdAt)}</span>
+                    <span className="text-xs font-black text-foreground">
+                      {formatDateTime(user.createdAt)}
+                    </span>
                   </InfoPill>
                   <InfoPill label="Ultimo acesso">
                     <span className="text-xs font-black text-foreground">
@@ -73,12 +87,12 @@ export function AdminUsersTable({
                     </span>
                   </InfoPill>
                   <InfoPill label="Validade">
-                    <span className="text-xs font-black text-foreground">{formatDate(user.currentPeriodEnd)}</span>
+                    <span className="text-xs font-black text-foreground">
+                      {formatDate(user.currentPeriodEnd)}
+                    </span>
                   </InfoPill>
                   <InfoPill label="Acesso">
-                    <AdminBadge tone={user.isBlocked ? "blocked" : "active"}>
-                      {user.isBlocked ? "Bloqueado" : "Ativo"}
-                    </AdminBadge>
+                    <AdminBadge tone={accessBadge.tone}>{accessBadge.label}</AdminBadge>
                   </InfoPill>
                   <InfoPill label="WhatsApp">
                     <PhoneLink user={user} compact />
@@ -167,4 +181,32 @@ function formatDateTime(value: string) {
 function formatAccessDateTime(user: AdminManagedUser) {
   if (user.lastAccessAt) return formatDateTime(user.lastAccessAt);
   return user.lastAccess || "Sem registro";
+}
+
+function accessBadgeForUser(user: AdminManagedUser): {
+  tone: "active" | "blocked" | "expired";
+  label: string;
+} {
+  if (user.isBlocked || user.subscriptionStatus === "blocked") {
+    return { tone: "blocked", label: "Bloqueado" };
+  }
+  if (hasLiveAccess(user)) {
+    return { tone: "active", label: "Ativo" };
+  }
+  if (user.subscriptionStatus === "expired" || isExpiredPeriod(user.currentPeriodEnd)) {
+    return { tone: "expired", label: "Vencido" };
+  }
+  return { tone: "expired", label: "Inativo" };
+}
+
+function hasLiveAccess(user: AdminManagedUser) {
+  if (user.isBlocked) return false;
+  if (!["active", "manual_vip", "trial"].includes(user.subscriptionStatus)) return false;
+  const end = Date.parse(user.currentPeriodEnd);
+  return Number.isFinite(end) && end > Date.now();
+}
+
+function isExpiredPeriod(value: string) {
+  const end = Date.parse(value);
+  return Number.isFinite(end) && end <= Date.now();
 }

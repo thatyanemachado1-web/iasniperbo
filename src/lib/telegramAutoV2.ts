@@ -1,6 +1,18 @@
 import type { DashboardData, NeuralReading, Round } from "@/types/dashboard";
+import {
+  analyzeLateralPayingNumbersEntry,
+  analyzeLateralTiePatternEntry,
+  type LateralBacBoResult,
+} from "../utils/lateralMotors.ts";
 
-export type TelegramAutoV2ModuleKey = "ai_patterns" | "paying_numbers" | "surf_alert" | "ties_only" | "validator";
+export type TelegramAutoV2ModuleKey =
+  | "ai_patterns"
+  | "paying_numbers"
+  | "surf_alert"
+  | "ties_only"
+  | "validator"
+  | "lateral_paying_numbers"
+  | "lateral_tie_patterns";
 
 export type TelegramAutoV2ConfirmedCard = {
   moduleKey: Exclude<TelegramAutoV2ModuleKey, "validator">;
@@ -20,15 +32,24 @@ export type TelegramAutoV2CardProbe = {
   meta?: Record<string, unknown>;
 };
 
-export const TELEGRAM_AUTO_V2_GLOBAL_MODULES: Array<Exclude<TelegramAutoV2ModuleKey, "validator">> = [
-  "ai_patterns",
-  "paying_numbers",
-  "surf_alert",
-  "ties_only",
-];
+export const TELEGRAM_AUTO_V2_GLOBAL_MODULES: Array<Exclude<TelegramAutoV2ModuleKey, "validator">> =
+  [
+    "ai_patterns",
+    "paying_numbers",
+    "surf_alert",
+    "ties_only",
+    "lateral_paying_numbers",
+    "lateral_tie_patterns",
+  ];
+
+export function isLateralTelegramAutoV2Module(moduleKey: unknown) {
+  return moduleKey === "lateral_paying_numbers" || moduleKey === "lateral_tie_patterns";
+}
 
 function readRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function readString(record: Record<string, unknown>, key: string) {
@@ -117,11 +138,13 @@ function roundKey(round: Round | null | undefined, fallbackId = 0) {
 
 function readPayingNumbersSideFromDashboard(dashboard: DashboardData) {
   const reading = (dashboard.neuralReading || null) as NeuralReading | null;
-  const entryState = readRecord((dashboard as DashboardData & { neuralEntryState?: unknown }).neuralEntryState);
+  const entryState = readRecord(
+    (dashboard as DashboardData & { neuralEntryState?: unknown }).neuralEntryState,
+  );
   const currentSignal = readRecord(dashboard.currentSignal as unknown);
   const fromVisualReading = readVisualPayingNumbersSide(reading);
   if (fromVisualReading) return fromVisualReading;
-  const fromReading = normalizeSide(reading?.expectedSide);
+  const fromReading = normalizeSide(readRecord(reading).expectedSide);
   if (fromReading) return fromReading;
   const fromReadingAny = sideFromAnyValue(reading);
   if (fromReadingAny) return fromReadingAny;
@@ -130,7 +153,9 @@ function readPayingNumbersSideFromDashboard(dashboard: DashboardData) {
   const fromEntryStateAny = sideFromAnyValue(entryState);
   if (fromEntryStateAny) return fromEntryStateAny;
   // Prefer explicit side fields first; many signal IDs don't contain PLAYER/BANKER text.
-  const fromCurrentSignalSide = normalizeSide(currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao);
+  const fromCurrentSignalSide = normalizeSide(
+    currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao,
+  );
   if (fromCurrentSignalSide) return fromCurrentSignalSide;
   const fromCurrentSignalTextCandidates = [
     readString(currentSignal, "entryLabel"),
@@ -145,7 +170,12 @@ function readPayingNumbersSideFromDashboard(dashboard: DashboardData) {
   const fromCurrentSignalAny = sideFromAnyValue(currentSignal);
   if (fromCurrentSignalAny) return fromCurrentSignalAny;
   const signalStatus = readString(currentSignal, "status").toLowerCase();
-  if (signalStatus === "pending" || signalStatus === "g1" || signalStatus === "active" || signalStatus === "confirmed") {
+  if (
+    signalStatus === "pending" ||
+    signalStatus === "g1" ||
+    signalStatus === "active" ||
+    signalStatus === "confirmed"
+  ) {
     return normalizeSide(currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao);
   }
   return "";
@@ -153,20 +183,27 @@ function readPayingNumbersSideFromDashboard(dashboard: DashboardData) {
 
 function readPayingNumbersActiveMode(dashboard: DashboardData) {
   const reading = (dashboard.neuralReading || null) as NeuralReading | null;
-  const entryState = readRecord((dashboard as DashboardData & { neuralEntryState?: unknown }).neuralEntryState);
+  const entryState = readRecord(
+    (dashboard as DashboardData & { neuralEntryState?: unknown }).neuralEntryState,
+  );
   const currentSignal = readRecord(dashboard.currentSignal as unknown);
   const readingMode = normalizeText(reading?.mode);
   const visualReadingSide = readVisualPayingNumbersSide(reading);
   if (readingMode === "ACTIVE" && visualReadingSide) return "ACTIVE";
-  if (isConfirmedStatusText(reading?.paganteStatus || reading?.paganteAlert) && visualReadingSide) return "ACTIVE";
+  if (isConfirmedStatusText(reading?.paganteStatus || reading?.paganteAlert) && visualReadingSide)
+    return "ACTIVE";
   if (Object.keys(entryState).length && readString(entryState, "status")) return "ACTIVE";
   const signalStatus = readString(currentSignal, "status").toLowerCase();
   const currentSignalSide =
     normalizeSide(currentSignal.side ?? currentSignal.entry ?? currentSignal.direcao) ||
     sideFromAnyValue(currentSignal);
-  const inferredEntrySide = currentSignalSide || sideFromAnyValue(reading) || sideFromAnyValue(entryState);
+  const inferredEntrySide =
+    currentSignalSide || sideFromAnyValue(reading) || sideFromAnyValue(entryState);
   if (
-    (signalStatus === "pending" || signalStatus === "g1" || signalStatus === "active" || signalStatus === "confirmed") &&
+    (signalStatus === "pending" ||
+      signalStatus === "g1" ||
+      signalStatus === "active" ||
+      signalStatus === "confirmed") &&
     inferredEntrySide
   ) {
     return "ACTIVE";
@@ -184,7 +221,8 @@ export function detectPayingNumbersConfirmedCard(
   const mode = readPayingNumbersActiveMode(dashboard);
   const side = readPayingNumbersSideFromDashboard(dashboard);
   const numero = typeof reading?.numero === "number" ? reading.numero : null;
-  const signalKey = side && roundId ? `paying:Bac Bo:${numero ?? "na"}:${side}:round:${roundId}` : "";
+  const signalKey =
+    side && roundId ? `paying:Bac Bo:${numero ?? "na"}:${side}:round:${roundId}` : "";
 
   if (!reading && !side) {
     return {
@@ -195,23 +233,49 @@ export function detectPayingNumbersConfirmedCard(
       roundId,
       meta: {
         card_source: "dashboard.neuralReading/currentSignal",
-        visual_title: readString(readRecord(dashboard.currentSignal as unknown), "id") || readString(readRecord(dashboard.neuralReading as unknown), "paganteStatus"),
+        visual_title:
+          readString(readRecord(dashboard.currentSignal as unknown), "id") ||
+          readString(readRecord(dashboard.neuralReading as unknown), "paganteStatus"),
         card_name: "Leitura Neural / Numero Oposto / Numeros Pagantes",
         side,
       },
     };
   }
   if (mode !== "ACTIVE") {
-    return { moduleKey: "paying_numbers", confirmed: false, reason: "card_not_active", signalKey, roundId };
+    return {
+      moduleKey: "paying_numbers",
+      confirmed: false,
+      reason: "card_not_active",
+      signalKey,
+      roundId,
+    };
   }
   if (!side) {
-    return { moduleKey: "paying_numbers", confirmed: false, reason: "missing_expected_side", signalKey, roundId };
+    return {
+      moduleKey: "paying_numbers",
+      confirmed: false,
+      reason: "missing_expected_side",
+      signalKey,
+      roundId,
+    };
   }
   if (side === "T") {
-    return { moduleKey: "paying_numbers", confirmed: false, reason: "tie_card_not_paying_numbers", signalKey, roundId };
+    return {
+      moduleKey: "paying_numbers",
+      confirmed: false,
+      reason: "tie_card_not_paying_numbers",
+      signalKey,
+      roundId,
+    };
   }
   if (!roundId) {
-    return { moduleKey: "paying_numbers", confirmed: false, reason: "missing_round_id", signalKey, roundId };
+    return {
+      moduleKey: "paying_numbers",
+      confirmed: false,
+      reason: "missing_round_id",
+      signalKey,
+      roundId,
+    };
   }
   return {
     moduleKey: "paying_numbers",
@@ -235,8 +299,16 @@ export function detectAiPatternsConfirmedCard(
   dashboard: DashboardData,
   latestRound: Round | null,
 ): TelegramAutoV2CardProbe {
-  const snapshot = readRecord((dashboard as DashboardData & { patternMinerSnapshot?: unknown }).patternMinerSnapshot || dashboard.patternMiner);
-  const entryAlerts = Array.isArray(snapshot.entryAlerts) ? snapshot.entryAlerts.map(readRecord) : [];
+  const dashboardPatterns = dashboard as DashboardData & {
+    patternMinerSnapshot?: unknown;
+    patternMiner?: unknown;
+  };
+  const snapshot = readRecord(
+    dashboardPatterns.patternMinerSnapshot || dashboardPatterns.patternMiner,
+  );
+  const entryAlerts = Array.isArray(snapshot.entryAlerts)
+    ? snapshot.entryAlerts.map(readRecord)
+    : [];
   const alert =
     entryAlerts.find((item) => {
       const kind = readString(item, "kind").toLowerCase();
@@ -247,7 +319,13 @@ export function detectAiPatternsConfirmedCard(
   const roundId = Number(round?.id) || 0;
 
   if (!alert) {
-    return { moduleKey: "ai_patterns", confirmed: false, reason: "no_confirmed_pattern_card", signalKey: "", roundId };
+    return {
+      moduleKey: "ai_patterns",
+      confirmed: false,
+      reason: "no_confirmed_pattern_card",
+      signalKey: "",
+      roundId,
+    };
   }
 
   const strategy = readRecord(alert.strategy);
@@ -255,7 +333,9 @@ export function detectAiPatternsConfirmedCard(
   const sequence = Array.isArray(strategy.sequence)
     ? strategy.sequence.map((item) => String(item || "").trim()).filter(Boolean)
     : [];
-  const matchedRounds = Array.isArray(alert.matchedRounds) ? alert.matchedRounds.map(readRecord) : [];
+  const matchedRounds = Array.isArray(alert.matchedRounds)
+    ? alert.matchedRounds.map(readRecord)
+    : [];
   const lastMatchedRound = matchedRounds.at(-1) || {};
   const lastMatchedRoundId =
     readString(lastMatchedRound, "id") ||
@@ -263,21 +343,41 @@ export function detectAiPatternsConfirmedCard(
     readString(lastMatchedRound, "round_id") ||
     roundKey(round, roundId);
   const alertId = readString(alert, "id") || readString(strategy, "id") || sequence.join(">");
-  const eventId = [alertId, lastMatchedRoundId, expected, sequence.join(">")].filter(Boolean).join(":");
+  const eventId = [alertId, lastMatchedRoundId, expected, sequence.join(">")]
+    .filter(Boolean)
+    .join(":");
   const signalKey = expected && eventId ? `ai-dashboard:${eventId}` : "";
 
   if (!expected) {
-    return { moduleKey: "ai_patterns", confirmed: false, reason: "missing_expected_side", signalKey, roundId };
+    return {
+      moduleKey: "ai_patterns",
+      confirmed: false,
+      reason: "missing_expected_side",
+      signalKey,
+      roundId,
+    };
   }
   if (!sequence.length) {
-    return { moduleKey: "ai_patterns", confirmed: false, reason: "missing_pattern_sequence", signalKey, roundId };
+    return {
+      moduleKey: "ai_patterns",
+      confirmed: false,
+      reason: "missing_pattern_sequence",
+      signalKey,
+      roundId,
+    };
   }
   const kind = readString(alert, "kind").toLowerCase();
   const title = readString(alert, "title");
   const confirmedByAlert = kind === "validated" || isConfirmedStatusText(title);
   const confirmedByStrategy = isConfirmedStatusText(strategy.status);
   if (!confirmedByAlert && !confirmedByStrategy) {
-    return { moduleKey: "ai_patterns", confirmed: false, reason: "entry_not_confirmed", signalKey, roundId };
+    return {
+      moduleKey: "ai_patterns",
+      confirmed: false,
+      reason: "entry_not_confirmed",
+      signalKey,
+      roundId,
+    };
   }
 
   return {
@@ -303,27 +403,60 @@ export function detectSurfConfirmedCard(
   const alert = readRecord(dashboard.currentSurfAlert);
   const round = latestRoundFromDashboard(dashboard, latestRound);
   const roundId = Number(round?.id) || 0;
-  const side = normalizeSide(alert.surf_prediction_side || alert.surf_side || alert.side || alert.entry);
-  const statusText = normalizeText(alert.surf_status || alert.status || alert.phase || alert.surf_phase);
-  const signalKey = side && roundId ? `surf:${readString(alert, "id") || roundId}:${side}:round:${roundId}` : "";
+  const side = normalizeSide(
+    alert.surf_prediction_side || alert.surf_side || alert.side || alert.entry,
+  );
+  const statusText = normalizeText(
+    alert.surf_prediction_status ||
+      alert.surf_status ||
+      alert.status ||
+      alert.phase ||
+      alert.surf_phase,
+  );
+  const signalKey =
+    side && roundId ? `surf:${readString(alert, "id") || roundId}:${side}:round:${roundId}` : "";
 
   if (!Object.keys(alert).length) {
-    return { moduleKey: "surf_alert", confirmed: false, reason: "no_surf_card", signalKey, roundId };
+    return {
+      moduleKey: "surf_alert",
+      confirmed: false,
+      reason: "no_surf_card",
+      signalKey,
+      roundId,
+    };
   }
   if (!side) {
-    return { moduleKey: "surf_alert", confirmed: false, reason: "missing_expected_side", signalKey, roundId };
+    return {
+      moduleKey: "surf_alert",
+      confirmed: false,
+      reason: "missing_expected_side",
+      signalKey,
+      roundId,
+    };
   }
   const active = Boolean(
     alert.surf_alert === true ||
-      statusText.includes("ACTIVE") ||
-      statusText.includes("ATIVO") ||
-      statusText.includes("CONFIRM"),
+    statusText.includes("ACTIVE") ||
+    statusText.includes("ATIVO") ||
+    statusText.includes("CONFIRM"),
   );
   if (!active) {
-    return { moduleKey: "surf_alert", confirmed: false, reason: "card_not_active", signalKey, roundId };
+    return {
+      moduleKey: "surf_alert",
+      confirmed: false,
+      reason: "card_not_active",
+      signalKey,
+      roundId,
+    };
   }
   if (!isConfirmedStatusText(statusText) && !statusText.includes("ALERTA")) {
-    return { moduleKey: "surf_alert", confirmed: false, reason: "entry_not_confirmed", signalKey, roundId };
+    return {
+      moduleKey: "surf_alert",
+      confirmed: false,
+      reason: "entry_not_confirmed",
+      signalKey,
+      roundId,
+    };
   }
   return {
     moduleKey: "surf_alert",
@@ -333,7 +466,10 @@ export function detectSurfConfirmedCard(
     roundId,
     meta: {
       card_source: "dashboard.currentSurfAlert",
-      visual_title: readString(alert, "surf_status") || readString(alert, "status") || readString(alert, "surf_phase"),
+      visual_title:
+        readString(alert, "surf_status") ||
+        readString(alert, "status") ||
+        readString(alert, "surf_phase"),
       card_name: "Surf Analyzer",
       side,
     },
@@ -349,13 +485,21 @@ export function detectTiesConfirmedCard(
   const roundId = Number(round?.id) || 0;
   const status = readString(alert, "status").toLowerCase();
   const level = readString(alert, "level") || readString(alert, "nivel");
-  const signalKey = roundId ? `tie:${readString(alert, "id") || roundId}:${level}:round:${roundId}` : "";
+  const signalKey = roundId
+    ? `tie:${readString(alert, "id") || roundId}:${level}:round:${roundId}`
+    : "";
 
   if (!Object.keys(alert).length) {
     return { moduleKey: "ties_only", confirmed: false, reason: "no_tie_card", signalKey, roundId };
   }
   if (status !== "active") {
-    return { moduleKey: "ties_only", confirmed: false, reason: "card_not_active", signalKey, roundId };
+    return {
+      moduleKey: "ties_only",
+      confirmed: false,
+      reason: "card_not_active",
+      signalKey,
+      roundId,
+    };
   }
   return {
     moduleKey: "ties_only",
@@ -373,16 +517,224 @@ export function detectTiesConfirmedCard(
   };
 }
 
+export function readDashboardLateralResults(dashboard: DashboardData): LateralBacBoResult[] {
+  const exactResults = Array.isArray(dashboard.bacBoBeadPlate) ? dashboard.bacBoBeadPlate : [];
+  if (exactResults.length) {
+    const results: LateralBacBoResult[] = [];
+    exactResults.forEach((value, index) => {
+      const record = readRecord(value);
+      const side = normalizeLateralResultSide(record.side);
+      const slot = Number.isInteger(Number(record.slot)) ? Number(record.slot) : index;
+      const valueNumber = Number(record.value);
+      if (!side || !Number.isFinite(valueNumber) || slot < 0 || slot >= 156) return;
+      results.push({
+        id: readString(record, "id") || `slot-${slot}`,
+        side,
+        value: valueNumber,
+        slot,
+        time: readString(record, "time") || null,
+        tieMultiplier: readOptionalFiniteNumber(record.tieMultiplier),
+      });
+    });
+    return results.sort((left, right) => Number(left.slot) - Number(right.slot)).slice(-200);
+  }
+
+  const uniqueRounds = new Map<number, Round>();
+  for (const round of Array.isArray(dashboard.rounds) ? dashboard.rounds : []) {
+    const id = Number(round?.id);
+    if (Number.isFinite(id)) uniqueRounds.set(id, round);
+  }
+  return [...uniqueRounds.values()]
+    .sort((left, right) => Number(left.id) - Number(right.id))
+    .slice(-200)
+    .map((round, slot) => ({
+      id: String(round.id),
+      side: round.result === "P" ? "PLAYER" : round.result === "B" ? "BANKER" : "TIE",
+      value: round.result === "P" ? Number(round.playerScore) : Number(round.bankerScore),
+      slot,
+      time: round.time || null,
+      tieMultiplier: readOptionalFiniteNumber(round.tieMultiplier),
+    }));
+}
+
+export function detectLateralPayingNumbersConfirmedCard(
+  dashboard: DashboardData,
+  latestRound: Round | null,
+): TelegramAutoV2CardProbe {
+  const round = latestRoundFromDashboard(dashboard, latestRound);
+  const roundId = Number(round?.id) || 0;
+  const results = readDashboardLateralResults(dashboard);
+  const analysis = analyzeLateralPayingNumbersEntry(results);
+  const active = analysis.active;
+  const pattern = active?.pattern;
+  const signalKey = analysis.signalKey;
+  if (!analysis.confirmed || !active || !pattern) {
+    return {
+      moduleKey: "lateral_paying_numbers",
+      confirmed: false,
+      reason: analysis.reason,
+      signalKey,
+      roundId,
+      meta: {
+        card_source:
+          Array.isArray(dashboard.bacBoBeadPlate) && dashboard.bacBoBeadPlate.length
+            ? "dashboard.bacBoBeadPlate"
+            : "dashboard.rounds",
+        card_name: "Motor lateral / Numero pagante lateral",
+        cycle_size: analysis.cycleSize,
+        blocked_pattern: analysis.blocked?.pattern.key || "",
+      },
+    };
+  }
+  if (!roundId) {
+    return {
+      moduleKey: "lateral_paying_numbers",
+      confirmed: false,
+      reason: "missing_round_id",
+      signalKey,
+      roundId,
+    };
+  }
+  const greens = pattern.sg + pattern.g1;
+  const strength =
+    greens + pattern.reds > 0 ? Math.round((greens / (greens + pattern.reds)) * 100) : 0;
+  return {
+    moduleKey: "lateral_paying_numbers",
+    confirmed: true,
+    reason: "confirmed_lateral_paying_entry",
+    signalKey,
+    roundId,
+    meta: {
+      card_source:
+        Array.isArray(dashboard.bacBoBeadPlate) && dashboard.bacBoBeadPlate.length
+          ? "dashboard.bacBoBeadPlate"
+          : "dashboard.rounds",
+      visual_title: active.attempt === "G1" ? "AGUARDANDO G1" : "ENTRADA CONFIRMADA",
+      card_name: "Motor lateral / Numero pagante lateral",
+      side: pattern.target,
+      trigger_side: pattern.triggerSide,
+      trigger_value: pattern.triggerValue,
+      trigger_id: active.trigger.id,
+      attempt: active.attempt,
+      pattern_key: pattern.key,
+      samples: pattern.samples,
+      greens,
+      reds: pattern.reds,
+      strength,
+      cycle_size: analysis.cycleSize,
+    },
+  };
+}
+
+export function detectLateralTiePatternsConfirmedCard(
+  dashboard: DashboardData,
+  latestRound: Round | null,
+): TelegramAutoV2CardProbe {
+  const round = latestRoundFromDashboard(dashboard, latestRound);
+  const roundId = Number(round?.id) || 0;
+  const results = readDashboardLateralResults(dashboard);
+  const analysis = analyzeLateralTiePatternEntry(results);
+  const active = analysis.active;
+  if (!analysis.confirmed || !active) {
+    return {
+      moduleKey: "lateral_tie_patterns",
+      confirmed: false,
+      reason: analysis.reason,
+      signalKey: analysis.signalKey,
+      roundId,
+      meta: {
+        card_source:
+          Array.isArray(dashboard.bacBoBeadPlate) && dashboard.bacBoBeadPlate.length
+            ? "dashboard.bacBoBeadPlate"
+            : "dashboard.rounds",
+        card_name: "Motor de empate lateral / diagonal / espacado",
+        cycle_size: analysis.cycleSize,
+      },
+    };
+  }
+  if (!roundId) {
+    return {
+      moduleKey: "lateral_tie_patterns",
+      confirmed: false,
+      reason: "missing_round_id",
+      signalKey: analysis.signalKey,
+      roundId,
+    };
+  }
+  const formation = active.formation;
+  const resolved = analysis.templateTies + analysis.templateReds;
+  const strength = resolved ? Math.round((analysis.templateTies / resolved) * 100) : 0;
+  return {
+    moduleKey: "lateral_tie_patterns",
+    confirmed: true,
+    reason: "confirmed_lateral_tie_entry",
+    signalKey: analysis.signalKey,
+    roundId,
+    meta: {
+      card_source:
+        Array.isArray(dashboard.bacBoBeadPlate) && dashboard.bacBoBeadPlate.length
+          ? "dashboard.bacBoBeadPlate"
+          : "dashboard.rounds",
+      visual_title: active.attempt === "G1" ? "RISCO DE EMPATE G1" : "RISCO DE EMPATE",
+      card_name: "Motor de empate lateral / diagonal / espacado",
+      side: "TIE",
+      attempt: active.attempt,
+      pattern_id: formation.template.id,
+      pattern_label: formation.template.label,
+      pattern_pair: `${formation.firstValue}-${formation.secondValue ?? "?"}`,
+      first_value: formation.firstValue,
+      second_value: formation.secondValue,
+      geometry: formation.template.geometry,
+      origin_id: formation.firstId,
+      origin_position: formation.originPosition,
+      target_position: formation.targetPosition,
+      dry_tie_risk: analysis.dryTieRisk,
+      horizontal_tie_risk: analysis.horizontalTieRisk,
+      ties: analysis.templateTies,
+      reds: analysis.templateReds,
+      strength,
+      cycle_size: analysis.cycleSize,
+    },
+  };
+}
+
+function normalizeLateralResultSide(value: unknown): LateralBacBoResult["side"] | "" {
+  const side = normalizeSide(value);
+  if (side === "B") return "BANKER";
+  if (side === "P") return "PLAYER";
+  if (side === "T") return "TIE";
+  return "";
+}
+
+function readOptionalFiniteNumber(value: unknown) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 export function probeTelegramAutoV2ModuleCard(
   dashboard: DashboardData,
   latestRound: Round | null,
   moduleKey: TelegramAutoV2ModuleKey,
 ): TelegramAutoV2CardProbe {
   if (moduleKey === "ai_patterns") return detectAiPatternsConfirmedCard(dashboard, latestRound);
-  if (moduleKey === "paying_numbers") return detectPayingNumbersConfirmedCard(dashboard, latestRound);
+  if (moduleKey === "paying_numbers")
+    return detectPayingNumbersConfirmedCard(dashboard, latestRound);
   if (moduleKey === "surf_alert") return detectSurfConfirmedCard(dashboard, latestRound);
   if (moduleKey === "ties_only") return detectTiesConfirmedCard(dashboard, latestRound);
-  return { moduleKey: "validator", confirmed: false, reason: "unsupported_module", signalKey: "", roundId: 0 };
+  if (moduleKey === "lateral_paying_numbers") {
+    return detectLateralPayingNumbersConfirmedCard(dashboard, latestRound);
+  }
+  if (moduleKey === "lateral_tie_patterns") {
+    return detectLateralTiePatternsConfirmedCard(dashboard, latestRound);
+  }
+  return {
+    moduleKey: "validator",
+    confirmed: false,
+    reason: "unsupported_module",
+    signalKey: "",
+    roundId: 0,
+  };
 }
 
 export function detectGlobalConfirmedCards(
@@ -393,7 +745,9 @@ export function detectGlobalConfirmedCards(
     probeTelegramAutoV2ModuleCard(dashboard, latestRound, moduleKey),
   );
   return probes
-    .filter((probe): probe is TelegramAutoV2ConfirmedCard => probe.confirmed && Boolean(probe.signalKey))
+    .filter(
+      (probe): probe is TelegramAutoV2ConfirmedCard => probe.confirmed && Boolean(probe.signalKey),
+    )
     .map((probe) => ({
       moduleKey: probe.moduleKey as Exclude<TelegramAutoV2ModuleKey, "validator">,
       confirmed: true as const,

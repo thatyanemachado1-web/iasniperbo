@@ -20,22 +20,18 @@ export async function fetchNeuralCalendar(params: {
   if (params.engines?.length) search.set("engines", params.engines.join(","));
 
   const token = readUserSession().clientToken || "";
-  try {
-    const response = await fetch(`${publicApiBaseUrl()}/calendar/neural?${search.toString()}`, {
-      headers: {
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(readApiError(text) || "Nao foi possivel carregar o Calendario Neural.");
-    }
-    const data = (await response.json()) as { calendar: NeuralCalendarPayload };
-    return data.calendar;
-  } catch (error) {
-    throw error;
+  const response = await fetch(`${publicApiBaseUrl()}/calendar/neural?${search.toString()}`, {
+    headers: {
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(readApiError(text) || "Nao foi possivel carregar o Calendario Neural.");
   }
+  const data = (await response.json()) as { calendar: NeuralCalendarPayload };
+  return data.calendar;
 }
 
 function readApiError(text: string) {

@@ -46,6 +46,7 @@ function AdminBroadcastPage() {
     buttonUrl: "",
   });
   const [status, setStatus] = useState("");
+  const [statusTone, setStatusTone] = useState<"success" | "error" | "info">("info");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(Boolean(session));
 
@@ -58,7 +59,10 @@ function AdminBroadcastPage() {
         if (active) setSettings({ ...DEFAULT_SITE_CONTENT_SETTINGS, ...next });
       })
       .catch((err) => {
-        if (active) setStatus(err instanceof Error ? err.message : "Falha ao carregar conteudo.");
+        if (active) {
+          setStatusTone("error");
+          setStatus(err instanceof Error ? err.message : "Falha ao carregar conteudo.");
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -75,8 +79,10 @@ function AdminBroadcastPage() {
     try {
       const next = await updateAdminSiteContent(session, settings);
       setSettings({ ...DEFAULT_SITE_CONTENT_SETTINGS, ...next });
+      setStatusTone("success");
       setStatus("Conteudo salvo. O preview do link pode demorar por causa do cache do WhatsApp.");
     } catch (err) {
+      setStatusTone("error");
       setStatus(err instanceof Error ? err.message : "Falha ao salvar conteudo.");
     } finally {
       setBusy(false);
@@ -92,9 +98,11 @@ function AdminBroadcastPage() {
       if (response.siteContent) {
         setSettings({ ...DEFAULT_SITE_CONTENT_SETTINGS, ...response.siteContent });
       }
+      setStatusTone("success");
       setStatus("Pop-up disparado. Quem estiver no site recebe na próxima leitura.");
       setBroadcast((current) => ({ ...current, title: "", message: "" }));
     } catch (err) {
+      setStatusTone("error");
       setStatus(err instanceof Error ? err.message : "Falha ao disparar pop-up.");
     } finally {
       setBusy(false);
@@ -105,6 +113,7 @@ function AdminBroadcastPage() {
     key: K,
     value: SiteContentSettings[K],
   ) {
+    setStatus("");
     setSettings((current) => ({ ...current, [key]: value }));
   }
 
@@ -128,7 +137,15 @@ function AdminBroadcastPage() {
           right={<Megaphone className="size-5 text-neon-cyan" />}
         />
         {status && (
-          <div className="mt-4 rounded-xl border border-neon-cyan/25 bg-neon-cyan/10 px-3 py-2 text-sm text-neon-cyan">
+          <div
+            className={`mt-4 rounded-xl border px-3 py-2 text-sm ${
+              statusTone === "error"
+                ? "border-destructive/35 bg-destructive/10 text-destructive"
+                : statusTone === "success"
+                  ? "border-success/30 bg-success/10 font-semibold text-success"
+                  : "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan"
+            }`}
+          >
             {status}
           </div>
         )}

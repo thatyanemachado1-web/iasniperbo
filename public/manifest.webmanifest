@@ -2,7 +2,7 @@
   "name": "SNIPER BO IA",
   "short_name": "SNIPER BO",
   "description": "Painel operacional BAC BO com leitura estatistica e IA em tempo real.",
-  "start_url": "/",
+  "start_url": "/app?source=pwa",
   "scope": "/",
   "display": "standalone",
   "background_color": "#030712",

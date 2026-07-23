@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   Activity,
@@ -6,8 +6,6 @@ import {
   Bell,
   BrainCircuit,
   Check,
-  ChevronLeft,
-  ChevronRight,
   Crown,
   Eye,
   EyeOff,
@@ -31,14 +29,18 @@ import {
 import { BrainAI } from "@/components/brand/BrainAI";
 import { NeuralLines } from "@/components/brand/NeuralLines";
 import { SniperLogoMark } from "@/components/brand/SniperLogoMark";
+import { ResponsibleGamingNotice } from "@/components/landing/ResponsibleGamingNotice";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import {
+  AccessApiError,
+  AccessApiTimeoutError,
   checkClientAccess,
   createPublicBillingCheckout,
   getBillingPlans,
   getSalesSettings,
   registerClient,
   saveAccessSession,
+  validateLoginAccess,
   type BillingPlan,
   type ClientAccess,
 } from "@/lib/accessApi";
@@ -75,6 +77,7 @@ export const Route = createFileRoute("/")({
 
 const WAITLIST_URL = "https://wa.me/5567992308362";
 const LOGIN_BOOTSTRAP_FALLBACK_MS = 3500;
+const LOGIN_REQUEST_TIMEOUT_MS = 20_000;
 
 const landingFallbackPlans: BillingPlan[] = [
   {
@@ -106,51 +109,11 @@ const hudCards = [
   { icon: Activity, label: "Análise em Tempo Real", position: "right-0 top-16", delay: "0.8s" },
   { icon: Bell, label: "Pressão de Tie", position: "left-3 bottom-24", delay: "1.4s" },
   { icon: TrendingUp, label: "Tendência da Mesa", position: "right-4 bottom-20", delay: "2.1s" },
-  { icon: Radio, label: "Contexto Operacional", position: "left-1/2 top-[78%] -translate-x-1/2", delay: "2.8s" },
-];
-
-const FEATURE_SLIDES = [
   {
-    image: "/login-banners/1.png",
-    title: "Validador de Estratégias",
-    summary: "Monte seu padrão, valide no histórico real e saiba se vale salvar.",
-    body:
-      "Ajuda quando você tem uma ideia de entrada, mas não quer apostar no achismo. Você monta a sequência, escolhe entrada, gale e proteção no empate, e vê o desempenho real antes de usar dinheiro na mesa.",
-  },
-  {
-    image: "/login-banners/2.png",
-    title: "Leitura Neural + Número Pagante",
-    summary: "Mostra quais números estão puxando Player, Banker ou Tie agora.",
-    body:
-      "Serve para você entender a força da mesa antes da entrada. A leitura mostra se o número está pagando no lado natural, no oposto ou no pós-empate, com placar de SG, G1, RED e sequência.",
-  },
-  {
-    image: "/login-banners/3.png",
-    title: "Surf Analyzer",
-    summary: "Ajuda a saber se a tendência ainda tem força ou se pode quebrar.",
-    body:
-      "Quando a mesa está surfando em uma cor, essa ferramenta organiza a leitura para você não seguir movimento cansado. Ela mostra continuidade, risco de quebra e contexto dos painéis Big Road, Big Eye, Small Road e Cockroach.",
-  },
-  {
-    image: "/login-banners/4.png",
-    title: "Radar de Empates",
-    summary: "Identifica pressão de Tie, multiplicadores e números que puxam empate.",
-    body:
-      "Ajuda você a enxergar quando o empate começa a ganhar força na mesa. Mostra os multiplicadores pegos no dia, os números que mais puxaram Tie e quando o cenário merece atenção.",
-  },
-  {
-    image: "/login-banners/5.png",
-    title: "Padrões de IA",
-    summary: "Mostra formações repetidas e padrões que estão quase confirmando.",
-    body:
-      "É para quem não quer ficar horas caçando sequência manualmente. A IA procura padrões recorrentes, mostra o que falta completar e aponta a leitura provável quando existe amostra real.",
-  },
-  {
-    image: "/login-banners/6.png",
-    title: "Calendário de Temperatura do Mercado",
-    summary: "Mostra se o mercado está bom por mês, semana, dia, hora e minuto.",
-    body:
-      "Ajuda você a escolher melhor o momento de operar. Antes de entrar, você consulta se aquele período está muito bom, operável ou ruim, evitando forçar entrada em janela fria.",
+    icon: Radio,
+    label: "Contexto Operacional",
+    position: "left-1/2 top-[78%] -translate-x-1/2",
+    delay: "2.8s",
   },
 ];
 
@@ -177,6 +140,7 @@ const GAME_OPTIONS = [
     imageClass: "",
   },
 ];
+
 const PARTICLES = Array.from({ length: 28 }, (_, i) => {
   const size = 2 + ((i * 7) % 4);
   const left = (i * 37) % 100;
@@ -186,10 +150,11 @@ const PARTICLES = Array.from({ length: 28 }, (_, i) => {
 });
 
 function LoginPage() {
+  const navigate = useNavigate();
   const savedUser = readUserSession();
   const loginCardRef = useRef<HTMLDivElement | null>(null);
   const plansCardRef = useRef<HTMLDivElement | null>(null);
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register" | "purchase">("login");
   const [authPanelOpen, setAuthPanelOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState("");
@@ -202,8 +167,6 @@ function LoginPage() {
   const [checkoutLeadEmail, setCheckoutLeadEmail] = useState(savedUser.email || "");
   const [selectedCountryId, setSelectedCountryId] = useState(DEFAULT_COUNTRY_DIAL.id);
   const [whatsappPhone, setWhatsappPhone] = useState("");
-  const [slideIndex, setSlideIndex] = useState(0);
-  const slide = FEATURE_SLIDES[slideIndex];
   const selectedCountry =
     COUNTRY_DIAL_OPTIONS.find((option) => option.id === selectedCountryId) ?? DEFAULT_COUNTRY_DIAL;
 
@@ -232,25 +195,19 @@ function LoginPage() {
     };
   }, []);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setSlideIndex((current) => (current + 1) % FEATURE_SLIDES.length);
-    }, 6500);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  function goSlide(direction: -1 | 1) {
-    setSlideIndex((current) => (current + direction + FEATURE_SLIDES.length) % FEATURE_SLIDES.length);
-  }
   const paidPlans = [...plans]
     .filter((plan) => plan.id !== "free")
     .sort((a, b) => {
-      const order = new Map([["vip", 0], ["premium", 1]]);
+      const order = new Map([
+        ["vip", 0],
+        ["premium", 1],
+      ]);
       return (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99);
     });
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setMode("login");
     setLoading(true);
     setNotice("");
     setPendingAccess(null);
@@ -260,9 +217,9 @@ function LoginPage() {
     setPrefillEmail(email);
     setCheckoutLeadEmail(email);
     try {
-      const access = await checkClientAccess(email, password);
+      const access = await checkClientAccess(email, password, LOGIN_REQUEST_TIMEOUT_MS);
       if (!access.registered) {
-        if (!salesClosed) setMode("register");
+        setMode("login");
         setNotice(
           salesClosed
             ? "Vagas encerradas no momento. Entre na fila de espera para a próxima abertura."
@@ -270,16 +227,33 @@ function LoginPage() {
         );
         return;
       }
-      if (salesClosed && !canEnterWhenSalesClosed(access)) {
-        setNotice("Vagas encerradas. Somente clientes Premium com acesso ativo conseguem entrar na plataforma.");
+      const validated = validateLoginAccess(access);
+      if (!validated.ok) {
+        setNotice(validated.message);
         return;
       }
-      saveAccessSession(access, email);
-      window.location.href = "/app";
+
+      if (salesClosed && !canEnterWhenSalesClosed(validated.access)) {
+        setNotice(
+          "Vagas encerradas. Somente clientes Premium com acesso ativo conseguem entrar na plataforma.",
+        );
+        return;
+      }
+
+      try {
+        saveAccessSession(validated.access, email);
+      } catch {
+        setNotice("Login feito, mas não foi possível salvar sua sessão local. Tente novamente.");
+        return;
+      }
+
+      await navigate({ to: "/app", replace: true });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Não foi possível validar seu acesso.";
+      const message = resolveLoginErrorMessage(err);
       if (!salesClosed && shouldOpenRegisterForPasswordSetup(message)) {
         setMode("register");
+      } else {
+        setMode("login");
       }
       setNotice(message);
     } finally {
@@ -320,20 +294,38 @@ function LoginPage() {
       return;
     }
     try {
-      const access = await registerClient({
-        full_name: fullName,
-        email,
-        password,
-        phone: phoneDigits,
-        phone_full: buildInternationalPhone(selectedCountry.code, phoneDigits),
-        city: String(data.get("city") || "").trim(),
-        country: selectedCountry.country,
-        country_code: selectedCountry.code,
-      });
-      saveAccessSession(access, email);
-      window.location.href = "/app";
+      const access = await registerClient(
+        {
+          full_name: fullName,
+          email,
+          password,
+          phone: phoneDigits,
+          phone_full: buildInternationalPhone(selectedCountry.code, phoneDigits),
+          city: String(data.get("city") || "").trim(),
+          country: selectedCountry.country,
+          country_code: selectedCountry.code,
+        },
+        LOGIN_REQUEST_TIMEOUT_MS,
+      );
+
+      const validated = validateLoginAccess(access);
+      if (!validated.ok) {
+        setNotice(validated.message);
+        return;
+      }
+
+      try {
+        saveAccessSession(validated.access, email);
+      } catch {
+        setNotice(
+          "Cadastro concluído, mas não foi possível salvar sua sessão local. Tente entrar novamente.",
+        );
+        return;
+      }
+
+      await navigate({ to: "/app", replace: true });
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Não foi possível concluir o cadastro.");
+      setNotice(resolveLoginErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -342,7 +334,7 @@ function LoginPage() {
   function enterDemo() {
     if (!pendingAccess) return;
     saveAccessSession(pendingAccess);
-    window.location.href = "/app";
+    void navigate({ to: "/app", replace: true });
   }
 
   function goCheckout() {
@@ -352,11 +344,11 @@ function LoginPage() {
     }
     if (pendingAccess) {
       saveAccessSession(pendingAccess);
-      window.location.href = "/app/planos";
+      void navigate({ to: "/app/planos" });
       return;
     }
-    setNotice("Escolha um plano abaixo e informe seu e-mail para abrir o checkout.");
-    plansCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setMode("purchase");
+    setNotice("Escolha um plano e informe seu e-mail para abrir o checkout.");
   }
 
   async function startDirectCheckout(plan: BillingPlan) {
@@ -395,7 +387,7 @@ function LoginPage() {
       window.location.href = WAITLIST_URL;
       return;
     }
-    setMode("register");
+    setMode("purchase");
     setAuthPanelOpen(true);
   }
 
@@ -424,7 +416,9 @@ function LoginPage() {
     const detectedCountry = detectCountryDialOptionFromPhone(value);
     if (detectedCountry) {
       setSelectedCountryId(detectedCountry.id);
-      setWhatsappPhone(maskPhoneForCountry(stripCountryCodeFromPhone(value, detectedCountry), detectedCountry));
+      setWhatsappPhone(
+        maskPhoneForCountry(stripCountryCodeFromPhone(value, detectedCountry), detectedCountry),
+      );
       return;
     }
     setWhatsappPhone(maskPhoneForCountry(value, selectedCountry));
@@ -434,7 +428,7 @@ function LoginPage() {
     <div className="landing-safe relative min-h-screen overflow-hidden bg-[#020617] text-white">
       <div
         className="absolute inset-0 bg-cover bg-center opacity-75"
-        style={{ backgroundImage: "url('/assets/dark-tech-bg.png')" }}
+        style={{ backgroundImage: "url('/assets/dark-tech-bg.jpg')" }}
       />
       <div
         className="absolute inset-0 pointer-events-none"
@@ -469,17 +463,13 @@ function LoginPage() {
         <NeuralLines cx={42} cy={48} count={14} opacity={0.34} reach={1.05} />
       </div>
 
+      <ResponsibleGamingNotice />
+
       <main className="landing-safe-inner relative z-10 mx-auto flex min-h-screen flex-col px-5 py-5 sm:px-6 lg:px-10">
         <header className="flex min-w-0 items-center justify-between gap-3">
           <SniperLogoMark className="h-12 w-auto max-w-[170px] min-w-0 sm:h-16 sm:max-w-[280px] drop-shadow-[0_0_24px_rgba(0,229,255,0.24)]" />
           <div className="flex items-center gap-2">
             <div className="hidden min-w-[230px] grid-cols-2 rounded-2xl border border-neon-cyan/25 bg-black/35 p-1 shadow-[0_0_22px_rgba(0,229,255,0.1)] backdrop-blur-xl lg:grid">
-              <a
-                href="/app"
-                className="rounded-xl px-4 py-2 text-center text-xs font-black uppercase tracking-wide text-white transition btn-primary-grad"
-              >
-                Ver sinais
-              </a>
               <button
                 type="button"
                 onClick={focusLogin}
@@ -487,50 +477,50 @@ function LoginPage() {
               >
                 Entrar
               </button>
+              {!salesClosed && (
+                <button
+                  type="button"
+                  onClick={focusRegister}
+                  className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-wide text-neon-purple transition hover:bg-neon-purple/10"
+                >
+                  Cadastro
+                </button>
+              )}
             </div>
-            <a
-              href="/app"
-              className="inline-flex lg:hidden rounded-xl px-3 py-2 text-xs font-black uppercase btn-primary-grad"
-            >
-              Sinais
-            </a>
           </div>
         </header>
 
         <section className="grid min-w-0 flex-1 items-center gap-5 py-4 sm:gap-8 sm:py-8 lg:grid-cols-1 lg:gap-10 lg:py-10">
           <div className="min-w-0">
-            <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,0.82fr)_minmax(520px,1.18fr)]">
+            <div className="grid min-w-0 items-start gap-6">
               <div className="order-1 min-w-0 xl:-mt-4">
-                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.18em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)] sm:text-[10px] sm:tracking-[0.2em]">
+                <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-neon-purple/35 bg-neon-purple/10 px-3 py-2 text-[9px] font-black uppercase tracking-[0.14em] text-neon-cyan shadow-[0_0_22px_rgba(168,85,247,0.18)] sm:text-[10px] sm:tracking-[0.18em]">
                   <Zap className="size-3.5 shrink-0" />
-                  <span className="truncate">Tecnologia que analisa. Inteligência que antecipa.</span>
+                  <span className="text-left leading-4">
+                    Plataforma de análise baseada em Inteligência Artificial
+                  </span>
                 </div>
 
-                <h1 className="landing-title mt-4 max-w-3xl font-black uppercase leading-[0.95] tracking-tight text-white sm:mt-5 sm:text-6xl lg:text-7xl">
-                  NÃO É SORTE. É MÉTODO.
+                <h1 className="landing-title mt-5 max-w-3xl font-black uppercase leading-[0.95] tracking-tight text-white sm:mt-6 sm:text-6xl lg:text-7xl">
+                  ANÁLISE ANTES DA DECISÃO.
                 </h1>
-                <p className="landing-subtitle mt-3 max-w-2xl font-black uppercase leading-tight text-gradient-brand sm:mt-4 sm:text-3xl">
-                  Crie suas próprias estratégias, valide no histórico e leia a mesa em tempo real com o Sniper BO IA.
+                <p className="landing-subtitle mt-3 max-w-xl font-black uppercase leading-tight text-gradient-brand sm:mt-4 sm:text-3xl">
+                  Mais contexto. Menos achismo.
                 </p>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:mt-4 sm:text-base">
-                  Enquanto a maioria aposta no impulso, o SNIPER BO IA cruza leitura neural, tendência, surf e risco para entregar contexto operacional em tempo real.
+                <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:mt-5 sm:text-base">
+                  O Sniper BO IA reúne ferramentas de análise, validação histórica e monitoramento
+                  em tempo real para auxiliar no estudo de estratégias com base em dados e contexto
+                  operacional.
                 </p>
-                <p className="mt-2 max-w-xl text-xs leading-5 text-slate-400 sm:mt-3 sm:text-sm">
-                  Dados não eliminam risco. Mas reduzem o achismo antes da decisão.
+                <p className="mt-3 max-w-2xl text-xs leading-5 text-slate-400 sm:mt-4 sm:text-sm">
+                  Crie estratégias, valide comportamentos históricos e acompanhe dados em tempo
+                  real com apoio da inteligência artificial.
                 </p>
               </div>
 
-              <LandingFeatureCarousel
-                className="order-3 xl:order-2 xl:row-span-2"
-                slide={slide}
-                slideIndex={slideIndex}
-                onSelect={setSlideIndex}
-                onStep={goSlide}
-              />
-
               <GameAvailabilityStrip className="order-4 xl:order-3 xl:-mt-1" />
 
-              <div className="order-2 flex min-w-0 flex-col gap-2 sm:flex-row xl:order-4 xl:-mt-2">
+              <div className="order-2 flex min-w-0 max-w-2xl flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
                   onClick={requestAccess}
@@ -548,7 +538,6 @@ function LoginPage() {
                 </button>
               </div>
             </div>
-
 
             <div className="mt-5 hidden min-w-0 rounded-3xl border border-neon-purple/30 bg-black/45 p-4 shadow-[0_0_34px_rgba(168,85,247,0.12)] backdrop-blur-xl sm:block">
               <p className="text-lg font-black uppercase leading-tight text-white sm:text-2xl">
@@ -568,239 +557,339 @@ function LoginPage() {
                 className="absolute inset-0 cursor-default"
                 onClick={() => setAuthPanelOpen(false)}
               />
-              <aside ref={loginCardRef} className="relative z-10 max-h-[92vh] min-w-0 w-full max-w-md overflow-y-auto rounded-t-[2rem] sm:max-w-lg sm:rounded-[2rem]">
-            <GlassCard className="max-w-full rounded-[2rem] border-neon-purple/35 bg-background/80 p-5 shadow-[0_0_44px_rgba(168,85,247,0.18)] sm:p-7">
-              <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-neon-purple/80 to-transparent" />
-              <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10">
-                <LockKeyhole className="size-6 text-neon-cyan" />
-              </div>
-              <div className="text-center">
-                <h2 className="text-2xl font-black text-white">{mode === "register" && !salesClosed ? "Criar cadastro" : "Acesso Premium"}</h2>
-                <p className="mt-2 text-xs leading-5 text-slate-400">
-                  {mode === "register" && !salesClosed
-                    ? "Cadastre seus dados para solicitar acesso ao SNIPER BO IA."
-                    : "Entre com sua conta para acessar o painel do SNIPER BO IA."}
-                </p>
-              </div>
+              <aside
+                ref={loginCardRef}
+                className="relative z-10 max-h-[92vh] min-w-0 w-full max-w-md overflow-y-auto rounded-t-[2rem] sm:max-w-lg sm:rounded-[2rem]"
+              >
+                <GlassCard className="max-w-full rounded-[2rem] border-neon-purple/35 bg-background/80 p-5 shadow-[0_0_44px_rgba(168,85,247,0.18)] sm:p-7">
+                  <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-transparent via-neon-purple/80 to-transparent" />
+                  <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10">
+                    <LockKeyhole className="size-6 text-neon-cyan" />
+                  </div>
+                  <div className="text-center">
+                    <h2 className="text-2xl font-black text-white">
+                      {mode === "register" && !salesClosed
+                        ? "Criar cadastro"
+                        : mode === "purchase" && !salesClosed
+                          ? "Escolha seu plano"
+                          : "Acesso Premium"}
+                    </h2>
+                    <p className="mt-2 text-xs leading-5 text-slate-400">
+                      {mode === "register" && !salesClosed
+                        ? "Cadastre seus dados para solicitar acesso ao SNIPER BO IA."
+                        : mode === "purchase" && !salesClosed
+                          ? "Informe seus dados e escolha o plano ideal para abrir o checkout."
+                          : "Entre com sua conta para acessar o painel do SNIPER BO IA."}
+                    </p>
+                  </div>
 
-              <div className={`mt-5 mb-4 grid rounded-2xl border border-border/70 bg-secondary/35 p-1 ${salesClosed ? "grid-cols-1" : "grid-cols-2"}`}>
-                <button
-                  type="button"
-                  onClick={() => setMode("login")}
-                  className={`rounded-xl py-2 text-xs font-black uppercase transition ${mode === "login" || salesClosed ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  Entrar
-                </button>
-                {!salesClosed && (
-                  <button
-                    type="button"
-                    onClick={() => setMode("register")}
-                    className={`rounded-xl py-2 text-xs font-black uppercase transition ${mode === "register" ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
+                  <div
+                    className={`mt-5 mb-4 grid rounded-2xl border border-border/70 bg-secondary/35 p-1 ${salesClosed ? "grid-cols-1" : "grid-cols-3"}`}
                   >
-                    Cadastro
-                  </button>
-                )}
-              </div>
-
-              {mode === "login" || salesClosed ? (
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <LoginField icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={prefillEmail} placeholder="seu@email.com" />
-                  <LoginField icon={<ShieldCheck className="size-4" />} label="Senha" name="password" type="password" placeholder="sua senha" />
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl py-3.5 text-sm font-black uppercase tracking-wide glow-blue disabled:opacity-60"
-                  >
-                    <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
-                    {loading ? <Loader2 className="relative size-4 animate-spin" /> : <ShieldCheck className="relative size-4" />}
-                    <span className="relative">Entrar no painel</span>
-                  </button>
-                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 text-xs">
                     <button
                       type="button"
-                      onClick={() => window.open(WAITLIST_URL, "_blank", "noopener,noreferrer")}
-                      className="text-slate-400 transition hover:text-neon-cyan"
+                      onClick={() => setMode("login")}
+                      className={`rounded-xl py-2 text-xs font-black uppercase transition ${mode === "login" || salesClosed ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
                     >
-                      Recuperar senha
+                      Entrar
                     </button>
-                    <a href={WAITLIST_URL} target="_blank" rel="noreferrer" className="text-neon-cyan transition hover:text-neon-blue">
-                      Suporte oficial
-                    </a>
-                  </div>
-                </form>
-              ) : (
-                <form onSubmit={handleRegister} className="space-y-3">
-                  <LoginField icon={<UserPlus className="size-4" />} label="Nome completo" name="full_name" placeholder="Nome completo" />
-                  <LoginField key={`register-email-${prefillEmail}`} icon={<Mail className="size-4" />} label="E-mail" name="email" type="email" defaultValue={prefillEmail} placeholder="seu@email.com" />
-                  <LoginField icon={<KeyRound className="size-4" />} label="Criar senha" name="password" type="password" placeholder="mínimo 4 caracteres" />
-                  <LoginField icon={<ShieldCheck className="size-4" />} label="Confirmar senha" name="password_confirm" type="password" placeholder="repita sua senha" />
-                  <CountryDialField
-                    icon={<Radio className="size-4" />}
-                    selectedId={selectedCountry.id}
-                    onChange={changeCountry}
-                  />
-                  <WhatsAppField
-                    icon={<Phone className="size-4" />}
-                    countryCode={selectedCountry.code}
-                    value={whatsappPhone}
-                    onChange={changeWhatsapp}
-                    placeholder={selectedCountry.id === "BR" ? "67 99230-8362" : "número sem DDI"}
-                  />
-                  <input type="hidden" name="country" value={selectedCountry.country} />
-                  <input type="hidden" name="country_code" value={selectedCountry.code} />
-                  <input type="hidden" name="phone_full" value={buildInternationalPhone(selectedCountry.code, whatsappPhone)} />
-                  <LoginField icon={<MapPin className="size-4" />} label="Cidade" name="city" placeholder="Cidade" />
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl py-3.5 text-sm font-black uppercase tracking-wide glow-blue disabled:opacity-60"
-                  >
-                    <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
-                    {loading ? <Loader2 className="relative size-4 animate-spin" /> : <UserPlus className="relative size-4" />}
-                    <span className="relative">Cadastrar e continuar</span>
-                  </button>
-                </form>
-              )}
-
-              {notice && (
-                <div className="mt-4 flex gap-2 rounded-2xl border border-warning/35 bg-warning/10 px-3 py-2 text-xs text-warning">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                  <span>{notice}</span>
-                </div>
-              )}
-
-              {pendingAccess && !salesClosed && (
-                <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={goCheckout}
-                    className="btn-gold-grad inline-flex w-full items-center justify-center gap-2 rounded-2xl px-3 py-3 text-center text-xs font-black glow-gold"
-                  >
-                    <Crown className="size-4" /> Ir para checkout
-                  </button>
-                  <button
-                    type="button"
-                    onClick={enterDemo}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-3 text-center text-xs font-black text-neon-cyan"
-                  >
-                    <Sparkles className="size-4" /> Entrar no demo
-                  </button>
-                </div>
-              )}
-
-              {!salesClosed && (
-                <div
-                  ref={plansCardRef}
-                  className="mt-5 rounded-2xl border border-gold/30 bg-gold/10 p-4 text-left"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-gold/35 bg-gold/15">
-                      <Crown className="size-5 text-gold" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm font-black uppercase text-white">Comprar agora</div>
-                      <p className="mt-1 text-xs leading-5 text-slate-400">
-                        Veja os planos e abra o checkout sem precisar entrar no painel.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <input
-                      value={checkoutLeadName}
-                      onChange={(event) => setCheckoutLeadName(event.target.value)}
-                      placeholder="Nome"
-                      className="min-h-11 rounded-xl border border-border/70 bg-background/70 px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-gold/70"
-                    />
-                    <input
-                      value={checkoutLeadEmail}
-                      onChange={(event) => setCheckoutLeadEmail(event.target.value)}
-                      placeholder="Email para compra"
-                      type="email"
-                      inputMode="email"
-                      className="min-h-11 rounded-xl border border-border/70 bg-background/70 px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-gold/70"
-                    />
-                  </div>
-
-                  <div className="mt-3 grid gap-2">
-                    {paidPlans.map((plan) => (
+                    {!salesClosed && (
                       <button
-                        key={plan.id}
                         type="button"
-                        onClick={() => startDirectCheckout(plan)}
-                        disabled={checkoutLoadingPlan === plan.id || !plan.checkoutEnabled}
-                        className="flex min-h-[72px] w-full items-center justify-between gap-3 rounded-2xl border border-gold/30 bg-black/35 px-3 py-3 text-left transition hover:border-gold/60 hover:bg-gold/10 disabled:cursor-wait disabled:opacity-70"
+                        onClick={() => setMode("register")}
+                        className={`rounded-xl py-2 text-xs font-black uppercase transition ${mode === "register" ? "btn-primary-grad" : "text-muted-foreground hover:text-foreground"}`}
                       >
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-black uppercase text-white">{plan.name}</span>
-                            <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-black uppercase text-gold">
-                              {formatMoney(plan.amount, plan.currency)}/mês
-                            </span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-1.5">
-                            {plan.features.slice(0, 3).map((feature) => (
-                              <span key={feature} className="inline-flex items-center gap-1 text-[10px] text-slate-400">
-                                <Check className="size-3 text-gold" />
-                                {feature}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <span className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-gold px-3 py-2 text-[11px] font-black uppercase text-black">
-                          {checkoutLoadingPlan === plan.id ? (
-                            <Loader2 className="size-3.5 animate-spin" />
-                          ) : (
-                            <Crown className="size-3.5" />
-                          )}
-                          Checkout
-                        </span>
+                        Cadastro
                       </button>
-                    ))}
+                    )}
+                    {!salesClosed && (
+                      <button
+                        type="button"
+                        onClick={() => setMode("purchase")}
+                        className={`rounded-xl py-2 text-xs font-black uppercase transition ${mode === "purchase" ? "btn-gold-grad text-black" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        Planos
+                      </button>
+                    )}
                   </div>
-                </div>
-              )}
 
-              <div className="mt-5 border-t border-border/60 pt-4 text-center text-[11px] text-slate-400">
-                Acesso exclusivo para clientes ativos.
-                {!salesClosed && (
-                  <span>
-                    {" "}A partir de <span className="font-semibold text-gold">R$ 297/mês</span>.
-                  </span>
+                  {(mode === "login" || salesClosed) && (
+                    <form onSubmit={handleLogin} className="space-y-4">
+                      <LoginField
+                        icon={<Mail className="size-4" />}
+                        label="E-mail"
+                        name="email"
+                        type="email"
+                        defaultValue={prefillEmail}
+                        placeholder="seu@email.com"
+                      />
+                      <LoginField
+                        icon={<ShieldCheck className="size-4" />}
+                        label="Senha"
+                        name="password"
+                        type="password"
+                        placeholder="sua senha"
+                      />
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl py-3.5 text-sm font-black uppercase tracking-wide glow-blue disabled:opacity-60"
+                      >
+                        <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
+                        {loading ? (
+                          <Loader2 className="relative size-4 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="relative size-4" />
+                        )}
+                        <span className="relative">Entrar no painel</span>
+                      </button>
+                      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => window.open(WAITLIST_URL, "_blank", "noopener,noreferrer")}
+                          className="text-slate-400 transition hover:text-neon-cyan"
+                        >
+                          Recuperar senha
+                        </button>
+                        <a
+                          href={WAITLIST_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-neon-cyan transition hover:text-neon-blue"
+                        >
+                          Suporte oficial
+                        </a>
+                      </div>
+                    </form>
+                  )}
+
+                  {mode === "register" && !salesClosed && (
+                    <form onSubmit={handleRegister} className="space-y-3">
+                      <LoginField
+                        icon={<UserPlus className="size-4" />}
+                        label="Nome completo"
+                        name="full_name"
+                        placeholder="Nome completo"
+                      />
+                      <LoginField
+                        key={`register-email-${prefillEmail}`}
+                        icon={<Mail className="size-4" />}
+                        label="E-mail"
+                        name="email"
+                        type="email"
+                        defaultValue={prefillEmail}
+                        placeholder="seu@email.com"
+                      />
+                      <LoginField
+                        icon={<KeyRound className="size-4" />}
+                        label="Criar senha"
+                        name="password"
+                        type="password"
+                        placeholder="mínimo 4 caracteres"
+                      />
+                      <LoginField
+                        icon={<ShieldCheck className="size-4" />}
+                        label="Confirmar senha"
+                        name="password_confirm"
+                        type="password"
+                        placeholder="repita sua senha"
+                      />
+                      <CountryDialField
+                        icon={<Radio className="size-4" />}
+                        selectedId={selectedCountry.id}
+                        onChange={changeCountry}
+                      />
+                      <WhatsAppField
+                        icon={<Phone className="size-4" />}
+                        countryCode={selectedCountry.code}
+                        value={whatsappPhone}
+                        onChange={changeWhatsapp}
+                        placeholder={
+                          selectedCountry.id === "BR" ? "67 99230-8362" : "número sem DDI"
+                        }
+                      />
+                      <input type="hidden" name="country" value={selectedCountry.country} />
+                      <input type="hidden" name="country_code" value={selectedCountry.code} />
+                      <input
+                        type="hidden"
+                        name="phone_full"
+                        value={buildInternationalPhone(selectedCountry.code, whatsappPhone)}
+                      />
+                      <LoginField
+                        icon={<MapPin className="size-4" />}
+                        label="Cidade"
+                        name="city"
+                        placeholder="Cidade"
+                      />
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="btn-primary-grad group relative flex min-h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl py-3.5 text-sm font-black uppercase tracking-wide glow-blue disabled:opacity-60"
+                      >
+                        <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
+                        {loading ? (
+                          <Loader2 className="relative size-4 animate-spin" />
+                        ) : (
+                          <UserPlus className="relative size-4" />
+                        )}
+                        <span className="relative">Cadastrar e continuar</span>
+                      </button>
+                    </form>
+                  )}
+
+                  {notice && (
+                    <div className="mt-4 flex gap-2 rounded-2xl border border-warning/35 bg-warning/10 px-3 py-2 text-xs text-warning">
+                      <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                      <span>{notice}</span>
+                    </div>
+                  )}
+
+                  {mode === "purchase" && pendingAccess && !salesClosed && (
+                    <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={goCheckout}
+                        className="btn-gold-grad inline-flex w-full items-center justify-center gap-2 rounded-2xl px-3 py-3 text-center text-xs font-black glow-gold"
+                      >
+                        <Crown className="size-4" /> Ir para checkout
+                      </button>
+                      <button
+                        type="button"
+                        onClick={enterDemo}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-neon-cyan/35 bg-neon-cyan/10 px-3 py-3 text-center text-xs font-black text-neon-cyan"
+                      >
+                        <Sparkles className="size-4" /> Entrar no demo
+                      </button>
+                    </div>
+                  )}
+
+                  {mode === "purchase" && !salesClosed && (
+                    <div
+                      ref={plansCardRef}
+                      className="mt-5 rounded-2xl border border-gold/30 bg-gold/10 p-4 text-left"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-gold/35 bg-gold/15">
+                          <Crown className="size-5 text-gold" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-black uppercase text-white">
+                            Comprar agora
+                          </div>
+                          <p className="mt-1 text-xs leading-5 text-slate-400">
+                            Veja os planos e abra o checkout sem precisar entrar no painel.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <input
+                          value={checkoutLeadName}
+                          onChange={(event) => setCheckoutLeadName(event.target.value)}
+                          placeholder="Nome"
+                          className="min-h-11 rounded-xl border border-border/70 bg-background/70 px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-gold/70"
+                        />
+                        <input
+                          value={checkoutLeadEmail}
+                          onChange={(event) => setCheckoutLeadEmail(event.target.value)}
+                          placeholder="Email para compra"
+                          type="email"
+                          inputMode="email"
+                          className="min-h-11 rounded-xl border border-border/70 bg-background/70 px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-gold/70"
+                        />
+                      </div>
+
+                      <div className="mt-3 grid gap-2">
+                        {paidPlans.map((plan) => (
+                          <button
+                            key={plan.id}
+                            type="button"
+                            onClick={() => startDirectCheckout(plan)}
+                            disabled={checkoutLoadingPlan === plan.id || !plan.checkoutEnabled}
+                            className="flex min-h-[72px] w-full items-center justify-between gap-3 rounded-2xl border border-gold/30 bg-black/35 px-3 py-3 text-left transition hover:border-gold/60 hover:bg-gold/10 disabled:cursor-wait disabled:opacity-70"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-black uppercase text-white">
+                                  {plan.name}
+                                </span>
+                                <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-black uppercase text-gold">
+                                  {formatMoney(plan.amount, plan.currency)}/mês
+                                </span>
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                {plan.features.slice(0, 3).map((feature) => (
+                                  <span
+                                    key={feature}
+                                    className="inline-flex items-center gap-1 text-[10px] text-slate-400"
+                                  >
+                                    <Check className="size-3 text-gold" />
+                                    {feature}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                            <span className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-gold px-3 py-2 text-[11px] font-black uppercase text-black">
+                              {checkoutLoadingPlan === plan.id ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Crown className="size-3.5" />
+                              )}
+                              Checkout
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-5 border-t border-border/60 pt-4 text-center text-[11px] text-slate-400">
+                    {mode === "purchase" && !salesClosed ? (
+                      <>
+                        Planos a partir de{" "}
+                        <span className="font-semibold text-gold">R$ 297/mês</span>.
+                      </>
+                    ) : mode === "register" && !salesClosed ? (
+                      "Cadastro protegido para solicitar seu acesso."
+                    ) : (
+                      "Acesso exclusivo para clientes ativos."
+                    )}
+                  </div>
+                </GlassCard>
+
+                {mode === "purchase" && !salesClosed && (
+                  <GlassCard className="mt-4 max-w-full rounded-3xl border-warning/30 bg-black/55 p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-warning/35 bg-warning/10">
+                        <Crown className="size-5 text-warning" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black uppercase text-white">Vagas limitadas</h3>
+                        <p className="mt-1 text-xs leading-5 text-slate-400">
+                          Liberamos novas vagas apenas em períodos específicos. Quando fechar, não
+                          sabemos quando abriremos novamente.
+                        </p>
+                      </div>
+                    </div>
+                    <a
+                      href={WAITLIST_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-warning/40 bg-warning/10 px-4 text-xs font-black uppercase tracking-wide text-warning transition hover:bg-warning/15"
+                    >
+                      Entrar na fila de espera
+                    </a>
+                  </GlassCard>
                 )}
-              </div>
-            </GlassCard>
 
-            <GlassCard className="mt-4 max-w-full rounded-3xl border-warning/30 bg-black/55 p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-warning/35 bg-warning/10">
-                  <Crown className="size-5 text-warning" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-black uppercase text-white">Vagas limitadas</h3>
-                  <p className="mt-1 text-xs leading-5 text-slate-400">
-                    Liberamos novas vagas apenas em períodos específicos. Quando fechar, não sabemos quando abriremos novamente.
-                  </p>
-                </div>
-              </div>
-              <a
-                href={WAITLIST_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-warning/40 bg-warning/10 px-4 text-xs font-black uppercase tracking-wide text-warning transition hover:bg-warning/15"
-              >
-                Entrar na fila de espera
-              </a>
-            </GlassCard>
-
-              <button
-                type="button"
-                onClick={() => setAuthPanelOpen(false)}
-                aria-label="Fechar"
-                className="absolute right-3 top-3 z-20 inline-flex size-9 items-center justify-center rounded-full border border-border/70 bg-black/55 text-slate-300 transition hover:border-neon-cyan/50 hover:text-neon-cyan"
-              >
-                <X className="size-4" />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setAuthPanelOpen(false)}
+                  aria-label="Fechar"
+                  className="absolute right-3 top-3 z-20 inline-flex size-9 items-center justify-center rounded-full border border-border/70 bg-black/55 text-slate-300 transition hover:border-neon-cyan/50 hover:text-neon-cyan"
+                >
+                  <X className="size-4" />
+                </button>
               </aside>
             </div>
           )}
@@ -831,14 +920,30 @@ function LoginPage() {
           <div className="mx-auto mb-4 flex max-w-3xl flex-col items-center gap-3 sm:flex-row sm:justify-between">
             <SniperLogoMark className="h-10 w-auto max-w-[180px] opacity-90" />
             <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
-              <a href="#ferramentas" className="hover:text-neon-cyan">Ferramentas</a>
-              <a href="#como-funciona" className="hover:text-neon-cyan">Como Funciona</a>
-              <a href="#planos" className="hover:text-neon-cyan">Planos</a>
-              <a href={WAITLIST_URL} target="_blank" rel="noreferrer" className="hover:text-neon-cyan">Suporte</a>
+              <a href="#ferramentas" className="hover:text-neon-cyan">
+                Ferramentas
+              </a>
+              <a href="#como-funciona" className="hover:text-neon-cyan">
+                Como Funciona
+              </a>
+              <a href="#planos" className="hover:text-neon-cyan">
+                Planos
+              </a>
+              <a
+                href={WAITLIST_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-neon-cyan"
+              >
+                Suporte
+              </a>
             </div>
           </div>
-          O SNIPER BO IA é uma ferramenta de leitura e análise operacional. Não existe garantia de lucro. Use sempre gestão de banca e responsabilidade.
-          <div className="mt-2 text-[10px] text-slate-600">© {new Date().getFullYear()} SNIPER BO IA. Todos os direitos reservados.</div>
+          O SNIPER BO IA é uma ferramenta de leitura e análise operacional. Não existe garantia de
+          lucro. Use sempre gestão de banca e responsabilidade.
+          <div className="mt-2 text-[10px] text-slate-600">
+            © {new Date().getFullYear()} SNIPER BO IA. Todos os direitos reservados.
+          </div>
         </footer>
       </main>
     </div>
@@ -846,11 +951,31 @@ function LoginPage() {
 }
 
 const landingTools = [
-  { icon: Target, title: "VALIDADOR DE PADRÕES / ESTRATÉGIAS", desc: "Teste combinações, valide entradas no histórico e descubra quais padrões tiveram melhor desempenho." },
-  { icon: BrainCircuit, title: "LEITURA NEURAL", desc: "Analisa o comportamento da mesa e entrega uma leitura mais objetiva para apoiar sua tomada de decisão." },
-  { icon: Bell, title: "RADAR DE EMPATES", desc: "Identifica pressão de Tie e destaca momentos em que o empate ganha força na mesa." },
-  { icon: Waves, title: "SURF ANALYZER", desc: "Mostra tendência, continuidade, esticamento e risco de virada para você ler o fluxo do jogo." },
-  { icon: Sparkles, title: "BUSCA DE PADRÕES IA", desc: "Encontra repetições e estruturas recorrentes para revelar oportunidades com apoio da inteligência artificial." },
+  {
+    icon: Target,
+    title: "VALIDADOR DE PADRÕES / ESTRATÉGIAS",
+    desc: "Teste combinações, valide entradas no histórico e descubra quais padrões tiveram melhor desempenho.",
+  },
+  {
+    icon: BrainCircuit,
+    title: "LEITURA NEURAL",
+    desc: "Analisa o comportamento da mesa e entrega uma leitura mais objetiva para apoiar sua tomada de decisão.",
+  },
+  {
+    icon: Bell,
+    title: "RADAR DE EMPATES",
+    desc: "Identifica pressão de Tie e destaca momentos em que o empate ganha força na mesa.",
+  },
+  {
+    icon: Waves,
+    title: "SURF ANALYZER",
+    desc: "Mostra tendência, continuidade, esticamento e risco de virada para você ler o fluxo do jogo.",
+  },
+  {
+    icon: Sparkles,
+    title: "BUSCA DE PADRÕES IA",
+    desc: "Encontra repetições e estruturas recorrentes para revelar oportunidades com apoio da inteligência artificial.",
+  },
 ];
 
 function LandingToolsSection() {
@@ -864,7 +989,8 @@ function LandingToolsSection() {
           A plataforma completa do <span className="text-gradient-brand">Sniper BO IA</span>
         </h2>
         <p className="mx-auto mt-3 max-w-2xl text-sm text-slate-400">
-          Ferramentas visuais, validação de padrões e leitura avançada da mesa em uma única interface.
+          Ferramentas visuais, validação de padrões e leitura avançada da mesa em uma única
+          interface.
         </p>
       </div>
     </section>
@@ -873,9 +999,17 @@ function LandingToolsSection() {
 
 const landingBenefits = [
   { icon: Activity, title: "LEITURA EM TEMPO REAL", desc: "Dados atualizados a cada segundo." },
-  { icon: Sparkles, title: "FERRAMENTAS EXCLUSIVAS", desc: "Recursos únicos para decisões melhores." },
+  {
+    icon: Sparkles,
+    title: "FERRAMENTAS EXCLUSIVAS",
+    desc: "Recursos únicos para decisões melhores.",
+  },
   { icon: Shield, title: "INTERFACE PROFISSIONAL", desc: "Design limpo, intuitivo e poderoso." },
-  { icon: TrendingUp, title: "ANÁLISE VISUAL INTELIGENTE", desc: "Transforme dados em vantagem real." },
+  {
+    icon: TrendingUp,
+    title: "ANÁLISE VISUAL INTELIGENTE",
+    desc: "Transforme dados em vantagem real.",
+  },
 ];
 
 function LandingBenefitsSection() {
@@ -883,7 +1017,10 @@ function LandingBenefitsSection() {
     <section className="relative z-10 py-8">
       <div className="mx-auto grid max-w-6xl gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {landingBenefits.map((b) => (
-          <div key={b.title} className="glass rounded-2xl border-neon-cyan/15 p-4 text-center transition hover:border-neon-cyan/40">
+          <div
+            key={b.title}
+            className="glass rounded-2xl border-neon-cyan/15 p-4 text-center transition hover:border-neon-cyan/40"
+          >
             <div className="mx-auto mb-3 flex size-10 items-center justify-center rounded-xl border border-neon-cyan/30 bg-neon-cyan/10">
               <b.icon className="size-5 text-neon-cyan" />
             </div>
@@ -897,9 +1034,21 @@ function LandingBenefitsSection() {
 }
 
 const landingSteps = [
-  { n: "01", title: "Observe a leitura da mesa", desc: "Acompanhe os dados e sinais visuais em tempo real." },
-  { n: "02", title: "Valide padrões", desc: "Use o validador e a IA para confirmar estratégias antes de entrar." },
-  { n: "03", title: "Tome decisões com clareza", desc: "Entre com mais confiança usando múltiplas ferramentas de análise." },
+  {
+    n: "01",
+    title: "Observe a leitura da mesa",
+    desc: "Acompanhe os dados e sinais visuais em tempo real.",
+  },
+  {
+    n: "02",
+    title: "Valide padrões",
+    desc: "Use o validador e a IA para confirmar estratégias antes de entrar.",
+  },
+  {
+    n: "03",
+    title: "Tome decisões com clareza",
+    desc: "Entre com mais confiança usando múltiplas ferramentas de análise.",
+  },
 ];
 
 function LandingHowItWorksSection() {
@@ -915,10 +1064,17 @@ function LandingHowItWorksSection() {
       </div>
       <div className="mx-auto mt-8 grid max-w-6xl gap-4 md:grid-cols-3">
         {landingSteps.map((step) => (
-          <div key={step.n} className="glass relative overflow-hidden rounded-2xl border-neon-purple/20 p-6 transition hover:border-neon-purple/50">
-            <div className="absolute -right-2 -top-4 text-7xl font-black text-neon-purple/10">{step.n}</div>
+          <div
+            key={step.n}
+            className="glass relative overflow-hidden rounded-2xl border-neon-purple/20 p-6 transition hover:border-neon-purple/50"
+          >
+            <div className="absolute -right-2 -top-4 text-7xl font-black text-neon-purple/10">
+              {step.n}
+            </div>
             <div className="relative">
-              <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">Passo {step.n}</div>
+              <div className="text-xs font-black uppercase tracking-[0.2em] text-neon-cyan">
+                Passo {step.n}
+              </div>
               <div className="mt-2 text-lg font-black text-white">{step.title}</div>
               <p className="mt-2 text-sm leading-6 text-slate-400">{step.desc}</p>
             </div>
@@ -938,8 +1094,12 @@ function LandingPlanSection({ onCta }: { onCta: () => void }) {
           <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl border border-gold/40 bg-gold/10">
             <Crown className="size-7 text-gold" />
           </div>
-          <div className="text-xs font-black uppercase tracking-[0.2em] text-gold">Plano em destaque</div>
-          <h3 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">PLANO SNIPER BO IA</h3>
+          <div className="text-xs font-black uppercase tracking-[0.2em] text-gold">
+            Plano em destaque
+          </div>
+          <h3 className="mt-2 text-2xl font-black uppercase text-white sm:text-3xl">
+            PLANO SNIPER BO IA
+          </h3>
           <div className="mt-5 flex items-end justify-center gap-2">
             <span className="text-5xl font-black text-white sm:text-6xl">R$297</span>
             <span className="pb-2 text-sm text-slate-400">/mês</span>
@@ -948,13 +1108,22 @@ function LandingPlanSection({ onCta }: { onCta: () => void }) {
             Hoje no valor promocional. Após hoje, <span className="text-gold">R$497</span>.
           </p>
           <ul className="mx-auto mt-6 grid max-w-md gap-2 text-left">
-            {["Acesso completo ao painel operacional","Validador de padrões e estratégias","Leitura Neural e Surf Analyzer","Radar de Empates e Busca de Padrões IA"].map((f) => (
+            {[
+              "Acesso completo ao painel operacional",
+              "Validador de padrões e estratégias",
+              "Leitura Neural e Surf Analyzer",
+              "Radar de Empates e Busca de Padrões IA",
+            ].map((f) => (
               <li key={f} className="flex items-center gap-2 text-sm text-slate-300">
                 <Check className="size-4 shrink-0 text-gold" /> {f}
               </li>
             ))}
           </ul>
-          <button type="button" onClick={onCta} className="btn-gold-grad relative mt-7 inline-flex min-h-12 w-full max-w-sm items-center justify-center gap-2 overflow-hidden rounded-2xl px-6 py-3 text-sm font-black uppercase tracking-wide text-black glow-gold">
+          <button
+            type="button"
+            onClick={onCta}
+            className="btn-gold-grad relative mt-7 inline-flex min-h-12 w-full max-w-sm items-center justify-center gap-2 overflow-hidden rounded-2xl px-6 py-3 text-sm font-black uppercase tracking-wide text-black glow-gold"
+          >
             <Crown className="size-4" /> Quero acessar
           </button>
         </div>
@@ -968,10 +1137,15 @@ function LandingFinalCta({ onCta }: { onCta: () => void }) {
     <section className="relative z-10 py-12">
       <div className="mx-auto max-w-4xl rounded-3xl border border-neon-purple/30 bg-black/55 p-8 text-center shadow-[0_0_40px_rgba(168,85,247,0.18)] backdrop-blur-xl sm:p-12">
         <h2 className="text-2xl font-black uppercase leading-tight text-white sm:text-4xl">
-          Pare de operar no escuro.<br />
+          Pare de operar no escuro.
+          <br />
           <span className="text-gradient-brand">Use método, leitura e validação ao seu favor.</span>
         </h2>
-        <button type="button" onClick={onCta} className="btn-primary-grad relative mt-6 inline-flex min-h-12 items-center justify-center gap-2 overflow-hidden rounded-2xl px-8 py-3 text-sm font-black uppercase tracking-wide glow-purple">
+        <button
+          type="button"
+          onClick={onCta}
+          className="btn-primary-grad relative mt-6 inline-flex min-h-12 items-center justify-center gap-2 overflow-hidden rounded-2xl px-8 py-3 text-sm font-black uppercase tracking-wide glow-purple"
+        >
           <span className="absolute inset-0 shine opacity-60 pointer-events-none" />
           <ShieldCheck className="relative size-4" />
           <span className="relative">Acessar agora</span>
@@ -983,7 +1157,9 @@ function LandingFinalCta({ onCta }: { onCta: () => void }) {
 
 function HeroBrainShowcase({ className = "" }: { className?: string }) {
   return (
-    <div className={`relative mx-auto h-[260px] w-full max-w-[440px] overflow-hidden sm:h-[360px] ${className}`}>
+    <div
+      className={`relative mx-auto h-[260px] w-full max-w-[440px] overflow-hidden sm:h-[360px] ${className}`}
+    >
       <div className="absolute inset-0 rounded-full bg-gradient-to-br from-neon-cyan/10 via-neon-purple/10 to-transparent blur-3xl" />
       <div className="absolute left-1/2 top-1/2 flex max-w-full -translate-x-1/2 -translate-y-1/2 scale-[0.62] items-center justify-center sm:scale-100">
         <div className="absolute size-[300px] rounded-full border border-neon-blue/20 animate-orbit-slow sm:size-[390px]" />
@@ -1000,7 +1176,9 @@ function HeroBrainShowcase({ className = "" }: { className?: string }) {
           <div className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-neon-purple/30 bg-neon-purple/10">
             <card.icon className="size-4 text-neon-cyan" />
           </div>
-          <span className="text-[10px] font-black uppercase tracking-wide text-white">{card.label}</span>
+          <span className="text-[10px] font-black uppercase tracking-wide text-white">
+            {card.label}
+          </span>
         </div>
       ))}
     </div>
@@ -1044,88 +1222,13 @@ function GameAvailabilityStrip({ className = "" }: { className?: string }) {
     </div>
   );
 }
-function LandingFeatureCarousel({
-  className = "",
-  slide,
-  slideIndex,
-  onSelect,
-  onStep,
-}: {
-  className?: string;
-  slide: (typeof FEATURE_SLIDES)[number];
-  slideIndex: number;
-  onSelect: (index: number) => void;
-  onStep: (direction: -1 | 1) => void;
-}) {
-  return (
-    <GlassCard className={`overflow-hidden rounded-[1.5rem] border-neon-cyan/25 bg-background/70 p-2.5 shadow-[0_0_44px_rgba(0,229,255,0.14)] sm:rounded-[2rem] sm:p-3 ${className}`}>
-      <div className="relative overflow-hidden rounded-2xl border border-neon-cyan/20 bg-black/35">
-        <img
-          src={slide.image}
-          alt={slide.title}
-          className="aspect-[16/10] h-full w-full object-cover object-center"
-          draggable={false}
-        />
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-background/95 via-background/50 to-transparent p-4 xl:hidden">
-          <div className="text-xs font-black uppercase tracking-[0.22em] text-neon-cyan">{slide.title}</div>
-        </div>
-      </div>
-
-      <div className="mt-2 rounded-2xl border border-border/70 bg-secondary/35 p-3 sm:mt-3 sm:p-4">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-neon-cyan">
-            Ferramenta {slideIndex + 1}/{FEATURE_SLIDES.length}
-          </span>
-          <span className="rounded-full border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-1 text-[10px] font-black uppercase text-neon-cyan">
-            Saiba mais
-          </span>
-        </div>
-        <h2 className="mt-3 text-xl font-black leading-tight text-white sm:text-3xl">{slide.title}</h2>
-        <p className="mt-2 text-xs font-semibold text-neon-cyan sm:text-sm">{slide.summary}</p>
-        <p className="mt-2 text-xs leading-5 text-slate-400 sm:mt-3 sm:text-sm sm:leading-6">{slide.body}</p>
-
-        <div className="mt-4 flex items-center justify-between gap-3 sm:mt-5">
-          <div className="flex gap-1.5">
-            {FEATURE_SLIDES.map((item, index) => (
-              <button
-                key={item.title}
-                type="button"
-                onClick={() => onSelect(index)}
-                aria-label={`Ver ${item.title}`}
-                className={`h-2 rounded-full transition-all ${index === slideIndex ? "w-8 bg-neon-cyan" : "w-2 bg-slate-500/50 hover:bg-neon-cyan/70"}`}
-              />
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => onStep(-1)}
-              aria-label="Banner anterior"
-              className="inline-flex size-9 items-center justify-center rounded-xl border border-border/70 bg-secondary/50 text-slate-300 hover:border-neon-cyan/50 hover:text-neon-cyan"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onStep(1)}
-              aria-label="Próximo banner"
-              className="inline-flex size-9 items-center justify-center rounded-xl border border-border/70 bg-secondary/50 text-slate-300 hover:border-neon-cyan/50 hover:text-neon-cyan"
-            >
-              <ChevronRight className="size-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-    </GlassCard>
-  );
-}
 
 function SalesAccessLoading() {
   return (
     <div className="landing-safe relative flex min-h-screen items-center justify-center overflow-hidden bg-[#020617] px-5 py-10">
       <div
         className="absolute inset-0 bg-cover bg-center opacity-70"
-        style={{ backgroundImage: "url('/assets/dark-tech-bg.png')" }}
+        style={{ backgroundImage: "url('/assets/dark-tech-bg.jpg')" }}
       />
       <div className="absolute inset-0 bg-background/80" />
       <div className="relative w-full max-w-sm rounded-3xl border border-neon-cyan/30 bg-background/75 p-6 text-center shadow-[0_0_40px_rgba(0,229,255,0.12)] backdrop-blur-xl">
@@ -1162,6 +1265,30 @@ function shouldOpenRegisterForPasswordSetup(message: string) {
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
   return normalized.includes("conta encontrada sem senha") || normalized.includes("crie sua senha");
+}
+
+function resolveLoginErrorMessage(error: unknown) {
+  if (error instanceof AccessApiTimeoutError) {
+    return error.message;
+  }
+  if (error instanceof AccessApiError) {
+    if (error.status === 401) {
+      return error.message || "E-mail ou senha incorretos.";
+    }
+    if (error.status === 503) {
+      return (
+        error.message || "Servidor de login indisponível no momento. Tente novamente em instantes."
+      );
+    }
+    if (error.status === 0) {
+      return error.message;
+    }
+    return error.message || "Não foi possível validar seu acesso.";
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return "Não foi possível validar seu acesso.";
 }
 
 function formatMoney(amount: number, currency: string) {

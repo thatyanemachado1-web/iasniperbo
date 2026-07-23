@@ -13,8 +13,6 @@ import type { ReactNode } from "react";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { Button } from "@/components/ui/button";
-import { useDashboardData } from "@/hooks/useDashboardData";
-import { useRoundHistory } from "@/hooks/useRoundHistory";
 import { fetchNeuralCalendar } from "@/lib/neuralCalendarApi";
 import type {
   NeuralCalendarClassification,
@@ -23,26 +21,18 @@ import type {
   NeuralCalendarHourlyStat,
   NeuralCalendarPayload,
 } from "@/types/neuralCalendar";
-import {
-  buildMinuteHeatSnapshot,
-  minuteHeatSideLabel,
-  type MinuteHeatBucket,
-  type MinuteHeatSide,
-  type MinuteHeatSnapshot,
-  type MinuteHeatTemperature,
-} from "@/utils/minuteHeatEngine";
 
 export const Route = createFileRoute("/app/calendario")({
   component: NeuralCalendarPage,
 });
 
 const CALENDAR_START_DATE = "2026-06-10";
-const CALENDAR_TIMEZONE = "America/Sao_Paulo";
+const CALENDAR_TIMEZONE_FALLBACK = "America/Campo_Grande";
 
 const engineOptions: Array<{ id: NeuralCalendarEngineKey; label: string }> = [
   { id: "todos", label: "Todos os motores" },
   { id: "neural_pagante", label: "Neural Pagante" },
-  { id: "padroes_quentes_ia", label: "Padroes IA" },
+  { id: "padroes_quentes_ia", label: "Padroes Quentes IA" },
   { id: "surf_analyzer", label: "Surf Analyzer" },
   { id: "radar_empates", label: "Radar de Empates" },
   { id: "tendencia", label: "Tendencia" },
@@ -72,8 +62,6 @@ interface WeekdayHourCellData {
 
 function NeuralCalendarPage() {
   const today = useMemo(() => saoPauloTodayParts(), []);
-  const { data: liveDashboardData } = useDashboardData();
-  const { history: roundHistory } = useRoundHistory(liveDashboardData, !liveDashboardData.mockMode);
   const allowedYears = useMemo(() => [today.year - 1, today.year, today.year + 1], [today.year]);
   const [engineMode, setEngineMode] = useState<NeuralCalendarEngineKey>("todos");
   const [customEngines, setCustomEngines] = useState<NeuralCalendarEngineKey[]>(
@@ -141,10 +129,6 @@ function NeuralCalendarPage() {
     if (!calendar || selectedHour === null || !selectedDate) return null;
     return calendar.selectedHours.find((hour) => hour.hour === selectedHour) || null;
   }, [calendar, selectedDate, selectedHour]);
-  const minuteHeat = useMemo(
-    () => buildMinuteHeatSnapshot(roundHistory.todayRounds),
-    [roundHistory.todayRounds],
-  );
 
   const canMovePrevious = canMoveMonth(-1, year, month, allowedYears);
   const canMoveNext = canMoveMonth(1, year, month, allowedYears);
@@ -220,7 +204,7 @@ function NeuralCalendarPage() {
         <GlassCard className="p-4">
           <CalendarPanelHeader
             title={calendar?.month.label || `${monthLabels[month - 1]} ${year}`}
-            subtitle={`Consulta leve por agregados - ${CALENDAR_TIMEZONE}`}
+            subtitle={`Consulta leve por agregados - ${deviceCalendarTimezone()}`}
           />
           {status === "loading" && <CalendarSkeleton />}
           {calendar && status !== "loading" && (
@@ -239,7 +223,6 @@ function NeuralCalendarPage() {
                 selectedHour={selectedHour}
                 onSelectHour={setSelectedHour}
               />
-              <MinuteHeatPanel snapshot={minuteHeat} />
             </>
           )}
         </GlassCard>
@@ -642,7 +625,7 @@ function CalendarHoursOverview({
   onSelectHour: (hour: number) => void;
 }) {
   const selectedDay = calendar.month.days.find((day) => day.date === selectedDate) || null;
-  const weekRows = buildSelectedWeekHourRows(calendar, selectedDate);
+  const weekdayRows = buildWeekdayHourRows(calendar);
   return (
     <div className="mt-5 space-y-4 rounded-2xl border border-neon-cyan/20 bg-background/30 p-3 sm:p-4">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
@@ -683,9 +666,6 @@ function CalendarHoursOverview({
       )}
 
       <div className="hidden lg:block">
-        <div className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-muted-foreground">
-          Semana real do dia selecionado
-        </div>
         <div
           className="grid items-center gap-0.5 text-center"
           style={{ gridTemplateColumns: "42px repeat(24, minmax(18px, 1fr))" }}
@@ -696,13 +676,13 @@ function CalendarHoursOverview({
               {hour}
             </div>
           ))}
-          {weekRows.map((row) => (
-            <div key={row.date} className="contents">
+          {weekdayRows.map((row) => (
+            <div key={row.label} className="contents">
               <div className="text-left text-[9px] font-black uppercase text-muted-foreground">
                 {row.label}
               </div>
               {row.hours.map((cell) => (
-                <WeekdayHourCell key={`${row.date}-${cell.hour}`} cell={cell} />
+                <WeekdayHourCell key={`${row.label}-${cell.hour}`} cell={cell} />
               ))}
             </div>
           ))}
@@ -710,138 +690,17 @@ function CalendarHoursOverview({
       </div>
 
       <div className="space-y-3 lg:hidden">
-        {weekRows.map((row) => (
-          <div key={row.date}>
+        {weekdayRows.map((row) => (
+          <div key={row.label}>
             <div className="mb-1 text-[10px] font-black uppercase text-muted-foreground">{row.fullLabel}</div>
             <div className="grid grid-cols-6 gap-1.5">
               {row.hours.map((cell) => (
-                <WeekdayHourCell key={`${row.date}-${cell.hour}`} cell={cell} showHour />
+                <WeekdayHourCell key={`${row.label}-${cell.hour}`} cell={cell} showHour />
               ))}
             </div>
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-function MinuteHeatPanel({ snapshot }: { snapshot: MinuteHeatSnapshot }) {
-  const currentBucket = snapshot.buckets[snapshot.minute];
-  const hasWindowSample = snapshot.windowTotalRounds >= 3 && snapshot.temperature !== "sem_amostra";
-  return (
-    <div className="mt-4 rounded-2xl border border-neon-cyan/20 bg-background/35 p-3 sm:p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-neon-cyan">
-            Temperatura minuto a minuto
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Hora atual {String(snapshot.hour).padStart(2, "0")}h · janela viva de {snapshot.windowMinutes} min.
-          </div>
-        </div>
-        <div className={`rounded-xl border px-3 py-2 text-right ${minuteHeatTemperatureClass(snapshot.temperature)}`}>
-          <div className="text-[9px] font-black uppercase tracking-[0.12em] text-muted-foreground">Agora</div>
-          <div className="text-lg font-black leading-none">
-            {hasWindowSample ? formatPercent(snapshot.score) : "--"}
-          </div>
-          <div className="mt-1 text-[9px] font-black uppercase leading-tight">
-            {minuteHeatTemperatureLabel(snapshot.temperature)}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-3 grid gap-2 sm:grid-cols-4">
-        <MinuteHeatMetric
-          label="Dominante"
-          value={minuteHeatSideLabel(snapshot.dominantSide)}
-          side={snapshot.dominantSide}
-        />
-        <MinuteHeatMetric
-          label="Rodadas janela"
-          value={formatNumber(snapshot.windowTotalRounds)}
-        />
-        <MinuteHeatMetric
-          label="Tendencia"
-          value={minuteHeatTrendLabel(snapshot.trend)}
-        />
-        <MinuteHeatMetric
-          label="Minuto atual"
-          value={`${String(snapshot.hour).padStart(2, "0")}:${String(snapshot.minute).padStart(2, "0")}`}
-        />
-      </div>
-
-      <div className="mt-3 grid grid-cols-10 gap-1 sm:grid-cols-12 xl:grid-cols-[repeat(20,minmax(0,1fr))]">
-        {snapshot.buckets.map((bucket) => (
-          <MinuteHeatCell
-            key={bucket.minute}
-            bucket={bucket}
-            isCurrent={bucket.minute === snapshot.minute}
-            isFuture={bucket.minute > snapshot.minute}
-          />
-        ))}
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-        <span>Quadrado = minuto da hora atual.</span>
-        <span>Azul Player · Vermelho Banker · Amarelo Tie.</span>
-        <span>Nao envia entrada, so mede a temperatura.</span>
-        {currentBucket?.total ? (
-          <span>
-            Minuto {String(currentBucket.minute).padStart(2, "0")}: {formatNumber(currentBucket.total)} rodada(s).
-          </span>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function MinuteHeatMetric({
-  label,
-  value,
-  side = "NONE",
-}: {
-  label: string;
-  value: string;
-  side?: MinuteHeatSide;
-}) {
-  return (
-    <div className="rounded-xl border border-border/60 bg-secondary/15 px-3 py-2">
-      <div className="text-[9px] font-black uppercase tracking-[0.12em] text-muted-foreground">{label}</div>
-      <div className={`mt-1 truncate text-sm font-black ${minuteHeatSideTextClass(side)}`}>{value}</div>
-    </div>
-  );
-}
-
-function MinuteHeatCell({
-  bucket,
-  isCurrent,
-  isFuture,
-}: {
-  bucket: MinuteHeatBucket;
-  isCurrent: boolean;
-  isFuture: boolean;
-}) {
-  const display = bucket.total ? minuteHeatShortSide(bucket.dominantSide) : "-";
-  return (
-    <div
-      title={`${String(bucket.minute).padStart(2, "0")}min · ${
-        bucket.total ? `${formatPercent(bucket.score)} ${minuteHeatSideLabel(bucket.dominantSide)}` : "Sem amostra"
-      }`}
-      className={`min-h-[34px] rounded-md border px-0.5 py-1 text-center transition ${
-        isCurrent ? "ring-2 ring-neon-cyan/45" : ""
-      } ${isFuture ? "opacity-40" : ""} ${minuteHeatCellClass(bucket)}`}
-    >
-      <div className="text-[7px] font-black leading-none text-muted-foreground">
-        {String(bucket.minute).padStart(2, "0")}
-      </div>
-      <div className={`mt-1 text-[10px] font-black leading-none ${minuteHeatSideTextClass(bucket.dominantSide)}`}>
-        {display}
-      </div>
-      {bucket.total > 0 && (
-        <div className="mt-0.5 text-[7px] font-black leading-none text-muted-foreground">
-          {Math.round(bucket.score)}%
-        </div>
-      )}
     </div>
   );
 }
@@ -1473,60 +1332,37 @@ function InfoLine({ icon, label, value }: { icon: ReactNode; label: string; valu
   );
 }
 
-function buildSelectedWeekHourRows(calendar: NeuralCalendarPayload, selectedDate: string) {
-  const buckets = new Map<string, { score: number; totalRounds: number }>();
+function buildWeekdayHourRows(calendar: NeuralCalendarPayload) {
+  const buckets = new Map<string, { weightedScore: number; totalRounds: number }>();
   for (const item of calendar.month.heatmap) {
+    const weekday = weekdayIndexFromDate(item.date);
+    const key = `${weekday}:${item.hour}`;
+    const current = buckets.get(key) || { weightedScore: 0, totalRounds: 0 };
     const totalRounds = Math.max(0, Math.floor(Number(item.totalRounds) || 0));
-    buckets.set(`${item.date}:${item.hour}`, {
-      score: totalRounds ? Number(item.score) || 0 : 0,
-      totalRounds,
-    });
+    current.weightedScore += (Number(item.score) || 0) * totalRounds;
+    current.totalRounds += totalRounds;
+    buckets.set(key, current);
   }
 
-  const [selectedYear, selectedMonth, selectedDay] = (selectedDate || "").split("-").map(Number);
-  const baseDate =
-    selectedYear && selectedMonth && selectedDay
-      ? new Date(Date.UTC(selectedYear, selectedMonth - 1, selectedDay))
-      : new Date(Date.UTC(calendar.month.year, calendar.month.month - 1, 1));
-  const weekStart = new Date(baseDate);
-  weekStart.setUTCDate(baseDate.getUTCDate() - baseDate.getUTCDay());
-
-  return Array.from({ length: 7 }, (_, dayOffset) => {
-    const date = new Date(weekStart);
-    date.setUTCDate(weekStart.getUTCDate() + dayOffset);
-    const dateKey = calendarDateKey(date);
-    const weekday = weekdayMeta[date.getUTCDay()] || weekdayMeta[0];
-    const isCurrentMonth = date.getUTCFullYear() === calendar.month.year && date.getUTCMonth() + 1 === calendar.month.month;
-
-    return {
-      ...weekday,
-      date: dateKey,
-      label: isCurrentMonth ? `${weekday.label} ${String(date.getUTCDate()).padStart(2, "0")}` : weekday.label,
-      fullLabel: isCurrentMonth ? `${weekday.fullLabel} · ${formatDateShort(dateKey)}` : `${weekday.fullLabel} · fora do mês`,
+  return weekdayMeta.map((weekday) => ({
+    ...weekday,
     hours: Array.from({ length: 24 }, (_, hour): WeekdayHourCellData => {
-        const bucket = isCurrentMonth ? buckets.get(`${dateKey}:${hour}`) : null;
+      const bucket = buckets.get(`${weekday.index}:${hour}`);
       const totalRounds = bucket?.totalRounds ?? 0;
       return {
-          label: isCurrentMonth ? `${weekday.fullLabel} ${formatDateShort(dateKey)}` : weekday.fullLabel,
+        label: weekday.fullLabel,
         hour,
-          score: totalRounds ? Math.round(bucket?.score ?? 0) : 0,
+        score: totalRounds ? Math.round((bucket?.weightedScore ?? 0) / totalRounds) : 0,
         totalRounds,
       };
     }),
-    };
-  });
+  }));
 }
 
 function weekdayIndexFromDate(date: string) {
   const [year, month, day] = date.split("-").map(Number);
   const parsed = new Date(Date.UTC(year || 1970, (month || 1) - 1, day || 1));
   return parsed.getUTCDay();
-}
-
-function calendarDateKey(date: Date) {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
-    date.getUTCDate(),
-  ).padStart(2, "0")}`;
 }
 
 function canMoveMonth(delta: number, year: number, month: number, allowedYears: number[]) {
@@ -1537,49 +1373,6 @@ function canMoveMonth(delta: number, year: number, month: number, allowedYears: 
 
 function monthTotalSignals(calendar: NeuralCalendarPayload) {
   return calendar.month.days.reduce((sum, day) => sum + day.totalRounds, 0);
-}
-
-function minuteHeatTemperatureLabel(value: MinuteHeatTemperature) {
-  if (value === "quente") return "Mesa quente";
-  if (value === "operavel") return "Operavel";
-  if (value === "frio") return "Fria";
-  return "Sem amostra";
-}
-
-function minuteHeatTrendLabel(value: MinuteHeatSnapshot["trend"]) {
-  if (value === "aquecendo") return "Aquecendo";
-  if (value === "esfriando") return "Esfriando";
-  if (value === "estavel") return "Estavel";
-  return "Sem amostra";
-}
-
-function minuteHeatTemperatureClass(value: MinuteHeatTemperature) {
-  if (value === "quente") return "border-emerald-400/30 bg-emerald-500/10 text-emerald-200";
-  if (value === "operavel") return "border-yellow-400/30 bg-yellow-500/10 text-yellow-200";
-  if (value === "frio") return "border-red-400/30 bg-red-500/10 text-red-200";
-  return "border-border/60 bg-secondary/20 text-muted-foreground";
-}
-
-function minuteHeatCellClass(bucket: MinuteHeatBucket) {
-  if (!bucket.total || bucket.temperature === "sem_amostra") return "border-border/60 bg-secondary/20";
-  if (bucket.dominantSide === "PLAYER") return "border-sky-400/30 bg-sky-500/12";
-  if (bucket.dominantSide === "BANKER") return "border-red-400/30 bg-red-500/12";
-  if (bucket.dominantSide === "TIE") return "border-yellow-400/30 bg-yellow-500/12";
-  return "border-border/60 bg-secondary/20";
-}
-
-function minuteHeatSideTextClass(value: MinuteHeatSide) {
-  if (value === "PLAYER") return "text-sky-300";
-  if (value === "BANKER") return "text-red-300";
-  if (value === "TIE") return "text-yellow-300";
-  return "text-foreground";
-}
-
-function minuteHeatShortSide(value: MinuteHeatSide) {
-  if (value === "PLAYER") return "P";
-  if (value === "BANKER") return "B";
-  if (value === "TIE") return "T";
-  return "-";
 }
 
 function classificationLabel(value: NeuralCalendarClassification) {
@@ -1711,7 +1504,7 @@ function forceLabel(value: string) {
 
 function saoPauloTodayParts() {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: CALENDAR_TIMEZONE,
+    timeZone: deviceCalendarTimezone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -1726,6 +1519,15 @@ function saoPauloTodayParts() {
     day,
     date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
   };
+}
+
+function deviceCalendarTimezone() {
+  if (typeof window === "undefined") return CALENDAR_TIMEZONE_FALLBACK;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || CALENDAR_TIMEZONE_FALLBACK;
+  } catch {
+    return CALENDAR_TIMEZONE_FALLBACK;
+  }
 }
 
 const monthLabels = [

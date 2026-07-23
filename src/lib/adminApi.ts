@@ -17,6 +17,7 @@ import type { ModuleToggles } from "@/types/dashboard";
 import type { SalesSettings } from "@/lib/accessApi";
 import { LOCAL_SIGNALS_API_BASE_URL } from "@/lib/runtimePorts";
 import type { AnnouncementTone, SiteContentSettings } from "@/lib/siteContent";
+import type { ValidatorNotificationChannel } from "@/types/neuralValidator";
 
 export interface LocalAiAdminSettings {
   enabled: boolean;
@@ -55,10 +56,39 @@ export interface LocalAiAdminLog {
   timestamp: string;
 }
 
+export type AdminPlanOfferStatus = "active" | "inactive" | "promo" | "sold_out";
+
+export interface AdminPlanOffer {
+  id: "vip" | "premium";
+  name: string;
+  slug: string;
+  description: string;
+  price: number;
+  oldPrice: number;
+  billingPeriod: "monthly";
+  isActive: boolean;
+  isFeatured: boolean;
+  badgeText: string;
+  checkoutUrl: string;
+  benefits: string[];
+  sortOrder: number;
+  accessLevel: "vip" | "premium";
+  status: AdminPlanOfferStatus;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface AdminTelegramRoomsResponse {
+  userId: string;
+  channels: ValidatorNotificationChannel[];
+  limit: number;
+}
+
 const API_URL_KEY = "sniper_admin_api_url";
 const SESSION_KEY = "sniper_admin_session";
 export const LOCAL_ADMIN_API_URL = LOCAL_SIGNALS_API_BASE_URL;
 export const PUBLIC_ADMIN_API_URL = "https://sniperbo.com";
+const DEFAULT_ADMIN_REQUEST_TIMEOUT_MS = 40_000;
 const ALLOWED_REMOTE_API_HOSTS = new Set(["sniperbo.com", "www.sniperbo.com"]);
 
 const defaultApiUrl = () =>
@@ -226,8 +256,70 @@ export async function updateAdminSalesSettings(
   return data.salesSettings;
 }
 
+export async function listAdminTelegramRooms(session: AdminSession, userId: string) {
+  return request<AdminTelegramRoomsResponse>(
+    session,
+    `/admin/telegram/channels?userId=${encodeURIComponent(userId)}`,
+  );
+}
+
+export async function createAdminTelegramRoom(
+  session: AdminSession,
+  userId: string,
+  channel: Record<string, unknown>,
+) {
+  return request<{ channel: ValidatorNotificationChannel; limit: number }>(session, "/admin/telegram/channels", {
+    method: "POST",
+    body: JSON.stringify({ userId, channel }),
+  });
+}
+
+export async function updateAdminTelegramRoom(
+  session: AdminSession,
+  userId: string,
+  channelId: string,
+  channel: Partial<ValidatorNotificationChannel>,
+) {
+  return request<{ channel: ValidatorNotificationChannel; limit: number }>(
+    session,
+    `/admin/telegram/channels/${encodeURIComponent(channelId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ userId, channel }),
+    },
+  );
+}
+
+export async function testAdminTelegramRoom(session: AdminSession, userId: string, channelId: string) {
+  return request<{ ok: boolean; channelId: string; messageId: number | string | null }>(
+    session,
+    "/admin/telegram/channels/test",
+    {
+      method: "POST",
+      body: JSON.stringify({ userId, channelId }),
+    },
+  );
+}
+
+export async function getAdminPlanOffers(session: AdminSession) {
+  const data = await request<{ plans: AdminPlanOffer[] }>(session, "/admin/plan-offers");
+  return data.plans ?? [];
+}
+
+export async function updateAdminPlanOffer(
+  session: AdminSession,
+  planId: AdminPlanOffer["id"],
+  patch: Partial<AdminPlanOffer>,
+) {
+  const data = await request<{ plan: AdminPlanOffer; plans: AdminPlanOffer[] }>(session, "/admin/plan-offers", {
+    method: "POST",
+    body: JSON.stringify({ planId, patch }),
+  });
+  return data;
+}
+
 export async function getAdminSiteContent(session: AdminSession) {
-  const data = await request<{ siteContent: SiteContentSettings }>(session, "/admin/site-content");
+  const data = await request<{ siteContent: SiteContentSettings }>(session, "/admin/site-content", {}, 12_000);
   return data.siteContent;
 }
 
@@ -238,7 +330,7 @@ export async function updateAdminSiteContent(
   const data = await request<{ siteContent: SiteContentSettings }>(session, "/admin/site-content", {
     method: "POST",
     body: JSON.stringify(payload),
-  });
+  }, 12_000);
   return data.siteContent;
 }
 
@@ -255,7 +347,7 @@ export async function getAdminSummary(session: AdminSession) {
 }
 
 export async function listAdminUsers(session: AdminSession) {
-  return request<AdminUsersResponse>(session, "/admin/users");
+  return request<AdminUsersResponse>(session, "/admin/users", {}, 25_000);
 }
 
 export async function getAdminCrm(session: AdminSession) {
@@ -509,24 +601,86 @@ function normalizeAdminRole(role: unknown): NonNullable<AdminSession["role"]> {
   return value === "admin" || value === "approver" ? "admin" : "owner";
 }
 
-async function request<T>(session: AdminSession, path: string, init: RequestInit = {}) {
-  const response = await fetch(`${normalizeMaybeUrl(session.apiUrl)}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.token}`,
-      ...(init.headers ?? {}),
+async function request<T>(session: AdminSession, path: string, init: RequestInit = {}, timeoutMs = DEFAULT_ADMIN_REQUEST_TIMEOUT_MS) {
+  const response = await fetchWithTimeout(
+    `${normalizeMaybeUrl(session.apiUrl)}${path}`,
+    {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.token}`,
+        ...(init.headers ?? {}),
+      },
     },
-  });
+    timeoutMs,
+  );
   if (!response.ok) {
     if (response.status === 401) {
       clearAdminSession();
       throw new Error("Sessão admin expirada ou não autorizada.");
     }
-    const text = await response.text();
-    throw new Error(text || "Falha ao conversar com a API admin.");
+    throw new Error(await readAdminApiError(response));
   }
   return (await response.json()) as T;
+}
+
+async function readAdminApiError(response: Response) {
+  const fallback =
+    response.status === 503
+      ? "O serviço de cadastros está temporariamente indisponível. Tente novamente em alguns segundos."
+      : `Falha ao conversar com a API admin (HTTP ${response.status}).`;
+
+  let raw = "";
+  try {
+    raw = (await response.text()).trim();
+  } catch {
+    return fallback;
+  }
+  if (!raw) return fallback;
+
+  try {
+    const message = extractAdminApiErrorMessage(JSON.parse(raw));
+    return message || fallback;
+  } catch {
+    const plainText = raw
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return plainText && plainText.length <= 280 ? plainText : fallback;
+  }
+}
+
+function extractAdminApiErrorMessage(payload: unknown): string {
+  if (typeof payload === "string") return payload.trim().slice(0, 280);
+  if (!payload || typeof payload !== "object") return "";
+
+  const object = payload as Record<string, unknown>;
+  for (const key of ["message", "error", "detail", "description"]) {
+    const value = object[key];
+    if (typeof value === "string" && value.trim()) return value.trim().slice(0, 280);
+    if (value && typeof value === "object") {
+      const nested = extractAdminApiErrorMessage(value);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = DEFAULT_ADMIN_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("O servidor demorou para responder. Tente novamente em alguns segundos.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function normalizeBaseUrl(apiUrl: string) {

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   blockAdminUser,
   changeAdminUserPlan,
-  changeAdminUserRole,
   deleteAdminUser,
   extendAdminUserAccess,
   getAdminSalesSettings,
@@ -47,13 +46,15 @@ const defaultFilters: FilterState = {
 
 export function AdminUsersPage() {
   const session = readEffectiveAdminSession();
-  const [users, setUsers] = useState<AdminManagedUser[]>([]);
-  const [overview, setOverview] = useState<AdminPanelOverview | undefined>();
+  const [users, setUsers] = useState<AdminManagedUser[] | null>(null);
+  const [overview, setOverview] = useState<AdminPanelOverview | null>(null);
   const [filters, setFilters] = useState(defaultFilters);
   const [selected, setSelected] = useState<AdminManagedUser | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(session));
+  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [successNotice, setSuccessNotice] = useState("");
   const [salesSettings, setSalesSettings] = useState<SalesSettings>({
     salesClosed: false,
     mode: "open",
@@ -67,13 +68,13 @@ export function AdminUsersPage() {
   async function load() {
     if (!session) return;
     setLoading(true);
-    setError("");
+    setLoadError("");
     try {
       const data = await listAdminUsers(session);
       setUsers(data.users ?? []);
       setOverview(data.overview);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível carregar usuários.");
+      setLoadError(err instanceof Error ? err.message : "Não foi possível carregar usuários.");
     } finally {
       setLoading(false);
     }
@@ -97,9 +98,19 @@ export function AdminUsersPage() {
     }
   }, [canOpen]);
 
-  const filteredUsers = useMemo(() => applyFilters(users, filters), [users, filters]);
+  const filteredUsers = useMemo(
+    () => (users === null ? [] : applyFilters(users, filters)),
+    [users, filters],
+  );
   const groupedUsers = useMemo(() => splitClientGroups(filteredUsers), [filteredUsers]);
-  const realOverview = useMemo(() => buildOverviewFromUsers(users, overview), [users, overview]);
+  const realOverview = useMemo(
+    () => (users === null ? null : buildOverviewFromUsers(users, overview ?? undefined)),
+    [users, overview],
+  );
+  const hasLoadedUsers = users !== null;
+  const initialLoading = loading && !hasLoadedUsers;
+  const refreshing = loading && hasLoadedUsers;
+  const unavailable = Boolean(loadError) && !hasLoadedUsers;
 
   if (!canOpen) {
     return (
@@ -150,10 +161,14 @@ export function AdminUsersPage() {
     if (!session || !selected) return;
     setBusy(true);
     setError("");
+    setSuccessNotice("");
     try {
       const updated = await updateAdminUser(session, selected.id, payload);
-      setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      setSelected(updated);
+      setUsers((current) =>
+        current?.map((item) => (item.id === updated.id ? updated : item)) ?? null,
+      );
+      setSelected(null);
+      setSuccessNotice("Alteracoes salvas com sucesso.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao salvar usuário.");
     } finally {
@@ -205,21 +220,26 @@ export function AdminUsersPage() {
     }
     setBusy(true);
     setError("");
+    setSuccessNotice("");
     try {
       if (action === "deleteUser") {
         await deleteAdminUser(session, user.id, "Excluir cadastro sem pagamento");
         const deletedEmail = user.email.trim().toLowerCase();
         setUsers((current) =>
-          current.filter(
+          current?.filter(
             (item) => item.id !== user.id && item.email.trim().toLowerCase() !== deletedEmail,
-          ),
+          ) ?? null,
         );
         if (selected?.id === user.id) setSelected(null);
+        setSuccessNotice("Cadastro excluido com sucesso.");
         return;
       }
       const updated = await performQuickAction(session, user, action);
-      setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setUsers((current) =>
+        current?.map((item) => (item.id === updated.id ? updated : item)) ?? null,
+      );
       if (selected?.id === updated.id) setSelected(updated);
+      setSuccessNotice(successMessageForAction(action));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao executar ação.");
     } finally {
@@ -229,7 +249,11 @@ export function AdminUsersPage() {
 
   return (
     <div className="space-y-5">
-      <AdminPanelCard overview={realOverview} />
+      <AdminPanelCard
+        overview={realOverview}
+        loading={initialLoading}
+        unavailable={unavailable}
+      />
 
       <AdminSalesControlCard
         settings={salesSettings}
@@ -264,11 +288,14 @@ export function AdminUsersPage() {
             </button>
             <button
               type="button"
+              disabled={loading}
               onClick={() => {
+                setError("");
+                setSuccessNotice("");
                 void load();
                 void loadSalesSettings();
               }}
-              className="glass inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black text-neon-cyan"
+              className="glass inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black text-neon-cyan disabled:cursor-wait disabled:opacity-60"
             >
               <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
               Atualizar
@@ -318,9 +345,62 @@ export function AdminUsersPage() {
           />
         </div>
 
+        {initialLoading && (
+          <div
+            role="status"
+            className="mt-4 flex items-center gap-2 rounded-xl border border-neon-cyan/25 bg-neon-cyan/8 px-3 py-3 text-sm font-semibold text-neon-cyan"
+          >
+            <Loader2 className="size-4 animate-spin" />
+            Carregando os cadastros confirmados…
+          </div>
+        )}
+        {refreshing && (
+          <div
+            role="status"
+            className="mt-4 flex items-center gap-2 rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 px-3 py-2 text-xs font-semibold text-neon-cyan"
+          >
+            <Loader2 className="size-3.5 animate-spin" />
+            Atualizando em segundo plano. A última lista confirmada continua visível.
+          </div>
+        )}
+        {loadError && (
+          <div
+            role="alert"
+            className="mt-4 flex flex-col gap-3 rounded-xl border border-warning/35 bg-warning/10 px-3 py-3 text-sm text-warning sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div>
+              <div className="font-black">
+                {hasLoadedUsers
+                  ? "Atualização temporariamente indisponível"
+                  : "Cadastros temporariamente indisponíveis"}
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {loadError}
+                {hasLoadedUsers
+                  ? " A última lista confirmada foi preservada abaixo."
+                  : " Nenhuma contagem foi presumida enquanto a fonte não responder."}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void load()}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-warning/35 bg-warning/10 px-3 py-2 text-xs font-black text-warning transition hover:bg-warning/15 disabled:cursor-wait disabled:opacity-60"
+            >
+              <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+              Tentar novamente
+            </button>
+          </div>
+        )}
+
         {error && (
           <div className="mt-4 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {error}
+          </div>
+        )}
+        {successNotice && (
+          <div className="mt-4 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm font-semibold text-success">
+            {successNotice}
           </div>
         )}
         {exportNotice && (
@@ -330,11 +410,12 @@ export function AdminUsersPage() {
         )}
       </GlassCard>
 
-      <div className="grid min-w-0 gap-4 2xl:grid-cols-2">
+      <div className="grid min-w-0 gap-5">
         <UserGroupSection
           title="Clientes"
           subtitle="Pagantes, aprovados ou premium com acesso ativo."
           users={groupedUsers.clients}
+          state={initialLoading ? "loading" : unavailable ? "unavailable" : "ready"}
           emptyMessage="Nenhum cliente pagante encontrado com os filtros atuais."
           onEdit={setSelected}
           onQuickAction={(action, user) => void runQuickAction(action, user)}
@@ -344,6 +425,7 @@ export function AdminUsersPage() {
           title="Não clientes"
           subtitle="Free, trial, pendentes ou sem pagamento ativo."
           users={groupedUsers.nonClients}
+          state={initialLoading ? "loading" : unavailable ? "unavailable" : "ready"}
           emptyMessage="Nenhum cadastro free/pendente encontrado com os filtros atuais."
           onEdit={setSelected}
           onQuickAction={(action, user) => void runQuickAction(action, user)}
@@ -351,7 +433,7 @@ export function AdminUsersPage() {
         />
       </div>
 
-      {!loading && filteredUsers.length === 0 && (
+      {users !== null && !loading && filteredUsers.length === 0 && (
         <GlassCard className="text-center text-sm text-muted-foreground">
           Nenhum usuário encontrado com os filtros atuais.
         </GlassCard>
@@ -524,6 +606,7 @@ function UserGroupSection({
   title,
   subtitle,
   users,
+  state,
   emptyMessage,
   onEdit,
   onQuickAction,
@@ -532,6 +615,7 @@ function UserGroupSection({
   title: string;
   subtitle: string;
   users: AdminManagedUser[];
+  state: "loading" | "unavailable" | "ready";
   emptyMessage: string;
   onEdit: (user: AdminManagedUser) => void;
   onQuickAction: (action: QuickAction, user: AdminManagedUser) => void;
@@ -547,11 +631,23 @@ function UserGroupSection({
           <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
         </div>
         <span className="rounded-full border border-neon-cyan/25 bg-neon-cyan/10 px-2.5 py-1 text-xs font-black text-neon-cyan">
-          {users.length}
+          {state === "loading" ? "..." : state === "unavailable" ? "—" : users.length}
         </span>
       </div>
 
-      {users.length > 0 ? (
+      {state === "loading" ? (
+        <div
+          role="status"
+          className="flex items-center justify-center gap-2 rounded-2xl border border-neon-cyan/20 bg-neon-cyan/5 px-4 py-6 text-sm font-semibold text-neon-cyan"
+        >
+          <Loader2 className="size-4 animate-spin" />
+          Carregando cadastros…
+        </div>
+      ) : state === "unavailable" ? (
+        <div className="rounded-2xl border border-warning/30 bg-warning/8 px-4 py-6 text-center text-sm text-muted-foreground">
+          Contagem indisponível até a fonte de cadastros responder.
+        </div>
+      ) : users.length > 0 ? (
         <>
           <AdminUsersTable
             users={users}
@@ -760,9 +856,25 @@ async function performQuickAction(
       reason: "Cancelar acesso",
     });
   if (action === "block") return blockAdminUser(session, user.id);
-  if (action === "unblock") return unblockAdminUser(session, user.id);
-  if (action === "makeAdmin") return changeAdminUserRole(session, user.id, "admin");
-  return changeAdminUserRole(session, user.id, "user");
+  return unblockAdminUser(session, user.id);
+}
+
+function successMessageForAction(action: QuickAction) {
+  const messages: Record<QuickAction, string> = {
+    trial7: "Trial liberado com sucesso.",
+    monthly30: "Mensal liberado com sucesso.",
+    premium30: "Premium liberado com sucesso.",
+    vip30: "VIP manual liberado com sucesso.",
+    extend7: "Acesso prorrogado com sucesso.",
+    extend15: "Acesso prorrogado com sucesso.",
+    extend30: "Acesso prorrogado com sucesso.",
+    extend90: "Acesso prorrogado com sucesso.",
+    cancel: "Acesso cancelado com sucesso.",
+    block: "Usuario bloqueado com sucesso.",
+    unblock: "Usuario reativado com sucesso.",
+    deleteUser: "Cadastro excluido com sucesso.",
+  };
+  return messages[action] || "Acao concluida com sucesso.";
 }
 
 function addDays(base: Date, days: number) {

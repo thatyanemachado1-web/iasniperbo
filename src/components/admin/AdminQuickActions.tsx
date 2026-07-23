@@ -3,9 +3,7 @@ import {
   CalendarPlus,
   Crown,
   ShieldCheck,
-  Trash2,
   UserCheck,
-  UserCog,
   UserMinus,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -22,9 +20,7 @@ type QuickAction =
   | "cancel"
   | "block"
   | "unblock"
-  | "deleteUser"
-  | "makeAdmin"
-  | "removeAdmin";
+  | "deleteUser";
 
 const actions: Array<{
   id: QuickAction;
@@ -87,14 +83,6 @@ const actions: Array<{
     label: "Reativar usuário",
     tone: "primary",
     icon: <UserCheck className="size-4" />,
-  },
-  { id: "deleteUser", label: "Excluir cadastro", tone: "red", icon: <Trash2 className="size-4" /> },
-  { id: "makeAdmin", label: "Tornar admin", tone: "muted", icon: <UserCog className="size-4" /> },
-  {
-    id: "removeAdmin",
-    label: "Remover admin",
-    tone: "muted",
-    icon: <UserMinus className="size-4" />,
   },
 ];
 

@@ -14,6 +14,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppVozRouteImport } from './routes/app.voz'
 import { Route as AppValidadorRouteImport } from './routes/app.validador'
+import { Route as AppSalasRouteImport } from './routes/app.salas'
 import { Route as AppPlanosRouteImport } from './routes/app.planos'
 import { Route as AppPagamentosRouteImport } from './routes/app.pagamentos'
 import { Route as AppPadroesRouteImport } from './routes/app.padroes'
@@ -22,9 +23,11 @@ import { Route as AppContaRouteImport } from './routes/app.conta'
 import { Route as AppCalendarioRouteImport } from './routes/app.calendario'
 import { Route as AppBancaRouteImport } from './routes/app.banca'
 import { Route as AppAssinaturaRouteImport } from './routes/app.assinatura'
+import { Route as AppAoVivoRouteImport } from './routes/app.ao-vivo'
 import { Route as AppAgentesRouteImport } from './routes/app.agentes'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
+import { Route as AppAdminTelegramRouteImport } from './routes/app.admin.telegram'
 import { Route as AppAdminModulesRouteImport } from './routes/app.admin.modules'
 import { Route as AppAdminLogsRouteImport } from './routes/app.admin.logs'
 import { Route as AppAdminCrmRouteImport } from './routes/app.admin.crm'
@@ -53,6 +56,11 @@ const AppVozRoute = AppVozRouteImport.update({
 const AppValidadorRoute = AppValidadorRouteImport.update({
   id: '/validador',
   path: '/validador',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSalasRoute = AppSalasRouteImport.update({
+  id: '/salas',
+  path: '/salas',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPlanosRoute = AppPlanosRouteImport.update({
@@ -95,6 +103,11 @@ const AppAssinaturaRoute = AppAssinaturaRouteImport.update({
   path: '/assinatura',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAoVivoRoute = AppAoVivoRouteImport.update({
+  id: '/ao-vivo',
+  path: '/ao-vivo',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAgentesRoute = AppAgentesRouteImport.update({
   id: '/agentes',
   path: '/agentes',
@@ -108,6 +121,11 @@ const AppAdminRoute = AppAdminRouteImport.update({
 const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
   id: '/users',
   path: '/users',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminTelegramRoute = AppAdminTelegramRouteImport.update({
+  id: '/telegram',
+  path: '/telegram',
   getParentRoute: () => AppAdminRoute,
 } as any)
 const AppAdminModulesRoute = AppAdminModulesRouteImport.update({
@@ -136,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/agentes': typeof AppAgentesRoute
+  '/app/ao-vivo': typeof AppAoVivoRoute
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/banca': typeof AppBancaRoute
   '/app/calendario': typeof AppCalendarioRoute
@@ -144,6 +163,7 @@ export interface FileRoutesByFullPath {
   '/app/padroes': typeof AppPadroesRoute
   '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
+  '/app/salas': typeof AppSalasRoute
   '/app/validador': typeof AppValidadorRoute
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
@@ -151,12 +171,14 @@ export interface FileRoutesByFullPath {
   '/app/admin/crm': typeof AppAdminCrmRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/modules': typeof AppAdminModulesRoute
+  '/app/admin/telegram': typeof AppAdminTelegramRoute
   '/app/admin/users': typeof AppAdminUsersRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/agentes': typeof AppAgentesRoute
+  '/app/ao-vivo': typeof AppAoVivoRoute
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/banca': typeof AppBancaRoute
   '/app/calendario': typeof AppCalendarioRoute
@@ -165,6 +187,7 @@ export interface FileRoutesByTo {
   '/app/padroes': typeof AppPadroesRoute
   '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
+  '/app/salas': typeof AppSalasRoute
   '/app/validador': typeof AppValidadorRoute
   '/app/voz': typeof AppVozRoute
   '/app': typeof AppIndexRoute
@@ -172,6 +195,7 @@ export interface FileRoutesByTo {
   '/app/admin/crm': typeof AppAdminCrmRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/modules': typeof AppAdminModulesRoute
+  '/app/admin/telegram': typeof AppAdminTelegramRoute
   '/app/admin/users': typeof AppAdminUsersRoute
 }
 export interface FileRoutesById {
@@ -180,6 +204,7 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/agentes': typeof AppAgentesRoute
+  '/app/ao-vivo': typeof AppAoVivoRoute
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/banca': typeof AppBancaRoute
   '/app/calendario': typeof AppCalendarioRoute
@@ -188,6 +213,7 @@ export interface FileRoutesById {
   '/app/padroes': typeof AppPadroesRoute
   '/app/pagamentos': typeof AppPagamentosRoute
   '/app/planos': typeof AppPlanosRoute
+  '/app/salas': typeof AppSalasRoute
   '/app/validador': typeof AppValidadorRoute
   '/app/voz': typeof AppVozRoute
   '/app/': typeof AppIndexRoute
@@ -195,6 +221,7 @@ export interface FileRoutesById {
   '/app/admin/crm': typeof AppAdminCrmRoute
   '/app/admin/logs': typeof AppAdminLogsRoute
   '/app/admin/modules': typeof AppAdminModulesRoute
+  '/app/admin/telegram': typeof AppAdminTelegramRoute
   '/app/admin/users': typeof AppAdminUsersRoute
 }
 export interface FileRouteTypes {
@@ -204,6 +231,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/app/admin'
     | '/app/agentes'
+    | '/app/ao-vivo'
     | '/app/assinatura'
     | '/app/banca'
     | '/app/calendario'
@@ -212,6 +240,7 @@ export interface FileRouteTypes {
     | '/app/padroes'
     | '/app/pagamentos'
     | '/app/planos'
+    | '/app/salas'
     | '/app/validador'
     | '/app/voz'
     | '/app/'
@@ -219,12 +248,14 @@ export interface FileRouteTypes {
     | '/app/admin/crm'
     | '/app/admin/logs'
     | '/app/admin/modules'
+    | '/app/admin/telegram'
     | '/app/admin/users'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/app/admin'
     | '/app/agentes'
+    | '/app/ao-vivo'
     | '/app/assinatura'
     | '/app/banca'
     | '/app/calendario'
@@ -233,6 +264,7 @@ export interface FileRouteTypes {
     | '/app/padroes'
     | '/app/pagamentos'
     | '/app/planos'
+    | '/app/salas'
     | '/app/validador'
     | '/app/voz'
     | '/app'
@@ -240,6 +272,7 @@ export interface FileRouteTypes {
     | '/app/admin/crm'
     | '/app/admin/logs'
     | '/app/admin/modules'
+    | '/app/admin/telegram'
     | '/app/admin/users'
   id:
     | '__root__'
@@ -247,6 +280,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/app/admin'
     | '/app/agentes'
+    | '/app/ao-vivo'
     | '/app/assinatura'
     | '/app/banca'
     | '/app/calendario'
@@ -255,6 +289,7 @@ export interface FileRouteTypes {
     | '/app/padroes'
     | '/app/pagamentos'
     | '/app/planos'
+    | '/app/salas'
     | '/app/validador'
     | '/app/voz'
     | '/app/'
@@ -262,6 +297,7 @@ export interface FileRouteTypes {
     | '/app/admin/crm'
     | '/app/admin/logs'
     | '/app/admin/modules'
+    | '/app/admin/telegram'
     | '/app/admin/users'
   fileRoutesById: FileRoutesById
 }
@@ -305,6 +341,13 @@ declare module '@tanstack/react-router' {
       path: '/validador'
       fullPath: '/app/validador'
       preLoaderRoute: typeof AppValidadorRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/salas': {
+      id: '/app/salas'
+      path: '/salas'
+      fullPath: '/app/salas'
+      preLoaderRoute: typeof AppSalasRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/planos': {
@@ -363,6 +406,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAssinaturaRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/ao-vivo': {
+      id: '/app/ao-vivo'
+      path: '/ao-vivo'
+      fullPath: '/app/ao-vivo'
+      preLoaderRoute: typeof AppAoVivoRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/agentes': {
       id: '/app/agentes'
       path: '/agentes'
@@ -382,6 +432,13 @@ declare module '@tanstack/react-router' {
       path: '/users'
       fullPath: '/app/admin/users'
       preLoaderRoute: typeof AppAdminUsersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/telegram': {
+      id: '/app/admin/telegram'
+      path: '/telegram'
+      fullPath: '/app/admin/telegram'
+      preLoaderRoute: typeof AppAdminTelegramRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/modules': {
@@ -420,6 +477,7 @@ interface AppAdminRouteChildren {
   AppAdminCrmRoute: typeof AppAdminCrmRoute
   AppAdminLogsRoute: typeof AppAdminLogsRoute
   AppAdminModulesRoute: typeof AppAdminModulesRoute
+  AppAdminTelegramRoute: typeof AppAdminTelegramRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
 }
 
@@ -428,6 +486,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminCrmRoute: AppAdminCrmRoute,
   AppAdminLogsRoute: AppAdminLogsRoute,
   AppAdminModulesRoute: AppAdminModulesRoute,
+  AppAdminTelegramRoute: AppAdminTelegramRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
 }
 
@@ -438,6 +497,7 @@ const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRouteWithChildren
   AppAgentesRoute: typeof AppAgentesRoute
+  AppAoVivoRoute: typeof AppAoVivoRoute
   AppAssinaturaRoute: typeof AppAssinaturaRoute
   AppBancaRoute: typeof AppBancaRoute
   AppCalendarioRoute: typeof AppCalendarioRoute
@@ -446,6 +506,7 @@ interface AppRouteChildren {
   AppPadroesRoute: typeof AppPadroesRoute
   AppPagamentosRoute: typeof AppPagamentosRoute
   AppPlanosRoute: typeof AppPlanosRoute
+  AppSalasRoute: typeof AppSalasRoute
   AppValidadorRoute: typeof AppValidadorRoute
   AppVozRoute: typeof AppVozRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -454,6 +515,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRouteWithChildren,
   AppAgentesRoute: AppAgentesRoute,
+  AppAoVivoRoute: AppAoVivoRoute,
   AppAssinaturaRoute: AppAssinaturaRoute,
   AppBancaRoute: AppBancaRoute,
   AppCalendarioRoute: AppCalendarioRoute,
@@ -462,6 +524,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPadroesRoute: AppPadroesRoute,
   AppPagamentosRoute: AppPagamentosRoute,
   AppPlanosRoute: AppPlanosRoute,
+  AppSalasRoute: AppSalasRoute,
   AppValidadorRoute: AppValidadorRoute,
   AppVozRoute: AppVozRoute,
   AppIndexRoute: AppIndexRoute,

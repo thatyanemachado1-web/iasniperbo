@@ -1,16 +1,31 @@
-import { useQuery } from "@tanstack/react-query";
+import { replaceEqualDeep, useQuery, useQueryClient } from "@tanstack/react-query";
 import { mockDashboardData } from "@/data/mockDashboardData";
+import { refreshAccessSession } from "@/lib/accessApi";
 import { readAdminSession } from "@/lib/adminApi";
 import { LOCAL_SIGNALS_API_BASE_URL } from "@/lib/runtimePorts";
-import { readUserSession } from "@/lib/userSession";
-import { useEffect, useMemo, useState } from "react";
-import type { DashboardData, ModuleToggles, NeuralReading, NeuralScoreboard } from "@/types/dashboard";
+import { clearUserSession, readUserSession } from "@/lib/userSession";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type {
+  CurrentSignalSide,
+  DashboardData,
+  DashboardDailyResultsByModule,
+  DashboardDisplayState,
+  DashboardPersistentResult,
+  ModuleToggles,
+  NeuralReading,
+  NeuralScoreboard,
+} from "@/types/dashboard";
 import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 
-const LIVE_REFETCH_INTERVAL_MS = 2500;
+const DEFAULT_POLLING_MS = 500;
+const ERROR_BACKOFF_POLLING_MS = 1500;
+const DASHBOARD_FETCH_DEDUP_MS = 250;
+const DASHBOARD_FETCH_TIMEOUT_MS = 4_000;
+const MAX_IN_FLIGHT_REQUESTS = 1;
+const STREAM_ENABLED = false;
+const DASHBOARD_AUTH_FAILURES_BEFORE_LOGOUT = 6;
+const DASHBOARD_AUTH_FAILURE_WINDOW_MS = 45_000;
 const CLIENT_MODULE_TOGGLES_KEY = "sniper_client_module_toggles";
-const NEURAL_SCORE_BASELINE_KEY = "sniper_neural_score_baseline_reset_2026_06_03_192855";
-const NEURAL_SEQUENCE_KEY = "sniper_neural_live_sequence_v2";
 const DASHBOARD_CYCLE_TIME_ZONE = "America/Sao_Paulo";
 const PUBLIC_LIVE_API_BASE_URL = "https://sniperbo.com";
 const DASHBOARD_SOURCE_STORAGE_KEY = "sniper_admin_api_url";
@@ -19,6 +34,147 @@ const DEFAULT_MODULE_TOGGLES: ModuleToggles = {
   surfAnalyzer: true,
 };
 const ALLOWED_REMOTE_API_HOSTS = new Set(["sniperbo.com", "www.sniperbo.com"]);
+const CONNECTING_DASHBOARD_DATA: DashboardData = {
+  ...mockDashboardData,
+  user: { name: "" },
+  mockMode: false,
+  revision: 0,
+  sequenceId: 0,
+  rounds: [],
+  updatedAt: undefined,
+  collectorStatus: "connecting",
+  websocketStatus: "connecting",
+  currentSignal: {
+    id: "connecting",
+    side: "NONE",
+    status: "waiting",
+    protection: "-",
+    strength: 0,
+  },
+  lastSignalResult: null,
+  displayState: "analyzing",
+  displaySide: "NONE",
+  displayRoundId: null,
+  currentTieAlert: {
+    id: "current-tie",
+    level: "Baixo",
+    confidence: 0,
+    validityRounds: 0,
+    status: "expired",
+    source: "stale",
+  },
+  currentSurfAlert: {
+    surf_alert: false,
+    surf_phase: "SEM_RISCO",
+    surf_side: "NONE",
+    surf_status: "SEM_RISCO",
+    surf_risk: 0,
+    surf_break_risk: 0,
+    surf_confidence: 0,
+    stretched_count: 0,
+    correction_count: 0,
+    reason: "Aguardando dados reais da mesa.",
+    panels: {
+      big_road: "Aguardando dados reais.",
+      big_eye_boy: "Aguardando dados reais.",
+      small_road: "Aguardando dados reais.",
+      cockroach_pig: "Aguardando dados reais.",
+    },
+    surf_prediction_side: "NONE",
+    surf_prediction_status: "EXPIRED",
+    surf_prediction_confidence: 0,
+    surf_prediction_window: 0,
+  },
+  neuralReading: {
+    mode: "SCANNING",
+    numero: null,
+    origem: null,
+    origemTipo: null,
+    direcao: null,
+    validade: "G1",
+    alertas: 0,
+    acertos: 0,
+    greenSemGale: 0,
+    greenG1: 0,
+    erros: 0,
+    reds: 0,
+    assertividade: 0,
+    paganteStatus: "ANALISANDO",
+    paganteAlert: "Aguardando dashboard real.",
+  },
+  neuralScoreboard: {
+    totalAlerts: 0,
+    acertos: 0,
+    greens: 0,
+    greenSemGale: 0,
+    greenG1: 0,
+    erros: 0,
+    reds: 0,
+    assertividade: 0,
+  },
+  neuralEntryState: null,
+  neuralEntryLastResult: null,
+  engineDecision: {
+    state: "AGUARDAR",
+    reason: "Aguardando dados reais da mesa.",
+    confidence: 0,
+  },
+  mainScoreboard: {
+    greens: 0,
+    greensG1: 0,
+    reds: 0,
+    totalGreens: 0,
+    totalEntries: 0,
+    assertiveness: 0,
+  },
+  tieAlertScoreboard: {
+    greenTieAlerts: 0,
+    expired: 0,
+    totalAlerts: 0,
+    assertiveness: 0,
+  },
+  tieRadarHistory: undefined,
+  monthlyTieStats: undefined,
+  dailyResultsByModule: {},
+  surfAnalyzerScoreboard: {
+    totalAlerts: 0,
+    hits: 0,
+    fails: 0,
+    expired: 0,
+    greenSemGale: 0,
+    greenG1: 0,
+    reds: 0,
+    blocked: 0,
+    noRisk: 0,
+    bankerHits: 0,
+    playerHits: 0,
+    assertiveness: 0,
+    sequencePositive: 0,
+    sequenceNegative: 0,
+    maxBankerSurfHit: 0,
+    maxPlayerSurfHit: 0,
+    maxBreakDetected: 0,
+    maxRetakeDetected: 0,
+    currentHitStreak: 0,
+  },
+  pressureSeries: [],
+};
+
+let dashboardFetchInFlight:
+  | {
+      key: string;
+      promise: Promise<DashboardData>;
+    }
+  | null = null;
+let dashboardFetchCache:
+  | {
+      key: string;
+      data: DashboardData;
+      fetchedAt: number;
+    }
+  | null = null;
+let dashboardAuthFailureCount = 0;
+let dashboardAuthFailureFirstAt = 0;
 
 function configuredDashboardUrl() {
   const directUrl = import.meta.env.VITE_SNIPER_DASHBOARD_URL as string | undefined;
@@ -42,6 +198,10 @@ function configuredDashboardUrl() {
     }
 
     const savedAdminApi = window.localStorage.getItem(DASHBOARD_SOURCE_STORAGE_KEY);
+    if (!isLocalFrontend() && isHostedAppOrigin()) {
+      if (savedAdminApi) window.localStorage.removeItem(DASHBOARD_SOURCE_STORAGE_KEY);
+      return defaultDashboardUrl();
+    }
     if (savedAdminApi && isSameOriginApiBaseUrl(savedAdminApi)) {
       window.localStorage.removeItem(DASHBOARD_SOURCE_STORAGE_KEY);
       return defaultDashboardUrl();
@@ -100,6 +260,12 @@ function isLocalFrontend() {
   );
 }
 
+function isHostedAppOrigin() {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location.hostname.toLowerCase();
+  return hostname === "sniperbo.com" || hostname === "www.sniperbo.com" || hostname.endsWith(".lovable.app");
+}
+
 function ensureDashboardPath(url: string) {
   const trimmed = url.trim().replace(/\/+$/, "");
   return trimmed.endsWith("/dashboard") ? trimmed : `${trimmed}/dashboard`;
@@ -113,6 +279,9 @@ function defaultDashboardUrl() {
   if (typeof window === "undefined") return "";
   if (isLocalFrontend()) {
     return ensureDashboardPath(LOCAL_SIGNALS_API_BASE_URL);
+  }
+  if (isHostedAppOrigin()) {
+    return ensureDashboardPath(PUBLIC_LIVE_API_BASE_URL);
   }
   return ensureDashboardPath(PUBLIC_LIVE_API_BASE_URL);
 }
@@ -134,16 +303,53 @@ function isLocalDashboardUrl(url: string) {
 
 async function fetchDashboardData(): Promise<DashboardData> {
   const url = configuredDashboardUrl();
-  const userSession = readUserSession();
-  const adminSession = readAdminSession();
-  const token = configuredDashboardToken(url) || adminSession?.token || userSession.clientToken;
-  const response = await fetch(url, {
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
+  const key = dashboardRequestCacheKey(url);
+  const now = Date.now();
+  if (MAX_IN_FLIGHT_REQUESTS !== 1) {
+    throw new Error("Dashboard polling supports a single in-flight request");
+  }
+  if (dashboardFetchInFlight?.key === key) return dashboardFetchInFlight.promise;
+  if (
+    dashboardFetchCache?.key === key &&
+    now - dashboardFetchCache.fetchedAt < DASHBOARD_FETCH_DEDUP_MS
+  ) {
+    return dashboardFetchCache.data;
+  }
+
+  const promise = fetchDashboardDataOnce(url)
+    .then((data) => {
+      noteDashboardAuthSuccess();
+      dashboardFetchCache = { key, data, fetchedAt: Date.now() };
+      return data;
+    })
+    .finally(() => {
+      if (dashboardFetchInFlight?.promise === promise) {
+        dashboardFetchInFlight = null;
+      }
+    });
+  dashboardFetchInFlight = { key, promise };
+  return promise;
+}
+
+async function fetchDashboardDataOnce(url: string): Promise<DashboardData> {
+  const response = await fetchDashboardResponse(url);
+
+  if (response.status === 401 || response.status === 403) {
+    const refreshed = await refreshAccessSession().catch(() => null);
+    if (refreshed?.client_token) {
+      noteDashboardAuthSuccess();
+      const retry = await fetchDashboardResponse(url);
+      if (retry.ok) {
+        return normalizeDashboardData(await retry.json());
+      }
+      if (retry.status === 401 || retry.status === 403) {
+        expireDashboardSessionAfterRepeatedAuthFailures();
+      }
+      throw new Error(`Dashboard API returned ${retry.status}`);
+    }
+    expireDashboardSessionAfterRepeatedAuthFailures();
+    throw new Error(`Dashboard API returned ${response.status}`);
+  }
 
   if (!response.ok) {
     throw new Error(`Dashboard API returned ${response.status}`);
@@ -152,23 +358,189 @@ async function fetchDashboardData(): Promise<DashboardData> {
   return normalizeDashboardData(await response.json());
 }
 
+function noteDashboardAuthSuccess() {
+  dashboardAuthFailureCount = 0;
+  dashboardAuthFailureFirstAt = 0;
+}
+
+function expireDashboardSessionAfterRepeatedAuthFailures() {
+  if (typeof window === "undefined") return;
+  const session = readUserSession();
+  if (!session.clientToken) {
+    expireDashboardSession();
+    return;
+  }
+
+  const now = Date.now();
+  if (!dashboardAuthFailureFirstAt || now - dashboardAuthFailureFirstAt > DASHBOARD_AUTH_FAILURE_WINDOW_MS) {
+    dashboardAuthFailureFirstAt = now;
+    dashboardAuthFailureCount = 0;
+  }
+  dashboardAuthFailureCount += 1;
+
+  if (dashboardAuthFailureCount < DASHBOARD_AUTH_FAILURES_BEFORE_LOGOUT) {
+    console.warn("[DASHBOARD_AUTH_GRACE]", {
+      failures: dashboardAuthFailureCount,
+      required: DASHBOARD_AUTH_FAILURES_BEFORE_LOGOUT,
+    });
+    return;
+  }
+
+  expireDashboardSession();
+}
+
+function expireDashboardSession() {
+  if (typeof window === "undefined") return;
+  clearUserSession();
+  window.location.assign("/");
+}
+
+function dashboardRequestCacheKey(url: string) {
+  return `${url}|${dashboardAuthTokenForUrl(url)}`;
+}
+
+function fetchDashboardResponse(url: string) {
+  const liveUrl = dashboardPollUrl(url);
+  const userSession = readUserSession();
+  const adminSession = readAdminSession();
+  const token = configuredDashboardToken(url) || adminSession?.token || userSession.clientToken;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DASHBOARD_FETCH_TIMEOUT_MS);
+  return fetch(liveUrl, {
+    cache: "no-store",
+    signal: controller.signal,
+    headers: {
+      Accept: "application/json",
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      Pragma: "no-cache",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  }).finally(() => clearTimeout(timeoutId));
+}
+
+function dashboardPollUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set("rt", `${Date.now()}`);
+    return parsed.toString();
+  } catch {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}rt=${Date.now()}`;
+  }
+}
+
+function dashboardAuthTokenForUrl(url: string) {
+  const userSession = readUserSession();
+  const adminSession = readAdminSession();
+  const token = configuredDashboardToken(url) || adminSession?.token || userSession.clientToken;
+  return token || "";
+}
+
+function dashboardStreamUrl(url: string, token: string) {
+  try {
+    const parsed = new URL(url);
+    parsed.pathname = "/dashboard";
+    parsed.searchParams.set("stream", "1");
+    parsed.searchParams.set("rt", `${Date.now()}`);
+    if (token) {
+      parsed.searchParams.set("access_token", token);
+    } else {
+      parsed.searchParams.delete("access_token");
+    }
+    return parsed.toString();
+  } catch {
+    const baseWithoutQuery = url.replace(/\?.*$/, "");
+    const base = /\/dashboard\/?$/i.test(baseWithoutQuery)
+      ? baseWithoutQuery.replace(/\/dashboard\/?$/, "")
+      : baseWithoutQuery;
+    const normalizedBase = base.endsWith("/") ? base.slice(0, -1) : base;
+    const fallbackBase = normalizedBase ? `${normalizedBase}/dashboard` : "/dashboard";
+    const tokenQuery = token
+      ? `?stream=1&access_token=${encodeURIComponent(token)}&rt=${Date.now()}`
+      : `?stream=1&rt=${Date.now()}`;
+    return `${fallbackBase}${tokenQuery}`;
+  }
+}
+
 export function useDashboardData() {
+  const [mounted, setMounted] = useState(false);
   const dashboardUrl = configuredDashboardUrl();
+  const initialDashboardData = dashboardUrl ? CONNECTING_DASHBOARD_DATA : mockDashboardData;
+  const queryClient = useQueryClient();
   const [moduleToggles, setModuleTogglesState] = useState<ModuleToggles>(() =>
     readStoredModuleToggles(),
   );
+  const [sessionRefreshNonce, setSessionRefreshNonce] = useState(0);
+  const sessionRefreshInFlightRef = useRef<Promise<boolean> | null>(null);
+  const streamToken = useMemo(() => dashboardAuthTokenForUrl(dashboardUrl), [dashboardUrl, sessionRefreshNonce]);
+  const [, setStreamEnabled] = useState(false);
+  const lastLoggedRevisionRef = useRef<number | string | null>(null);
   const query = useQuery({
     queryKey: ["dashboard-data", dashboardUrl],
     queryFn: fetchDashboardData,
-    enabled: Boolean(dashboardUrl) && typeof window !== "undefined",
-    initialData: mockDashboardData,
-    refetchInterval: dashboardUrl ? LIVE_REFETCH_INTERVAL_MS : false,
+    enabled: mounted && Boolean(dashboardUrl) && typeof window !== "undefined",
+    initialData: initialDashboardData,
+    refetchInterval: (activeQuery) =>
+      activeQuery.state.error || activeQuery.state.fetchFailureCount > 0
+        ? ERROR_BACKOFF_POLLING_MS
+        : DEFAULT_POLLING_MS,
     refetchIntervalInBackground: true,
-    retry: 1,
+    retry: false,
     staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
+    refetchOnReconnect: "always",
+    refetchOnWindowFocus: "always",
+    structuralSharing: (oldValue: unknown, newValue: unknown) => {
+      const oldData = oldValue as DashboardData | undefined;
+      const newData = newValue as DashboardData;
+      if (oldData && !isDashboardSnapshotFreshEnough(newData, oldData)) return oldData;
+      const mergedData = mergePersistentDashboardSnapshot(oldData, newData);
+      // Revisions are assigned inside separate edge isolates, so two valid snapshots
+      // can share (or even regress) the same numeric revision while an individual
+      // card has already changed. Preserve equal branches, never the whole stale
+      // dashboard solely because the revision happens to match.
+      return oldData ? replaceEqualDeep(oldData, mergedData) : mergedData;
+    },
   });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined" || !mounted || !dashboardUrl) {
+      return undefined;
+    }
+
+    let lastSyncAt = 0;
+    const queryKey = ["dashboard-data", dashboardUrl] as const;
+    const syncNow = () => {
+      const now = Date.now();
+      if (now - lastSyncAt < DEFAULT_POLLING_MS) return;
+      lastSyncAt = now;
+      void queryClient.refetchQueries({ queryKey, type: "active" });
+    };
+    const syncWhenVisible = () => {
+      if (!document.hidden) syncNow();
+    };
+
+    syncNow();
+    window.addEventListener("focus", syncNow);
+    window.addEventListener("pageshow", syncNow);
+    window.addEventListener("online", syncNow);
+    document.addEventListener("visibilitychange", syncWhenVisible);
+
+    return () => {
+      window.removeEventListener("focus", syncNow);
+      window.removeEventListener("pageshow", syncNow);
+      window.removeEventListener("online", syncNow);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+    };
+  }, [dashboardUrl, mounted, queryClient]);
+
   const data = useMemo(() => {
-    const rawData = query.data ?? mockDashboardData;
+    const rawData = query.data ?? initialDashboardData;
     return {
       ...rawData,
       moduleToggles,
@@ -176,6 +548,105 @@ export function useDashboardData() {
       entryModeFilter: undefined,
     };
   }, [query.data, moduleToggles]);
+
+  useEffect(() => {
+    if (!query.data || query.data.mockMode) return;
+    const revision = dashboardRevisionKey(query.data);
+    if (!revision || revision === lastLoggedRevisionRef.current) return;
+    lastLoggedRevisionRef.current = revision;
+    console.info("[DASHBOARD_FETCH] frontend recebeu revision nova", {
+      revision,
+      updatedAt: query.data.updatedAt,
+      signalStatus: query.data.currentSignal?.status,
+      signalSide: query.data.currentSignal?.side,
+      displayState: query.data.displayState,
+      displaySide: query.data.displaySide,
+    });
+    console.info("[FRONT_DASHBOARD_RECEIVED]", {
+      revision,
+      displayState: query.data.displayState,
+      side: query.data.displaySide,
+    });
+    console.info(window.innerWidth < 768 ? "[MOBILE_SYNC] mobile renderizou mesma revision" : "[WEB_SYNC] web renderizou mesma revision", {
+      revision,
+    });
+  }, [query.data]);
+
+  useEffect(() => {
+    if (!STREAM_ENABLED) {
+      setStreamEnabled(false);
+      return undefined;
+    }
+    if (typeof window === "undefined" || !dashboardUrl) return;
+    const streamUrl = dashboardStreamUrl(dashboardUrl, streamToken);
+    let activeStream: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let aborted = false;
+    let reconnectAttempts = 0;
+    const refreshStreamSession = () => {
+      if (sessionRefreshInFlightRef.current) return sessionRefreshInFlightRef.current;
+      sessionRefreshInFlightRef.current = refreshAccessSession()
+        .then((access) => {
+          const refreshed = Boolean(access?.client_token);
+          if (refreshed) {
+            setSessionRefreshNonce((value) => value + 1);
+            queryClient.invalidateQueries({ queryKey: ["dashboard-data", dashboardUrl] });
+          }
+          return refreshed;
+        })
+        .catch(() => false)
+        .finally(() => {
+          sessionRefreshInFlightRef.current = null;
+        });
+      return sessionRefreshInFlightRef.current;
+    };
+    const onMessage = (event: MessageEvent) => {
+      reconnectAttempts = 0;
+      setStreamEnabled(true);
+      try {
+        const parsed = normalizeDashboardData(JSON.parse(event.data));
+        queryClient.setQueryData(["dashboard-data", dashboardUrl], (current: DashboardData | undefined) =>
+          isDashboardSnapshotFreshEnough(parsed, current)
+            ? mergePersistentDashboardSnapshot(current, parsed)
+            : current ?? parsed,
+        );
+      } catch {
+        // ignore malformed events
+      }
+    };
+    const openStream = () => {
+      if (aborted) return;
+      const source = new EventSource(streamUrl);
+      activeStream = source;
+      const cleanupAndReopen = () => {
+        source.close();
+        if (aborted) return;
+        setStreamEnabled(false);
+        void refreshStreamSession().then((refreshed) => {
+          if (aborted) return;
+          reconnectAttempts = refreshed ? 0 : reconnectAttempts + 1;
+          const delay = refreshed ? 100 : Math.min(750 * Math.pow(2, reconnectAttempts), 3000);
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(openStream, delay);
+        });
+      };
+      source.addEventListener("dashboard", onMessage);
+      source.onerror = cleanupAndReopen;
+      source.onopen = () => {
+        setStreamEnabled(true);
+      };
+    };
+
+    openStream();
+    return () => {
+      aborted = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      if (activeStream) activeStream.close();
+      setStreamEnabled(false);
+    };
+  }, [dashboardUrl, streamToken, queryClient]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -239,6 +710,8 @@ function normalizeModuleToggles(value: unknown, fallback: ModuleToggles): Module
 
 function normalizeDashboardData(payload: unknown): DashboardData {
   const data = readRecord(payload) as unknown as DashboardData;
+  const currentSignal = normalizeCurrentSignal(data.currentSignal, data.lastSignalResult);
+  const lastSignalResult = data.lastSignalResult ?? currentSignal.lastResult ?? null;
   const neuralReading =
     data.neuralReading ??
     (data as unknown as Record<string, unknown>).neural_reading ??
@@ -252,15 +725,390 @@ function normalizeDashboardData(payload: unknown): DashboardData {
     (data as unknown as Record<string, unknown>).neuralStats ??
     (data as unknown as Record<string, unknown>).neural_stats;
   const normalizedNeuralReading = normalizeNeuralReading(neuralReading, data.neuralReading);
+  const normalizedData = {
+    ...data,
+    currentSignal,
+    lastSignalResult,
+    neuralReading: normalizedNeuralReading,
+  };
+  const displayState = normalizeDisplayState((data as unknown as Record<string, unknown>).displayState) ??
+    deriveDashboardDisplayState(normalizedData);
+  const displaySide = normalizeDisplaySide((data as unknown as Record<string, unknown>).displaySide) ??
+    deriveDashboardDisplaySide(normalizedData);
 
   return {
     ...data,
+    revision: readOptionalNumber((data as unknown as Record<string, unknown>).revision) ?? data.revision ?? 0,
+    sequenceId: readOptionalNumber((data as unknown as Record<string, unknown>).sequenceId) ?? data.sequenceId ?? 0,
+    currentSignal,
+    lastSignalResult,
+    displayState,
+    displaySide,
+    displayRoundId:
+      normalizeDisplayRoundId((data as unknown as Record<string, unknown>).displayRoundId) ??
+      data.rounds?.at(-1)?.id ??
+      null,
+    monthlyTieStats: data.monthlyTieStats ?? data.tieRadarHistory,
+    dailyResultsByModule: normalizeFrontendDailyResultsByModule(data.dailyResultsByModule, dashboardDayKey(data)),
     ...applyNeuralScoreBaseline(
       normalizedNeuralReading,
       normalizeNeuralScoreboard(neuralScoreboard, data.neuralScoreboard),
       dashboardDayKey(data),
     ),
   };
+}
+
+function normalizeDisplayState(value: unknown): DashboardDisplayState | null {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (
+    text === "analyzing" ||
+    text === "monitoring" ||
+    text === "entry_confirmed" ||
+    text === "waiting_result" ||
+    text === "result_green" ||
+    text === "result_red" ||
+    text === "result_tie" ||
+    text === "expired"
+  ) {
+    return text as DashboardDisplayState;
+  }
+  return null;
+}
+
+function normalizeDisplaySide(value: unknown): CurrentSignalSide | null {
+  const side = normalizeNeuralSide(value);
+  if (side === "BANKER" || side === "PLAYER" || side === "TIE") return side;
+  const text = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (text === "NONE" || text === "WAITING" || text === "AGUARDAR") return "NONE";
+  return null;
+}
+
+function normalizeDisplayRoundId(value: unknown): string | number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value ?? "").trim();
+  return text ? text : null;
+}
+
+function deriveDashboardDisplayState(
+  data: Pick<
+    DashboardData,
+    "currentSignal" | "lastSignalResult" | "neuralEntryState" | "neuralEntryLastResult" | "neuralReading"
+  >,
+): DashboardDisplayState {
+  const signal = data.currentSignal;
+  if (signal?.status === "green" || signal?.status === "green_g1") return "result_green";
+  if (signal?.status === "red") return "result_red";
+  if (signal?.status === "tie") return "result_tie";
+
+  const entryResult = data.neuralEntryLastResult;
+  if (entryResult && isRecentDisplayResult(entryResult.finishedAt)) {
+    if (entryResult.outcome === "RED") return "result_red";
+    if (entryResult.outcome === "TIE") return "result_tie";
+    return "result_green";
+  }
+
+  if (signal?.side && signal.side !== "NONE" && signal.status === "g1") return "waiting_result";
+  if (signal?.side && signal.side !== "NONE" && signal.status === "pending") return "entry_confirmed";
+  if (data.neuralEntryState?.expectedSide) {
+    return data.neuralEntryState.status === "awaiting_g1" ? "waiting_result" : "entry_confirmed";
+  }
+  const neuralCycleStatus = String(data.neuralReading?.cycleStatus || "").toUpperCase();
+  const neuralCycleSide = normalizeActiveDisplaySide(data.neuralReading?.targetSide);
+  if (neuralCycleSide && (neuralCycleStatus === "AGUARDANDO_RESULTADO" || neuralCycleStatus === "AGUARDANDO_G1")) {
+    return neuralCycleStatus === "AGUARDANDO_G1" ? "waiting_result" : "entry_confirmed";
+  }
+  if (data.neuralReading?.mode === "ACTIVE" && (data.neuralReading.direcao || data.neuralReading.origem)) {
+    return "entry_confirmed";
+  }
+  if (data.neuralReading?.mode === "OBSERVING") return "monitoring";
+  return "analyzing";
+}
+
+function deriveDashboardDisplaySide(
+  data: Pick<DashboardData, "currentSignal" | "neuralEntryState" | "neuralEntryLastResult" | "neuralReading">,
+): CurrentSignalSide {
+  return (
+    normalizeActiveDisplaySide(data.currentSignal?.side) ??
+    normalizeActiveDisplaySide(data.neuralEntryState?.expectedSide) ??
+    normalizeActiveDisplaySide(data.neuralEntryLastResult?.expectedSide) ??
+    normalizeActiveDisplaySide(data.neuralReading?.targetSide) ??
+    normalizeActiveDisplaySide(data.neuralReading?.direcao) ??
+    normalizeActiveDisplaySide(data.neuralReading?.origem) ??
+    "NONE"
+  );
+}
+
+function normalizeActiveDisplaySide(value: unknown): CurrentSignalSide | null {
+  const side = normalizeDisplaySide(value);
+  return side && side !== "NONE" ? side : null;
+}
+
+function isRecentDisplayResult(finishedAt?: string | null) {
+  const time = Date.parse(String(finishedAt || ""));
+  if (!Number.isFinite(time)) return false;
+  const age = Date.now() - time;
+  return age >= -5_000 && age <= 1_500;
+}
+
+function normalizeCurrentSignal(
+  signal: DashboardData["currentSignal"],
+  lastSignalResult?: DashboardData["lastSignalResult"] | null,
+): DashboardData["currentSignal"] {
+  const fallback = CONNECTING_DASHBOARD_DATA.currentSignal;
+  const raw = signal ?? fallback;
+  const terminal = raw.status === "green" || raw.status === "green_g1" || raw.status === "red" || raw.status === "tie";
+  const result = raw.lastResult ?? lastSignalResult ?? null;
+
+  if (terminal && result) {
+    return {
+      ...raw,
+      lastResult: result,
+    };
+  }
+
+  if (raw.side === "NONE" || raw.status === "waiting") {
+    return {
+      ...raw,
+      side: "NONE",
+      status: "waiting",
+      protection: raw.protection || "-",
+      strength: Number.isFinite(Number(raw.strength)) ? raw.strength : 0,
+      lastResult: result,
+    };
+  }
+
+  return {
+    ...raw,
+    lastResult: null,
+  };
+}
+
+function dashboardRevisionKey(data: DashboardData) {
+  if (data.revision !== undefined && data.revision !== null) return data.revision;
+  if (data.sequenceId !== undefined && data.sequenceId !== null) return data.sequenceId;
+  return data.updatedAt ?? "";
+}
+
+function isDashboardSnapshotFreshEnough(next: DashboardData, current?: DashboardData) {
+  if (!current || current.mockMode) return true;
+  if (next.mockMode) return false;
+
+  const nextFreshness = dashboardFreshness(next);
+  const currentFreshness = dashboardFreshness(current);
+
+  // The result timestamp is the authoritative ordering signal and also handles
+  // a table/session round-id reset. Numeric revisions are local to an edge
+  // isolate and therefore are only a final tiebreaker.
+  if (
+    nextFreshness.roundRecordedAt >= 0 &&
+    currentFreshness.roundRecordedAt >= 0 &&
+    nextFreshness.roundRecordedAt !== currentFreshness.roundRecordedAt
+  ) {
+    return nextFreshness.roundRecordedAt >= currentFreshness.roundRecordedAt;
+  }
+  if (nextFreshness.roundId !== currentFreshness.roundId) {
+    return nextFreshness.roundId >= currentFreshness.roundId;
+  }
+  if (nextFreshness.updatedAt !== currentFreshness.updatedAt) {
+    return nextFreshness.updatedAt >= currentFreshness.updatedAt;
+  }
+  return nextFreshness.revision >= currentFreshness.revision;
+}
+
+function mergePersistentDashboardSnapshot(
+  current: DashboardData | undefined,
+  next: DashboardData,
+): DashboardData {
+  if (!current || current.mockMode || next.mockMode) return next;
+  const nextDayKey = dashboardDayKey(next);
+  const currentDayKey = dashboardDayKey(current);
+  const nextMonthKey = nextDayKey.slice(0, 7);
+  const currentMonthKey = currentDayKey.slice(0, 7);
+  const nextDaily = normalizeFrontendDailyResultsByModule(next.dailyResultsByModule, nextDayKey);
+  const currentDaily = normalizeFrontendDailyResultsByModule(current.dailyResultsByModule, nextDayKey);
+  const mergedDaily =
+    nextDayKey === currentDayKey
+      ? mergeFrontendDailyResultsByModule(currentDaily, nextDaily, nextDayKey)
+      : nextDaily;
+  const nextMonthlyTieStats = next.monthlyTieStats ?? next.tieRadarHistory;
+  const currentMonthlyTieStats = current.monthlyTieStats ?? current.tieRadarHistory;
+  const shouldKeepCurrentTieStats =
+    nextMonthKey === currentMonthKey &&
+    !tieHistoryHasCurrentMonthStats(nextMonthlyTieStats, nextMonthKey) &&
+    tieHistoryHasCurrentMonthStats(currentMonthlyTieStats, nextMonthKey);
+
+  return {
+    ...next,
+    dailyResultsByModule: mergedDaily,
+    monthlyTieStats: shouldKeepCurrentTieStats ? currentMonthlyTieStats : nextMonthlyTieStats,
+    tieRadarHistory:
+      shouldKeepCurrentTieStats && !tieHistoryHasCurrentMonthStats(next.tieRadarHistory, nextMonthKey)
+        ? currentMonthlyTieStats
+        : next.tieRadarHistory,
+  };
+}
+
+function normalizeFrontendDailyResultsByModule(
+  value: unknown,
+  dayKey: string,
+): DashboardDailyResultsByModule {
+  const record = readRecord(value);
+  const normalized: DashboardDailyResultsByModule = {};
+  for (const [moduleKey, rows] of Object.entries(record)) {
+    if (!Array.isArray(rows)) continue;
+    const moduleRows = rows
+      .map((row) => normalizeFrontendPersistentResult(row, moduleKey, dayKey))
+      .filter((row): row is DashboardPersistentResult => Boolean(row));
+    if (moduleRows.length) normalized[moduleKey] = moduleRows;
+  }
+  return {
+    LEITURA_NEURAL_NUMERO_PAGANTE: normalized.LEITURA_NEURAL_NUMERO_PAGANTE ?? [],
+    SURF_ANALYZER: normalized.SURF_ANALYZER ?? [],
+    PADROES_IA: normalized.PADROES_IA ?? [],
+    ...normalized,
+  };
+}
+
+function mergeFrontendDailyResultsByModule(
+  current: DashboardDailyResultsByModule,
+  next: DashboardDailyResultsByModule,
+  dayKey: string,
+): DashboardDailyResultsByModule {
+  const merged: DashboardDailyResultsByModule = {};
+  for (const source of [current, next]) {
+    for (const [moduleKey, rows] of Object.entries(source)) {
+      if (!Array.isArray(rows)) continue;
+      const byKey = new Map((merged[moduleKey] ?? []).map((row) => [frontendPersistentDedupeKey(row), row]));
+      for (const row of rows) {
+        if (row.dayKey !== dayKey) continue;
+        const key = frontendPersistentDedupeKey(row);
+        const existing = byKey.get(key);
+        byKey.set(key, preferredFrontendPersistentResult(existing, row));
+      }
+      merged[moduleKey] = [...byKey.values()].sort(
+        (a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""),
+      );
+    }
+  }
+  return normalizeFrontendDailyResultsByModule(merged, dayKey);
+}
+
+function normalizeFrontendPersistentResult(
+  value: unknown,
+  fallbackModuleKey: string,
+  fallbackDayKey: string,
+): DashboardPersistentResult | null {
+  const record = readRecord(value);
+  const createdAt = readOptionalString(firstDefined(record.createdAt, record.closedAt, record.finishedAt)) || new Date().toISOString();
+  const dayKey = readOptionalString(record.dayKey) || localDayKey(createdAt) || fallbackDayKey;
+  if (dayKey !== fallbackDayKey) return null;
+  const moduleKey = readOptionalString(firstDefined(record.moduleKey, record.module)) || fallbackModuleKey;
+  const resultType = readOptionalString(firstDefined(record.resultType, record.result, record.outcome, record.kind));
+  if (!moduleKey || !resultType) return null;
+  const roundId = firstDefined(record.roundId, record.closedRoundId, record.resultRoundKey, record.entryRoundId);
+  const signalId = readOptionalString(firstDefined(record.signalId, record.signal_id)) || null;
+  const resultId =
+    readOptionalString(firstDefined(record.resultId, record.cycleId, record.id)) ||
+    [moduleKey, signalId ?? "", String(roundId ?? ""), resultType, readOptionalString(record.attempt) ?? ""].join(":");
+  return {
+    moduleKey,
+    dayKey,
+    monthKey: readOptionalString(record.monthKey) || dayKey.slice(0, 7),
+    signalId,
+    resultId,
+    roundId: typeof roundId === "number" || typeof roundId === "string" ? roundId : null,
+    resultType,
+    side: normalizeDisplaySide(firstDefined(record.side, record.technicalSide, record.expectedSide, record.targetSide)),
+    attempt: readOptionalString(record.attempt),
+    tieMultiplier: firstDefined(record.tieMultiplier, record.tie_multiplier) as string | number | null | undefined,
+    createdAt,
+    displayTimeBR: readOptionalString(record.displayTimeBR) || formatFrontendDisplayTimeBR(createdAt),
+    label: readOptionalString(record.label) || resultType,
+    payload: readRecord(record.payload),
+  };
+}
+
+function frontendPersistentDedupeKey(row: DashboardPersistentResult) {
+  if (
+    row.moduleKey === "LEITURA_NEURAL_NUMERO_PAGANTE" &&
+    (row.signalId || (row.roundId !== null && row.roundId !== undefined))
+  ) {
+    const resultType = String(row.resultType || "").trim().toUpperCase();
+    const resultFamily =
+      resultType === "GREEN" || resultType === "GREEN_G1"
+        ? "GREEN"
+        : resultType === "EMPATE" || resultType === "EMPATE_G1"
+          ? "EMPATE"
+          : resultType;
+    return [row.moduleKey, row.dayKey ?? "", row.signalId ?? "", row.roundId ?? "", resultFamily].join(":");
+  }
+  return [
+    row.moduleKey,
+    row.dayKey ?? "",
+    row.resultId,
+    row.signalId ?? "",
+    row.roundId ?? "",
+    row.resultType,
+    row.attempt ?? "",
+  ].join(":");
+}
+
+function preferredFrontendPersistentResult(
+  current: DashboardPersistentResult | undefined,
+  candidate: DashboardPersistentResult,
+) {
+  if (!current) return candidate;
+  const specificity = (row: DashboardPersistentResult) => {
+    const type = String(row.resultType || "").trim().toUpperCase();
+    let score = type === "GREEN_G1" || type === "EMPATE_G1" ? 4 : 0;
+    if (String(row.attempt || "").toUpperCase() === "G1") score += 2;
+    if (row.tieMultiplier !== null && row.tieMultiplier !== undefined && row.tieMultiplier !== "") score += 1;
+    return score;
+  };
+  const currentRank = specificity(current);
+  const candidateRank = specificity(candidate);
+  if (candidateRank !== currentRank) return candidateRank > currentRank ? candidate : current;
+  const currentTime = Date.parse(current.createdAt || "");
+  const candidateTime = Date.parse(candidate.createdAt || "");
+  if (Number.isFinite(candidateTime) && (!Number.isFinite(currentTime) || candidateTime > currentTime)) {
+    return candidate;
+  }
+  return current;
+}
+
+function tieHistoryHasCurrentMonthStats(history: DashboardData["tieRadarHistory"], monthKey: string) {
+  if (!history) return false;
+  return history.monthly?.key === monthKey || history.recent?.some((item) => item.monthKey === monthKey);
+}
+
+function formatFrontendDisplayTimeBR(value: unknown) {
+  const date = new Date(String(value || ""));
+  if (!Number.isFinite(date.getTime())) return "--:--";
+  return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function dashboardFreshness(data: DashboardData) {
+  const latestRound = Array.isArray(data.rounds) ? data.rounds.at(-1) : undefined;
+  return {
+    roundId: safeFreshnessNumber(latestRound?.id),
+    roundRecordedAt: safeFreshnessTimestamp(latestRound?.recordedAt),
+    revision: safeFreshnessNumber(data.revision ?? data.sequenceId),
+    updatedAt: safeFreshnessTimestamp(data.updatedAt),
+  };
+}
+
+function safeFreshnessNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : -1;
+}
+
+function safeFreshnessTimestamp(value: unknown) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? time : -1;
 }
 
 function normalizeNeuralScoreboard(
@@ -713,23 +1561,15 @@ function readOptionalBoolean(value: unknown) {
   if (typeof value === "boolean") return value;
   if (value === undefined || value === null || value === "") return null;
   const text = String(value).trim().toLowerCase();
+  const normalizedText = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   if (["true", "1", "yes", "sim"].includes(text)) return true;
+  if (["false", "0", "no", "nao"].includes(normalizedText)) return false;
   if (["false", "0", "no", "nao", "não"].includes(text)) return false;
   return null;
 }
 
 function numberOrZero(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-interface NeuralScoreBaseline {
-  day: string;
-  alertas: number;
-  acertos: number;
-  greenSemGale: number;
-  greenG1: number;
-  erros: number;
-  reds: number;
 }
 
 interface NeuralLiveSequence {
@@ -746,7 +1586,7 @@ interface NeuralLiveSequence {
 function applyNeuralScoreBaseline(
   reading: NeuralReading,
   scoreboard: NeuralScoreboard | undefined,
-  day: string,
+  _day: string,
 ): Pick<DashboardData, "neuralReading" | "neuralScoreboard"> {
   const generalScore = neuralScoreFrom(reading, scoreboard);
   const numberScore = neuralScoreFrom(reading);
@@ -768,29 +1608,12 @@ function applyNeuralScoreBaseline(
   const numberTotalGreens = numberGreenSemGale + numberGreenG1 || numberAcertos;
   const numberTotalLosses = numberReds || numberErros;
   const numberTotal = numberTotalGreens + numberTotalLosses;
-  const providedSequence = scoreboard
-    ? {
-        sequencePositive: safeCounter(scoreboard.sequencePositive),
-        sequenceNegative: safeCounter(scoreboard.sequenceNegative),
-        maxSequencePositive: safeCounter(scoreboard.maxSequencePositive),
-        maxSequenceNegative: safeCounter(scoreboard.maxSequenceNegative),
-      }
-    : currentNeuralSequence(reading);
+  const generalSequence = currentNeuralSequence(reading, scoreboard);
   const numberSequence = currentNeuralSequence(reading);
-  const liveSequence =
-    typeof window === "undefined"
-      ? {
-          day,
-          greens: totalGreens,
-          reds: totalLosses,
-          ...providedSequence,
-          lastOutcome: null,
-        }
-      : updateNeuralLiveSequence(day, totalGreens, totalLosses, providedSequence);
-  const sequencePositive = liveSequence.sequencePositive;
-  const sequenceNegative = liveSequence.sequenceNegative;
-  const maxSequencePositive = liveSequence.maxSequencePositive;
-  const maxSequenceNegative = liveSequence.maxSequenceNegative;
+  const sequencePositive = generalSequence.sequencePositive;
+  const sequenceNegative = generalSequence.sequenceNegative;
+  const maxSequencePositive = generalSequence.maxSequencePositive;
+  const maxSequenceNegative = generalSequence.maxSequenceNegative;
 
   const neuralReading = {
     ...reading,
@@ -865,169 +1688,6 @@ function neuralScoreFrom(reading: NeuralReading, scoreboard?: NeuralScoreboard) 
   const erros = safeCounter(scoreboard?.erros ?? scoreboard?.reds ?? reading.erros ?? reading.reds);
   const alertas = safeCounter(scoreboard?.totalAlerts ?? reading.alertas ?? acertos + erros);
   return { alertas, acertos, greenSemGale, greenG1, erros, reds };
-}
-
-function zeroNeuralScoreboard(scoreboard?: NeuralScoreboard): NeuralScoreboard | undefined {
-  if (!scoreboard) return undefined;
-  return {
-    ...scoreboard,
-    totalAlerts: 0,
-    acertos: 0,
-    greens: 0,
-    greenSemGale: 0,
-    greenG1: 0,
-    erros: 0,
-    reds: 0,
-    assertividade: 0,
-    sequencePositive: 0,
-    sequenceNegative: 0,
-    maxSequencePositive: 0,
-    maxSequenceNegative: 0,
-  };
-}
-
-function readNeuralScoreBaseline(key: string): NeuralScoreBaseline | null {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) || "null") as Partial<NeuralScoreBaseline> | null;
-    if (!parsed || typeof parsed.day !== "string") return null;
-    return {
-      day: parsed.day,
-      alertas: safeCounter(parsed.alertas),
-      acertos: safeCounter(parsed.acertos),
-      greenSemGale: safeCounter(parsed.greenSemGale),
-      greenG1: safeCounter(parsed.greenG1),
-      erros: safeCounter(parsed.erros),
-      reds: safeCounter(parsed.reds),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeNeuralScoreBaseline(key: string, baseline: NeuralScoreBaseline) {
-  window.localStorage.removeItem("sniper_neural_general_score");
-  window.localStorage.removeItem("sniper_neural_score_baseline_v2");
-  window.localStorage.removeItem("sniper_neural_score_baseline_v3");
-  window.localStorage.removeItem("sniper_neural_score_baseline_v4");
-  for (const storageKey of Object.keys(window.localStorage)) {
-    if (
-      storageKey !== key &&
-      (storageKey.includes("sniper_neural_general_score") ||
-        storageKey.includes("sniper_neural_score_baseline"))
-    ) {
-      window.localStorage.removeItem(storageKey);
-    }
-  }
-  window.localStorage.setItem(key, JSON.stringify(baseline));
-}
-
-function updateNeuralLiveSequence(
-  day: string,
-  greens: number,
-  reds: number,
-  provided: Partial<Pick<
-    NeuralLiveSequence,
-    "sequencePositive" | "sequenceNegative" | "maxSequencePositive" | "maxSequenceNegative"
-  >> = {},
-) {
-  const key = neuralSequenceStorageKey();
-  const previous = readNeuralLiveSequence(key);
-  const base =
-    previous && previous.day === day && previous.greens <= greens && previous.reds <= reds
-      ? previous
-      : {
-          day,
-          greens: 0,
-          reds: 0,
-          sequencePositive: 0,
-          sequenceNegative: 0,
-          maxSequencePositive: 0,
-          maxSequenceNegative: 0,
-          lastOutcome: null,
-        };
-  const greenDelta = Math.max(0, greens - base.greens);
-  const redDelta = Math.max(0, reds - base.reds);
-  const providedPositive = safeCounter(provided.sequencePositive);
-  const providedNegative = safeCounter(provided.sequenceNegative);
-  const hasProvidedCurrent =
-    (providedPositive > 0 && providedNegative === 0) || (providedNegative > 0 && providedPositive === 0);
-  const next: NeuralLiveSequence = {
-    day,
-    greens,
-    reds,
-    sequencePositive: base.sequencePositive,
-    sequenceNegative: base.sequenceNegative,
-    maxSequencePositive: Math.max(base.maxSequencePositive, safeCounter(provided.maxSequencePositive)),
-    maxSequenceNegative: Math.max(base.maxSequenceNegative, safeCounter(provided.maxSequenceNegative)),
-    lastOutcome: base.lastOutcome,
-  };
-
-  if (hasProvidedCurrent) {
-    next.sequencePositive = providedPositive;
-    next.sequenceNegative = providedNegative;
-    next.lastOutcome = providedPositive > 0 ? "GREEN" : "RED";
-  } else if (greenDelta > 0 && redDelta > 0) {
-    next.sequencePositive = 0;
-    next.sequenceNegative = 0;
-    next.lastOutcome = null;
-  } else if (greenDelta > 0) {
-    next.sequencePositive = (base.lastOutcome === "GREEN" ? base.sequencePositive : 0) + greenDelta;
-    next.sequenceNegative = 0;
-    next.lastOutcome = "GREEN";
-  } else if (redDelta > 0) {
-    next.sequenceNegative = (base.lastOutcome === "RED" ? base.sequenceNegative : 0) + redDelta;
-    next.sequencePositive = 0;
-    next.lastOutcome = "RED";
-  }
-
-  next.maxSequencePositive = Math.max(next.maxSequencePositive, next.sequencePositive);
-  next.maxSequenceNegative = Math.max(next.maxSequenceNegative, next.sequenceNegative);
-  writeNeuralLiveSequence(key, next);
-  return next;
-}
-
-function readNeuralLiveSequence(key: string): NeuralLiveSequence | null {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) || "null") as Partial<NeuralLiveSequence> | null;
-    if (!parsed || typeof parsed.day !== "string") return null;
-    return {
-      day: parsed.day,
-      greens: safeCounter(parsed.greens),
-      reds: safeCounter(parsed.reds),
-      sequencePositive: safeCounter(parsed.sequencePositive),
-      sequenceNegative: safeCounter(parsed.sequenceNegative),
-      maxSequencePositive: safeCounter(parsed.maxSequencePositive ?? parsed.sequencePositive),
-      maxSequenceNegative: safeCounter(parsed.maxSequenceNegative ?? parsed.sequenceNegative),
-      lastOutcome: parsed.lastOutcome === "GREEN" || parsed.lastOutcome === "RED" ? parsed.lastOutcome : null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeNeuralLiveSequence(key: string, sequence: NeuralLiveSequence) {
-  window.localStorage.setItem(key, JSON.stringify(sequence));
-}
-
-function neuralScoreWentBackwards(current: Omit<NeuralScoreBaseline, "day">, baseline: NeuralScoreBaseline) {
-  return (
-    current.alertas < baseline.alertas ||
-    current.acertos < baseline.acertos ||
-    current.greenSemGale < baseline.greenSemGale ||
-    current.greenG1 < baseline.greenG1 ||
-    current.erros < baseline.erros ||
-    current.reds < baseline.reds
-  );
-}
-
-function neuralScoreBaselineStorageKey() {
-  const email = readUserSession().email.trim().toLowerCase();
-  return email ? `${NEURAL_SCORE_BASELINE_KEY}:${email}` : NEURAL_SCORE_BASELINE_KEY;
-}
-
-function neuralSequenceStorageKey() {
-  const email = readUserSession().email.trim().toLowerCase();
-  return email ? `${NEURAL_SEQUENCE_KEY}:${email}` : NEURAL_SEQUENCE_KEY;
 }
 
 function dashboardDayKey(data: DashboardData) {

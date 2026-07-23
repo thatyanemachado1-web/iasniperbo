@@ -101,9 +101,9 @@
   --success: oklch(0.72 0.18 145);
   --warning: oklch(0.78 0.16 65);
   --gold: oklch(0.82 0.15 85);
-  --banker: oklch(0.65 0.23 27);
+  --banker: oklch(0.58 0.26 25);
   --player: oklch(0.65 0.22 245);
-  --tie: oklch(0.65 0.25 295);
+  --tie: oklch(0.82 0.15 85);
 }
 
 .dark {
@@ -119,11 +119,14 @@
     overflow-x: hidden;
     box-sizing: border-box;
   }
-  html, body {
+  html,
+  body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: "Inter", "SF Pro Display", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
   *,
   *::before,
@@ -205,7 +208,10 @@
     color: var(--foreground);
     font-size: 0.875rem;
     outline: none;
-    transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    transition:
+      border-color 160ms ease,
+      box-shadow 160ms ease,
+      background 160ms ease;
   }
   .crm-input:focus {
     border-color: color-mix(in oklch, var(--neon-cyan) 70%, white 30%);
@@ -216,15 +222,35 @@
   }
   .bg-app {
     background:
-      radial-gradient(ellipse 80% 60% at 50% -10%, color-mix(in oklab, var(--neon-purple) 18%, transparent), transparent 60%),
-      radial-gradient(ellipse 70% 50% at 100% 20%, color-mix(in oklab, var(--neon-blue) 14%, transparent), transparent 60%),
-      radial-gradient(ellipse 60% 40% at 0% 100%, color-mix(in oklab, var(--neon-purple) 12%, transparent), transparent 60%),
+      radial-gradient(
+        ellipse 80% 60% at 50% -10%,
+        color-mix(in oklab, var(--neon-purple) 18%, transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse 70% 50% at 100% 20%,
+        color-mix(in oklab, var(--neon-blue) 14%, transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse 60% 40% at 0% 100%,
+        color-mix(in oklab, var(--neon-purple) 12%, transparent),
+        transparent 60%
+      ),
       #030712;
   }
   .glass {
     background:
-      linear-gradient(180deg, color-mix(in oklab, var(--card) 76%, transparent), color-mix(in oklab, var(--background) 68%, transparent)),
-      linear-gradient(125deg, color-mix(in oklab, var(--neon-cyan) 2%, transparent), transparent 58%);
+      linear-gradient(
+        180deg,
+        color-mix(in oklab, var(--card) 76%, transparent),
+        color-mix(in oklab, var(--background) 68%, transparent)
+      ),
+      linear-gradient(
+        125deg,
+        color-mix(in oklab, var(--neon-cyan) 2%, transparent),
+        transparent 58%
+      );
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
     border: 1px solid color-mix(in oklab, var(--neon-blue) 13%, transparent);
@@ -245,18 +271,17 @@
     pointer-events: none;
     border-radius: inherit;
     padding: 1px;
-    background:
-      linear-gradient(
-        115deg,
-        transparent 0%,
-        transparent 18%,
-        color-mix(in oklab, var(--neon-cyan) 88%, transparent) 22%,
-        transparent 30%,
-        transparent 58%,
-        color-mix(in oklab, var(--neon-purple) 72%, transparent) 63%,
-        transparent 72%,
-        transparent 100%
-      );
+    background: linear-gradient(
+      115deg,
+      transparent 0%,
+      transparent 18%,
+      color-mix(in oklab, var(--neon-cyan) 88%, transparent) 22%,
+      transparent 30%,
+      transparent 58%,
+      color-mix(in oklab, var(--neon-purple) 72%, transparent) 63%,
+      transparent 72%,
+      transparent 100%
+    );
     background-size: 240% 240%;
     opacity: 0.32;
     -webkit-mask:
@@ -285,13 +310,23 @@
     }
   }
   .glass-strong {
-    background: linear-gradient(180deg, color-mix(in oklab, var(--card) 90%, transparent), color-mix(in oklab, var(--card) 55%, transparent));
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--card) 90%, transparent),
+      color-mix(in oklab, var(--card) 55%, transparent)
+    );
     backdrop-filter: blur(20px);
     border: 1px solid color-mix(in oklab, var(--neon-blue) 25%, transparent);
   }
-  .glow-blue { box-shadow: 0 0 26px -12px color-mix(in oklab, var(--neon-blue) 50%, transparent); }
-  .glow-purple { box-shadow: 0 0 26px -12px color-mix(in oklab, var(--neon-purple) 50%, transparent); }
-  .glow-gold { box-shadow: 0 0 22px -10px color-mix(in oklab, var(--gold) 50%, transparent); }
+  .glow-blue {
+    box-shadow: 0 0 26px -12px color-mix(in oklab, var(--neon-blue) 50%, transparent);
+  }
+  .glow-purple {
+    box-shadow: 0 0 26px -12px color-mix(in oklab, var(--neon-purple) 50%, transparent);
+  }
+  .glow-gold {
+    box-shadow: 0 0 22px -10px color-mix(in oklab, var(--gold) 50%, transparent);
+  }
   .text-gradient-brand {
     background: linear-gradient(135deg, var(--neon-cyan), var(--neon-blue) 45%, var(--neon-purple));
     -webkit-background-clip: text;
@@ -301,9 +336,15 @@
   .btn-primary-grad {
     background: linear-gradient(135deg, var(--neon-blue), var(--neon-purple));
     color: white;
-    transition: filter .2s, transform .15s, box-shadow .2s;
+    transition:
+      filter 0.2s,
+      transform 0.15s,
+      box-shadow 0.2s;
   }
-  .btn-primary-grad:hover { filter: brightness(1.1); box-shadow: 0 0 28px -4px color-mix(in oklab, var(--neon-blue) 70%, transparent); }
+  .btn-primary-grad:hover {
+    filter: brightness(1.1);
+    box-shadow: 0 0 28px -4px color-mix(in oklab, var(--neon-blue) 70%, transparent);
+  }
   .btn-gold-grad {
     background: linear-gradient(135deg, oklch(0.82 0.15 85), oklch(0.7 0.18 50));
     color: #1a1006;
@@ -329,7 +370,11 @@
   .scan-grid {
     background-image:
       linear-gradient(color-mix(in oklab, var(--neon-blue) 12%, transparent) 1px, transparent 1px),
-      linear-gradient(90deg, color-mix(in oklab, var(--neon-blue) 12%, transparent) 1px, transparent 1px);
+      linear-gradient(
+        90deg,
+        color-mix(in oklab, var(--neon-blue) 12%, transparent) 1px,
+        transparent 1px
+      );
     background-size: 32px 32px;
   }
   .dashboard-command-grid {
@@ -350,8 +395,17 @@
   }
   .digital-result-card {
     background:
-      linear-gradient(180deg, color-mix(in oklab, var(--card) 56%, transparent), color-mix(in oklab, var(--background) 76%, transparent)),
-      linear-gradient(90deg, color-mix(in oklab, var(--neon-cyan) 3%, transparent), transparent 48%, color-mix(in oklab, var(--neon-purple) 2%, transparent));
+      linear-gradient(
+        180deg,
+        color-mix(in oklab, var(--card) 56%, transparent),
+        color-mix(in oklab, var(--background) 76%, transparent)
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in oklab, var(--neon-cyan) 3%, transparent),
+        transparent 48%,
+        color-mix(in oklab, var(--neon-purple) 2%, transparent)
+      );
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, white 3%, transparent),
       inset 0 1px 0 color-mix(in oklab, white 5%, transparent),
@@ -364,7 +418,12 @@
     left: -30%;
     width: 22%;
     height: 1px;
-    background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--neon-cyan) 58%, transparent), transparent);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--neon-cyan) 58%, transparent),
+      transparent
+    );
     opacity: 0.5;
     animation: digital-border-pass 6.8s linear infinite;
   }
@@ -376,7 +435,8 @@
     overflow-x: auto;
     overflow-y: hidden;
     padding-bottom: 0.28rem;
-    scrollbar-color: color-mix(in oklab, var(--neon-cyan) 72%, var(--neon-purple) 28%) color-mix(in oklab, white 5%, transparent);
+    scrollbar-color: color-mix(in oklab, var(--neon-cyan) 72%, var(--neon-purple) 28%)
+      color-mix(in oklab, white 5%, transparent);
     scrollbar-width: thin;
     cursor: grab;
   }
@@ -408,7 +468,11 @@
   }
   .digital-risk-card {
     background:
-      linear-gradient(180deg, color-mix(in oklab, var(--card) 54%, transparent), color-mix(in oklab, var(--background) 78%, transparent)),
+      linear-gradient(
+        180deg,
+        color-mix(in oklab, var(--card) 54%, transparent),
+        color-mix(in oklab, var(--background) 78%, transparent)
+      ),
       linear-gradient(90deg, color-mix(in oklab, var(--warning) 3%, transparent), transparent 62%);
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, white 3%, transparent),
@@ -422,49 +486,108 @@
 }
 
 @keyframes neon-card-flow {
-  0% { background-position: 220% 0%; opacity: 0.18; }
-  18% { opacity: 0.36; }
-  50% { opacity: 0.28; }
-  82% { opacity: 0.36; }
-  100% { background-position: -80% 100%; opacity: 0.18; }
+  0% {
+    background-position: 220% 0%;
+    opacity: 0.18;
+  }
+  18% {
+    opacity: 0.36;
+  }
+  50% {
+    opacity: 0.28;
+  }
+  82% {
+    opacity: 0.36;
+  }
+  100% {
+    background-position: -80% 100%;
+    opacity: 0.18;
+  }
 }
 
 @keyframes brain-pulse {
-  0% { filter: drop-shadow(0 0 12px color-mix(in oklab, var(--neon-blue) 60%, transparent)) drop-shadow(0 0 30px color-mix(in oklab, var(--neon-purple) 35%, transparent)); }
-  50% { filter: drop-shadow(0 0 22px color-mix(in oklab, var(--neon-blue) 90%, transparent)) drop-shadow(0 0 55px color-mix(in oklab, var(--neon-purple) 60%, transparent)); }
-  100% { filter: drop-shadow(0 0 12px color-mix(in oklab, var(--neon-blue) 60%, transparent)) drop-shadow(0 0 30px color-mix(in oklab, var(--neon-purple) 35%, transparent)); }
+  0% {
+    filter: drop-shadow(0 0 12px color-mix(in oklab, var(--neon-blue) 60%, transparent))
+      drop-shadow(0 0 30px color-mix(in oklab, var(--neon-purple) 35%, transparent));
+  }
+  50% {
+    filter: drop-shadow(0 0 22px color-mix(in oklab, var(--neon-blue) 90%, transparent))
+      drop-shadow(0 0 55px color-mix(in oklab, var(--neon-purple) 60%, transparent));
+  }
+  100% {
+    filter: drop-shadow(0 0 12px color-mix(in oklab, var(--neon-blue) 60%, transparent))
+      drop-shadow(0 0 30px color-mix(in oklab, var(--neon-purple) 35%, transparent));
+  }
 }
-.animate-brain-pulse { animation: brain-pulse 3.2s ease-in-out infinite; }
+.animate-brain-pulse {
+  animation: brain-pulse 3.2s ease-in-out infinite;
+}
 
 @keyframes status-blink {
-  0% { opacity: 1; }
-  50% { opacity: 0.35; }
-  100% { opacity: 1; }
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 1;
+  }
 }
-.animate-status-blink { animation: status-blink 1.6s ease-in-out infinite; }
+.animate-status-blink {
+  animation: status-blink 1.6s ease-in-out infinite;
+}
 
 @keyframes wave-bar {
-  0% { transform: scaleY(0.35); }
-  50% { transform: scaleY(1); }
-  100% { transform: scaleY(0.35); }
+  0% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+  100% {
+    transform: scaleY(0.35);
+  }
 }
-.wave-bar { animation: wave-bar 1.1s ease-in-out infinite; transform-origin: center; }
+.wave-bar {
+  animation: wave-bar 1.1s ease-in-out infinite;
+  transform-origin: center;
+}
 
 @keyframes shine {
-  0%   { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 .shine {
-  background: linear-gradient(110deg, transparent 30%, color-mix(in oklab, white 18%, transparent) 50%, transparent 70%);
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    color-mix(in oklab, white 18%, transparent) 50%,
+    transparent 70%
+  );
   background-size: 200% 100%;
   animation: shine 3s linear infinite;
 }
 
 @keyframes float-particle {
-  0% { transform: translateY(0) translateX(0); opacity: 0; }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { transform: translateY(-120vh) translateX(20px); opacity: 0; }
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-120vh) translateX(20px);
+    opacity: 0;
+  }
 }
 .particle {
   position: absolute;
@@ -475,60 +598,127 @@
 }
 
 @keyframes orbit-slow {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
-.animate-orbit-slow { animation: orbit-slow 28s linear infinite; }
-.animate-orbit-reverse { animation: orbit-slow 40s linear infinite reverse; }
+.animate-orbit-slow {
+  animation: orbit-slow 28s linear infinite;
+}
+.animate-orbit-reverse {
+  animation: orbit-slow 40s linear infinite reverse;
+}
 
 @keyframes landing-hud-float {
-  0%, 100% { transform: translateY(0); opacity: 0.86; }
-  50% { transform: translateY(-8px); opacity: 1; }
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.86;
+  }
+  50% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
 }
 .landing-hud-card {
   animation: landing-hud-float 5.2s ease-in-out infinite;
 }
 
 @keyframes sweep {
-  0% { transform: translateY(-100%); opacity: 0; }
-  20% { opacity: 1; }
-  100% { transform: translateY(100%); opacity: 0; }
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
 }
-.scan-sweep { animation: sweep 6s ease-in-out infinite; }
+.scan-sweep {
+  animation: sweep 6s ease-in-out infinite;
+}
 
 @keyframes base-pulse {
-  0%, 100% { opacity: 0.6; transform: translateX(-50%) scaleX(1); }
-  50% { opacity: 1; transform: translateX(-50%) scaleX(1.1); }
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: translateX(-50%) scaleX(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(-50%) scaleX(1.1);
+  }
 }
-.animate-base-pulse { animation: base-pulse 3s ease-in-out infinite; }
+.animate-base-pulse {
+  animation: base-pulse 3s ease-in-out infinite;
+}
 
 @keyframes holo-scan {
-  0% { background-position: 0 0; }
-  100% { background-position: 0 20px; }
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 0 20px;
+  }
 }
-.holo-scan { animation: holo-scan 2.5s linear infinite; }
+.holo-scan {
+  animation: holo-scan 2.5s linear infinite;
+}
 
 @keyframes digital-border-pass {
-  0% { transform: translateX(0); opacity: 0; }
-  12% { opacity: 0.55; }
-  76% { opacity: 0.55; }
-  100% { transform: translateX(420%); opacity: 0; }
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.55;
+  }
+  76% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translateX(420%);
+    opacity: 0;
+  }
 }
 
 @keyframes orbit-particle {
-  from { transform: rotate(var(--angle)) translateX(var(--radius)) rotate(calc(-1 * var(--angle))); opacity: 0.7; }
-  50%  { opacity: 1; }
-  to   { transform: rotate(calc(var(--angle) + 360deg)) translateX(var(--radius)) rotate(calc(-1 * var(--angle) - 360deg)); opacity: 0.7; }
+  from {
+    transform: rotate(var(--angle)) translateX(var(--radius)) rotate(calc(-1 * var(--angle)));
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+  to {
+    transform: rotate(calc(var(--angle) + 360deg)) translateX(var(--radius))
+      rotate(calc(-1 * var(--angle) - 360deg));
+    opacity: 0.7;
+  }
 }
-.animate-orbit-particle { animation: orbit-particle 9s linear infinite; }
+.animate-orbit-particle {
+  animation: orbit-particle 9s linear infinite;
+}
 
 @keyframes nl-line-pulse {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 @keyframes neural-brain {
-  0%, 100% {
+  0%,
+  100% {
     filter: drop-shadow(0 0 6px color-mix(in oklab, var(--neon-cyan) 55%, transparent));
     transform: scale(1);
   }
@@ -537,16 +727,28 @@
     transform: scale(1.06);
   }
 }
-.animate-neural-brain { animation: neural-brain 2.4s ease-in-out infinite; }
+.animate-neural-brain {
+  animation: neural-brain 2.4s ease-in-out infinite;
+}
 
 @keyframes neural-dot {
-  0%, 100% { opacity: 0.35; transform: translateY(0); }
-  50% { opacity: 1; transform: translateY(-2px); }
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
 }
-.animate-neural-dot { animation: neural-dot 1.15s ease-in-out infinite; }
+.animate-neural-dot {
+  animation: neural-dot 1.15s ease-in-out infinite;
+}
 
 @keyframes neural-card-glow {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow:
       inset 0 1px 0 color-mix(in oklab, white 7%, transparent),
       0 0 26px -15px color-mix(in oklab, var(--neon-cyan) 70%, transparent);
@@ -557,35 +759,71 @@
       0 0 34px -13px color-mix(in oklab, var(--neon-purple) 70%, transparent);
   }
 }
-.neural-mini-card { animation: neural-card-glow 3.4s ease-in-out infinite; }
+.neural-mini-card {
+  animation: neural-card-glow 3.4s ease-in-out infinite;
+}
 
 .neural-mini-grid {
   background-image:
-    radial-gradient(circle at 18% 28%, color-mix(in oklab, var(--neon-cyan) 48%, transparent) 0 1px, transparent 2px),
-    radial-gradient(circle at 78% 62%, color-mix(in oklab, var(--neon-purple) 38%, transparent) 0 1px, transparent 2px),
-    linear-gradient(145deg, transparent 0 40%, color-mix(in oklab, var(--neon-cyan) 12%, transparent) 40% 41%, transparent 42%),
-    linear-gradient(32deg, transparent 0 54%, color-mix(in oklab, var(--neon-purple) 12%, transparent) 54% 55%, transparent 56%);
+    radial-gradient(
+      circle at 18% 28%,
+      color-mix(in oklab, var(--neon-cyan) 48%, transparent) 0 1px,
+      transparent 2px
+    ),
+    radial-gradient(
+      circle at 78% 62%,
+      color-mix(in oklab, var(--neon-purple) 38%, transparent) 0 1px,
+      transparent 2px
+    ),
+    linear-gradient(
+      145deg,
+      transparent 0 40%,
+      color-mix(in oklab, var(--neon-cyan) 12%, transparent) 40% 41%,
+      transparent 42%
+    ),
+    linear-gradient(
+      32deg,
+      transparent 0 54%,
+      color-mix(in oklab, var(--neon-purple) 12%, transparent) 54% 55%,
+      transparent 56%
+    );
 }
 
 @keyframes neural-shimmer {
-  0% { transform: translateX(-100%); opacity: 0; }
-  35% { opacity: 1; }
-  100% { transform: translateX(100%); opacity: 0; }
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
 }
 .neural-mini-shimmer {
-  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--neon-cyan) 85%, transparent), transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--neon-cyan) 85%, transparent),
+    transparent
+  );
   animation: neural-shimmer 2.8s ease-in-out infinite;
 }
 
 @keyframes result-green-flash {
-  0%, 100% {
+  0%,
+  100% {
     border-color: color-mix(in oklab, var(--neon-blue) 18%, transparent);
     box-shadow:
       inset 0 1px 0 color-mix(in oklab, white 6%, transparent),
       0 10px 40px -10px color-mix(in oklab, var(--neon-blue) 25%, transparent);
     filter: saturate(1);
   }
-  8%, 36%, 64% {
+  8%,
+  36%,
+  64% {
     border-color: #99ff33;
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, #99ff33 85%, transparent),
@@ -594,7 +832,9 @@
       0 0 70px -10px color-mix(in oklab, #99ff33 92%, transparent);
     filter: saturate(1.28) brightness(1.12);
   }
-  20%, 48%, 76% {
+  20%,
+  48%,
+  76% {
     border-color: color-mix(in oklab, #99ff33 34%, var(--neon-cyan));
     box-shadow:
       inset 0 1px 0 color-mix(in oklab, white 8%, transparent),
@@ -604,10 +844,24 @@
 }
 
 @keyframes result-green-sweep {
-  0% { transform: translateX(-120%) skewX(-18deg); opacity: 0; }
-  10%, 38%, 66% { opacity: 0.62; }
-  24%, 52%, 80% { opacity: 0; }
-  100% { transform: translateX(145%) skewX(-18deg); opacity: 0; }
+  0% {
+    transform: translateX(-120%) skewX(-18deg);
+    opacity: 0;
+  }
+  10%,
+  38%,
+  66% {
+    opacity: 0.62;
+  }
+  24%,
+  52%,
+  80% {
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(145%) skewX(-18deg);
+    opacity: 0;
+  }
 }
 
 .result-green-flash {
@@ -620,57 +874,115 @@
   inset: -18%;
   pointer-events: none;
   background:
-    linear-gradient(100deg, transparent 35%, color-mix(in oklab, #99ff33 28%, transparent) 48%, transparent 62%),
-    radial-gradient(circle at 50% 50%, color-mix(in oklab, #99ff33 16%, transparent), transparent 56%);
+    linear-gradient(
+      100deg,
+      transparent 35%,
+      color-mix(in oklab, #99ff33 28%, transparent) 48%,
+      transparent 62%
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in oklab, #99ff33 16%, transparent),
+      transparent 56%
+    );
   mix-blend-mode: screen;
   animation: result-green-sweep 2.05s ease-out 1;
 }
 
 @keyframes neural-entry-flash-green {
-  0%, 100% { box-shadow: 0 0 18px -14px color-mix(in oklab, var(--success) 70%, transparent); }
-  10%, 42%, 74% {
+  0%,
+  100% {
+    box-shadow: 0 0 18px -14px color-mix(in oklab, var(--success) 70%, transparent);
+  }
+  10%,
+  42%,
+  74% {
     border-color: color-mix(in oklab, var(--success) 85%, transparent);
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, var(--success) 55%, transparent),
       0 0 18px -4px color-mix(in oklab, var(--success) 72%, transparent);
     filter: brightness(1.12);
   }
-  24%, 56%, 88% {
+  24%,
+  56%,
+  88% {
     box-shadow: 0 0 18px -12px color-mix(in oklab, var(--success) 42%, transparent);
     filter: brightness(1);
   }
 }
 
 @keyframes neural-entry-flash-red {
-  0%, 100% { box-shadow: 0 0 16px -14px color-mix(in oklab, var(--destructive) 70%, transparent); }
-  24% {
+  0%,
+  100% {
+    box-shadow: 0 0 16px -14px color-mix(in oklab, var(--destructive) 70%, transparent);
+  }
+  12%,
+  36%,
+  60%,
+  84% {
     border-color: color-mix(in oklab, var(--destructive) 88%, transparent);
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, var(--destructive) 62%, transparent),
       0 0 18px -4px color-mix(in oklab, var(--destructive) 75%, transparent);
     filter: brightness(1.1);
   }
+  24%,
+  48%,
+  72% {
+    box-shadow: 0 0 16px -14px color-mix(in oklab, var(--destructive) 70%, transparent);
+    filter: brightness(1);
+  }
 }
 
 @keyframes neural-entry-flash-tie {
-  0%, 100% { box-shadow: 0 0 18px -14px color-mix(in oklab, var(--tie) 70%, transparent); }
-  10%, 42%, 74% {
+  0%,
+  100% {
+    box-shadow: 0 0 18px -14px color-mix(in oklab, var(--tie) 70%, transparent);
+  }
+  10%,
+  42%,
+  74% {
     border-color: color-mix(in oklab, var(--tie) 88%, transparent);
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, var(--tie) 56%, transparent),
       0 0 18px -4px color-mix(in oklab, var(--tie) 72%, transparent);
     filter: brightness(1.13);
   }
-  24%, 56%, 88% {
+  24%,
+  56%,
+  88% {
     box-shadow: 0 0 18px -12px color-mix(in oklab, var(--tie) 42%, transparent);
     filter: brightness(1);
   }
 }
 
-.neural-entry-flash-green { animation: neural-entry-flash-green 3.05s ease-out 1; }
-.neural-entry-flash-red { animation: neural-entry-flash-red 1.25s ease-out 1; }
-.neural-entry-flash-tie { animation: neural-entry-flash-tie 3.05s ease-out 1; }
+.neural-entry-flash-green {
+  animation: neural-entry-flash-green 1.65s ease-out 1;
+}
+.neural-entry-flash-red {
+  animation: neural-entry-flash-red 1.05s ease-out 1;
+}
+.neural-entry-flash-tie {
+  animation: neural-entry-flash-tie 1.65s ease-out 1;
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-brain-pulse, .animate-orbit-particle, .animate-base-pulse, .holo-scan, .scan-sweep, .animate-neural-brain, .animate-neural-dot, .neural-mini-card, .neural-mini-shimmer, .result-green-flash, .result-green-flash::after, .neural-entry-flash-green, .neural-entry-flash-red, .neural-entry-flash-tie, .digital-result-card::before, .neon-card-lines::before { animation: none !important; }
+  .animate-brain-pulse,
+  .animate-orbit-particle,
+  .animate-base-pulse,
+  .holo-scan,
+  .scan-sweep,
+  .animate-neural-brain,
+  .animate-neural-dot,
+  .neural-mini-card,
+  .neural-mini-shimmer,
+  .result-green-flash,
+  .result-green-flash::after,
+  .neural-entry-flash-green,
+  .neural-entry-flash-red,
+  .neural-entry-flash-tie,
+  .digital-result-card::before,
+  .neon-card-lines::before {
+    animation: none !important;
+  }
 }

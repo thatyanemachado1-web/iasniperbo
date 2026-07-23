@@ -1,9 +1,15 @@
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
-import { AccessApiError, getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
+import { getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
 import { isPublicLiveDashboardPath } from "@/lib/publicLiveSignals";
-import { clearUserSession, hasFullAccess, isAdminOwnerEmail, readUserSession } from "@/lib/userSession";
+import {
+  clearUserSession,
+  hasFullAccess,
+  isAdminOwnerEmail,
+  readUserSession,
+  type UserSession,
+} from "@/lib/userSession";
 
 export const Route = createFileRoute("/app")({
   component: ProtectedAppRoute,
@@ -12,8 +18,8 @@ export const Route = createFileRoute("/app")({
 function ProtectedAppRoute() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const session = readUserSession();
-  const [salesClosed, setSalesClosed] = useState(false);
+  const [session, setSession] = useState<UserSession | null>(null);
+  const [salesClosed, setSalesClosed] = useState<boolean | null>(null);
   const isAdminRoute = pathname.startsWith("/app/admin");
   const isAccountRoute = pathname.startsWith("/app/conta");
   const isCheckoutRoute =
@@ -21,21 +27,39 @@ function ProtectedAppRoute() {
     pathname.startsWith("/app/assinatura") ||
     pathname.startsWith("/app/pagamentos");
   const isPublicLiveDashboard = isPublicLiveDashboardPath(pathname);
-  const isOwner = isAdminOwnerEmail(session.email);
-  const hasBackendSession = Boolean(session.clientToken);
-  const isAdminUser = hasBackendSession && (session.role === "admin" || session.role === "owner" || isOwner);
-  const fullAccess = hasBackendSession && hasFullAccess(session);
-  const canOpenApp = hasBackendSession && session.registered;
-  const demoExpired = session.accessMode === "demo" && isExpiredAt(session.expiresAt);
-  const canOpenDashboard =
+  const isOwner = session ? isAdminOwnerEmail(session.email) : false;
+  const hasBackendSession = Boolean(session?.clientToken);
+  const isAdminUser = Boolean(
+    session &&
+    hasBackendSession &&
+    (session.role === "admin" || session.role === "owner" || isOwner),
+  );
+  const fullAccess = Boolean(session && hasBackendSession && hasFullAccess(session));
+  const canOpenApp = Boolean(session && hasBackendSession && session.registered);
+  const demoExpired = Boolean(
+    session && session.accessMode === "demo" && isExpiredAt(session.expiresAt),
+  );
+  const canOpenDashboard = Boolean(
     isPublicLiveDashboard ||
-    (hasBackendSession &&
-      (fullAccess ||
-        (session.accessMode === "demo" && !demoExpired) ||
-        (session.registered && session.accessMode === "pending")));
+      (hasBackendSession &&
+        session &&
+        (fullAccess ||
+          (session.accessMode === "demo" && !demoExpired) ||
+          (session.registered && session.accessMode === "pending"))),
+  );
+  const isBooting =
+    !isPublicLiveDashboard &&
+    (session === null || (salesClosed === null && Boolean(session) && !fullAccess && !isAdminUser));
+
+  useEffect(() => {
+    setSession(readUserSession());
+  }, []);
 
   useEffect(() => {
     let active = true;
+    const fallbackTimer = window.setTimeout(() => {
+      if (active) setSalesClosed(false);
+    }, 3_500);
     getSalesSettings()
       .then((settings) => {
         if (active) setSalesClosed(settings.salesClosed);
@@ -45,21 +69,24 @@ function ProtectedAppRoute() {
       });
     return () => {
       active = false;
+      window.clearTimeout(fallbackTimer);
     };
   }, []);
 
   useEffect(() => {
+    if (!session) return;
     if (isAdminRoute || isPublicLiveDashboard) return;
+    if (salesClosed === null && !fullAccess && !isAdminUser) return;
     if (salesClosed && !fullAccess && !isAdminUser) {
-      navigate({ to: "/" });
+      navigate({ to: "/", replace: true });
       return;
     }
     if (!session.email || !canOpenApp) {
-      navigate({ to: "/" });
+      navigate({ to: "/", replace: true });
       return;
     }
     if (!canOpenDashboard && !isCheckoutRoute && !isAccountRoute) {
-      navigate({ to: "/app/planos" });
+      navigate({ to: "/app/planos", replace: true });
     }
   }, [
     canOpenApp,
@@ -73,10 +100,11 @@ function ProtectedAppRoute() {
     isPublicLiveDashboard,
     navigate,
     salesClosed,
-    session.email,
+    session,
   ]);
 
   useEffect(() => {
+    if (!session?.clientToken) return;
     if (isAdminRoute || isOwner || isPublicLiveDashboard) return;
 
     let stopped = false;
@@ -96,7 +124,13 @@ function ProtectedAppRoute() {
           expiresAt: current.expiresAt,
         };
         const access = await refreshAccessSession();
-        if (!access || stopped) return;
+        if (stopped) return;
+        if (!access) {
+          clearUserSession();
+          setSession(readUserSession());
+          await navigate({ to: "/", replace: true });
+          return;
+        }
 
         const changed =
           before.accessMode !== access.access_mode ||
@@ -106,13 +140,10 @@ function ProtectedAppRoute() {
           before.expiresAt !== access.expires_at;
 
         if (changed) {
-          window.location.reload();
+          setSession(readUserSession());
         }
-      } catch (error) {
-        if (shouldClearSessionAfterRefreshError(error)) {
-          clearUserSession();
-          if (!stopped) window.location.reload();
-        }
+      } catch {
+        // Keep the current app session stable; protected APIs still reject invalid tokens.
       } finally {
         refreshing = false;
       }
@@ -127,11 +158,30 @@ function ProtectedAppRoute() {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshSession);
     };
-  }, [isAdminRoute, isOwner, isPublicLiveDashboard]);
+  }, [isAdminRoute, isOwner, isPublicLiveDashboard, navigate, session?.clientToken]);
 
-  if (!isAdminRoute && !isPublicLiveDashboard && salesClosed && !fullAccess && !isAdminUser) return null;
-  if (!isAdminRoute && !isPublicLiveDashboard && (!session.email || !canOpenApp)) return null;
-  if (!isAdminRoute && !canOpenDashboard && !isCheckoutRoute && !isAccountRoute) return null;
+  if (isBooting) return <AppBootSplash />;
+  if (
+    !isAdminRoute &&
+    !isPublicLiveDashboard &&
+    salesClosed &&
+    !fullAccess &&
+    !isAdminUser
+  ) {
+    return <AppBootSplash message="Redirecionando para o início..." />;
+  }
+  if (!isAdminRoute && !isPublicLiveDashboard && (!session?.email || !canOpenApp)) {
+    return <AppBootSplash message="Validando seu acesso..." />;
+  }
+  if (
+    !isAdminRoute &&
+    !isPublicLiveDashboard &&
+    !canOpenDashboard &&
+    !isCheckoutRoute &&
+    !isAccountRoute
+  ) {
+    return <AppBootSplash message="Abrindo seus planos..." />;
+  }
 
   return (
     <AppShell>
@@ -140,15 +190,38 @@ function ProtectedAppRoute() {
   );
 }
 
+function AppBootSplash({ message = "Preparando seu painel..." }: { message?: string }) {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#030712] px-6 text-center">
+      <img
+        src="/assets/sniper-logo.png"
+        alt="SNIPER BO IA"
+        className="h-auto w-36 max-w-[70vw] opacity-95"
+      />
+      <div
+        className="mt-5 max-w-xs text-[11px] text-muted-foreground/80"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <span className="mx-auto mb-3 block size-5 animate-spin rounded-full border-2 border-neon-cyan/20 border-t-neon-cyan" />
+        <p>{message}</p>
+        <a
+          href="/app?reload=1"
+          className="mt-3 inline-flex rounded-full border border-neon-cyan/25 px-4 py-1.5 font-bold text-neon-cyan/90"
+        >
+          Limpar cache e tentar novamente
+        </a>
+        <noscript>
+          <p className="mt-3 text-warning">Ative o JavaScript para acessar o painel.</p>
+        </noscript>
+      </div>
+    </div>
+  );
+}
+
 function isExpiredAt(value: string) {
   if (!value) return false;
   const expires = Date.parse(value);
   return Number.isFinite(expires) && expires <= Date.now();
-}
-
-function shouldClearSessionAfterRefreshError(error: unknown) {
-  if (error instanceof AccessApiError) {
-    return error.status === 401 || error.status === 403;
-  }
-  return false;
 }

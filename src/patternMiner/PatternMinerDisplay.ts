@@ -1,33 +1,22 @@
 import type { RoundResult } from "@/types/dashboard";
 import type { PatternMinerStrategy, PatternMinerStrategyStatus } from "@/types/patternMiner";
+import { sideBgClass, sideTextClass } from "@/lib/sideColors";
+
+export { sideBgClass, sideTextClass };
 
 const SIDE_LABEL: Record<RoundResult, string> = {
   B: "BANKER",
   P: "PLAYER",
-  T: "TIE",
-};
-
-const SIDE_ICON: Record<RoundResult, string> = {
-  B: "🔴",
-  P: "🔵",
-  T: "🟡",
-};
-
-export const sideTextClass: Record<RoundResult, string> = {
-  B: "text-banker",
-  P: "text-player",
-  T: "text-warning",
-};
-
-export const sideBgClass: Record<RoundResult, string> = {
-  B: "bg-banker/15 border-banker/35 text-banker",
-  P: "bg-player/15 border-player/35 text-player",
-  T: "bg-warning/15 border-warning/35 text-warning",
+  T: "TIE/EMPATE",
 };
 
 export function formatPatternToken(token: string) {
-  const side = token[0] as RoundResult;
-  return `${SIDE_ICON[side]} ${token}`;
+  const side = token[0] as RoundResult | undefined;
+  const value = token.slice(1);
+  if (side === "B") return value ? `Banker ${value}` : "Banker";
+  if (side === "P") return value ? `Player ${value}` : "Player";
+  if (side === "T") return value ? `Empate ${value}` : "Empate";
+  return token;
 }
 
 export function formatPatternSequence(sequence: string[]) {
@@ -35,7 +24,7 @@ export function formatPatternSequence(sequence: string[]) {
 }
 
 export function formatPulledSide(side: RoundResult) {
-  return `${SIDE_ICON[side]} ${SIDE_LABEL[side]}`;
+  return SIDE_LABEL[side];
 }
 
 export function formatStrategyConclusion(strategy: PatternMinerStrategy) {
@@ -53,12 +42,12 @@ export function formatPercent(value: number | undefined) {
 
 export function statusLabel(status: PatternMinerStrategyStatus) {
   const labels: Record<PatternMinerStrategyStatus, string> = {
-    VERY_HOT: "🔥 MUITO QUENTE",
-    HOT: "🔥 QUENTE",
-    STABLE: "🟡 ESTAVEL",
-    OBSERVATION: "🟠 EM OBSERVACAO",
-    WEAK: "🔴 FRACA",
-    INACTIVE: "⚫ INATIVA",
+    VERY_HOT: "MUITO QUENTE",
+    HOT: "QUENTE",
+    STABLE: "ESTAVEL",
+    OBSERVATION: "EM OBSERVACAO",
+    WEAK: "FRACA",
+    INACTIVE: "INATIVA",
   };
   return labels[status];
 }

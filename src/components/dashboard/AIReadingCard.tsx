@@ -27,6 +27,7 @@ const DEFAULT_LOCAL_VOICE = "pt-BR-AntonioNeural";
 type AIReadingVoiceProvider = "browser" | "edge-tts" | "elevenlabs" | "piper";
 const AI_READING_VOICE_MAX_CHARS = 120;
 const AI_READING_RESULT_WINDOW_MS = 90_000;
+const AI_READING_SYNC_INTERVAL_MS = 900;
 const VOICE_COORDINATION_EVENT = "sniper-voice-stop";
 const AI_READING_VOICE_CHANGE_EVENT = "sniper-ai-reading-voice-change";
 const AI_READING_VOICE_SOURCE = "ai-reading";
@@ -132,8 +133,9 @@ export function AIReadingCard({ data, mode }: Props) {
     queryKey: ["ai-reading", stateKey],
     queryFn: () => callReading({ data: snapshot }),
     enabled: liveReady,
-    staleTime: 15_000,
-    refetchInterval: 20_000,
+    staleTime: 0,
+    refetchInterval: AI_READING_SYNC_INTERVAL_MS,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: false,
   });
 

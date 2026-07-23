@@ -1,19 +1,24 @@
-import { CircleHelp, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
-import { buildNeuralCopy } from "@/lib/operationalCopy";
-import { calculateMotorAssertiveness } from "@/utils/assertiveness";
+import { ChevronRight } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { AppBadge } from "@/components/ui-app/AppBadge";
+import { GlassCard } from "@/components/ui-app/GlassCard";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+  DASHBOARD_MODULE_CARD_BODY,
+  DASHBOARD_MODULE_CARD_FILL,
+  DASHBOARD_MODULE_CARD_ROOT,
+} from "@/components/dashboard/dashboardModuleCardLayout";
+import { cn } from "@/lib/utils";
+import { dashboardSideTextClass } from "@/lib/sideColors";
+import { calculateMotorAssertiveness } from "@/utils/assertiveness";
 import type {
+  DashboardPersistentResult,
   NeuralEntryLastResult,
   NeuralEntryState,
   NeuralReading,
   NeuralScoreboard,
   Round,
+  CurrentSignalSide,
+  DashboardDisplayState,
   SignalSide,
 } from "@/types/dashboard";
 
@@ -24,53 +29,35 @@ interface NeuralEntryDisplayResult {
   kind: NeuralEntryDisplayKind;
   side: NeuralSide;
   multiplier?: number | null;
-  minute: string;
+  attempt?: "SG" | "G1" | string | null;
 }
 
 interface NeuralEntryHistoryItem extends NeuralEntryDisplayResult {
   id: string;
+  minute: string;
 }
 
-interface NeuralScoreSummary {
-  totalAlerts: number | null;
-  greens: number | null;
-  sg: number | null;
-  g1: number | null;
-  reds: number | null;
-  total: number;
-  accuracy: number | null;
-  currentGreenSequence: number | null;
-  currentRedSequence: number | null;
-  maxGreenSequence: number | null;
-  maxRedSequence: number | null;
-}
-
-type LeituraNeuralMiniCardProps = NeuralReading & {
+type LeituraNeuralCardProps = NeuralReading & {
   className?: string;
   greenFlash?: boolean;
   neuralScoreboard?: NeuralScoreboard;
   rounds?: Round[];
   neuralEntryState?: NeuralEntryState | null;
   neuralEntryLastResult?: NeuralEntryLastResult | null;
+  displayState?: DashboardDisplayState;
+  displaySide?: CurrentSignalSide;
+  displayRevision?: string | number | null;
+  persistedResults?: DashboardPersistentResult[];
 };
 
-const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
-const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
+export type { LeituraNeuralCardProps };
+
+const SCANNING_READING: NeuralReading = { mode: "SCANNING" };
+const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v5";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
-
-const SCANNING_READING: NeuralReading = {
-  mode: "SCANNING",
-  numero: null,
-  origem: null,
-  direcao: null,
-  validade: null,
-  alertas: null,
-  acertos: null,
-  greenSemGale: null,
-  greenG1: null,
-  erros: null,
-  assertividade: null,
-};
+const VISIBLE_ENTRY_HISTORY = 100;
+const OFFICIAL_ENTRY_RESULT_HOLD_MS = 5_000;
+const RESOLVED_ENTRY_SUPPRESS_MS = 900;
 
 export function LeituraNeuralMiniCard({
   className,
@@ -79,43 +66,53 @@ export function LeituraNeuralMiniCard({
   rounds,
   neuralEntryState,
   neuralEntryLastResult,
+  displayState,
+  displaySide,
+  displayRevision,
+  persistedResults = [],
   ...reading
-}: LeituraNeuralMiniCardProps) {
-  const data = { ...SCANNING_READING, ...reading };
+}: LeituraNeuralCardProps) {
+  const rawData = { ...SCANNING_READING, ...reading };
+  const displayEntrySide = normalizeDisplayEntrySide(displaySide);
+  const isDisplayEntry =
+    (displayState === "entry_confirmed" || displayState === "waiting_result") && displayEntrySide;
+  const data =
+    !isDisplayEntry && shouldHideResolvedReading(rawData, neuralEntryLastResult)
+      ? scanningReadingAfterClosedEntry(rawData)
+      : rawData;
   const mode = data.mode ?? "SCANNING";
-  const hasNumber = typeof data.numero === "number" && Boolean(data.origem);
-  const sg = optionalNumberFrom(data.greenSemGale);
-  const g1 = optionalNumberFrom(data.greenG1);
-  const red = optionalNumberFrom(data.reds ?? data.erros);
-  const totalGreens = totalGreensFrom(data.acertos, data.greenSemGale, data.greenG1);
-  const totalAlerts = totalFrom(data.alertas, data.acertos, data.erros);
-  const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
-  const resolvedTotal = numberFrom(totalGreens) + numberFrom(red);
-  const showPayingStats = hasNumber || totalGreens !== null || accuracy !== null || totalAlerts !== null;
-  const alertTone = data.isRedAlert ? "red" : data.isSaturated ? "yellow" : "cyan";
-  const postTie = Boolean(data.postTie);
-  const originKind = neuralOriginKind(data);
-  const originBadge = originBadgeFor(originKind);
+  const hasNumber =
+    neuralDisplayNumber(data) !== null &&
+    Boolean(data.origem || data.triggerSide || data.oppositeSide);
   const pullingSide = data.direcao ?? data.origem;
-  const message = buildNeuralCopy(data);
-  const statusKind = neuralStatusKind(data);
+  const openCycleSide = isOpenNeuralCycle(data)
+    ? normalizeDisplayEntrySide(data.targetSide ?? data.direcao ?? data.origem)
+    : null;
+  const rawConfirmedSide = isDisplayEntry
+    ? displayEntrySide
+    : (openCycleSide ?? (mode === "ACTIVE" ? pullingSide : null));
+  const confirmedSide =
+    !isDisplayEntry && shouldHideResolvedEntry(rawConfirmedSide, neuralEntryLastResult)
+      ? null
+      : rawConfirmedSide;
+  const numberTokenSide = hasNumber ? neuralNumberOriginSide(data) : null;
   const generalScore = buildGeneralScore(neuralScoreboard, data);
-  const tieMultipliers = tieMultiplierStats(rounds);
-  const generalScoreState = neuralScoreState(generalScore);
-  const sequenceCopy = neuralSequenceCopy(
-    numberFrom(generalScore.currentGreenSequence),
-    numberFrom(generalScore.currentRedSequence),
-    "geral",
+  const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
+  const view = buildNeuralView(
+    data,
+    hasNumber,
+    confirmedSide,
+    accuracy,
+    generalScore,
+    mode,
+    Boolean(isDisplayEntry || openCycleSide),
+    Boolean(displayState === "waiting_result" || data.cycleStatus === "AGUARDANDO_G1"),
   );
-  const numberSequenceCopy = neuralSequenceCopy(
-    numberFrom(data.sequencePositive),
-    numberFrom(data.sequenceNegative),
-    "numero",
-  );
-  const numberStage = numberPaymentStage(sg, g1, red);
-  const confirmedEntrySide = mode === "ACTIVE" ? pullingSide : null;
+
   const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
-  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
+  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() =>
+    readNeuralEntryHistory(),
+  );
   const lastOfficialResultRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
   const mountedAtRef = useRef(Date.now());
@@ -125,24 +122,19 @@ export function LeituraNeuralMiniCard({
     if (!result || lastOfficialResultRef.current === result.id) return;
 
     lastOfficialResultRef.current = result.id;
+    const historyItem = displayHistoryFromOfficialEntry(neuralEntryLastResult);
+    if (historyItem) {
+      setEntryHistory((history) => upsertNeuralEntryHistory(history, historyItem));
+    }
     if (isOfficialEntryOlderThanSession(neuralEntryLastResult, mountedAtRef.current)) return;
 
     setEntryResult(result);
-    setEntryHistory((items) => {
-      if (items.some((item) => item.id === result.id)) return items;
-      return [result, ...items].slice(0, MAX_NEURAL_ENTRY_HISTORY);
-    });
-
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
     entryResultTimeoutRef.current = window.setTimeout(
       () => setEntryResult(null),
-      result.kind === "red" ? 1600 : 3200,
+      OFFICIAL_ENTRY_RESULT_HOLD_MS,
     );
   }, [neuralEntryLastResult]);
-
-  useEffect(() => {
-    writeNeuralEntryHistory(entryHistory);
-  }, [entryHistory]);
 
   useEffect(() => {
     return () => {
@@ -150,201 +142,419 @@ export function LeituraNeuralMiniCard({
     };
   }, []);
 
+  useEffect(() => {
+    const officialHistory = persistedResults
+      .map(neuralEntryHistoryFromPersistentResult)
+      .filter((item): item is NeuralEntryHistoryItem => Boolean(item));
+    if (!officialHistory.length) return;
+    setEntryHistory((history) => mergeNeuralEntryHistories(officialHistory, history));
+  }, [persistedResults]);
+
+  useEffect(() => {
+    writeNeuralEntryHistory(entryHistory);
+  }, [entryHistory]);
+
+  const officialEntryResult = shouldShowOfficialEntryResult(neuralEntryLastResult, neuralEntryState)
+    ? displayResultFromOfficialEntry(neuralEntryLastResult)
+    : null;
+  const visibleEntryResult = officialEntryResult ?? entryResult;
+  const resultView = visibleEntryResult
+    ? buildEntryResultView(visibleEntryResult)
+    : buildDisplayStateResultView(displayState, displaySide);
+  const renderLogKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const label = resultView?.action ?? view.action;
+    const key = `${displayRevision ?? "-"}:${displayState ?? "-"}:${displaySide ?? "-"}:${label}`;
+    if (renderLogKeyRef.current === key) return;
+    renderLogKeyRef.current = key;
+    console.info("[FRONT_CARD_RENDER]", {
+      module: "leitura_neural",
+      revision: displayRevision,
+      displayState,
+      side: displaySide,
+      label,
+    });
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      console.info("[MOBILE_CARD_RENDER]", {
+        revision: displayRevision,
+        displayState,
+        side: displaySide,
+      });
+    }
+  }, [displayRevision, displayState, displaySide, resultView?.action, view.action]);
+
   return (
-    <aside
+    <GlassCard
       className={cn(
-        "neural-mini-card relative z-10 w-full shrink-0 overflow-visible rounded-xl border border-neon-cyan/25 bg-[#071020]/78 px-2.5 py-2 text-left shadow-[0_0_24px_-18px_var(--neon-cyan)] backdrop-blur-xl sm:w-[170px] lg:w-[180px]",
-        mode === "ACTIVE" && "border-neon-purple/35 shadow-[0_0_28px_-18px_var(--neon-purple)]",
+        "digital-risk-card border-white/10 p-2 sm:p-2",
+        DASHBOARD_MODULE_CARD_ROOT,
+        view.borderClass,
         greenFlash && "result-green-flash",
+        visibleEntryResult?.kind === "red" && "neural-entry-flash-red",
+        visibleEntryResult?.kind === "tie" && "neural-entry-flash-tie",
+        visibleEntryResult?.kind === "green" && "neural-entry-flash-green",
         className,
       )}
       aria-label="Leitura neural de números pagantes"
-      title={message}
     >
-      <div className="absolute inset-0 neural-mini-grid opacity-40" />
-      <div className="absolute -right-5 -top-6 size-16 rounded-full bg-neon-purple/15 blur-2xl" />
-      <div className="absolute -bottom-6 -left-5 size-16 rounded-full bg-neon-cyan/15 blur-2xl" />
-      <NeuralGeneralScorePopover
-        score={generalScore}
-        scoreState={generalScoreState}
-        statusKind={statusKind}
-        statusLabel={statusLabel(data)}
-        reading={data}
-      />
-      <span className="absolute inset-x-0 top-0 h-px neural-mini-shimmer" />
+      <div className="pointer-events-none absolute inset-0 scan-grid opacity-[0.03]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-purple/22 to-transparent" />
 
-      <div className="relative flex items-center gap-1.5">
-        <AssistantOrb />
-        <div className="min-w-0">
-          <div className="truncate text-[8px] font-black uppercase tracking-[0.14em] text-gradient-brand sm:text-[9px]">
+      <div className="mb-2 flex min-w-0 items-start justify-between gap-2">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             Leitura Neural
           </div>
-          <div className="truncate text-[7px] font-bold uppercase tracking-[0.1em] text-neon-cyan/75 sm:text-[8px]">
-            {originKind === "OPOSTO" ? "numero oposto" : postTie ? "cor pos-empate" : "numero pagante"}
+          <div className="text-[8px] font-bold uppercase tracking-[0.1em] text-muted-foreground">
+            {originSubtitle(data)}
           </div>
         </div>
+        <AppBadge
+          tone={view.badgeTone}
+          pulse={view.pulse}
+          className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
+        >
+          {view.badge}
+        </AppBadge>
       </div>
 
-      {!hasNumber ? (
-        <div className="relative mt-2">
-          <div className="line-clamp-2 text-[10px] font-semibold leading-snug text-foreground/85 sm:text-[11px]">
-            IA procurando números pagantes...
-          </div>
-          <TypingDots />
-          <div
-            className={cn(
-              "mt-1.5 inline-flex max-w-full rounded-full border px-1.5 py-0.5 text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[7px]",
-              sequenceCopy.className,
-            )}
-            title={sequenceCopy.title}
-          >
-            <span className="max-w-full whitespace-normal break-words">{sequenceCopy.label}</span>
-          </div>
-          <TieMultiplierMiniLine multipliers={tieMultipliers} />
-          <div className="mt-1.5">
-            <NeuralEntryStatusCard
-              confirmedSide={null}
-              result={entryResult}
-              history={entryHistory}
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="relative mt-2 space-y-1">
-          <NeuralEntryStatusCard
-            confirmedSide={confirmedEntrySide}
-            result={entryResult}
-            history={entryHistory}
-          />
-
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="flex min-w-0 items-baseline gap-1">
-              <span className="text-lg font-black leading-none text-foreground sm:text-xl">
-                {data.origem === "TIE" ? `${data.numero}x${data.numero}` : data.numero}
-              </span>
-              <span className={cn("truncate text-[11px] font-extrabold", sideClass(data.origem))}>
-                {sideLabel(data.origem)}
-              </span>
-            </span>
-            <span
-              className={cn(
-                "rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase leading-none tracking-[0.08em]",
-                originBadge.className,
-              )}
+      <div className={DASHBOARD_MODULE_CARD_BODY}>
+        {resultView ? (
+          <div className={cn("rounded-xl border px-3 py-2.5 text-center", resultView.panelClass)}>
+            <div
+              className={cn("text-lg font-black uppercase leading-none", resultView.actionClass)}
             >
-              {originBadge.label}
+              {resultView.action}
+            </div>
+            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              {resultView.headline}
+            </div>
+          </div>
+        ) : (
+          <div className={cn("rounded-xl border px-3 py-2.5 text-center", view.panelClass)}>
+            <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>
+              {view.action}
+            </div>
+            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              {view.headline}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-1.5 text-center sm:grid-cols-3">
+          <NeuralStatChip label="Forca" value={view.strengthLabel} tone={view.strengthTone} />
+          <NeuralStatChip
+            label="Numero"
+            value={hasNumber ? formatNeuralNumber(data) : "--"}
+            tone={numberTokenSide ? sideNumberTone(numberTokenSide) : "muted"}
+          >
+            {hasNumber ? (
+              <NeuralNumberToken label={formatNeuralNumber(data)} side={numberTokenSide} />
+            ) : null}
+          </NeuralStatChip>
+          <NeuralStatChip label="Validade" value={data.validade ?? "G1"} tone="muted" />
+        </div>
+
+        <details className="group rounded-lg border border-white/10 bg-background/20">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan marker:content-none [&::-webkit-details-marker]:hidden">
+            <span>Ver mais — resultados e detalhes</span>
+            <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="space-y-2 border-t border-white/10 p-2">
+        <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
+          <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
+            Placar geral - reseta 00:00 (BR)
+          </div>
+          <div className="mt-0.5 font-semibold text-foreground">
+            SG {formatCount(generalScore.sg)} - G1 {formatCount(generalScore.g1)} - RD{" "}
+            {formatCount(generalScore.reds)} - {formatPercent(generalScore.accuracy)}
+          </div>
+        </div>
+
+        {hasNumber && pullingSide ? (
+          <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px]">
+            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
+              Leitura ativa
+            </div>
+            <div className="mt-0.5 font-semibold text-foreground">
+              <NeuralNumberToken label={formatNeuralNumber(data)} side={numberTokenSide} />
+              {" - puxando "}
+              <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>
+              {data.origemTipo === "OPOSTO"
+                ? " - gatilho oposto"
+                : data.postTie
+                  ? " - pos-empate"
+                  : ""}
+            </div>
+          </div>
+        ) : null}
+
+        {data.strategyType && (hasNumber || hasStrategyOrigin(data)) ? (
+          <NeuralStrategyDetails data={data} />
+        ) : null}
+
+        {data.formationCandidates?.length ? (
+          <NeuralFormationCandidates candidates={data.formationCandidates} />
+        ) : null}
+
+        {neuralEntryState?.expectedSide &&
+        !visibleEntryResult &&
+        !shouldHideResolvedEntry(neuralEntryState.expectedSide, neuralEntryLastResult) ? (
+          <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1 text-[9px] text-muted-foreground">
+            Entrada oficial:{" "}
+            <span className={sideClass(neuralEntryState.expectedSide)}>
+              {sideLabel(neuralEntryState.expectedSide)}
             </span>
           </div>
+        ) : null}
 
-          {pullingSide ? (
-            <div className="truncate text-[10px] font-bold text-muted-foreground sm:text-[11px]">
-              <span className="text-neon-cyan">
-                {originKind === "OPOSTO" ? "Numero oposto puxando" : postTie ? "Cor pos-empate" : "Puxando"}
-              </span>{" "}
-              <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>{" "}
-              <span className="text-[9px] text-muted-foreground/85">até {data.validade ?? "G1"}</span>
-            </div>
-          ) : (
-            <div className="truncate text-[10px] font-semibold text-muted-foreground">
-              Em observação pagante
-            </div>
-          )}
+        <NeuralEntryHistoryList history={entryHistory} />
+          </div>
+        </details>
+        <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
+      </div>
+    </GlassCard>
+  );
+}
 
-          {showPayingStats ? (
-            <div className="rounded-lg border border-neon-cyan/15 bg-background/35 px-1.5 py-1">
-              <div className="truncate text-[7px] font-black uppercase tracking-[0.1em] text-neon-cyan/85">
-                Numero atual
-              </div>
-              <div className="flex items-baseline justify-between gap-1">
-                <span className="text-[7px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                  {originKind === "OPOSTO"
-                    ? "Oposto"
-                    : postTie
-                      ? "Pos-empate"
-                      : typeof data.numero === "number"
-                        ? `Número ${data.numero}`
-                        : "Pagando"}
+function buildNeuralView(
+  data: NeuralReading,
+  hasNumber: boolean,
+  confirmedSide: NeuralSide | null | undefined,
+  accuracy: number | null,
+  generalScore: ReturnType<typeof buildGeneralScore>,
+  mode: NeuralReading["mode"],
+  forceOfficialEntryDisplay = false,
+  isAwaitingG1 = false,
+) {
+  const strengthLabel =
+    accuracy !== null ? `${Math.round(accuracy)}%` : formatPercent(generalScore.accuracy);
+  const validity = data.validade ?? "G1";
+  const originKind = neuralOriginKind(data);
+
+  if (data.blocked || data.isRedAlert || (data.isSaturated && neuralStatusKind(data) === "red")) {
+    const riskEntrySide = confirmedSide ?? normalizeDisplayEntrySide(data.direcao ?? data.origem);
+    return {
+      badge: data.blocked ? "Bloqueado" : "Risco alto",
+      badgeTone: "red" as const,
+      pulse: false,
+      action: data.blocked
+        ? "Bloqueado"
+        : riskEntrySide
+          ? `Entrada ${entrySideToken(riskEntrySide)}`
+          : "Entrada",
+      headline: data.paganteAlert ?? "Estrategia atingiu 3 reds recentes",
+      actionClass: riskEntrySide ? sideActionClass(riskEntrySide) : "text-destructive",
+      panelClass: "border-destructive/35 bg-destructive/10",
+      borderClass: "border-destructive/30",
+      strengthLabel,
+      strengthTone: "red" as const,
+      numberTone: "muted" as const,
+    };
+  }
+
+  if (confirmedSide && (hasNumber || forceOfficialEntryDisplay)) {
+    return {
+      badge: originKind === "OPOSTO" ? "Oposto" : data.postTie ? "Pos-empate" : "Pagante",
+      badgeTone: sideBadgeTone(confirmedSide),
+      pulse: true,
+      action: isAwaitingG1
+        ? `Aguardando G1 ${entrySideToken(confirmedSide)}`
+        : `Entrada ${entrySideToken(confirmedSide)}`,
+      headline: hasNumber
+        ? `${sideLabel(confirmedSide)} - ate ${validity} - ${data.accuracyLabel ?? strengthLabel}`
+        : `${sideLabel(confirmedSide)} - entrada confirmada pela engine`,
+      actionClass: sideActionClass(confirmedSide),
+      panelClass: sidePanelClass(confirmedSide),
+      borderClass: sideBorderClass(confirmedSide),
+      strengthLabel,
+      strengthTone: sideStatTone(confirmedSide),
+      numberTone: sideNumberTone(data.origem),
+    };
+  }
+
+  if (hasNumber && mode === "OBSERVING") {
+    const side = pullingSideLabel(data);
+    return {
+      badge: "Observando",
+      badgeTone: "amber" as const,
+      pulse: true,
+      action: side ? `Monitorar ${side}` : "Monitorar",
+      headline: "Numero apareceu - aguardando confirmacao da engine",
+      actionClass: "text-warning",
+      panelClass: "border-warning/30 bg-warning/10",
+      borderClass: "border-warning/25",
+      strengthLabel,
+      strengthTone: "amber" as const,
+      numberTone: sideNumberTone(data.origem),
+    };
+  }
+
+  if (hasNumber) {
+    const side = pullingSideLabel(data);
+    return {
+      badge: "Leitura",
+      badgeTone: "blue" as const,
+      pulse: false,
+      action: side ? `Monitorar ${side}` : "Monitorar",
+      headline: "Numero detectado - sem entrada confirmada agora",
+      actionClass: "text-warning",
+      panelClass: "border-warning/25 bg-warning/8",
+      borderClass: "border-neon-purple/20",
+      strengthLabel,
+      strengthTone: "cyan" as const,
+      numberTone: sideNumberTone(data.origem),
+    };
+  }
+
+  return {
+    badge: "Procurando",
+    badgeTone: "muted" as const,
+    pulse: false,
+    action: "Aguardar",
+    headline: "IA procurando numeros pagantes no ciclo atual",
+    actionClass: "text-muted-foreground",
+    panelClass: "border-border/60 bg-secondary/20",
+    borderClass: "border-border/50",
+    strengthLabel,
+    strengthTone: "muted" as const,
+    numberTone: "muted" as const,
+  };
+}
+
+function NeuralStrategyDetails({ data }: { data: NeuralReading }) {
+  const target = normalizeDisplayEntrySide(data.targetSide ?? data.direcao);
+  const originNumber = strategyOriginNumber(data);
+  const originSide = neuralNumberOriginSide(data);
+  const originKind =
+    data.origemTipo === "OPOSTO" || isOppositeStrategy(data) ? "oposto" : "pagante";
+  const sample =
+    data.sampleLabel ?? (typeof data.samples === "number" ? `${data.samples} amostras` : "--");
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[8.5px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-black uppercase tracking-[0.08em] text-muted-foreground">
+          Origem tecnica
+        </span>
+        <span className="truncate font-semibold text-neon-cyan">
+          {strategyTypeLabel(data.strategyType)}
+        </span>
+      </div>
+      <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5 font-semibold">
+        <span className="flex min-w-0 items-center gap-1 text-foreground">
+          Numero <NeuralNumberToken label={String(originNumber ?? "--")} side={originSide} />
+          <span className={cn("truncate", sideClass(originSide))}>
+            {originSide ? sideLabel(originSide).toUpperCase() : ""} {originKind}
+          </span>
+        </span>
+        <span className="truncate text-right">{strategyTypeLabel(data.strategyType)}</span>
+        <span className="truncate">
+          Puxou:{" "}
+          <span className={sideClass(target)}>
+            {target ? sideLabel(target).toUpperCase() : "--"}
+          </span>
+        </span>
+        <span className="truncate text-right">
+          {data.accuracyLabel ?? formatPercent(optionalNumberFrom(data.accuracy))}
+        </span>
+        <span className="truncate">Amostra: {sample}</span>
+        <span className="truncate text-right">
+          Reds: {formatCount(optionalNumberFrom(data.recentReds))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function NeuralFormationCandidates({
+  candidates,
+}: {
+  candidates: NonNullable<NeuralReading["formationCandidates"]>;
+}) {
+  const visible = candidates.slice(0, 3);
+  return (
+    <div className="rounded-lg border border-white/8 bg-background/12 px-2 py-1.5 text-[8px]">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="font-black uppercase tracking-[0.08em] text-muted-foreground">
+          Em formacao
+        </span>
+        <span className="text-muted-foreground/70">{candidates.length} no radar</span>
+      </div>
+      <div className="space-y-0.5">
+        {visible.map((candidate, index) => {
+          const target = normalizeDisplayEntrySide(candidate.targetSide);
+          return (
+            <div
+              key={candidate.strategyId ?? `${candidate.strategyType}:${index}`}
+              className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/8 px-1.5 py-0.5 font-semibold"
+            >
+              <span className="min-w-0 truncate text-muted-foreground">
+                {formationOriginLabel(candidate)} puxando{" "}
+                <span className={sideClass(target)}>
+                  {target ? sideLabel(target).toUpperCase() : "--"}
                 </span>
-                <span className="text-[11px] font-black text-neon-cyan">
-                  {formatPercent(accuracy)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-1">
-                <span className="truncate text-[8px] font-semibold text-muted-foreground sm:text-[9px]">
-                  SG:{formatCount(sg, true)} G1:{formatCount(g1, true)} RD:{formatCount(red, true)}
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full border px-1 py-0.5 text-[6.5px] font-black uppercase leading-none tracking-[0.06em]",
-                    numberStage.className,
-                  )}
-                  title={numberStage.title}
-                >
-                  {numberStage.label}
-                </span>
-              </div>
-              <div
-                className={cn(
-                  "mt-1 rounded-full border px-1.5 py-0.5 text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[7px]",
-                  numberSequenceCopy.className,
-                )}
-                title={numberSequenceCopy.title}
-              >
-                {numberSequenceCopy.label}
-              </div>
-              <div className="my-1 h-px bg-neon-cyan/10" />
-              <div className="truncate text-[7px] font-black uppercase tracking-[0.1em] text-neon-cyan/85">
-                Placar geral
-              </div>
-              <div className="truncate text-[7.5px] font-black uppercase tracking-[0.04em] text-foreground/90 sm:text-[8px]">
-                SG:{formatCount(generalScore.sg, true)} G1:{formatCount(generalScore.g1, true)} RD:{formatCount(generalScore.reds, true)}
-              </div>
-              <div className="truncate text-[7.5px] font-black uppercase tracking-[0.04em] text-muted-foreground sm:text-[8px]">
-                SQG:{formatCount(generalScore.maxGreenSequence, true)} SQR:{formatCount(generalScore.maxRedSequence, true)} {formatPercent(generalScore.accuracy)}
-              </div>
-              <div
-                className={cn(
-                  "mt-1 rounded-full border px-1.5 py-0.5 text-[6.5px] font-black uppercase leading-tight tracking-[0.08em] sm:text-[7px]",
-                  sequenceCopy.className,
-                )}
-                title={sequenceCopy.title}
-              >
-                {sequenceCopy.label}
-              </div>
-              {data.paganteCycleProgress || data.paganteWindow ? (
-                <div className="truncate text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                  {data.paganteCycleProgress
-                    ? `Ciclo: ${formatCount(numberFrom(data.paganteCycleProgress))}/${formatCount(numberFrom(data.paganteCycleLimit ?? data.paganteWindow))}`
-                    : `Janela: ${data.paganteWindow} rodadas`}
-                </div>
-              ) : null}
-              <TieMultiplierMiniLine multipliers={tieMultipliers} />
-              {data.paganteStatus && data.paganteStatus !== "VALIDO" ? (
-                <div
-                  className={cn(
-                    "mt-1 truncate rounded-full border px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.08em]",
-                    alertTone === "red" && "border-destructive/35 bg-destructive/10 text-destructive",
-                    alertTone === "yellow" && "border-warning/35 bg-warning/10 text-warning",
-                    alertTone === "cyan" && "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
-                  )}
-                  title={data.paganteAlert ?? undefined}
-                >
-                  {data.paganteStatus}
-                </div>
-              ) : null}
+              </span>
+              <span className="shrink-0 text-warning">
+                {candidate.accuracyLabel ?? formatPercent(optionalNumberFrom(candidate.accuracy))}{" "}
+                {candidate.sampleLabel ?? ""}
+              </span>
             </div>
-          ) : (
-            <div className="space-y-1">
-              <div className="inline-flex items-center gap-1 text-[9px] font-semibold text-neon-cyan/85">
-                <Sparkles className="size-2.5" />
-                Observando
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function NeuralEntryHistoryList({ history }: { history: NeuralEntryHistoryItem[] }) {
+  const visible = history.slice(0, VISIBLE_ENTRY_HISTORY);
+
+  return (
+    <details className="group rounded-lg border border-white/8 bg-background/12 px-2 py-1">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 py-0.5 marker:content-none [&::-webkit-details-marker]:hidden">
+        <span className="flex min-w-0 items-center gap-1 text-[7px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/75">
+          <ChevronRight className="size-2.5 shrink-0 transition group-open:rotate-90" />
+          <span className="truncate">Entradas</span>
+        </span>
+        <span className="shrink-0 whitespace-nowrap text-[6.5px] font-black uppercase tracking-[0.02em] text-muted-foreground/65">
+          {history.length} no ciclo
+        </span>
+      </summary>
+
+      <div className="mt-1 border-t border-white/5 pt-1">
+        {visible.length ? (
+          <div className="max-h-20 space-y-0.5 overflow-y-auto pr-0.5">
+            {visible.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/8 px-1.5 py-0.5 text-[7.5px] font-semibold leading-tight"
+              >
+                <span className="min-w-0 truncate">
+                  <span className={item.kind === "tie" ? "text-tie" : sideClass(item.side)}>
+                    {entrySideHistoryLabel(item)}
+                  </span>
+                  {item.kind !== "tie" ? (
+                    <>
+                      {" "}
+                      <span className={entryResultClass(item.kind)}>
+                        {entryResultLabel(item.kind, item.attempt)}
+                      </span>
+                    </>
+                  ) : null}
+                </span>
+                <span className="shrink-0 text-[7px] text-muted-foreground/70">{item.minute}</span>
               </div>
-              <TieMultiplierMiniLine multipliers={tieMultipliers} />
-            </div>
-          )}
-        </div>
-      )}
-    </aside>
+            ))}
+          </div>
+        ) : (
+          <div className="pb-0.5 text-[7.5px] font-semibold text-muted-foreground/70">
+            Sem greens, reds ou ties recentes.
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -375,8 +585,32 @@ function writeNeuralEntryHistory(history: NeuralEntryHistoryItem[]) {
       JSON.stringify(history.slice(0, MAX_NEURAL_ENTRY_HISTORY)),
     );
   } catch {
-    // Local persistence is only a visual convenience; the engine data remains authoritative.
+    // Local persistence is only a visual convenience.
   }
+}
+
+function mergeNeuralEntryHistories(
+  primary: NeuralEntryHistoryItem[],
+  secondary: NeuralEntryHistoryItem[],
+) {
+  let merged = secondary;
+  for (const item of primary.slice().reverse()) {
+    merged = upsertNeuralEntryHistory(merged, item);
+  }
+  return merged;
+}
+
+function upsertNeuralEntryHistory(history: NeuralEntryHistoryItem[], item: NeuralEntryHistoryItem) {
+  const merged = [item, ...history.filter((entry) => entry.id !== item.id)].slice(
+    0,
+    MAX_NEURAL_ENTRY_HISTORY,
+  );
+  return neuralEntryHistoryEquals(history, merged) ? history : merged;
+}
+
+function neuralEntryHistoryEquals(left: NeuralEntryHistoryItem[], right: NeuralEntryHistoryItem[]) {
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => JSON.stringify(item) === JSON.stringify(right[index]));
 }
 
 function normalizeNeuralEntryHistoryItem(value: unknown): NeuralEntryHistoryItem | null {
@@ -384,21 +618,279 @@ function normalizeNeuralEntryHistoryItem(value: unknown): NeuralEntryHistoryItem
   const record = value as Partial<NeuralEntryHistoryItem>;
   if (!isNeuralEntryResultKind(record.kind) || !isNeuralSide(record.side)) return null;
 
-  const multiplier =
-    typeof record.multiplier === "number" && Number.isFinite(record.multiplier)
-      ? record.multiplier
-      : null;
-
   return {
-    id: typeof record.id === "string" && record.id ? record.id : `restored:${Date.now()}:${Math.random()}`,
+    id:
+      typeof record.id === "string" && record.id
+        ? record.id
+        : `restored:${Date.now()}:${Math.random()}`,
     kind: record.kind,
     side: record.side,
-    multiplier,
+    multiplier:
+      typeof record.multiplier === "number" && Number.isFinite(record.multiplier)
+        ? record.multiplier
+        : null,
+    attempt: record.attempt === "G1" ? "G1" : record.attempt === "SG" ? "SG" : null,
     minute: typeof record.minute === "string" && record.minute ? record.minute : "--",
   };
 }
 
-function displayResultFromOfficialEntry(result: NeuralEntryLastResult | null | undefined): NeuralEntryHistoryItem | null {
+function neuralEntryHistoryFromPersistentResult(
+  value: DashboardPersistentResult,
+): NeuralEntryHistoryItem | null {
+  if (value.moduleKey !== "LEITURA_NEURAL_NUMERO_PAGANTE") return null;
+  const side = normalizeDisplayEntrySide(value.side);
+  if (!side) return null;
+  const resultType = String(value.resultType || "").toUpperCase();
+  const kind: NeuralEntryDisplayKind =
+    resultType === "RED"
+      ? "red"
+      : resultType === "EMPATE" || resultType === "EMPATE_G1"
+        ? "tie"
+        : "green";
+  const multiplier =
+    typeof value.tieMultiplier === "number"
+      ? value.tieMultiplier
+      : Number(String(value.tieMultiplier || "").replace(/\D+/g, "")) || null;
+  const semanticId = ["neural", value.signalId ?? value.resultId, value.roundId ?? "", kind].join(
+    ":",
+  );
+  return {
+    id: semanticId,
+    kind,
+    side,
+    multiplier,
+    attempt: value.attempt === "G1" ? "G1" : "SG",
+    minute:
+      minuteLabelFromTimeText(value.displayTimeBR) ?? minuteLabelFromIso(value.createdAt) ?? "--",
+  };
+}
+
+function displayHistoryFromOfficialEntry(result: NeuralEntryLastResult | null | undefined) {
+  const base = displayResultFromOfficialEntry(result);
+  if (!base) return null;
+
+  return {
+    ...base,
+    minute: minuteLabelFromOfficialResult(result),
+  };
+}
+
+function clearNeuralEntryHistoryStorage() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(NEURAL_ENTRY_HISTORY_STORAGE_KEY);
+  } catch {
+    // The official payload is the source of truth across web and mobile.
+  }
+}
+
+function shouldShowOfficialEntryResult(
+  result: NeuralEntryLastResult | null | undefined,
+  _state: NeuralEntryState | null | undefined,
+) {
+  if (!result?.id) return false;
+  if (isOfficialEntryFreshForDisplay(result)) return true;
+  return false;
+}
+
+function isOfficialEntryFreshForDisplay(result: NeuralEntryLastResult | null | undefined) {
+  if (!result?.finishedAt) return false;
+  const finishedAt = new Date(result.finishedAt).getTime();
+  if (Number.isNaN(finishedAt)) return false;
+  const age = Date.now() - finishedAt;
+  return age >= -5_000 && age <= OFFICIAL_ENTRY_RESULT_HOLD_MS;
+}
+
+function minuteLabelFromOfficialResult(result: NeuralEntryLastResult | null | undefined) {
+  const roundKeyMinute = minuteLabelFromTimeText(result?.resultRoundKey);
+  if (roundKeyMinute) return roundKeyMinute;
+
+  const finishedMinute = minuteLabelFromIso(result?.finishedAt);
+  return finishedMinute ?? "--";
+}
+
+function minuteLabelFromTimeText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const match = value.match(/\b(\d{1,2}:\d{2})(?::\d{2})?\b/);
+  return match?.[1]?.padStart(5, "0") ?? null;
+}
+
+function minuteLabelFromIso(value: unknown) {
+  if (typeof value !== "string" || !value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function isNeuralEntryResultKind(value: unknown): value is NeuralEntryDisplayKind {
+  return value === "green" || value === "red" || value === "tie";
+}
+
+function isNeuralSide(value: unknown): value is NeuralSide {
+  return value === "BANKER" || value === "PLAYER" || value === "TIE";
+}
+
+function entrySideHistoryLabel(item: NeuralEntryHistoryItem) {
+  if (item.kind === "tie") {
+    return `EMPATE${item.multiplier ? ` ${item.multiplier}X` : ""}`.trim();
+  }
+  if (item.side === "BANKER") return "BANKER";
+  if (item.side === "PLAYER") return "PLAYER";
+  return "TIE";
+}
+
+function entryHistoryText(item: NeuralEntryHistoryItem) {
+  if (item.kind === "tie") return entrySideHistoryLabel(item);
+  return `${entrySideHistoryLabel(item)} ${entryResultLabel(item.kind, item.attempt)}`;
+}
+
+function entryResultLabel(kind: NeuralEntryDisplayKind, attempt?: string | null) {
+  if (kind === "red") return "RED";
+  if (kind === "tie") return "EMPATE";
+  return attempt === "G1" ? "GREEN G1" : "GREEN SG";
+}
+
+function entryResultClass(kind: NeuralEntryDisplayKind) {
+  if (kind === "red") return "text-destructive";
+  if (kind === "tie") return "text-warning";
+  return "text-success";
+}
+
+function buildEntryResultView(result: NeuralEntryDisplayResult) {
+  if (result.kind === "red") {
+    return {
+      action: "RED FINAL",
+      headline: "Entrada neural fechou no red",
+      actionClass: "text-destructive",
+      panelClass: "neural-entry-flash-red border-destructive/35 bg-destructive/10",
+    };
+  }
+
+  if (result.kind === "tie") {
+    return {
+      action: `EMPATE ${result.multiplier ? `${result.multiplier}X` : ""}`.trim(),
+      headline: "Empate confirmado na validade",
+      actionClass: "text-warning",
+      panelClass: "neural-entry-flash-tie border-warning/35 bg-warning/10",
+    };
+  }
+
+  return {
+    action: result.attempt === "G1" ? "GREEN G1" : "GREEN SG",
+    headline: `${sideLabel(result.side)} confirmado pela Leitura Neural`,
+    actionClass: sideActionClass(result.side),
+    panelClass: "neural-entry-flash-green border-success/35 bg-success/10",
+  };
+}
+
+function buildDisplayStateResultView(
+  displayState: DashboardDisplayState | undefined,
+  displaySide: CurrentSignalSide | undefined,
+) {
+  const side = normalizeDisplayEntrySide(displaySide);
+  if (displayState === "result_tie") {
+    return buildEntryResultView({ kind: "tie", side: "TIE" });
+  }
+  if (displayState === "result_red" && side) {
+    return buildEntryResultView({ kind: "red", side });
+  }
+  if (displayState === "result_green" && side) {
+    return buildEntryResultView({ kind: "green", side });
+  }
+  return null;
+}
+
+function NeuralStatChip({
+  label,
+  value,
+  tone,
+  children,
+}: {
+  label: string;
+  value: string;
+  tone: "green" | "amber" | "cyan" | "red" | "muted" | "banker" | "player" | "tie";
+  children?: ReactNode;
+}) {
+  const toneClass = {
+    green: "border-success/30 bg-success/8 text-success",
+    amber: "border-warning/30 bg-warning/8 text-warning",
+    cyan: "border-neon-cyan/30 bg-neon-cyan/8 text-neon-cyan",
+    red: "border-destructive/30 bg-destructive/8 text-destructive",
+    muted: "border-border/60 bg-secondary/25 text-foreground",
+    banker: "border-banker/30 bg-banker/8 text-banker",
+    player: "border-player/35 bg-player/10 text-player",
+    tie: "border-tie/35 bg-tie/10 text-tie",
+  }[tone];
+
+  return (
+    <div className={cn("rounded-lg border px-1 py-1.5", toneClass)}>
+      <div className="text-[8px] font-black uppercase tracking-[0.08em] opacity-75">{label}</div>
+      <div className="mt-0.5 flex min-h-4 items-center justify-center text-[11px] font-black leading-none">
+        {children ?? <span className="truncate">{value}</span>}
+      </div>
+    </div>
+  );
+}
+
+function NeuralNumberToken({ label, side }: { label: string; side?: NeuralSide | null }) {
+  const compactLabel = compactNumberTokenLabel(label);
+  return (
+    <span
+      className={cn(
+        "inline-grid size-5 shrink-0 place-items-center rounded-full border font-black leading-none tabular-nums shadow-[0_0_10px_-7px_currentColor] [-webkit-text-stroke:0.2px_currentColor]",
+        compactLabel.length > 1 ? "text-[10px]" : "text-[12px]",
+        numberTokenClass(side),
+      )}
+      title={label}
+      aria-label={label}
+    >
+      {compactLabel}
+    </span>
+  );
+}
+
+function compactNumberTokenLabel(label: string) {
+  const text = String(label || "--").trim();
+  const sideNumber = text.match(/^(\d+)\s*[BP]$/i) || text.match(/^[BP]\s*(\d+)$/i);
+  if (sideNumber?.[1]) return sideNumber[1];
+  const tieNumber = text.match(/^(\d+)\s*x\s*\d*$/i);
+  if (tieNumber?.[1]) return tieNumber[1];
+  const onlyNumber = text.match(/\d+/)?.[0];
+  return onlyNumber || text || "--";
+}
+
+function numberTokenClass(side?: NeuralSide | null) {
+  if (side === "BANKER") return "border-banker/70 bg-banker text-white";
+  if (side === "PLAYER") return "border-player/70 bg-player text-white";
+  if (side === "TIE") return "border-warning/70 bg-warning text-background";
+  return "border-white/20 bg-white/10 text-foreground";
+}
+
+function buildGeneralScore(
+  scoreboard: NeuralScoreboard | undefined,
+  fallbackReading: NeuralReading,
+) {
+  const sg = optionalNumberFrom(scoreboard?.greenSemGale ?? fallbackReading.greenSemGale);
+  const g1 = optionalNumberFrom(scoreboard?.greenG1 ?? fallbackReading.greenG1);
+  const splitGreens = sg !== null || g1 !== null ? numberFrom(sg) + numberFrom(g1) : null;
+  const greens = optionalNumberFrom(
+    splitGreens ?? scoreboard?.greens ?? scoreboard?.acertos ?? fallbackReading.acertos,
+  );
+  const reds = optionalNumberFrom(
+    scoreboard?.reds ?? scoreboard?.erros ?? fallbackReading.reds ?? fallbackReading.erros,
+  );
+  const accuracy =
+    accuracyFrom(null, greens, reds) ??
+    optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
+
+  return { sg, g1, reds, accuracy };
+}
+
+function displayResultFromOfficialEntry(result: NeuralEntryLastResult | null | undefined) {
   if (!result?.id) return null;
 
   const side = normalizeEntrySide(result.expectedSide ?? result.origem);
@@ -408,13 +900,15 @@ function displayResultFromOfficialEntry(result: NeuralEntryLastResult | null | u
       : result.outcome === "RED" || result.kind === "red"
         ? "red"
         : "green";
+  const attempt =
+    result.attempt === "G1" || result.kind === "g1" || result.kind === "tie_g1" ? "G1" : "SG";
 
   return {
-    id: result.id,
+    id: ["neural", result.key || result.id, result.resultRoundKey || "", kind].join(":"),
     kind,
     side: kind === "tie" ? "TIE" : side,
-    multiplier: kind === "tie" ? result.tieMultiplier ?? null : null,
-    minute: minuteLabelFromOfficialResult(result),
+    multiplier: kind === "tie" ? (result.tieMultiplier ?? null) : null,
+    attempt,
   };
 }
 
@@ -429,430 +923,137 @@ function isOfficialEntryOlderThanSession(
 }
 
 function normalizeEntrySide(side: unknown): NeuralSide {
-  return isNeuralSide(side) ? side : "TIE";
+  if (side === "BANKER" || side === "PLAYER" || side === "TIE") return side;
+  return "TIE";
 }
 
-function minuteLabelFromOfficialResult(result: NeuralEntryLastResult) {
-  const roundKeyMinute = minuteLabelFromTimeText(result.resultRoundKey);
-  if (roundKeyMinute) return roundKeyMinute;
-
-  const finishedMinute = minuteLabelFromIso(result.finishedAt);
-  return finishedMinute ?? "--";
+function normalizeDisplayEntrySide(side: unknown): NeuralSide | null {
+  if (side === "BANKER" || side === "PLAYER" || side === "TIE") return side;
+  return null;
 }
 
-function minuteLabelFromTimeText(value: unknown) {
-  if (typeof value !== "string") return null;
-  const match = value.match(/\b\d{1,2}:(\d{2})(?::\d{2})?\b/);
-  return match?.[1] ?? null;
+function originSubtitle(data: NeuralReading) {
+  const kind = neuralOriginKind(data);
+  if (kind === "OPOSTO") return "numero oposto";
+  if (kind === "TIE" || data.postTie) return "pos-empate";
+  return "numero pagante";
 }
 
-function minuteLabelFromIso(value: unknown) {
-  if (typeof value !== "string" || !value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo",
-    minute: "2-digit",
-  });
+function strategyOriginNumber(data: NeuralReading) {
+  if (data.origemTipo === "OPOSTO" || isOppositeStrategy(data)) {
+    return data.oppositeNumber ?? data.numero;
+  }
+  return data.triggerNumber ?? data.numero;
 }
 
-function isNeuralEntryResultKind(value: unknown): value is NeuralEntryDisplayKind {
-  return value === "green" || value === "red" || value === "tie";
+function neuralNumberOriginSide(data: NeuralReading) {
+  if (data.origemTipo === "OPOSTO" || isOppositeStrategy(data)) {
+    return normalizeDisplayEntrySide(data.oppositeSide ?? data.origem);
+  }
+  return normalizeDisplayEntrySide(data.triggerSide ?? data.origem);
 }
 
-function isNeuralSide(value: unknown): value is NeuralSide {
-  return value === "BANKER" || value === "PLAYER" || value === "TIE";
-}
-
-function neuralSequenceCopy(
-  sequencePositive: number,
-  sequenceNegative: number,
-  scope: "numero" | "geral" = "geral",
+function formationOriginLabel(
+  candidate: NonNullable<NeuralReading["formationCandidates"]>[number],
 ) {
-  const labelPrefix = scope === "numero" ? "Seq numero" : "Seq geral";
-
-  if (sequenceNegative > 0) {
-    return {
-      label: `${labelPrefix}: ${sequenceNegative} RED ${sequenceNegative === 1 ? "seguido" : "seguidos"}`,
-      title: "Sequência atual de reds da Leitura Neural.",
-      className: "border-destructive/35 bg-destructive/10 text-destructive",
-    };
+  if (candidate.oppositeNumber !== null && candidate.oppositeNumber !== undefined) {
+    const side = normalizeDisplayEntrySide(candidate.oppositeSide);
+    return `${candidate.oppositeNumber}${side ? ` ${sideLabel(side).toUpperCase()}` : ""} oposto`;
   }
-
-  if (sequencePositive > 0) {
-    return {
-      label: `${labelPrefix}: ${sequencePositive} GREEN ${sequencePositive === 1 ? "seguido" : "seguidos"}`,
-      title: "Sequência atual de greens da Leitura Neural.",
-      className: "border-success/35 bg-success/10 text-success",
-    };
-  }
-
-  return {
-    label: `${labelPrefix}: aguardando`,
-    title: "Aguardando resultado real da Leitura Neural.",
-    className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
-  };
+  const side = normalizeDisplayEntrySide(candidate.triggerSide);
+  return `${candidate.triggerNumber ?? "--"}${side ? ` ${sideLabel(side).toUpperCase()}` : ""}`;
 }
 
-function NeuralEntryStatusCard({
-  confirmedSide,
-  result,
-  history,
-}: {
-  confirmedSide?: NeuralSide | null;
-  result: NeuralEntryDisplayResult | null;
-  history: NeuralEntryHistoryItem[];
-}) {
-  const state = neuralEntryStatusState(confirmedSide, result);
+function strategyTypeLabel(value: unknown) {
+  const text = String(value || "");
+  if (text === "PAGANTE_OPOSTO") return "Pagante oposto";
+  if (text === "PAGANTE_DIRETO") return "Pagante direto";
+  return "Motor neural";
+}
 
+function formatNeuralNumber(data: NeuralReading) {
+  const number = neuralDisplayNumber(data);
+  if (number === null) return "--";
+  if (data.origem === "TIE") return `${number}x`;
+  return String(number);
+}
+
+function pullingSideLabel(data: NeuralReading) {
+  const side = data.direcao ?? data.origem;
+  return side ? sideLabel(side).toUpperCase() : null;
+}
+
+function neuralOriginKind(data: NeuralReading) {
+  if (data.postTie || data.origem === "TIE") return "TIE";
+  if (isOppositeStrategy(data)) return "OPOSTO";
+  return data.origemTipo ?? "PAGANTE";
+}
+
+function neuralDisplayNumber(data: NeuralReading) {
+  if (typeof data.numero === "number") return data.numero;
+  if (typeof data.oppositeNumber === "number") return data.oppositeNumber;
+  if (typeof data.triggerNumber === "number") return data.triggerNumber;
+  return null;
+}
+
+function hasStrategyOrigin(data: NeuralReading) {
   return (
-    <div
-      className={cn(
-        "rounded-lg border px-2 py-1.5 text-center shadow-[0_0_18px_-16px_currentColor]",
-        state.className,
-      )}
-    >
-      <div className="text-[7px] font-black uppercase tracking-[0.14em] opacity-80">
-        {state.kicker}
-      </div>
-      <div className={cn("mt-0.5 text-base font-black uppercase leading-none", state.sideClass)}>
-        {state.label}
-      </div>
-      {state.description ? (
-        <div className="mt-1 text-[8px] font-semibold leading-tight text-muted-foreground">
-          {state.description}
-        </div>
-      ) : null}
-
-      <details className="group mt-1 text-left">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[6.5px] font-black uppercase tracking-[0.08em] text-muted-foreground/80 transition hover:text-neon-cyan">
-          <span>Ultimas entradas</span>
-          <span className="text-[8px] leading-none transition group-open:rotate-90">&gt;</span>
-        </summary>
-        <div className="mt-0.5 max-h-28 space-y-0.5 overflow-y-auto pr-1">
-          {history.length ? (
-            history.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between gap-1 text-[7px] font-semibold leading-tight"
-              >
-                <span className="min-w-0 truncate">
-                  <span className={sideClass(item.side)}>
-                    {entrySideSymbol(item.side)} {entrySideHistoryLabel(item)}
-                  </span>{" "}
-                  <span className={item.kind === "red" ? "text-destructive" : "text-success"}>
-                    {entryResultHistoryLabel(item)}
-                  </span>
-                </span>
-                <span className="shrink-0 text-[6.5px] text-muted-foreground/75">Min {item.minute}</span>
-              </div>
-            ))
-          ) : (
-            <div className="text-[7px] font-semibold text-muted-foreground/75">
-              Sem entradas recentes.
-            </div>
-          )}
-        </div>
-      </details>
-    </div>
+    typeof data.triggerNumber === "number" ||
+    typeof data.oppositeNumber === "number" ||
+    Boolean(data.triggerSide || data.oppositeSide || data.targetSide)
   );
 }
 
-function neuralEntryStatusState(
-  confirmedSide?: NeuralSide | null,
-  result?: NeuralEntryDisplayResult | null,
-) {
-  if (result?.kind === "red") {
-    return {
-      kicker: "Resultado",
-      label: "RED",
-      description: null,
-      sideClass: "text-destructive",
-      className: "neural-entry-flash-red border-destructive/35 bg-destructive/10 text-destructive",
-    };
-  }
-
-  if (result?.kind === "tie") {
-    return {
-      kicker: "Resultado",
-      label: `GREEN EMPATE ${result.multiplier ? `${result.multiplier}X` : ""}`.trim(),
-      description: null,
-      sideClass: "text-tie",
-      className: "neural-entry-flash-tie border-tie/40 bg-tie/10 text-tie",
-    };
-  }
-
-  if (result?.kind === "green") {
-    return {
-      kicker: "Resultado",
-      label: `GREEN ${sideLabel(result.side)}`,
-      description: null,
-      sideClass: sideClass(result.side),
-      className: "neural-entry-flash-green border-success/35 bg-success/10 text-success",
-    };
-  }
-
-  if (confirmedSide) {
-    return {
-      kicker: "Entrada confirmada",
-      label: sideLabel(confirmedSide).toUpperCase(),
-      description: null,
-      sideClass: sideClass(confirmedSide),
-      className:
-        confirmedSide === "BANKER"
-          ? "border-banker/30 bg-banker/10 text-banker"
-          : confirmedSide === "PLAYER"
-            ? "border-player/30 bg-player/10 text-player"
-            : "border-tie/35 bg-tie/10 text-tie",
-    };
-  }
-
-  return {
-    kicker: "Aguardando entrada",
-    label: "Sem entrada",
-    description: "Sem entrada confirmada agora.",
-    sideClass: "text-muted-foreground",
-    className: "border-white/10 bg-background/35 text-muted-foreground",
-  };
+function isOpenNeuralCycle(data: NeuralReading) {
+  const status = String(data.cycleStatus || "").toUpperCase();
+  return status === "AGUARDANDO_RESULTADO" || status === "AGUARDANDO_G1";
 }
 
-function entrySideSymbol(side: NeuralSide) {
-  if (side === "BANKER") return "B";
-  if (side === "PLAYER") return "P";
-  return "T";
+function isOppositeStrategy(data: NeuralReading) {
+  const strategyType = String(data.strategyType || "").toUpperCase();
+  return strategyType.includes("OPOSTO") || typeof data.oppositeNumber === "number";
 }
 
-function entrySideHistoryLabel(item: NeuralEntryHistoryItem) {
-  if (item.kind === "tie") return `EMPATE ${item.multiplier ? `${item.multiplier}X` : ""}`.trim();
-  return sideLabel(item.side).toUpperCase();
+function neuralStatusKind(reading: NeuralReading): "green" | "amber" | "red" | "muted" {
+  if (typeof reading.numero !== "number") return "muted";
+  if (reading.isRedAlert || reading.isSaturated) return "red";
+  if (reading.mode === "ACTIVE") return "green";
+  return "amber";
 }
 
-function entryResultHistoryLabel(item: NeuralEntryHistoryItem) {
-  if (item.kind === "red") return "RED";
-  return "GREEN";
+function sideBadgeTone(side: NeuralSide) {
+  if (side === "BANKER") return "red" as const;
+  if (side === "PLAYER") return "blue" as const;
+  return "gold" as const;
 }
 
-function NeuralGeneralScorePopover({
-  score,
-  scoreState,
-  statusKind,
-  statusLabel,
-  reading,
-}: {
-  score: NeuralScoreSummary;
-  scoreState: ReturnType<typeof neuralScoreState>;
-  statusKind: "green" | "amber" | "red" | "muted";
-  statusLabel: string;
-  reading: NeuralReading;
-}) {
-  const insight = neuralToolInsight(reading);
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "absolute right-1.5 top-1.5 z-10 grid size-6 place-items-center rounded-full border bg-background/75 text-muted-foreground shadow-sm backdrop-blur transition hover:border-neon-cyan/45 hover:text-neon-cyan",
-            statusButtonClass(statusKind),
-          )}
-          aria-label="Abrir placar geral da Leitura Neural"
-          title="Placar geral da Leitura Neural"
-        >
-          <span
-            className={cn(
-              "absolute right-0.5 top-0.5 size-1.5 rounded-full",
-              statusDotClass(statusKind),
-            )}
-          />
-          <CircleHelp className="size-3.5" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="left"
-        align="start"
-        className="w-[268px] rounded-xl border-neon-purple/25 bg-background/95 p-3 shadow-[0_0_30px_-18px_var(--neon-purple)]"
-      >
-        <div className="space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-[9px] font-black uppercase tracking-[0.16em] text-gradient-brand">
-                Placar Geral
-              </div>
-              <div className="mt-0.5 text-[10px] font-semibold text-muted-foreground">
-                {statusLabel}
-              </div>
-              <div className={cn("mt-1 inline-flex rounded-full border px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.1em]", scoreState.className)}>
-                {scoreState.label}
-              </div>
-            </div>
-            <div className={cn("rounded-full border px-2 py-0.5 text-[9px] font-black", statusPillClass(statusKind))}>
-              {formatPercent(score.accuracy)}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1.5">
-            <ScoreBox label="Green geral" value={score.greens} tone="green" />
-            <ScoreBox label="RED geral" value={score.reds} tone="red" />
-            <ScoreBox label="SG geral" value={score.sg} tone="green" />
-            <ScoreBox label="G1 geral" value={score.g1} tone="cyan" />
-            <ScoreBox label="Alertas" value={score.totalAlerts} tone="neutral" />
-            <ScoreBox label="Total" value={score.total} tone="neutral" />
-            <ScoreBox label="Seq Green" value={score.currentGreenSequence ?? "coletando"} tone="green" />
-            <ScoreBox label="Seq RED" value={score.currentRedSequence ?? "coletando"} tone="red" />
-            <ScoreBox label="SQG max" value={score.maxGreenSequence ?? "coletando"} tone="green" />
-            <ScoreBox label="SQR max" value={score.maxRedSequence ?? "coletando"} tone="red" />
-          </div>
-          <div className="space-y-2 rounded-lg border border-neon-cyan/15 bg-neon-cyan/5 px-2 py-2 text-[10px] leading-relaxed text-muted-foreground">
-            <div>
-              <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">Para que serve: </span>
-              mostra se o número pagante está puxando Banker, Player ou Tie.
-            </div>
-            <div>
-              <span className="font-black uppercase tracking-[0.1em] text-neon-cyan">Como funciona: </span>
-              conta SG, G1 e RED reais da Neural. Não é entrada oficial sozinha.
-            </div>
-            <div className={cn("rounded-md border px-2 py-1.5 font-black uppercase tracking-[0.08em]", insight.className)}>
-              {insight.text}
-            </div>
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
+function sidePanelClass(side: NeuralSide) {
+  if (side === "BANKER") return "border-banker/35 bg-banker/10";
+  if (side === "PLAYER") return "border-player/35 bg-player/10";
+  return "border-tie/35 bg-tie/10";
 }
 
-function TieMultiplierMiniLine({
-  multipliers,
-}: {
-  multipliers: Array<{ label: (typeof TIE_MULTIPLIER_LABELS)[number]; value: number }>;
-}) {
-  return (
-    <div
-      className="mt-1 rounded-lg border border-warning/15 bg-warning/5 px-1.5 py-1"
-      title="Empates pegos no historico real carregado hoje"
-    >
-      <div className="mb-0.5 truncate text-[6.5px] font-black uppercase tracking-[0.1em] text-warning/90">
-        Empates do dia
-      </div>
-      <div className="flex flex-wrap items-end gap-x-1.5 gap-y-1">
-        {multipliers.map((item) => (
-          <span key={item.label} className="inline-flex items-end gap-0.5 leading-none">
-            <span className="grid place-items-center">
-              <span className="text-[6px] font-black text-warning">{item.label}</span>
-              <span className="size-2 rounded-full border border-warning/45 bg-warning shadow-[0_0_8px_-3px_var(--warning)]" />
-            </span>
-            <span className="text-[7.5px] font-black text-foreground">{item.value}</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
+function sideBorderClass(side: NeuralSide) {
+  if (side === "BANKER") return "border-banker/35";
+  if (side === "PLAYER") return "border-player/35";
+  return "border-tie/35";
 }
 
-function neuralToolInsight(reading: NeuralReading) {
-  const side = reading.direcao ?? reading.origem;
-  const validity = reading.validade ?? "G1";
-  const hasNumber = typeof reading.numero === "number" && Boolean(reading.origem);
-  const originKind = neuralOriginKind(reading);
-  const trigger =
-    hasNumber && reading.origem === "TIE"
-      ? `${reading.numero}x${reading.numero} Tie`
-      : hasNumber
-        ? `${reading.numero} ${sideLabel(reading.origem)}`
-        : "";
-
-  if (!hasNumber || !side) {
-    return {
-      text: "Pela Neural agora: observar. Sem número pagante ativo.",
-      className: "border-neon-cyan/20 bg-neon-cyan/10 text-neon-cyan",
-    };
-  }
-
-
-  const prefix =
-    originKind === "OPOSTO"
-      ? `${trigger} em numero oposto.`
-      : reading.postTie
-        ? `${trigger} pós-empate.`
-        : `${trigger} pagante.`;
-
-  return {
-    text: `${prefix} Pela Neural agora: ${sideLabel(side)} até ${validity}.`,
-    className:
-      side === "BANKER"
-        ? "border-banker/35 bg-banker/10 text-banker"
-        : side === "PLAYER"
-          ? "border-player/35 bg-player/10 text-player"
-          : "border-tie/35 bg-tie/10 text-tie",
-  };
+function sideStatTone(side: NeuralSide) {
+  if (side === "BANKER") return "banker" as const;
+  if (side === "PLAYER") return "player" as const;
+  return "tie" as const;
 }
 
-function neuralScoreState(score: NeuralScoreSummary) {
-  const hasData = numberFrom(score.totalAlerts) > 0 || score.total > 0;
-  if (!hasData) {
-    return {
-      label: "Coletando",
-      className: "border-warning/25 bg-warning/10 text-warning",
-    };
-  }
-  return {
-    label: "Dados reais",
-    className: "border-success/25 bg-success/10 text-success",
-  };
+function sideActionClass(side: NeuralSide) {
+  return dashboardSideTextClass(side);
 }
 
-function ScoreBox({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number | string | null;
-  tone: "green" | "red" | "cyan" | "neutral";
-}) {
-  return (
-    <div className={cn("rounded-lg border px-2 py-1.5", scoreBoxClass(tone))}>
-      <div className="text-[8px] font-bold uppercase tracking-[0.1em] opacity-75">{label}</div>
-      <div className="text-sm font-black leading-tight">{typeof value === "string" ? value : formatCount(value)}</div>
-    </div>
-  );
-}
-
-function AssistantOrb() {
-  return (
-    <div className="relative grid size-6 shrink-0 place-items-center overflow-hidden rounded-full border border-neon-cyan/35 bg-[#020817] shadow-[0_0_18px_-6px_var(--neon-cyan)]">
-      <span className="absolute inset-0 rounded-full bg-[conic-gradient(from_180deg,var(--neon-cyan),var(--neon-purple),var(--neon-blue),var(--neon-cyan))] opacity-85 animate-spin [animation-duration:5.5s]" />
-      <span className="absolute inset-[3px] rounded-full bg-background/90" />
-      <span className="absolute size-3.5 rounded-full bg-[radial-gradient(circle_at_35%_25%,white_0%,var(--neon-cyan)_34%,var(--neon-purple)_70%,transparent_100%)] shadow-[0_0_14px_var(--neon-cyan)] animate-neural-brain" />
-      <span className="absolute left-1 top-1 size-1 rounded-full bg-white/90 blur-[1px]" />
-    </div>
-  );
-}
-
-function TypingDots() {
-  return (
-    <div className="mt-2 flex gap-1" aria-hidden="true">
-      {[0, 1, 2].map((index) => (
-        <span
-          key={index}
-          className="size-1.5 rounded-full bg-neon-cyan animate-neural-dot"
-          style={{ animationDelay: `${index * 0.18}s` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function totalFrom(
-  alertas?: number | null,
-  acertos?: number | null,
-  erros?: number | null,
-) {
-  if (typeof acertos === "number" || typeof erros === "number") {
-    return (acertos ?? 0) + (erros ?? 0);
-  }
-  return typeof alertas === "number" ? alertas : null;
+function sideNumberTone(side: NeuralSide | null | undefined) {
+  if (side === "BANKER") return "banker" as const;
+  if (side === "PLAYER") return "player" as const;
+  if (side === "TIE") return "tie" as const;
+  return "muted" as const;
 }
 
 function accuracyFrom(
@@ -868,269 +1069,21 @@ function accuracyFrom(
   return null;
 }
 
-function totalGreensFrom(
-  acertos?: number | null,
-  greenSemGale?: number | null,
-  greenG1?: number | null,
-) {
-  if (typeof acertos === "number" && Number.isFinite(acertos)) return acertos;
-  const sg = optionalNumberFrom(greenSemGale);
-  const g1 = optionalNumberFrom(greenG1);
-  if (sg === null && g1 === null) return null;
-  return numberFrom(sg) + numberFrom(g1);
-}
-
-function buildGeneralScore(
-  scoreboard: NeuralScoreboard | undefined,
-  fallbackReading: NeuralReading,
-): NeuralScoreSummary {
-  const sg = optionalNumberFrom(scoreboard?.greenSemGale ?? fallbackReading.greenSemGale);
-  const g1 = optionalNumberFrom(scoreboard?.greenG1 ?? fallbackReading.greenG1);
-  const hasSplitGreens = sg !== null || g1 !== null;
-  const splitGreens = hasSplitGreens ? numberFrom(sg) + numberFrom(g1) : null;
-  const greens = optionalNumberFrom(
-    splitGreens ??
-      scoreboard?.greens ??
-      scoreboard?.acertos ??
-      fallbackReading.acertos ??
-      fallbackReading.greenSemGale,
-  );
-  const reds = optionalNumberFrom(scoreboard?.reds ?? scoreboard?.erros ?? fallbackReading.reds ?? fallbackReading.erros);
-  const total = numberFrom(greens) + numberFrom(reds);
-  const totalAlerts = optionalNumberFrom(scoreboard?.totalAlerts ?? fallbackReading.alertas ?? total) ?? total;
-  const accuracy = accuracyFrom(null, greens, reds) ?? optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
-  const currentGreenSequence = optionalPositiveNumberFrom(scoreboard?.sequencePositive ?? fallbackReading.sequencePositive);
-  const currentRedSequence = optionalPositiveNumberFrom(scoreboard?.sequenceNegative ?? fallbackReading.sequenceNegative);
-  const maxGreenSequence = optionalPositiveNumberFrom(scoreboard?.maxSequencePositive ?? fallbackReading.maxSequencePositive);
-  const maxRedSequence = optionalPositiveNumberFrom(scoreboard?.maxSequenceNegative ?? fallbackReading.maxSequenceNegative);
-
-  return {
-    totalAlerts,
-    greens,
-    sg,
-    g1,
-    reds,
-    total,
-    accuracy,
-    currentGreenSequence,
-    currentRedSequence,
-    maxGreenSequence,
-    maxRedSequence,
-  };
-}
-
-function tieMultiplierStats(rounds: Round[] | undefined) {
-  const counts = new Map<(typeof TIE_MULTIPLIER_LABELS)[number], number>(
-    TIE_MULTIPLIER_LABELS.map((label) => [label, 0]),
-  );
-
-  for (const round of rounds ?? []) {
-    if (round.result !== "T") continue;
-    const multiplier = multiplierForTieRound(round);
-    if (!multiplier) continue;
-    const label = `${multiplier}x` as (typeof TIE_MULTIPLIER_LABELS)[number];
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-
-  return TIE_MULTIPLIER_LABELS.map((label) => ({
-    label,
-    value: counts.get(label) ?? 0,
-  }));
-}
-
-function multiplierForTieRound(round: Round) {
-  const explicit = normalizeTieMultiplier(round.tieMultiplier);
-  if (explicit) return explicit;
-  if (round.bankerScore !== round.playerScore) return null;
-
-  const score = Math.round(Number(round.bankerScore));
-  if (!Number.isFinite(score)) return null;
-  if (score === 2 || score === 12) return 88;
-  if (score === 3 || score === 11) return 25;
-  if (score === 4 || score === 10) return 10;
-  if (score === 5 || score === 9) return 6;
-  if (score === 6 || score === 7 || score === 8) return 4;
-  return null;
-}
-
-function normalizeTieMultiplier(value: unknown) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return null;
-  const rounded = Math.round(numeric);
-  return [4, 6, 10, 25, 88].includes(rounded) ? rounded : null;
-}
-
-function numberPaymentStage(sg: number | null, g1: number | null, red: number | null) {
-  const greens = numberFrom(sg) + numberFrom(g1);
-  const losses = numberFrom(red);
-
-  if (losses >= 2) {
-    return {
-      label: "Bloqueado",
-      title: "Esse nÃºmero tomou 2 reds e saiu da linha.",
-      className: "border-destructive/35 bg-destructive/10 text-destructive",
-    };
-  }
-
-  if (greens <= 3 && losses === 0) {
-    return {
-      label: "Novo",
-      title: "ComeÃ§ou a pagar agora.",
-      className: "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan",
-    };
-  }
-
-  if (greens >= 8 && losses === 0) {
-    return {
-      label: "Esticado",
-      title: "JÃ¡ pagou bastante sem red. Entrar com mais cautela.",
-      className: "border-warning/35 bg-warning/10 text-warning",
-    };
-  }
-
-  if (greens >= 8) {
-    return {
-      label: "Maduro",
-      title: "JÃ¡ tem bastante leitura validada.",
-      className: "border-warning/30 bg-warning/10 text-warning",
-    };
-  }
-
-  return {
-    label: "Pagando",
-    title: "NÃºmero pagante com validaÃ§Ã£o ativa.",
-    className: "border-success/30 bg-success/10 text-success",
-  };
-}
-
 function optionalNumberFrom(value?: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function optionalPositiveNumberFrom(value?: number | null) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function numberFrom(value?: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function neuralOriginKind(reading: NeuralReading) {
-  if (reading.postTie || reading.origem === "TIE") return "TIE";
-  return reading.origemTipo ?? "PAGANTE";
-}
-
-function originBadgeFor(kind: NonNullable<NeuralReading["origemTipo"]>) {
-  if (kind === "OPOSTO") {
-    return {
-      label: "Oposto",
-      className: "border-warning/35 bg-warning/10 text-warning",
-    };
-  }
-  if (kind === "TIE") {
-    return {
-      label: "Tie",
-      className: "border-tie/35 bg-tie/10 text-tie",
-    };
-  }
-  return {
-    label: "Pagante",
-    className: "border-success/35 bg-success/10 text-success",
-  };
-}
-
 function formatPercent(value: number | null) {
   if (value === null) return "--";
-  return `${value.toFixed(1).replace(".", ",")}%`;
+  return `${Math.round(value)}%`;
 }
 
-function formatCount(value: number | null, pad = false) {
-  if (value === null) return "--";
-  return pad && value >= 0 && value < 10 ? `0${value}` : String(value);
-}
-
-function neuralStatusKind(reading: NeuralReading): "green" | "amber" | "red" | "muted" {
-  if (typeof reading.numero !== "number") return "muted";
-
-  const status = normalizeStatus(reading.paganteStatus);
-  if (
-    reading.isRedAlert ||
-    reading.isSaturated ||
-    status.includes("RISCO") ||
-    status.includes("ESTICADO") ||
-    status.includes("RED") ||
-    status.includes("FALH")
-  ) {
-    return "red";
-  }
-
-  if (
-    reading.mode === "OBSERVING" ||
-    status.includes("INICIANTE") ||
-    status.includes("OBSERV") ||
-    status.includes("AGUARD") ||
-    status.includes("POS-EMPATE") ||
-    status.includes("POS EMPATE")
-  ) {
-    return "amber";
-  }
-
-  if (
-    reading.mode === "ACTIVE" &&
-    (status === "" ||
-      status.includes("VALID") ||
-      status.includes("GREEN") ||
-      status.includes("CONFIRM") ||
-      status.includes("FAVOR"))
-  ) {
-    return "green";
-  }
-
-  return "amber";
-}
-
-function statusLabel(reading: NeuralReading) {
-  if (typeof reading.numero !== "number") return "Procurando pagante";
-  const status = reading.paganteStatus?.trim();
-  if (status) return status.toLocaleLowerCase("pt-BR").replace(/_/g, " ");
-  if (neuralStatusKind(reading) === "green") return "leitura batendo";
-  return "em observação";
-}
-
-function normalizeStatus(value?: string | null) {
-  return (value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/_/g, " ");
-}
-
-function statusButtonClass(status: "green" | "amber" | "red" | "muted") {
-  if (status === "green") return "border-success/30 text-success";
-  if (status === "red") return "border-destructive/35 text-destructive";
-  if (status === "amber") return "border-warning/35 text-warning";
-  return "border-white/10 text-muted-foreground";
-}
-
-function statusDotClass(status: "green" | "amber" | "red" | "muted") {
-  if (status === "green") return "bg-success shadow-[0_0_10px_var(--success)]";
-  if (status === "red") return "bg-destructive shadow-[0_0_10px_var(--destructive)]";
-  if (status === "amber") return "bg-warning shadow-[0_0_10px_var(--warning)]";
-  return "bg-muted-foreground/55";
-}
-
-function statusPillClass(status: "green" | "amber" | "red" | "muted") {
-  if (status === "green") return "border-success/25 bg-success/10 text-success";
-  if (status === "red") return "border-destructive/30 bg-destructive/10 text-destructive";
-  if (status === "amber") return "border-warning/25 bg-warning/10 text-warning";
-  return "border-white/10 bg-white/5 text-muted-foreground";
-}
-
-function scoreBoxClass(tone: "green" | "red" | "cyan" | "neutral") {
-  if (tone === "green") return "border-success/25 bg-success/10 text-success";
-  if (tone === "red") return "border-destructive/30 bg-destructive/10 text-destructive";
-  if (tone === "cyan") return "border-neon-cyan/25 bg-neon-cyan/10 text-neon-cyan";
-  return "border-white/10 bg-white/5 text-muted-foreground";
+function formatCount(value: number | null) {
+  return value === null ? "0" : String(value);
 }
 
 function sideLabel(side?: NeuralSide | null) {
@@ -1140,9 +1093,111 @@ function sideLabel(side?: NeuralSide | null) {
   return "";
 }
 
+function entrySideToken(side?: NeuralSide | null) {
+  if (side === "BANKER") return "BANKER";
+  if (side === "PLAYER") return "PLAYER";
+  if (side === "TIE") return "TIE";
+  return "";
+}
+
 function sideClass(side?: NeuralSide | null) {
-  if (side === "BANKER") return "text-banker";
-  if (side === "PLAYER") return "text-player";
-  if (side === "TIE") return "text-tie";
-  return "text-muted-foreground";
+  return dashboardSideTextClass(side);
+}
+
+function shouldHideResolvedEntry(
+  confirmedSide: NeuralSide | null | undefined,
+  result: NeuralEntryLastResult | null | undefined,
+) {
+  if (!confirmedSide || !result?.id) return false;
+  const resultSide = normalizeEntrySide(result.expectedSide ?? result.origem);
+  if (resultSide !== confirmedSide) return false;
+  if (!result.finishedAt) return true;
+  const finishedAt = new Date(result.finishedAt).getTime();
+  if (Number.isNaN(finishedAt)) return false;
+  return Date.now() - finishedAt < RESOLVED_ENTRY_SUPPRESS_MS;
+}
+
+function shouldHideResolvedReading(
+  reading: NeuralReading,
+  result: NeuralEntryLastResult | null | undefined,
+) {
+  if (!result?.id || !result.finishedAt || reading.mode !== "ACTIVE") return false;
+  const finishedAt = new Date(result.finishedAt).getTime();
+  if (Number.isNaN(finishedAt) || Date.now() - finishedAt >= RESOLVED_ENTRY_SUPPRESS_MS)
+    return false;
+
+  const readingKey = neuralReadingEntryKey(reading);
+  if (readingKey && result.key && readingKey === result.key) return true;
+
+  const readingSide = reading.direcao ?? reading.origem;
+  const resultSide = normalizeEntrySide(result.expectedSide ?? result.origem);
+  return Boolean(
+    readingSide &&
+    resultSide &&
+    readingSide === resultSide &&
+    reading.numero === result.numero &&
+    reading.origem === result.origem &&
+    reading.origemTipo === result.origemTipo,
+  );
+}
+
+function neuralReadingEntryKey(reading: NeuralReading) {
+  if (reading.strategyId) return String(reading.strategyId);
+  if (typeof reading.numero !== "number") return "";
+  const origem = strictNeuralSide(reading.origem);
+  const origemTipo = reading.origemTipo;
+  const expectedSide = strictNeuralSide(reading.direcao ?? reading.origem);
+  if (!origem || !origemTipo || !expectedSide) return "";
+  return `${reading.numero}:${origem}:${origemTipo}:${expectedSide}`;
+}
+
+function strictNeuralSide(side: unknown): NeuralSide | null {
+  if (side === "BANKER" || side === "PLAYER" || side === "TIE") return side;
+  return null;
+}
+
+function scanningReadingAfterClosedEntry(reading: NeuralReading): NeuralReading {
+  return {
+    ...reading,
+    mode: "SCANNING",
+    numero: null,
+    origem: null,
+    origemTipo: null,
+    direcao: null,
+    paganteStatus: "ANALISANDO",
+    paganteAlert: "Aguardando nova confirmacao da engine.",
+    paganteWindow: null,
+    paganteCycleProgress: null,
+    paganteCycleLimit: null,
+    strategyId: null,
+    strategyType: null,
+    triggerNumber: null,
+    triggerSide: null,
+    oppositeNumber: null,
+    oppositeSide: null,
+    winnerSide: null,
+    targetSide: null,
+    samples: null,
+    recentGreens: null,
+    recentReds: null,
+    accuracy: null,
+    accuracyLabel: null,
+    sampleLabel: null,
+    strength: null,
+    maxAttempt: null,
+    cycleStatus: null,
+    attempt: null,
+    triggerRoundId: null,
+    entryRoundId: null,
+    g1RoundId: null,
+    result: null,
+    tieMultiplier: null,
+    formationCandidates: null,
+    updatedAt: null,
+    blocked: null,
+    blockReason: null,
+    isSaturated: null,
+    isRedAlert: null,
+    postTie: null,
+  };
 }

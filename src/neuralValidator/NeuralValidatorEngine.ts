@@ -11,7 +11,17 @@ import type {
   ValidatorRisk,
 } from "@/types/neuralValidator";
 
-export const VALIDATOR_HISTORY_OPTIONS = [1000, 2000, 5000, 10000, 15000, 20000] as const;
+export const VALIDATOR_HISTORY_OPTIONS = [
+  250,
+  500,
+  1000,
+  2000,
+  5000,
+  10000,
+  15000,
+  20000,
+  50000,
+] as const;
 export const DEFAULT_VALIDATOR_CONFIG: ValidatorConfig = {
   name: "Estrategia Neural",
   tableId: "bac-bo",
@@ -53,6 +63,8 @@ export class NeuralValidatorEngine {
     let sgWins = 0;
     let g1Wins = 0;
     let g2Wins = 0;
+    let g3Wins = 0;
+    let g4Wins = 0;
     let losses = 0;
     let ties = 0;
     let tieWins = 0;
@@ -81,6 +93,8 @@ export class NeuralValidatorEngine {
       if (validation.status === "GREEN_SG") sgWins += 1;
       if (validation.status === "GREEN_G1") g1Wins += 1;
       if (validation.status === "GREEN_G2") g2Wins += 1;
+      if (validation.status === "GREEN_G3") g3Wins += 1;
+      if (validation.status === "GREEN_G4") g4Wins += 1;
       if (entry === "T" && validation.status.startsWith("GREEN")) tieWins += 1;
       if (validation.status === "RED") losses += 1;
 
@@ -98,10 +112,11 @@ export class NeuralValidatorEngine {
       details.push(buildDetail(analyzedRounds, entryIndex, entry, validation.status, validation.galeUsed, pattern));
     }
 
-    const totalValidated = sgWins + g1Wins + g2Wins + losses;
-    const accuracy = totalValidated ? ((sgWins + g1Wins + g2Wins) / totalValidated) * 100 : undefined;
+    const totalGreens = sgWins + g1Wins + g2Wins + g3Wins + g4Wins;
+    const totalValidated = totalGreens + losses;
+    const accuracy = totalValidated ? (totalGreens / totalValidated) * 100 : undefined;
     const sgAccuracy = totalValidated ? (sgWins / totalValidated) * 100 : undefined;
-    const galeAccuracy = totalValidated ? ((sgWins + g1Wins + g2Wins) / totalValidated) * 100 : undefined;
+    const galeAccuracy = totalValidated ? (totalGreens / totalValidated) * 100 : undefined;
 
     return {
       totalSignals,
@@ -109,6 +124,8 @@ export class NeuralValidatorEngine {
       sgWins,
       g1Wins,
       g2Wins,
+      g3Wins,
+      g4Wins,
       losses,
       ties,
       tieWins,
@@ -238,6 +255,8 @@ function validateFixedEntry(
   let sgWins = 0;
   let g1Wins = 0;
   let g2Wins = 0;
+  let g3Wins = 0;
+  let g4Wins = 0;
   let losses = 0;
 
   for (let start = 0; start <= rounds.length - pattern.length; start += 1) {
@@ -246,13 +265,16 @@ function validateFixedEntry(
     if (validation.status === "GREEN_SG") sgWins += 1;
     if (validation.status === "GREEN_G1") g1Wins += 1;
     if (validation.status === "GREEN_G2") g2Wins += 1;
+    if (validation.status === "GREEN_G3") g3Wins += 1;
+    if (validation.status === "GREEN_G4") g4Wins += 1;
     if (validation.status === "RED") losses += 1;
   }
 
-  const totalValidated = sgWins + g1Wins + g2Wins + losses;
+  const totalGreens = sgWins + g1Wins + g2Wins + g3Wins + g4Wins;
+  const totalValidated = totalGreens + losses;
   return {
     totalValidated,
-    accuracy: totalValidated ? ((sgWins + g1Wins + g2Wins) / totalValidated) * 100 : undefined,
+    accuracy: totalValidated ? (totalGreens / totalValidated) * 100 : undefined,
   };
 }
 
@@ -263,7 +285,7 @@ function validateEntryAt(
   galeLimit: ValidatorGaleLimit,
   tieProtection: boolean,
 ): { status: ValidatorDetail["status"]; galeUsed: number; tieCount: number } {
-  const maxGale = Math.max(0, Number(galeLimit) || 0);
+  const maxGale = Math.max(0, Math.min(4, Math.floor(Number(galeLimit) || 0)));
   let galeUsed = 0;
   let tieCount = 0;
   let attempts = 0;
@@ -276,7 +298,7 @@ function validateEntryAt(
     if (round.result === entry) {
       if (entry === "T") tieCount += 1;
       return {
-        status: galeUsed === 0 ? "GREEN_SG" : galeUsed === 1 ? "GREEN_G1" : "GREEN_G2",
+        status: greenStatusForGale(galeUsed),
         galeUsed,
         tieCount,
       };
@@ -298,6 +320,14 @@ function validateEntryAt(
   }
 
   return tieCount ? { status: "TIE", galeUsed, tieCount } : { status: "PENDING", galeUsed, tieCount };
+}
+
+function greenStatusForGale(galeUsed: number): ValidatorDetail["status"] {
+  if (galeUsed <= 0) return "GREEN_SG";
+  if (galeUsed === 1) return "GREEN_G1";
+  if (galeUsed === 2) return "GREEN_G2";
+  if (galeUsed === 3) return "GREEN_G3";
+  return "GREEN_G4";
 }
 
 function buildDetail(
@@ -327,6 +357,8 @@ function emptyResult(analyzedRounds: number, entry: RoundResult | null): Validat
     sgWins: 0,
     g1Wins: 0,
     g2Wins: 0,
+    g3Wins: 0,
+    g4Wins: 0,
     losses: 0,
     ties: 0,
     tieWins: 0,
@@ -378,7 +410,12 @@ function buildPatternVariants(rounds: Round[], includeNumbers: boolean) {
 
 function suggestionScore(result: ValidatorResult, occurrences: number) {
   const accuracy = result.accuracy ?? 0;
-  const greenWeight = result.sgWins * 2.2 + result.g1Wins * 1.4 + result.g2Wins;
+  const greenWeight =
+    result.sgWins * 2.2 +
+    result.g1Wins * 1.4 +
+    result.g2Wins +
+    result.g3Wins * 0.8 +
+    result.g4Wins * 0.6;
   const redPenalty = result.losses * 3 + result.bestLossStreak * 5;
   return accuracy * 2 + occurrences + greenWeight - redPenalty;
 }

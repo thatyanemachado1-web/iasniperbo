@@ -12,23 +12,42 @@ import {
   Network,
   CalendarDays,
   WalletCards,
+  Send,
   ChevronLeft,
   ChevronRight,
+  Radio,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
-import { MainSignalLivePopupBridge } from "@/components/dashboard/MainSignalLivePopupBridge";
-import { ValidatorLivePopupBridge } from "@/components/validator/ValidatorLivePopupBridge";
+import { LiveHouseCard } from "@/components/live/LiveHouseCard";
 import { canSeeAdminUi } from "@/lib/adminSession";
-import { hasFullAccess, readUserSession } from "@/lib/userSession";
-import { useEffect, useState, type ReactNode } from "react";
+import { hasFullAccess, hasSignalAccess, readUserSession } from "@/lib/userSession";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+
+const MainSignalLivePopupBridge = lazy(() =>
+  import("@/components/dashboard/MainSignalLivePopupBridge").then((module) => ({
+    default: module.MainSignalLivePopupBridge,
+  })),
+);
+const NeuralEntryLivePopupBridge = lazy(() =>
+  import("@/components/dashboard/NeuralEntryLivePopupBridge").then((module) => ({
+    default: module.NeuralEntryLivePopupBridge,
+  })),
+);
+const ValidatorLivePopupBridge = lazy(() =>
+  import("@/components/validator/ValidatorLivePopupBridge").then((module) => ({
+    default: module.ValidatorLivePopupBridge,
+  })),
+);
 
 const navItems = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/app/ao-vivo", label: "Ao vivo", icon: Radio },
   { to: "/app/agentes", label: "Agentes IA", icon: Network },
   { to: "/app/voz", label: "Voz", icon: Mic },
   { to: "/app/ia", label: "Aprendizado IA", icon: Brain },
   { to: "/app/padroes", label: "Padrões IA", icon: BrainCircuit },
   { to: "/app/validador", label: "Validador", icon: ShieldCheck },
+  { to: "/app/salas", label: "Telegram", icon: Send },
   { to: "/app/calendario", label: "Calendario", icon: CalendarDays },
   { to: "/app/banca", label: "Banca IA", icon: WalletCards },
   { to: "/app/planos", label: "Assinar", icon: Crown },
@@ -36,31 +55,49 @@ const navItems = [
 ] as const;
 
 const adminNavItem = { to: "/app/admin/users", label: "ADM", icon: ShieldCheck } as const;
-const hiddenOnMobileNav = new Set(["/app/ia"]);
+const hiddenOnMobileNav = new Set(["/app/ia", "/app/validador"]);
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarPreferenceLoaded, setSidebarPreferenceLoaded] = useState(false);
+  const [liveHouseMounted, setLiveHouseMounted] = useState(pathname === "/app/ao-vivo");
   const userSession = readUserSession();
   const canSeeAdmin = canSeeAdminUi();
   const fullAccess = hasFullAccess(userSession);
+  const signalAccess = hasSignalAccess(userSession);
+  const liveHousePage = pathname === "/app/ao-vivo";
   const visibleNavItems = fullAccess
     ? navItems.filter((item) => item.to !== "/app/planos")
     : navItems;
+  const desktopNavItems = visibleNavItems.filter((item) => item.to !== "/app/validador");
   const visibleMobileNavItems = visibleNavItems.filter((item) => !hiddenOnMobileNav.has(item.to));
-  const mobileNavItems = canSeeAdmin ? [...visibleMobileNavItems, adminNavItem] : visibleMobileNavItems;
+  const mobileNavItems = canSeeAdmin
+    ? [...visibleMobileNavItems, adminNavItem]
+    : visibleMobileNavItems;
 
   useEffect(() => {
-    const savedPreference = window.localStorage.getItem("sniper_sidebar_collapsed");
-    if (savedPreference) setSidebarCollapsed(savedPreference === "true");
+    try {
+      const savedPreference = window.localStorage.getItem("sniper_sidebar_collapsed");
+      if (savedPreference) setSidebarCollapsed(savedPreference === "true");
+    } catch {
+      // Storage may be unavailable in privacy-restricted browsers.
+    }
     setSidebarPreferenceLoaded(true);
   }, []);
 
   useEffect(() => {
     if (!sidebarPreferenceLoaded) return;
-    window.localStorage.setItem("sniper_sidebar_collapsed", String(sidebarCollapsed));
+    try {
+      window.localStorage.setItem("sniper_sidebar_collapsed", String(sidebarCollapsed));
+    } catch {
+      // Keep the in-memory preference when persistent storage is unavailable.
+    }
   }, [sidebarCollapsed, sidebarPreferenceLoaded]);
+
+  useEffect(() => {
+    if (liveHousePage) setLiveHouseMounted(true);
+  }, [liveHousePage]);
 
   return (
     <div className="min-h-screen bg-app text-foreground">
@@ -71,7 +108,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Logo size={32} />
           </div>
           <div className="flex items-center gap-2">
-            <button className="size-9 rounded-xl glass flex items-center justify-center hover:glow-blue">
+            <button
+              type="button"
+              aria-label="Abrir notificações"
+              className="size-9 rounded-xl glass flex items-center justify-center hover:glow-blue"
+            >
               <Bell className="size-4 text-neon-cyan" />
             </button>
             <div className="group relative">
@@ -124,7 +165,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </button>
           <nav className="flex-1 space-y-1">
-            {visibleNavItems.map((it) => {
+            {desktopNavItems.map((it) => {
               const active = pathname === it.to || (it.to !== "/app" && pathname.startsWith(it.to));
               return (
                 <Link
@@ -172,11 +213,21 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
         </aside>
 
-        <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-28 lg:pb-8">{children}</main>
+        <main className="flex-1 min-w-0 px-3 sm:px-6 py-4 pb-28 lg:pb-8">
+          {liveHouseMounted && (
+            <div className={liveHousePage ? "block" : "hidden"} aria-hidden={!liveHousePage}>
+              <LiveHouseCard active={liveHousePage} />
+            </div>
+          )}
+          {!liveHousePage && children}
+        </main>
       </div>
 
-      {fullAccess && <MainSignalLivePopupBridge />}
-      {fullAccess && <ValidatorLivePopupBridge />}
+      <Suspense fallback={null}>
+        {signalAccess && !liveHousePage && <MainSignalLivePopupBridge />}
+        {signalAccess && !liveHousePage && <NeuralEntryLivePopupBridge />}
+        {fullAccess && !liveHousePage && <ValidatorLivePopupBridge />}
+      </Suspense>
 
       {/* Bottom nav mobile */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-border/60 glass-strong lg:hidden">

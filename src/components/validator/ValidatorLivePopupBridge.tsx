@@ -1,5 +1,5 @@
 import { BellRing, CheckCircle2, Clock3, X, XCircle } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
 import { readUserSession } from "@/lib/userSession";
@@ -23,10 +23,11 @@ import type {
   ValidatorPatternToken,
 } from "@/types/neuralValidator";
 
-const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v1";
-const SAVED_PATTERN_REFRESH_MS = 3_000;
-const SERVER_TAIL_REFRESH_MS = 1500;
+const LOCAL_PATTERN_REFRESH_MS = 3_000;
+const SERVER_PATTERN_REFRESH_MS = 15_000;
+const SERVER_TAIL_REFRESH_MS = 10_000;
 const MAX_CLIENT_MONITOR_ROUNDS = 200;
+const DELETED_PATTERNS_KEY = "sniper_neural_validator_deleted_patterns_v1";
 
 type PopupStatus = "entry" | "green" | "red" | "tie";
 
@@ -51,10 +52,11 @@ interface PatternPopup {
 
 export function ValidatorLivePopupBridge() {
   const { data, mode } = useDashboardData();
-  const [patterns, setPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
+  const [patterns, setPatterns] = useState<SavedValidatorPattern[]>(() =>
+    mergeSavedPatterns(readSavedPatterns()),
+  );
   const [serverRounds, setServerRounds] = useState<Round[]>([]);
   const [popups, setPopups] = useState<PatternPopup[]>([]);
-  const telegramSendKeysRef = useRef(new Set<string>());
   const liveRounds = mode === "live" && !data.mockMode ? data.rounds : [];
   const storedRounds = useMemo(
     () => readValidatorHistory(liveRounds).slice(-MAX_CLIENT_MONITOR_ROUNDS),
@@ -70,12 +72,15 @@ export function ValidatorLivePopupBridge() {
 
   useEffect(() => {
     let stopped = false;
+    let serverRequestInFlight = false;
 
     function refreshPatterns() {
       setPatterns((current) => mergeSavedPatterns(current, readSavedPatterns()));
     }
 
     async function refreshServerPatterns() {
+      if (serverRequestInFlight) return;
+      serverRequestInFlight = true;
       try {
         const serverPatterns = await fetchServerSavedPatterns();
         if (stopped) return;
@@ -86,20 +91,24 @@ export function ValidatorLivePopupBridge() {
         });
       } catch {
         refreshPatterns();
+      } finally {
+        serverRequestInFlight = false;
       }
     }
 
     refreshPatterns();
     void refreshServerPatterns();
-    const interval = window.setInterval(() => {
-      refreshPatterns();
-      void refreshServerPatterns();
-    }, SAVED_PATTERN_REFRESH_MS);
+    const localInterval = window.setInterval(refreshPatterns, LOCAL_PATTERN_REFRESH_MS);
+    const serverInterval = window.setInterval(
+      () => void refreshServerPatterns(),
+      SERVER_PATTERN_REFRESH_MS,
+    );
     const onStorage = () => refreshPatterns();
     window.addEventListener("storage", onStorage);
     return () => {
       stopped = true;
-      window.clearInterval(interval);
+      window.clearInterval(localInterval);
+      window.clearInterval(serverInterval);
       window.removeEventListener("storage", onStorage);
     };
   }, []);
@@ -111,14 +120,19 @@ export function ValidatorLivePopupBridge() {
     }
 
     let stopped = false;
+    let serverRequestInFlight = false;
     const limit = monitorRoundLimit(patterns);
 
     async function refreshRoundTail() {
+      if (serverRequestInFlight) return;
+      serverRequestInFlight = true;
       try {
         const nextRounds = await fetchValidatorRoundTail(limit);
         if (!stopped) setServerRounds(nextRounds);
       } catch {
         if (!stopped) setServerRounds([]);
+      } finally {
+        serverRequestInFlight = false;
       }
     }
 
@@ -178,9 +192,6 @@ export function ValidatorLivePopupBridge() {
       return changed ? next : current;
     });
 
-    for (const hit of liveHits) {
-      void sendLiveHitToTelegram(hit, telegramSendKeysRef.current);
-    }
   }, [liveHitKey]);
 
   useEffect(() => {
@@ -332,9 +343,11 @@ function monitorRoundLimit(patterns: SavedValidatorPattern[]) {
 }
 
 function mergeSavedPatterns(...sources: SavedValidatorPattern[][]) {
+  const deletedPatternIds = readDeletedPatternIds();
   const byId = new Map<string, SavedValidatorPattern>();
   for (const source of sources) {
     for (const pattern of source.filter(isSavedPattern)) {
+      if (deletedPatternIds.has(pattern.id)) continue;
       const current = byId.get(pattern.id);
       if (!current || Date.parse(pattern.updatedAt || "") >= Date.parse(current.updatedAt || "")) {
         byId.set(pattern.id, pattern);
@@ -342,6 +355,23 @@ function mergeSavedPatterns(...sources: SavedValidatorPattern[][]) {
     }
   }
   return [...byId.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+}
+
+function readDeletedPatternIds() {
+  if (typeof window === "undefined") return new Set<string>();
+  const userId = currentUserId();
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(`${DELETED_PATTERNS_KEY}:${userId}`) || "[]",
+    ) as unknown;
+    return new Set(
+      Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === "string")
+        : [],
+    );
+  } catch {
+    return new Set<string>();
+  }
 }
 
 function mergeRoundSources(sources: Round[][]) {
@@ -504,33 +534,6 @@ function resolveLiveOutcome(hit: LiveValidatorHit, rounds: Round[]): PopupOutcom
   };
 }
 
-async function sendLiveHitToTelegram(hit: LiveValidatorHit, inMemoryKeys: Set<string>) {
-  if (hit.pattern.destination !== "telegram" && hit.pattern.destination !== "site_telegram") return;
-  const sendKey = `${hit.pattern.id}:${hit.detectedRoundId}`;
-  if (inMemoryKeys.has(sendKey) || wasTelegramNotificationSent(sendKey)) return;
-
-  inMemoryKeys.add(sendKey);
-  markTelegramNotificationSent(sendKey);
-  try {
-    const response = await fetch("/validator/live-hit/send", {
-      method: "POST",
-      cache: "no-store",
-      headers: validatorApiHeaders(true),
-      body: JSON.stringify({
-        patternId: hit.pattern.id,
-        detectedRoundId: hit.detectedRoundId,
-      }),
-    });
-    if (!response.ok) {
-      inMemoryKeys.delete(sendKey);
-      forgetTelegramNotificationSent(sendKey);
-    }
-  } catch {
-    inMemoryKeys.delete(sendKey);
-    forgetTelegramNotificationSent(sendKey);
-  }
-}
-
 function validatorApiHeaders(withJson = false) {
   const session = readUserSession();
   const adminSession = readAdminSession();
@@ -564,36 +567,6 @@ function roundsSignature(rounds: Round[]) {
   const first = rounds[0];
   const last = rounds.at(-1);
   return `${rounds.length}:${first?.id ?? 0}:${last?.id ?? 0}:${last?.result ?? ""}`;
-}
-
-function telegramSentStorageKey() {
-  return `${TELEGRAM_SENT_KEY}:${currentUserId()}`;
-}
-
-function readTelegramSentKeys() {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(telegramSentStorageKey()) || "[]") as unknown;
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function wasTelegramNotificationSent(key: string) {
-  return readTelegramSentKeys().includes(key);
-}
-
-function markTelegramNotificationSent(key: string) {
-  if (typeof window === "undefined") return;
-  const next = Array.from(new Set([key, ...readTelegramSentKeys()])).slice(0, 400);
-  window.localStorage.setItem(telegramSentStorageKey(), JSON.stringify(next));
-}
-
-function forgetTelegramNotificationSent(key: string) {
-  if (typeof window === "undefined") return;
-  const next = readTelegramSentKeys().filter((item) => item !== key);
-  window.localStorage.setItem(telegramSentStorageKey(), JSON.stringify(next));
 }
 
 function sideEmoji(side: RoundResult) {

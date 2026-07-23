@@ -20,7 +20,16 @@ dist-ssr
 
 # Wrangler / Cloudflare
 .wrangler/
+.wrangler-dry-run/
 .dev.vars
+
+# Local audit/runtime artifacts
+work/
+pattern_miner_round_bank.json
+__pycache__/
+*.py[cod]
+*.bak
+*.bak-*
 
 # Editor directories and files
 .vscode/*

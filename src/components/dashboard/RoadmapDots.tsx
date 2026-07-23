@@ -8,8 +8,7 @@ const colorMap: Record<Round["result"], string> = {
 
 function displayValue(round: Round, showScore: boolean) {
   if (!showScore) return round.result;
-  if (round.result === "P") return round.playerScore;
-  return round.bankerScore;
+  return `${round.bankerScore}x${round.playerScore}`;
 }
 
 export function RoadmapDots({
@@ -27,7 +26,7 @@ export function RoadmapDots({
         <div
           key={r.id}
           title={`#${r.id} Banker ${r.bankerScore} x Player ${r.playerScore}`}
-          className={`shrink-0 size-7 rounded-full border-2 ${colorMap[r.result]} flex items-center justify-center text-[11px] font-bold shadow-[0_0_10px_-2px_currentColor]`}
+          className={`shrink-0 ${showScore ? "h-7 min-w-10 px-1.5 rounded-full text-[9px]" : "size-7 rounded-full text-[11px]"} border-2 ${colorMap[r.result]} flex items-center justify-center font-bold shadow-[0_0_10px_-2px_currentColor]`}
         >
           {displayValue(r, showScore)}
         </div>

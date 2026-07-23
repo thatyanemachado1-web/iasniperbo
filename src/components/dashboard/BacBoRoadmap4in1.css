@@ -1,0 +1,239 @@
+.bacbo-roadmap-4in1-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.bacbo-roadmap-4in1 {
+  --road-cell: 13px;
+  box-sizing: border-box;
+  width: 548px;
+  padding: 1px;
+  overflow: hidden;
+  border: 1px solid #d4d4d4;
+  border-radius: 8px;
+  background: #fff;
+}
+.bacbo-roadmap-4in1__derived {
+  display: grid;
+  grid-template-columns: repeat(3, 182px);
+  gap: 0;
+}
+.bacbo-road-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--road-columns), var(--road-cell));
+  grid-template-rows: repeat(var(--road-rows), var(--road-cell));
+  gap: 0;
+  width: calc(var(--road-columns) * var(--road-cell));
+  height: calc(var(--road-rows) * var(--road-cell));
+  background: #fff;
+}
+.bacbo-road-grid__cell {
+  box-sizing: border-box;
+  display: grid;
+  width: var(--road-cell);
+  height: var(--road-cell);
+  place-items: center;
+  border-right: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+  background: #fff;
+}
+.bacbo-road-grid--derived {
+  --road-cell: 6.5px;
+  background-color: #fff;
+  background-image:
+    linear-gradient(to right, #ddd 1px, transparent 1px),
+    linear-gradient(to bottom, #ddd 1px, transparent 1px);
+  background-size: 13px 13px;
+}
+.bacbo-road-grid--derived .bacbo-road-grid__cell {
+  border: 0;
+  background: transparent;
+}
+.bacbo-road-mark {
+  box-sizing: border-box;
+  display: block;
+}
+.bacbo-road-mark--big {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  border: 1.25px solid currentColor;
+  border-radius: 50%;
+  background: #fff;
+}
+.bacbo-road-mark--eye {
+  width: 4px;
+  height: 4px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: #fff;
+}
+.bacbo-road-mark--small {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.bacbo-road-mark--cockroach {
+  width: 5px;
+  height: 1.25px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: rotate(-45deg);
+}
+.bacbo-road-mark--blue {
+  color: #2f64ff;
+}
+.bacbo-road-mark--red {
+  color: #e53935;
+}
+.bacbo-road-mark--big.has-tie::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: -2px;
+  width: 2px;
+  height: 11px;
+  border-radius: 2px;
+  background: #f0ad1e;
+  transform: rotate(42deg);
+}
+.bacbo-road-mark__tie-count {
+  position: absolute;
+  z-index: 2;
+  top: -5px;
+  right: -5px;
+  min-width: 7px;
+  height: 7px;
+  padding: 0 1px;
+  border-radius: 4px;
+  background: #f0ad1e;
+  color: #442f00;
+  font-size: 6px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 7px;
+  text-align: center;
+}
+
+@media (min-width: 1024px) {
+  .bacbo-desktop-board-pair .bacbo-roadmap-4in1-scroll {
+    container-type: inline-size;
+    width: 100%;
+    padding-top: 25px;
+    overflow: hidden;
+  }
+
+  .bacbo-desktop-board-pair .bacbo-roadmap-4in1 {
+    --pair-width: min(548px, 100cqw);
+    --road-cell: calc((var(--pair-width) - 2px) / 42);
+    width: var(--pair-width);
+  }
+
+  .bacbo-desktop-board-pair .bacbo-roadmap-4in1__derived {
+    grid-template-columns: repeat(3, calc((var(--pair-width) - 2px) / 3));
+  }
+
+  .bacbo-desktop-board-pair .bacbo-road-grid--derived {
+    --road-cell: calc((var(--pair-width) - 2px) / 84);
+    background-size: calc((var(--pair-width) - 2px) / 42) calc((var(--pair-width) - 2px) / 42);
+  }
+
+  .bacbo-desktop-board-pair .bacbo-road-mark--big {
+    width: min(9px, calc(var(--road-cell) * 0.72));
+    height: min(9px, calc(var(--road-cell) * 0.72));
+  }
+
+  .bacbo-desktop-board-pair .bacbo-road-mark--eye {
+    width: min(4px, calc(var(--road-cell) * 0.72));
+    height: min(4px, calc(var(--road-cell) * 0.72));
+  }
+
+  .bacbo-desktop-board-pair .bacbo-road-mark--small {
+    width: min(4px, calc(var(--road-cell) * 0.62));
+    height: min(4px, calc(var(--road-cell) * 0.62));
+  }
+
+  .bacbo-desktop-board-pair .bacbo-road-mark--cockroach {
+    width: min(5px, calc(var(--road-cell) * 0.78));
+    height: min(1.25px, calc(var(--road-cell) * 0.18));
+  }
+}
+
+@media (max-width: 640px) {
+  .bacbo-roadmap-4in1-scroll {
+    container-type: inline-size;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .bacbo-roadmap-4in1 {
+    width: 100%;
+  }
+
+  .bacbo-roadmap-4in1__derived {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .bacbo-roadmap-4in1__big {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 42 / 6;
+    grid-template-columns: repeat(42, minmax(0, 1fr));
+    grid-template-rows: repeat(6, minmax(0, 1fr));
+  }
+
+  .bacbo-road-grid--derived {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 28 / 8;
+    grid-template-columns: repeat(28, minmax(0, 1fr));
+    grid-template-rows: repeat(8, minmax(0, 1fr));
+    background-size: calc(100% / 14) 25%;
+  }
+
+  .bacbo-road-grid__cell {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .bacbo-road-mark--big {
+    width: min(9px, 72%);
+    height: min(9px, 72%);
+  }
+
+  .bacbo-road-mark--eye {
+    width: min(4px, 72%);
+    height: min(4px, 72%);
+    border-width: min(1px, 18%);
+  }
+
+  .bacbo-road-mark--small {
+    width: min(4px, 62%);
+    height: min(4px, 62%);
+  }
+
+  .bacbo-road-mark--cockroach {
+    width: min(5px, 78%);
+    height: min(1.25px, 18%);
+  }
+
+  .bacbo-road-mark--big.has-tie::after {
+    left: 45%;
+    top: -10%;
+    width: min(2px, 16%);
+    height: 120%;
+  }
+
+  .bacbo-road-mark__tie-count {
+    top: -35%;
+    right: -35%;
+    min-width: min(7px, 62%);
+    height: min(7px, 62%);
+    padding: 0;
+    font-size: clamp(3px, 1vw, 6px);
+    line-height: 1;
+  }
+}

@@ -1,13 +1,10 @@
 import type { RoundResult } from "@/types/dashboard";
 import type { PatternMinerStrategy } from "@/types/patternMiner";
 import { cn } from "@/lib/utils";
+import { sideDotClass } from "@/lib/sideColors";
 import { sideTextClass } from "@/patternMiner/PatternMinerDisplay";
 
-const SIDE_DOT_CLASS: Record<RoundResult, string> = {
-  B: "border-banker/60 bg-banker text-white shadow-[0_0_14px_-6px_var(--banker)]",
-  P: "border-player/60 bg-player text-white shadow-[0_0_14px_-6px_var(--player)]",
-  T: "border-warning/70 bg-warning text-background shadow-[0_0_14px_-6px_var(--warning)]",
-};
+const SIDE_DOT_CLASS = sideDotClass;
 
 export function PatternSequence({
   sequence,
@@ -36,7 +33,7 @@ export function PatternSequence({
               </span>
               {!compact && (
                 <span className={cn("text-[8px] font-black uppercase leading-none", sideTextClass[side])}>
-                  {side}
+                  {patternTokenSideLabel(side)}
                 </span>
               )}
             </span>
@@ -80,16 +77,13 @@ export function StrategyConclusion({
 }
 
 function pulledSideLabel(side: RoundResult) {
-  if (side === "B") return "🔴 BANKER";
-  if (side === "P") return "🔵 PLAYER";
-  return "🟡 TIE";
+  if (side === "B") return "BANKER";
+  if (side === "P") return "PLAYER";
+  return "TIE/EMPATE";
 }
 
 function patternTokenValue(token: string) {
-  const side = token[0];
-  const value = token.slice(1);
-  if (side === "T" && value) return `${value}x`;
-  return value || side;
+  return /^[BPT]\d+$/.test(token) ? token : token[0];
 }
 
 function patternTokenTitle(token: string) {
@@ -97,6 +91,12 @@ function patternTokenTitle(token: string) {
   const value = token.slice(1);
   if (side === "B") return value ? `Banker ${value}` : "Banker";
   if (side === "P") return value ? `Player ${value}` : "Player";
-  if (side === "T") return value ? `Tie ${value}x` : "Tie";
+  if (side === "T") return value ? `Empate ${value}` : "Empate";
   return token;
+}
+
+function patternTokenSideLabel(side: RoundResult) {
+  if (side === "B") return "BANKER";
+  if (side === "P") return "PLAYER";
+  return "EMPATE";
 }

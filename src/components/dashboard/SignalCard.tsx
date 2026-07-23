@@ -626,7 +626,7 @@ function pulseGreen(setter: (value: boolean) => void) {
   setter(false);
   window.requestAnimationFrame(() => {
     setter(true);
-    window.setTimeout(() => setter(false), 2100);
+    window.setTimeout(() => setter(false), 900);
   });
 }
 

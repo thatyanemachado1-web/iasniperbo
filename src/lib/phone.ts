@@ -115,7 +115,7 @@ export function buildRemarketingMessage(name?: string) {
 function parsePhoneParts(phone: unknown, countryCode?: string) {
   const raw = String(phone ?? "").trim();
   let digits = digitsOnly(raw);
-  let code = normalizeCountryCode(countryCode);
+  const code = normalizeCountryCode(countryCode);
 
   if (code) {
     const codeDigits = digitsOnly(code);

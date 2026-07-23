@@ -32,9 +32,9 @@ export function readUserSession(): UserSession {
   if (typeof window === "undefined") {
     return emptyUserSession();
   }
-  const raw = window.localStorage.getItem(USER_SESSION_KEY);
-  if (!raw) return emptyUserSession();
   try {
+    const raw = window.localStorage.getItem(USER_SESSION_KEY);
+    if (!raw) return emptyUserSession();
     const session = JSON.parse(raw) as Partial<UserSession>;
     const email = String(session.email || "").trim();
     const name = String(session.name || "").trim() || nameFromEmail(email);
@@ -88,9 +88,7 @@ export function saveUserSession(email: string, partial: Partial<UserSession> = {
   const owner = isAdminOwnerEmail(cleanEmail);
   const approver = isAdminApproverEmail(cleanEmail);
   const role = normalizeUserRole(partial.role || (owner ? "owner" : approver ? "admin" : "user"));
-  const accessMode = normalizeAccessMode(
-    partial.accessMode || (owner ? "full" : "none"),
-  );
+  const accessMode = normalizeAccessMode(partial.accessMode || (owner ? "full" : "none"));
   const plan = normalizePlan(partial.plan || (accessMode === "full" ? "vip" : "free"));
   window.localStorage.setItem(
     USER_SESSION_KEY,
@@ -122,7 +120,11 @@ export function saveDemoSession(email: string, name?: string) {
 
 export function clearUserSession() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(USER_SESSION_KEY);
+  try {
+    window.localStorage.removeItem(USER_SESSION_KEY);
+  } catch {
+    // Storage can be unavailable in hardened browsers and embedded webviews.
+  }
 }
 
 export function isAdminOwnerEmail(email?: string | null) {
@@ -178,7 +180,9 @@ function emptyUserSession(): UserSession {
 }
 
 function normalizeAccessMode(value: unknown): UserSession["accessMode"] {
-  const text = String(value || "none").trim().toLowerCase();
+  const text = String(value || "none")
+    .trim()
+    .toLowerCase();
   if (text === "demo" || text === "pending" || text === "full" || text === "expired") {
     return text;
   }
@@ -186,13 +190,17 @@ function normalizeAccessMode(value: unknown): UserSession["accessMode"] {
 }
 
 function normalizePlan(value: unknown): UserSession["plan"] {
-  const text = String(value || "free").trim().toLowerCase();
+  const text = String(value || "free")
+    .trim()
+    .toLowerCase();
   if (text === "premium" || text === "vip") return text;
   return "free";
 }
 
 function normalizeUserRole(value: unknown): UserSession["role"] {
-  const text = String(value || "user").trim().toLowerCase();
+  const text = String(value || "user")
+    .trim()
+    .toLowerCase();
   if (text === "owner") return "owner";
   if (text === "admin" || text === "approver") return "admin";
   return "user";
@@ -210,7 +218,9 @@ function parseAdminEmails(value: unknown) {
 }
 
 function normalizeEmail(value: unknown) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function nameFromEmail(email: string) {
