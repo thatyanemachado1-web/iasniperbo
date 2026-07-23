@@ -533,10 +533,12 @@ const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
 const DEFAULT_OLLAMA_MODEL = "qwen2.5:7b";
 const DEFAULT_EDGE_TTS_VOICE = "pt-BR-AntonioNeural";
 const MAX_SERVER_ROUND_HISTORY = 50_000;
+const FREE_VALIDATOR_ROUND_HISTORY = 1_000;
 const MAX_MONITOR_ROUND_HISTORY = 300;
 const MAX_VALIDATOR_ROUND_WRITE_BATCH = 500;
 const MAX_VALIDATOR_DETAIL_RESPONSE = 200;
 const VALIDATOR_ROUND_PRUNE_MIN_INTERVAL_MS = 10 * 60_000;
+const VALIDATOR_STORED_HISTORY_CACHE_TTL_MS = 5 * 60_000;
 const VALIDATOR_MONITOR_CACHE_TTL_MS = 30_000;
 const VALIDATOR_TELEGRAM_MAX_PARALLEL_SENDS = 80;
 const NEURAL_PANEL_CYCLE_RESET_VERSION = "2026-06-11-manual-reset-v1";
@@ -850,6 +852,10 @@ let adminClientRegistryResolvePromise: Promise<AdminClientRegistryResolution> | 
 let adminClientRegistryCachedResolution: AdminClientRegistryResolution | null = null;
 let adminClientRegistryCachedAt = 0;
 const validatorRoundPrunedAt = new Map<string, number>();
+const validatorStoredRoundCache = new Map<
+  string,
+  { rounds: Round[]; requestedLimit: number; loadedAt: number }
+>();
 const serverValidatorEngine = new NeuralValidatorEngine();
 const TELEGRAM_V2_PATTERN_MINER_HISTORY_LIMIT = 5000;
 const telegramAutoV2PatternMinerEngine = new PatternMinerEngine({
@@ -4708,13 +4714,17 @@ async function handleNeuralCalendarRequest(request: Request, url: URL, env: unkn
       null,
     );
     if (auditCalendar) {
-      return json({
-        calendar: operationalCalendar
-          ? mergeOriginalNeuralCalendarScore(auditCalendar, operationalCalendar)
-          : auditCalendar,
-      }, 200, {
-        "x-sniper-calendar-source": "official-result-events",
-      });
+      return json(
+        {
+          calendar: operationalCalendar
+            ? mergeOriginalNeuralCalendarScore(auditCalendar, operationalCalendar)
+            : auditCalendar,
+        },
+        200,
+        {
+          "x-sniper-calendar-source": "official-result-events",
+        },
+      );
     }
   }
 
@@ -8396,7 +8406,9 @@ async function handleValidatorValidationRequest(request: Request, url: URL, env:
   if (!pattern.length) return json({ error: "Padrao invalido." }, 400);
 
   const tableId = validatorTableId(readString(body, "tableId"));
-  const historySize = clampRoundHistoryLimit(String(body.historySize || ""));
+  const requestedHistorySize = clampRoundHistoryLimit(String(body.historySize || ""));
+  const historyLimit = await validatorHistoryLimitForRequest(request, env);
+  const historySize = Math.min(requestedHistorySize, historyLimit);
   const storedRounds = await withTimeout(
     fetchStoredValidatorRounds(env, historySize, tableId),
     LIVE_STATE_IO_TIMEOUT_MS,
@@ -8415,11 +8427,27 @@ async function handleValidatorValidationRequest(request: Request, url: URL, env:
   return json({
     result: summarizeValidatorResultForResponse(result),
     history: {
-      requested: historySize,
+      requested: requestedHistorySize,
+      applied: historySize,
+      limit: historyLimit,
       available: rounds.length,
       tableId,
     },
   });
+}
+
+async function validatorHistoryLimitForRequest(request: Request, env: unknown) {
+  const token = getBearerToken(request);
+  const session = token ? await verifySessionToken(env, token) : null;
+  if (!session) return FREE_VALIDATOR_ROUND_HISTORY;
+  if (session.scope === "owner" || session.scope === "admin_approver") {
+    return MAX_SERVER_ROUND_HISTORY;
+  }
+  if (!session.approved) return FREE_VALIDATOR_ROUND_HISTORY;
+  if (String(session.plan || "").toLowerCase() === "premium") {
+    return MAX_SERVER_ROUND_HISTORY;
+  }
+  return 10_000;
 }
 
 function summarizeValidatorResultForResponse(result: ValidatorResult): ValidatorResult {
@@ -8630,6 +8658,7 @@ const TELEGRAM_CONNECTION_TEST_MESSAGE = "[TESTE TELEGRAM]\nCanal conectado com 
 
 function isTelegramServiceRoutePath(pathname: string) {
   return (
+    pathname === "/telegram/bots/validate" ||
     pathname === "/telegram/channels" ||
     pathname.startsWith("/telegram/channels/") ||
     pathname === "/telegram/channels/test" ||
@@ -8842,14 +8871,10 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
   const clientId = await validatorRequestUserId(request, url, env);
   if (!clientId) return json({ error: "Nao autorizado." }, 401);
 
-  if (!(request.method === "GET" && url.pathname === "/telegram/channels")) {
-    await withTimeout(
-      hydrateValidatorUserCache(env, clientId),
-      LIVE_STATE_IO_TIMEOUT_MS,
-      "carregar Central Telegram",
-      undefined,
-    );
-  }
+  // Every Telegram service operation below performs its own targeted channel
+  // lookup against the Telegram Engine. Hydrating the broad validator cache
+  // here duplicated that I/O and could hold validation/toggle requests for the
+  // full live-state timeout before the real Telegram call even started.
 
   if (request.method === "GET" && url.pathname === "/telegram/channels") {
     return json({ channels: await telegramService.listChannels(env, clientId) });
@@ -8858,6 +8883,26 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
   if (request.method === "POST" && url.pathname === "/telegram/channels") {
     const body = readRecord(await request.json().catch(() => ({})));
     return telegramService.createChannel(env, request, clientId, body);
+  }
+
+  if (request.method === "POST" && url.pathname === "/telegram/bots/validate") {
+    const body = readRecord(await request.json().catch(() => ({})));
+    const botToken = normalizeSecretValue(
+      readFirstString(body, ["botToken", "bot_token", "telegram_bot_token"]),
+    );
+    if (!botToken) return json({ error: "Informe a chave do seu bot." }, 400);
+
+    const validation = await validateTelegramBotAccess(botToken);
+    if (!validation.ok) return json({ error: validation.error }, validation.status);
+    return json({
+      ok: true,
+      validated: true,
+      bot: {
+        username: validation.username,
+        name: validation.name,
+      },
+      validationCode: await issueTelegramBotValidationCode(env, clientId, botToken),
+    });
   }
 
   if (request.method === "POST" && url.pathname === "/telegram/channels/validate") {
@@ -8872,8 +8917,15 @@ async function handleTelegramServiceRequest(request: Request, url: URL, env: unk
       "channel_id",
       "group_id",
     ]);
+    const botValidationCode = readString(body, "botValidationCode");
     if (!botToken) return json({ error: "Token invalido ou revogado." }, 400);
     if (!chatId) return json({ error: "Chat ID invalido." }, 400);
+    if (
+      botValidationCode &&
+      !(await verifyTelegramBotValidationCode(env, clientId, botToken, botValidationCode))
+    ) {
+      return json({ error: "Valide seu bot novamente antes de testar o canal." }, 400);
+    }
 
     const existingByCode = findValidatorChannelByIncomingCode(liveValidatorChannels, clientId, {
       chatId,
@@ -10058,6 +10110,10 @@ async function handleValidatorStorageRequest(request: Request, url: URL, env: un
     }
 
     if (request.method === "POST") {
+      const historyLimit = await validatorHistoryLimitForRequest(request, env);
+      if (historyLimit <= FREE_VALIDATOR_ROUND_HISTORY) {
+        return json({ error: "Salvar estrategias exige o plano Premium." }, 403);
+      }
       try {
         const body = readRecord(await request.json().catch(() => ({})));
         const pattern = normalizeServerSavedPattern(body.pattern || body, userId);
@@ -10458,16 +10514,10 @@ async function loadValidatorChannelsForUser(env: unknown, userId: string) {
   return userChannels;
 }
 
-async function validateTelegramChannelAccess(request: Request, botToken: string, chatId: string) {
+async function validateTelegramBotAccess(botToken: string) {
   const cleanToken = normalizeSecretValue(botToken);
-  const cleanChatId = normalizeTelegramChatId(chatId);
-  const allowInsecureNodeFallback = isLocalDevelopmentRequest(request);
-
   if (!cleanToken) {
     return { ok: false as const, status: 400, error: "Token invalido ou revogado." };
-  }
-  if (!cleanChatId) {
-    return { ok: false as const, status: 400, error: "Chat ID obrigatorio." };
   }
 
   const getMe = await callTelegramJson(cleanToken, "getMe", {});
@@ -10485,7 +10535,34 @@ async function validateTelegramChannelAccess(request: Request, botToken: string,
     return { ok: false as const, status: 400, error: "Token invalido ou revogado." };
   }
 
-  const chat = await callTelegramJson(cleanToken, "getChat", { chat_id: cleanChatId });
+  return {
+    ok: true as const,
+    botId,
+    username: readString(bot, "username"),
+    name: readString(bot, "first_name") || readString(bot, "username") || "Bot Telegram",
+  };
+}
+
+async function validateTelegramChannelAccess(request: Request, botToken: string, chatId: string) {
+  const cleanToken = normalizeSecretValue(botToken);
+  const cleanChatId = normalizeTelegramChatId(chatId);
+  const allowInsecureNodeFallback = isLocalDevelopmentRequest(request);
+
+  if (!cleanChatId) {
+    return { ok: false as const, status: 400, error: "Chat ID obrigatorio." };
+  }
+
+  const botValidation = await validateTelegramBotAccess(cleanToken);
+  if (!botValidation.ok) return botValidation;
+  const botId = botValidation.botId;
+
+  const [chat, member] = await Promise.all([
+    callTelegramJson(cleanToken, "getChat", { chat_id: cleanChatId }),
+    callTelegramJson(cleanToken, "getChatMember", {
+      chat_id: cleanChatId,
+      user_id: botId,
+    }),
+  ]);
   if (!chat.ok) {
     return {
       ok: false as const,
@@ -10496,10 +10573,6 @@ async function validateTelegramChannelAccess(request: Request, botToken: string,
 
   const chatRecord = readRecord(chat.result);
   const chatType = readString(chatRecord, "type");
-  const member = await callTelegramJson(cleanToken, "getChatMember", {
-    chat_id: cleanChatId,
-    user_id: botId,
-  });
   if (!member.ok) {
     return {
       ok: false as const,
@@ -10607,6 +10680,44 @@ async function issueTelegramChannelValidationCode(
   const bucket = telegramValidationBucket();
   const signature = await telegramChannelValidationSignature(env, userId, botToken, chatId, bucket);
   return signature ? `${bucket}.${signature}` : "";
+}
+
+async function issueTelegramBotValidationCode(env: unknown, userId: string, botToken: string) {
+  const bucket = telegramValidationBucket();
+  const signature = await telegramBotValidationSignature(env, userId, botToken, bucket);
+  return signature ? `${bucket}.${signature}` : "";
+}
+
+async function verifyTelegramBotValidationCode(
+  env: unknown,
+  userId: string,
+  botToken: string,
+  validationCode: string,
+) {
+  const [bucketText, signature] = validationCode.split(".");
+  const bucket = Number(bucketText);
+  if (!Number.isFinite(bucket) || !signature) return false;
+  const currentBucket = telegramValidationBucket();
+  if (bucket < currentBucket - 1 || bucket > currentBucket) return false;
+  const expected = await telegramBotValidationSignature(env, userId, botToken, bucket);
+  return Boolean(expected && constantTimeStringEqual(signature, expected));
+}
+
+async function telegramBotValidationSignature(
+  env: unknown,
+  userId: string,
+  botToken: string,
+  bucket: number,
+) {
+  const secret = getSessionSecret(env);
+  if (!secret) return "";
+  const payload = [
+    normalizeValidatorUserId(userId),
+    normalizeSecretValue(botToken),
+    "bot",
+    String(bucket),
+  ].join("|");
+  return bytesToB64Url(await hmacSign(secret, payload));
 }
 
 async function verifyTelegramChannelValidationCode(
@@ -12038,9 +12149,8 @@ async function fetchStoredValidatorChannels(
 ) {
   const normalizedUserId = normalizeValidatorUserId(userId);
   if (!normalizedUserId) return [];
-  const cloudChannels = await (
-    cloudChannelsPromise || fetchCloudValidatorChannels(env, normalizedUserId)
-  );
+  const cloudChannels = await (cloudChannelsPromise ||
+    fetchCloudValidatorChannels(env, normalizedUserId));
   const liveDeletedRefs = await fetchValidatorChannelDeletedRefs(env, normalizedUserId);
   if (!getSupabasePersistenceConfig(env)) {
     return cloudChannels.filter((channel) => !isValidatorChannelDeleted(channel, liveDeletedRefs));
@@ -21116,34 +21226,93 @@ function validatorTableId(value: string | null) {
 }
 
 async function fetchStoredValidatorRounds(env: unknown, limit: number, tableId = "bac-bo") {
+  const normalizedLimit = Math.max(1, Math.min(MAX_SERVER_ROUND_HISTORY, limit));
+  // The free validator is intentionally kept warm with 1,000 rounds even when
+  // the user selects a smaller window. Subsequent validations only slice this
+  // cached bank instead of issuing another D1 read.
+  const fetchLimit = Math.max(normalizedLimit, FREE_VALIDATOR_ROUND_HISTORY);
+  const cleanTableId = validatorTableId(tableId);
+  const db = getDashboardResultsD1(env);
+  if (db) {
+    const rounds = await fetchStoredValidatorRoundsFromD1(db, fetchLimit, cleanTableId);
+    return rounds.slice(-normalizedLimit);
+  }
   if (!getSupabasePersistenceConfig(env)) return [];
   const rows = await fetchSupabaseRows(
     env,
     VALIDATOR_ROUNDS_TABLE,
     [
-      "select=id,table_id,round_id,result,banker_score,player_score,round_time,created_at",
-      `table_id=eq.${encodeURIComponent(tableId)}`,
+      "select=id,table_id,round_id,result,banker_score,player_score,tie_multiplier,round_time,created_at",
+      `table_id=eq.${encodeURIComponent(cleanTableId)}`,
       "order=created_at.desc,round_id.desc",
-      `limit=${Math.max(1, Math.min(MAX_SERVER_ROUND_HISTORY, limit))}`,
+      `limit=${fetchLimit}`,
     ].join("&"),
   );
   return rows
     .map(storedValidatorRoundFromRow)
     .filter((round): round is Round => Boolean(round))
-    .sort(compareRoundHistory);
+    .sort(compareRoundHistory)
+    .slice(-normalizedLimit);
+}
+
+async function fetchStoredValidatorRoundsFromD1(
+  db: D1DatabaseLike,
+  limit: number,
+  tableId: string,
+) {
+  const cached = validatorStoredRoundCache.get(tableId);
+  if (
+    cached &&
+    cached.requestedLimit >= limit &&
+    Date.now() - cached.loadedAt < VALIDATOR_STORED_HISTORY_CACHE_TTL_MS
+  ) {
+    return cached.rounds.slice(-limit);
+  }
+
+  try {
+    const response = await db
+      .prepare(
+        `SELECT id, table_id, round_id, result, banker_score, player_score,
+                tie_multiplier, round_time, created_at
+         FROM validator_rounds
+         WHERE table_id = ?
+         ORDER BY created_at DESC, round_id DESC
+         LIMIT ?`,
+      )
+      .bind(tableId, limit)
+      .all?.();
+    const rows = readRecord(response).results;
+    const rounds = (Array.isArray(rows) ? rows : [])
+      .map((row) => storedValidatorRoundFromRow(readRecord(row)))
+      .filter((round): round is Round => Boolean(round))
+      .sort(compareRoundHistory);
+    validatorStoredRoundCache.set(tableId, {
+      rounds,
+      requestedLimit: limit,
+      loadedAt: Date.now(),
+    });
+    return rounds;
+  } catch (error) {
+    console.warn("Nao foi possivel ler o historico do Validador no D1.", error);
+    return cached?.rounds.slice(-limit) ?? [];
+  }
 }
 
 async function persistValidatorRounds(env: unknown, rounds: Round[], tableId = "bac-bo") {
-  if (!rounds.length || !getSupabasePersistenceConfig(env)) return false;
+  if (!rounds.length) return false;
+  const cleanTableId = validatorTableId(tableId);
+  const db = getDashboardResultsD1(env);
+  if (db) return persistValidatorRoundsToD1(db, rounds, cleanTableId, env);
+  if (!getSupabasePersistenceConfig(env)) return false;
   const byId = new Map<string, Record<string, unknown>>();
   for (const round of rounds.slice(-MAX_VALIDATOR_ROUND_WRITE_BATCH)) {
-    const row = storedValidatorRoundToRow(round, tableId);
+    const row = storedValidatorRoundToRow(round, cleanTableId);
     byId.set(readString(row, "id"), row);
   }
   const saved = await persistSupabaseRows(env, VALIDATOR_ROUNDS_TABLE, [...byId.values()], "id");
   if (saved) {
     void withTimeout(
-      pruneStoredValidatorRounds(env, tableId),
+      pruneStoredValidatorRounds(env, cleanTableId),
       LIVE_STATE_IO_TIMEOUT_MS,
       "limpar rodadas antigas do Validador",
       false,
@@ -21152,12 +21321,110 @@ async function persistValidatorRounds(env: unknown, rounds: Round[], tableId = "
   return saved;
 }
 
+async function persistValidatorRoundsToD1(
+  db: D1DatabaseLike,
+  rounds: Round[],
+  tableId: string,
+  env: unknown,
+) {
+  try {
+    const byId = new Map<string, Round>();
+    for (const round of rounds.slice(-MAX_VALIDATOR_ROUND_WRITE_BATCH)) {
+      byId.set(validatorRoundStorageId(round, tableId), round);
+    }
+    const normalizedRounds = [...byId.values()];
+    const statements = normalizedRounds.map((round) => {
+      const row = storedValidatorRoundToRow(round, tableId);
+      return db
+        .prepare(
+          `INSERT INTO validator_rounds (
+             id, table_id, round_id, result, banker_score, player_score,
+             tie_multiplier, round_time, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             round_id = excluded.round_id,
+             result = excluded.result,
+             banker_score = excluded.banker_score,
+             player_score = excluded.player_score,
+             tie_multiplier = excluded.tie_multiplier,
+             round_time = excluded.round_time,
+             created_at = excluded.created_at`,
+        )
+        .bind(
+          row.id,
+          row.table_id,
+          row.round_id,
+          row.result,
+          row.banker_score,
+          row.player_score,
+          row.tie_multiplier,
+          row.round_time,
+          row.created_at,
+        );
+    });
+    await runD1StatementBatch(db, statements);
+
+    const cached = validatorStoredRoundCache.get(tableId);
+    if (cached) {
+      cached.rounds = mergeRoundHistoryWithLimit(
+        cached.rounds,
+        normalizedRounds,
+        Math.max(cached.requestedLimit, MAX_MONITOR_ROUND_HISTORY),
+      );
+      cached.loadedAt = Date.now();
+    }
+
+    void withTimeout(
+      pruneStoredValidatorRounds(env, tableId),
+      LIVE_STATE_IO_TIMEOUT_MS,
+      "limpar rodadas antigas do Validador no D1",
+      false,
+    );
+    return true;
+  } catch (error) {
+    console.warn("Nao foi possivel salvar rodadas do Validador no D1.", error);
+    return false;
+  }
+}
+
 async function pruneStoredValidatorRounds(env: unknown, tableId = "bac-bo") {
   const cleanTableId = validatorTableId(tableId);
   const now = Date.now();
   const lastPrunedAt = validatorRoundPrunedAt.get(cleanTableId) || 0;
   if (now - lastPrunedAt < VALIDATOR_ROUND_PRUNE_MIN_INTERVAL_MS) return false;
   validatorRoundPrunedAt.set(cleanTableId, now);
+
+  const db = getDashboardResultsD1(env);
+  if (db) {
+    const boundary = await d1First(
+      db,
+      `SELECT id, created_at
+       FROM validator_rounds
+       WHERE table_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1 OFFSET ?`,
+      cleanTableId,
+      MAX_SERVER_ROUND_HISTORY - 1,
+    );
+    const boundaryId = String(boundary.id || "").trim();
+    const boundaryCreatedAt = String(boundary.created_at || "").trim();
+    if (!boundaryId || !boundaryCreatedAt) return false;
+    await d1Run(
+      db
+        .prepare(
+          `DELETE FROM validator_rounds
+           WHERE table_id = ?
+             AND (
+               created_at < ?
+               OR (created_at = ? AND id < ?)
+             )`,
+        )
+        .bind(cleanTableId, boundaryCreatedAt, boundaryCreatedAt, boundaryId),
+    );
+    return true;
+  }
+
+  if (!getSupabasePersistenceConfig(env)) return false;
 
   const boundaryRows = await fetchSupabaseRowsRange(
     env,
@@ -21190,6 +21457,7 @@ function storedValidatorRoundToRow(round: Round, tableId: string) {
     result: round.result,
     banker_score: round.bankerScore,
     player_score: round.playerScore,
+    tie_multiplier: round.tieMultiplier ?? null,
     round_time: round.time,
     created_at: recordedAt,
   };
@@ -22962,10 +23230,12 @@ async function resolveAdminClientRegistryForRequest(
   );
   if (resolved?.ok) return resolved;
 
-  return resolved || {
-    ok: false,
-    retryAfterSeconds: ADMIN_CLIENT_REGISTRY_RETRY_AFTER_SECONDS,
-  };
+  return (
+    resolved || {
+      ok: false,
+      retryAfterSeconds: ADMIN_CLIENT_REGISTRY_RETRY_AFTER_SECONDS,
+    }
+  );
 }
 
 async function resolveAdminClientRegistryFresh(

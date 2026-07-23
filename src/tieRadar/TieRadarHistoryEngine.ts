@@ -26,12 +26,24 @@ export function buildTieRadarHistoryAnalysis(
   const cycleDate = normalizeDateKey(options.cycleDate) || saoPauloDateKey(now);
   const monthKey = cycleDate.slice(0, 7);
   const previous = options.previous ?? null;
-  const canReusePrevious = Boolean(previous?.countedRoundKeys?.length);
-  const countedRoundKeys = new Set(canReusePrevious ? previous?.countedRoundKeys ?? [] : []);
+  const previousRecent = previous?.recent ?? [];
+  // Public/persisted snapshots intentionally omit countedRoundKeys. Rebuild the
+  // dedupe set from the saved entries so a fresh Worker isolate does not throw
+  // away the accumulated month as soon as it receives the next 30-round tail.
+  const canReusePrevious = Boolean(
+    previous &&
+      (previous.daily?.key === cycleDate ||
+        previous.monthly?.key === monthKey ||
+        previousRecent.some((entry) => entry.dateKey === cycleDate || entry.monthKey === monthKey)),
+  );
+  const previousCountedRoundKeys = previous?.countedRoundKeys?.length
+    ? previous.countedRoundKeys
+    : previousRecent.map((entry) => entry.roundKey).filter(Boolean);
+  const countedRoundKeys = new Set(canReusePrevious ? previousCountedRoundKeys : []);
   const recent = new Map<string, TieHistoryEntry>();
 
   if (canReusePrevious) {
-    for (const entry of previous?.recent ?? []) {
+    for (const entry of previousRecent) {
       if (entry?.id) recent.set(entry.id, entry);
     }
   }
@@ -67,6 +79,69 @@ export function buildTieRadarHistoryAnalysis(
     monthly: finalizeAggregateTable(monthly),
     high: buildHighMultiplierAnalysis(daily, monthly, now),
     countedRoundKeys: [...countedRoundKeys].slice(-MAX_TRACKED_TIE_KEYS),
+  };
+}
+
+export function mergeTieRadarHistoryAnalyses(
+  histories: Array<TieRadarHistoryAnalysis | null | undefined>,
+  options: { cycleDate?: string; now?: Date | string } = {},
+): TieRadarHistoryAnalysis {
+  const now = toSafeDate(options.now) ?? new Date();
+  const cycleDate = normalizeDateKey(options.cycleDate) || saoPauloDateKey(now);
+  const monthKey = cycleDate.slice(0, 7);
+  const usable = histories.filter(
+    (history): history is TieRadarHistoryAnalysis =>
+      Boolean(
+        history &&
+          (history.daily?.key === cycleDate ||
+            history.monthly?.key === monthKey ||
+            history.recent?.some((entry) => entry.dateKey === cycleDate || entry.monthKey === monthKey)),
+      ),
+  );
+
+  if (!usable.length) return emptyTieRadarHistoryAnalysis(cycleDate);
+
+  const recentById = new Map<string, TieHistoryEntry>();
+  for (const history of usable) {
+    for (const entry of history.recent ?? []) {
+      if (!entry?.id || (entry.monthKey !== monthKey && entry.dateKey !== cycleDate)) continue;
+      const current = recentById.get(entry.id);
+      if (!current || Date.parse(entry.timestamp) > Date.parse(current.timestamp)) {
+        recentById.set(entry.id, entry);
+      }
+    }
+  }
+
+  const allEntries = [...recentById.values()].sort(
+    (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
+  );
+  const recent = [...allEntries]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, MAX_RECENT_TIES);
+  const daily = mergeAggregateTables(
+    usable.filter((history) => history.daily?.key === cycleDate).map((history) => history.daily),
+    cycleDate,
+    allEntries.filter((entry) => entry.dateKey === cycleDate),
+  );
+  const monthly = mergeAggregateTables(
+    usable.filter((history) => history.monthly?.key === monthKey).map((history) => history.monthly),
+    monthKey,
+    allEntries.filter((entry) => entry.monthKey === monthKey),
+  );
+  const countedRoundKeys = Array.from(
+    new Set([
+      ...usable.flatMap((history) => history.countedRoundKeys ?? []),
+      ...allEntries.map((entry) => entry.roundKey).filter(Boolean),
+    ]),
+  ).slice(-MAX_TRACKED_TIE_KEYS);
+
+  return {
+    updatedAt: now.toISOString(),
+    recent,
+    daily,
+    monthly,
+    high: buildHighMultiplierAnalysis(daily, monthly, now),
+    countedRoundKeys,
   };
 }
 
@@ -151,6 +226,49 @@ function cloneAggregateTable(value: TieAggregateTable, key: string): TieAggregat
     last25Timestamp: normalizeIso(value.last25Timestamp),
     last88Timestamp: normalizeIso(value.last88Timestamp),
   };
+}
+
+function mergeAggregateTables(tables: TieAggregateTable[], key: string, entries: TieHistoryEntry[]) {
+  const merged = emptyAggregateTable(key);
+  for (const entry of [...entries].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))) {
+    updateAggregateTable(merged, entry);
+  }
+
+  for (const label of TIE_MULTIPLIER_LABELS) {
+    merged.counts[label] = Math.max(
+      safeCount(merged.counts[label]),
+      ...tables.map((table) => safeCount(table?.counts?.[label])),
+    );
+  }
+  merged.totalTies = TIE_MULTIPLIER_LABELS.reduce((total, label) => total + merged.counts[label], 0);
+  merged.total25x = merged.counts["25x"];
+  merged.total88x = merged.counts["88x"];
+
+  for (const table of tables) {
+    for (const [hour, count] of Object.entries(table?.hourCounts ?? {})) {
+      merged.hourCounts[hour] = Math.max(safeCount(merged.hourCounts[hour]), safeCount(count));
+    }
+    merged.last25Timestamp = latestIso(merged.last25Timestamp, table?.last25Timestamp);
+    merged.last88Timestamp = latestIso(merged.last88Timestamp, table?.last88Timestamp);
+    if (safeCount(table?.interval25Samples) > safeCount(merged.interval25Samples)) {
+      merged.interval25Samples = safeCount(table.interval25Samples);
+      merged.average25IntervalMinutes = normalizeNullableNumber(table.average25IntervalMinutes);
+    }
+    if (safeCount(table?.interval88Samples) > safeCount(merged.interval88Samples)) {
+      merged.interval88Samples = safeCount(table.interval88Samples);
+      merged.average88IntervalMinutes = normalizeNullableNumber(table.average88IntervalMinutes);
+    }
+  }
+
+  return finalizeAggregateTable(merged);
+}
+
+function latestIso(left: unknown, right: unknown) {
+  const leftIso = normalizeIso(left);
+  const rightIso = normalizeIso(right);
+  if (!leftIso) return rightIso;
+  if (!rightIso) return leftIso;
+  return Date.parse(rightIso) > Date.parse(leftIso) ? rightIso : leftIso;
 }
 
 function updateAggregateTable(table: TieAggregateTable, entry: TieHistoryEntry) {

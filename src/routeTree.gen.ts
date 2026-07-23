@@ -22,6 +22,7 @@ import { Route as AppContaRouteImport } from './routes/app.conta'
 import { Route as AppCalendarioRouteImport } from './routes/app.calendario'
 import { Route as AppBancaRouteImport } from './routes/app.banca'
 import { Route as AppAssinaturaRouteImport } from './routes/app.assinatura'
+import { Route as AppAoVivoRouteImport } from './routes/app.ao-vivo'
 import { Route as AppAgentesRouteImport } from './routes/app.agentes'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
@@ -96,6 +97,11 @@ const AppAssinaturaRoute = AppAssinaturaRouteImport.update({
   path: '/assinatura',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAoVivoRoute = AppAoVivoRouteImport.update({
+  id: '/ao-vivo',
+  path: '/ao-vivo',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAgentesRoute = AppAgentesRouteImport.update({
   id: '/agentes',
   path: '/agentes',
@@ -142,6 +148,7 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/agentes': typeof AppAgentesRoute
+  '/app/ao-vivo': typeof AppAoVivoRoute
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/banca': typeof AppBancaRoute
   '/app/calendario': typeof AppCalendarioRoute
@@ -164,6 +171,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/agentes': typeof AppAgentesRoute
+  '/app/ao-vivo': typeof AppAoVivoRoute
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/banca': typeof AppBancaRoute
   '/app/calendario': typeof AppCalendarioRoute
@@ -188,6 +196,7 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/agentes': typeof AppAgentesRoute
+  '/app/ao-vivo': typeof AppAoVivoRoute
   '/app/assinatura': typeof AppAssinaturaRoute
   '/app/banca': typeof AppBancaRoute
   '/app/calendario': typeof AppCalendarioRoute
@@ -213,6 +222,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/app/admin'
     | '/app/agentes'
+    | '/app/ao-vivo'
     | '/app/assinatura'
     | '/app/banca'
     | '/app/calendario'
@@ -235,6 +245,7 @@ export interface FileRouteTypes {
     | '/'
     | '/app/admin'
     | '/app/agentes'
+    | '/app/ao-vivo'
     | '/app/assinatura'
     | '/app/banca'
     | '/app/calendario'
@@ -258,6 +269,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/app/admin'
     | '/app/agentes'
+    | '/app/ao-vivo'
     | '/app/assinatura'
     | '/app/banca'
     | '/app/calendario'
@@ -375,6 +387,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAssinaturaRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/ao-vivo': {
+      id: '/app/ao-vivo'
+      path: '/ao-vivo'
+      fullPath: '/app/ao-vivo'
+      preLoaderRoute: typeof AppAoVivoRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/agentes': {
       id: '/app/agentes'
       path: '/agentes'
@@ -459,6 +478,7 @@ const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRouteWithChildren
   AppAgentesRoute: typeof AppAgentesRoute
+  AppAoVivoRoute: typeof AppAoVivoRoute
   AppAssinaturaRoute: typeof AppAssinaturaRoute
   AppBancaRoute: typeof AppBancaRoute
   AppCalendarioRoute: typeof AppCalendarioRoute
@@ -475,6 +495,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRouteWithChildren,
   AppAgentesRoute: AppAgentesRoute,
+  AppAoVivoRoute: AppAoVivoRoute,
   AppAssinaturaRoute: AppAssinaturaRoute,
   AppBancaRoute: AppBancaRoute,
   AppCalendarioRoute: AppCalendarioRoute,

@@ -53,7 +53,7 @@ export function TieAlertCard({
   className?: string;
 }) {
   const enabled = toggles?.tieAlert !== false;
-  const multipliers = tieMultiplierStats(rounds, scoreboard);
+  const multipliers = tieMultiplierStats(rounds, scoreboard, history);
   const tiePullers = tiePullerStats(rounds, scoreboard);
   const mainTiePuller = tiePullers[0];
   const bestMultiplier = multipliers.reduce(
@@ -254,6 +254,12 @@ export function TieAlertCard({
           </div>
         </div>
 
+        <details className="group mt-2 rounded-lg border border-white/10 bg-background/20">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan marker:content-none [&::-webkit-details-marker]:hidden">
+            <span>Ver mais — relatório e histórico</span>
+            <span className="transition-transform group-open:rotate-180" aria-hidden="true">⌄</span>
+          </summary>
+          <div className="space-y-2 border-t border-white/10 p-2">
         <div
           className={cn(
             "mt-2 grid grid-cols-3 gap-2 text-[11px]",
@@ -387,6 +393,8 @@ export function TieAlertCard({
             </div>
           </div>
         ) : null}
+          </div>
+        </details>
       </div>
 
       {!enabled && <DisabledTieNote />}
@@ -691,7 +699,16 @@ function tieRadarStatus(alert: TieAlert) {
   };
 }
 
-function tieMultiplierStats(rounds: Round[] | undefined, scoreboard?: TieAlertScoreboard) {
+function tieMultiplierStats(
+  rounds: Round[] | undefined,
+  scoreboard?: TieAlertScoreboard,
+  history?: TieRadarHistoryAnalysis,
+) {
+  if (history?.daily?.counts) {
+    const counts = normalizeTieMultiplierCounts(history.daily.counts);
+    return TIE_MULTIPLIER_LABELS.map((label) => ({ label, value: counts[label] }));
+  }
+
   if (scoreboard?.multipliers) {
     const counts = normalizeTieMultiplierCounts(scoreboard.multipliers);
     return TIE_MULTIPLIER_LABELS.map((label) => ({ label, value: counts[label] }));

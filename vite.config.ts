@@ -3,6 +3,9 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 const frontendPort = Number(process.env.FRONTEND_PORT ?? process.env.VITE_FRONTEND_PORT ?? 5175);
 
 export default defineConfig({
+  nitro: {
+    plugins: ["./plugins/trial-claim-backfill.ts"],
+  } as any,
   tanstackStart: {
     server: { entry: "server" },
   },

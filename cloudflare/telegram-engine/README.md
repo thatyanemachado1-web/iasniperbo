@@ -22,6 +22,7 @@ https://sniperbo-telegram-engine.sniperboia.workers.dev
   - `ties_only`
   - `validator`
 - Dispara sinais via `POST /engine/signal`.
+- Liquida apenas os sinais pendentes via `POST /engine/results`, sem recriar entradas.
 - Lista ultimos envios em `GET /validator/notifications`.
 - Registra ultimo sucesso, ultimo erro e teste de conexao por sala.
 
@@ -52,6 +53,25 @@ wrangler deploy
 - `POST /validator/channels/test`
 - `GET /validator/notifications`
 - `POST /engine/signal`
+- `POST /engine/results`
+- `GET /engine/results/status`
+
+O publisher deve chamar `POST /engine/results` depois de aceitar um novo snapshot oficial:
+
+```json
+{
+  "source": "official_dashboard_publisher",
+  "dashboard": {
+    "rounds": [
+      { "id": 12345, "result": "BANKER" }
+    ]
+  }
+}
+```
+
+Essa rota processa somente notificacoes de entrada ja enviadas. Ela pode mandar
+`GREEN SG`, aviso de `G1`, `GREEN G1`, `RED` ou `EMPATE`, preservando as chaves
+de deduplicacao do sinal original. O monitor completo legado continua separado.
 
 O site expoe as salas ao cliente em `/app/salas` sem revelar Bot Token. O cadastro com segredo fica restrito ao painel administrativo em `/app/admin/telegram`.
 

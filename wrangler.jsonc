@@ -5,11 +5,15 @@
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
   "routes": ["sniperbo.com/*", "www.sniperbo.com/*"],
+  "triggers": {
+    "crons": ["*/1 * * * *"]
+  },
   "d1_databases": [
     {
       "binding": "DASHBOARD_RESULTS_DB",
       "database_name": "sniperbo-dashboard-results",
-      "database_id": "12452654-13f8-4b28-8c82-29c77fdfdfb5"
+      "database_id": "12452654-13f8-4b28-8c82-29c77fdfdfb5",
+      "migrations_dir": "cloudflare/d1/migrations"
     }
   ],
   "durable_objects": {

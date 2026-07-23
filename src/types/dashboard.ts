@@ -70,9 +70,7 @@ export type NeuralReadingMode = "SCANNING" | "OBSERVING" | "ACTIVE";
 export type NeuralOriginKind = "PAGANTE" | "OPOSTO" | "TIE";
 export type NeuralStrategyType =
   | "PAGANTE_DIRETO"
-  | "PAGANTE_OPOSTO"
-  | "PAGANTE_DELAY_2_CASAS"
-  | "OPOSTO_DELAY_2_CASAS";
+  | "PAGANTE_OPOSTO";
 
 export interface NeuralFormationCandidate {
   strategyId?: string | null;
@@ -82,7 +80,6 @@ export interface NeuralFormationCandidate {
   oppositeNumber?: number | null;
   oppositeSide?: SignalSide | "TIE" | null;
   targetSide?: SignalSide | "TIE" | null;
-  delayHouses?: number | null;
   accuracy?: number | null;
   accuracyLabel?: string | null;
   samples?: number | null;
@@ -104,7 +101,6 @@ export interface NeuralReading {
   oppositeSide?: SignalSide | "TIE" | null;
   winnerSide?: SignalSide | "TIE" | null;
   targetSide?: SignalSide | "TIE" | null;
-  delayHouses?: number | null;
   samples?: number | null;
   recentGreens?: number | null;
   recentReds?: number | null;
@@ -568,6 +564,19 @@ export interface DashboardData {
   revision?: number;
   sequenceId?: number;
   rounds: Round[];
+  bacBoBeadPlate?: Array<{
+    id: string;
+    side: "BANKER" | "PLAYER" | "TIE";
+    value: number;
+    slot: number;
+    row?: number;
+    column?: number;
+  }>;
+  bacBoRoadStats?: {
+    playerWins: number;
+    bankerWins: number;
+    ties: number;
+  };
   updatedAt?: string;
   collectorStatus?: string;
   websocketStatus?: string;

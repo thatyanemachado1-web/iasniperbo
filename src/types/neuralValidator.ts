@@ -9,7 +9,7 @@ export type ValidatorEntryType =
   | "AI";
 
 export type ValidatorDestination = "site" | "telegram" | "site_telegram" | "monitor" | "disabled";
-export type ValidatorGaleLimit = 0 | 1 | 2 | number;
+export type ValidatorGaleLimit = 0 | 1 | 2 | 3 | 4;
 export type ValidatorRisk = "baixo" | "medio" | "alto";
 export type ValidatorPatternStatus = "quente" | "estavel" | "observacao" | "fraco" | "sem_amostra";
 
@@ -33,7 +33,7 @@ export interface ValidatorDetail {
   roundId: number;
   roundLabel: string;
   entry: RoundResult;
-  status: "GREEN_SG" | "GREEN_G1" | "GREEN_G2" | "RED" | "TIE" | "PENDING";
+  status: "GREEN_SG" | "GREEN_G1" | "GREEN_G2" | "GREEN_G3" | "GREEN_G4" | "RED" | "TIE" | "PENDING";
   galeUsed: number;
   result?: RoundResult;
   sequence: ValidatorPatternToken[];
@@ -45,6 +45,8 @@ export interface ValidatorResult {
   sgWins: number;
   g1Wins: number;
   g2Wins: number;
+  g3Wins: number;
+  g4Wins: number;
   losses: number;
   ties: number;
   tieWins: number;

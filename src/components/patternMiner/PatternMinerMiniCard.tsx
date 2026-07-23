@@ -16,7 +16,7 @@ import type { DashboardPersistentResult, Round, RoundResult } from "@/types/dash
 import type { PatternMinerAlert, PatternMinerSnapshot, PatternMinerStrategy } from "@/types/patternMiner";
 
 const PATTERN_IA_CYCLE_STORAGE_KEY = "sniperbo:pattern-ia-hot-center-cycle:v3";
-const PATTERN_IA_HISTORY_STORAGE_KEY = "sniperbo:pattern-ia-results-history:v3";
+const PATTERN_IA_HISTORY_STORAGE_KEY = "sniperbo:pattern-ia-results-history:v4";
 const HOT_PATTERNS_SOURCE = "HOT_PATTERNS_AI_CENTER";
 const PATTERN_MINER_MIN_OCCURRENCES = 3;
 const PATTERN_MINER_MIN_VALIDATED = 2;
@@ -196,7 +196,7 @@ export function PatternMinerMiniCard({
     () => officialCycle ?? selectPatternCycle(contract, storedCycle, resultRounds.length ? resultRounds : rounds, latestRoundId),
     [contract, latestRoundId, officialCycle, resultRounds, rounds, storedCycle],
   );
-  const displayCycle = cycle && isCycleOpen(cycle) ? cycle : null;
+  const displayCycle = cycle && shouldDisplayCycleInMainCard(cycle) ? cycle : null;
   const displayContract = displayCycle ? contract : releaseClosedCycleFromMainCard(contract, cycle);
   const view = buildPatternView(displayContract, displayCycle);
   const sequence = displayContract.strategy?.sequence ?? displayCycle?.contract.sequence ?? [];
@@ -301,6 +301,12 @@ export function PatternMinerMiniCard({
           <PatternStatChip label="Forca" value={`${view.metricContract.strength}%`} tone="cyan" />
         </div>
 
+        <details className="group rounded-lg border border-white/10 bg-background/20">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan marker:content-none [&::-webkit-details-marker]:hidden">
+            <span>Ver mais — resultados e padrão</span>
+            <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="space-y-2 border-t border-white/10 p-2">
         <div className="grid grid-cols-3 gap-1.5 text-center">
           <PatternStatChip label="Greens" value={String(view.metricContract.recentGreens)} tone="green" />
           <PatternStatChip label="Amostra" value={String(view.metricContract.samples)} tone="muted" />
@@ -344,6 +350,8 @@ export function PatternMinerMiniCard({
         </Link>
 
         <PatternIaResultsHistoryList history={visibleResultHistory} />
+          </div>
+        </details>
         <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
       </div>
     </GlassCard>
@@ -1501,6 +1509,17 @@ function isCycleOpen(cycle: PatternIaCycle) {
   return cycle.cycleStatus === "AGUARDANDO_RESULTADO" || cycle.cycleStatus === "AGUARDANDO_G1";
 }
 
+const PATTERN_RESULT_HOLD_MS = 5_000;
+
+function shouldDisplayCycleInMainCard(cycle: PatternIaCycle) {
+  if (isCycleOpen(cycle)) return true;
+  if (!cycle.closedAt) return false;
+  const closedAt = Date.parse(cycle.closedAt);
+  if (!Number.isFinite(closedAt)) return false;
+  const age = Date.now() - closedAt;
+  return age >= -5_000 && age <= PATTERN_RESULT_HOLD_MS;
+}
+
 function sameContractCycle(contract: HotPatternsAiContract, cycle: PatternIaCycle) {
   return contract.signalId === cycle.signalId && contract.eventId === cycle.eventId;
 }
@@ -1623,16 +1642,29 @@ function patternIaHistoryFromPersistentResult(value: DashboardPersistentResult):
       : typeof value.tieMultiplier === "number"
         ? `${value.tieMultiplier}X`
         : null;
+  const payload = value.payload ?? {};
+  const patternId = String(payload.patternId ?? value.signalId ?? value.resultId);
+  const signalId = String(value.signalId ?? patternId);
+  const eventId = String(payload.eventId ?? value.resultId);
+  const entryRoundId = payload.entryRoundId ? String(payload.entryRoundId) : null;
+  const sourceRoundId = payload.sourceRoundId ? String(payload.sourceRoundId) : null;
 
   return normalizePatternHistoryItem({
     module: "PADROES_IA",
-    cycleId: value.resultId,
-    patternId: String(value.payload?.patternId ?? value.signalId ?? value.resultId),
+    cycleId: patternIaHistoryCycleId({
+      module: "PADROES_IA",
+      patternId,
+      signalId,
+      eventId,
+      entryRoundId,
+      sourceRoundId,
+    }),
+    patternId,
     technicalSide,
     result,
     attempt: value.attempt === "G1" ? "G1" : "SG",
     tieMultiplier,
-    entryRoundId: value.payload?.entryRoundId ? String(value.payload.entryRoundId) : null,
+    entryRoundId,
     closedRoundId: value.roundId === undefined || value.roundId === null ? null : String(value.roundId),
     closedAt: value.createdAt,
     label: value.label,

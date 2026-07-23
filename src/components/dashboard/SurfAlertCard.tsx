@@ -10,7 +10,13 @@ import { PremiumLock } from "@/components/ui-app/PremiumLock";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { cn } from "@/lib/utils";
 import type { DailySurfMaxSnapshot, DailySurfSide } from "@/surf/DailySurfMaxEngine";
-import type { DashboardPersistentResult, ModuleToggles, SurfAlert, SurfCycle, SurfHistoryEntry } from "@/types/dashboard";
+import type {
+  DashboardPersistentResult,
+  ModuleToggles,
+  SurfAlert,
+  SurfCycle,
+  SurfHistoryEntry,
+} from "@/types/dashboard";
 import { clampPercent, surfRiskBand, surfStrengthBand } from "@/utils/surf";
 import { ChevronDown, Waves } from "lucide-react";
 import { useState } from "react";
@@ -51,21 +57,32 @@ export function SurfAlertCard({
         )}
       >
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/35 to-transparent" />
-        <CompactHeader
-          view={view}
-          enabled={enabled}
-          toggles={toggles}
-          onModuleTogglesChange={onModuleTogglesChange}
-        />
-        <div className={cn(DASHBOARD_MODULE_CARD_BODY, "mt-2 transition duration-200", !enabled && "opacity-45 saturate-50")}>
+        <CompactHeader />
+        <div
+          className={cn(
+            DASHBOARD_MODULE_CARD_BODY,
+            "mt-2 transition duration-200",
+            !enabled && "opacity-45 saturate-50",
+          )}
+        >
           <ActionPanel view={view} />
           <StatsRow view={view} />
-          <DailySurfMemoryPanel alert={alert} compact />
-          <SurfCycleResultsPanel alert={alert} persistedResults={persistedResults} compact />
-          <SurfMaximaPanel snapshot={dailySurfMax} compact />
-          {view.reason && (
-            <div className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">{view.reason}</div>
-          )}
+          <details className="group rounded-lg border border-white/10 bg-background/20">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan marker:content-none [&::-webkit-details-marker]:hidden">
+              <span>Ver mais — resultados e análise</span>
+              <ChevronDown className="size-3 shrink-0 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="space-y-2 border-t border-white/10 p-2">
+              <DailySurfMemoryPanel alert={alert} compact />
+              <SurfCycleResultsPanel alert={alert} persistedResults={persistedResults} compact />
+              <SurfMaximaPanel snapshot={dailySurfMax} compact />
+              {view.reason && (
+                <div className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">
+                  {view.reason}
+                </div>
+              )}
+            </div>
+          </details>
           <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
         </div>
         {!enabled && <DisabledNote />}
@@ -80,7 +97,9 @@ export function SurfAlertCard({
   }
 
   return (
-    <GlassCard className={cn("min-h-[220px]", view.borderClass, !enabled && "border-muted-foreground/20")}>
+    <GlassCard
+      className={cn("min-h-[220px]", view.borderClass, !enabled && "border-muted-foreground/20")}
+    >
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-neon-cyan/35 to-transparent" />
       <SectionTitle
         title="Surf Analyzer"
@@ -90,11 +109,17 @@ export function SurfAlertCard({
             <AppBadge tone={view.statusTone} pulse={enabled && view.isActive}>
               {view.statusLabel}
             </AppBadge>
-            <ModuleToggleStrip toggles={toggles} modules={["surfAnalyzer"]} onChange={onModuleTogglesChange} />
+            <ModuleToggleStrip
+              toggles={toggles}
+              modules={["surfAnalyzer"]}
+              onChange={onModuleTogglesChange}
+            />
           </div>
         }
       />
-      <div className={cn("space-y-3 transition duration-200", !enabled && "opacity-45 saturate-50")}>
+      <div
+        className={cn("space-y-3 transition duration-200", !enabled && "opacity-45 saturate-50")}
+      >
         <ActionPanel view={view} large />
         <StatsRow view={view} large />
         <DailySurfMemoryPanel alert={alert} />
@@ -121,33 +146,11 @@ export function SurfAlertCard({
   );
 }
 
-function CompactHeader({
-  view,
-  enabled,
-  toggles,
-  onModuleTogglesChange,
-}: {
-  view: SurfView;
-  enabled: boolean;
-  toggles?: ModuleToggles;
-  onModuleTogglesChange?: (toggles: ModuleToggles) => void;
-}) {
+function CompactHeader() {
   return (
-    <div className="flex min-w-0 items-start justify-between gap-2">
-      <div className="min-w-0">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-          Surf Analyzer
-        </div>
-      </div>
-      <div className="flex max-w-[58%] shrink-0 flex-wrap items-center justify-end gap-1">
-        <AppBadge
-          tone={view.statusTone}
-          pulse={enabled && view.isActive}
-          className="max-w-full truncate px-1.5 py-0 text-[8px] tracking-[0.08em]"
-        >
-          {view.statusLabel}
-        </AppBadge>
-        <ModuleToggleStrip toggles={toggles} modules={["surfAnalyzer"]} onChange={onModuleTogglesChange} compact />
+    <div className="min-w-0">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+        Surf Analyzer
       </div>
     </div>
   );
@@ -162,7 +165,13 @@ function ActionPanel({ view, large = false }: { view: SurfView; large?: boolean 
         large && "py-3",
       )}
     >
-      <div className={cn("font-black uppercase leading-none", large ? "text-2xl" : "text-lg", view.actionClass)}>
+      <div
+        className={cn(
+          "font-black uppercase leading-none",
+          large ? "text-2xl" : "text-lg",
+          view.actionClass,
+        )}
+      >
         {view.action}
       </div>
       <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
@@ -213,7 +222,8 @@ function DailySurfMemoryPanel({ alert, compact = false }: { alert: SurfAlert; co
   const memory = alert.dailySurfMemory;
   if (!memory) return null;
 
-  const side = memory.surfBias ?? memory.stretchedSide ?? memory.recoverySide ?? memory.dominantSide;
+  const side =
+    memory.surfBias ?? memory.stretchedSide ?? memory.recoverySide ?? memory.dominantSide;
   const activeSide =
     alert.surf_prediction_side && alert.surf_prediction_side !== "NONE"
       ? alert.surf_prediction_side
@@ -224,7 +234,9 @@ function DailySurfMemoryPanel({ alert, compact = false }: { alert: SurfAlert; co
   const status = memoryAligned
     ? `${formatSurfStatus(memory.surfStatus)}${side ? ` ${side}` : ""}`
     : "MEMORIA DO DIA";
-  const dominant = memory.dominantSide ? `${memory.dominantSide} ${memory.dominantPercent}%` : `${memory.dominantPercent}%`;
+  const dominant = memory.dominantSide
+    ? `${memory.dominantSide} ${memory.dominantPercent}%`
+    : `${memory.dominantPercent}%`;
   const tone = memoryAligned
     ? side === "BANKER"
       ? "text-banker"
@@ -245,7 +257,9 @@ function DailySurfMemoryPanel({ alert, compact = false }: { alert: SurfAlert; co
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className={cn("truncate text-[9px] font-black uppercase tracking-[0.12em]", tone)}>{status}</div>
+        <div className={cn("truncate text-[9px] font-black uppercase tracking-[0.12em]", tone)}>
+          {status}
+        </div>
         <div className="shrink-0 text-[9px] font-black text-neon-cyan">
           {memoryAligned ? `${memory.confidence}%` : "contexto"}
         </div>
@@ -278,13 +292,15 @@ function SurfCycleResultsPanel({
     .map(surfHistoryFromPersistentResult)
     .filter((item): item is SurfHistoryEntry => Boolean(item));
   const history = dedupeSurfHistory([...persistedHistory, ...(alert.surfHistory ?? [])]);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const stats = alert.surfCycleStats;
   const persistedStats = buildSurfStatsFromHistory(history);
-  const cycleCount =
-    (persistedStats.greensSG || stats?.greensSG || 0) +
-    (persistedStats.redsSG || stats?.redsSG || 0) +
-    (persistedStats.empates || stats?.empates || 0);
+  const visibleStats = {
+    greensSG: Math.max(persistedStats.greensSG, stats?.greensSG ?? 0),
+    redsSG: Math.max(persistedStats.redsSG, stats?.redsSG ?? 0),
+    empates: Math.max(persistedStats.empates, stats?.empates ?? 0),
+  };
+  const cycleCount = visibleStats.greensSG + visibleStats.redsSG + visibleStats.empates;
 
   return (
     <div className="rounded-lg border border-neon-cyan/15 bg-background/22">
@@ -311,17 +327,25 @@ function SurfCycleResultsPanel({
       </button>
       {open && (
         <div className={cn("border-t border-white/10 px-2 pb-2", compact ? "pt-1.5" : "pt-2")}>
-          {(stats || persistedStats.greensSG || persistedStats.redsSG || persistedStats.empates) && (
+          {(stats ||
+            persistedStats.greensSG ||
+            persistedStats.redsSG ||
+            persistedStats.empates) && (
             <div className="mb-1.5 grid grid-cols-3 gap-1 text-center text-[8px]">
-              <MiniResultStat label="GREEN SG" value={persistedStats.greensSG || stats?.greensSG || 0} tone="green" />
-              <MiniResultStat label="RED SG" value={persistedStats.redsSG || stats?.redsSG || 0} tone="red" />
-              <MiniResultStat label="EMPATE" value={persistedStats.empates || stats?.empates || 0} tone="tie" />
+              <MiniResultStat label="GREEN SG" value={visibleStats.greensSG} tone="green" />
+              <MiniResultStat label="RED SG" value={visibleStats.redsSG} tone="red" />
+              <MiniResultStat label="EMPATE" value={visibleStats.empates} tone="tie" />
             </div>
           )}
           {history.length ? (
-            <div className={cn("space-y-1 overflow-y-auto pr-1", compact ? "max-h-20" : "max-h-24")}>
+            <div
+              className={cn("space-y-1 overflow-y-auto pr-1", compact ? "max-h-20" : "max-h-24")}
+            >
               {history.map((item, index) => (
-                <SurfHistoryRow key={`${item.cycleId ?? item.patternId ?? index}:${item.closedRoundId ?? index}`} item={item} />
+                <SurfHistoryRow
+                  key={`${item.cycleId ?? item.patternId ?? index}:${item.closedRoundId ?? index}`}
+                  item={item}
+                />
               ))}
             </div>
           ) : (
@@ -349,7 +373,10 @@ function surfHistoryFromPersistentResult(row: DashboardPersistentResult): SurfHi
     technicalSide: row.side === "BANKER" || row.side === "PLAYER" ? row.side : null,
     result,
     attempt: "SG",
-    tieMultiplier: row.tieMultiplier === undefined || row.tieMultiplier === null ? null : String(row.tieMultiplier),
+    tieMultiplier:
+      row.tieMultiplier === undefined || row.tieMultiplier === null
+        ? null
+        : String(row.tieMultiplier),
     entryRoundId: typeof row.payload?.entryRoundId === "string" ? row.payload.entryRoundId : null,
     closedRoundId: row.roundId ?? null,
     closedAt: row.createdAt,
@@ -394,17 +421,9 @@ function SurfHistoryRow({ item }: { item: SurfHistoryEntry }) {
   const side = item.technicalSide ?? "TIE";
   const label = formatSurfHistoryLabel(item);
   const resultClass =
-    result === "GREEN"
-      ? "text-success"
-      : result === "RED"
-        ? "text-destructive"
-        : "text-tie";
+    result === "GREEN" ? "text-success" : result === "RED" ? "text-destructive" : "text-tie";
   const sideClass =
-    side === "BANKER"
-      ? "text-banker"
-      : side === "PLAYER"
-        ? "text-player"
-        : "text-tie";
+    side === "BANKER" ? "text-banker" : side === "PLAYER" ? "text-player" : "text-tie";
 
   return (
     <div className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-white/10 bg-secondary/15 px-2 py-1 text-[9px]">
@@ -413,7 +432,9 @@ function SurfHistoryRow({ item }: { item: SurfHistoryEntry }) {
         <span className="mx-1 text-muted-foreground">/</span>
         <span className={resultClass}>{label}</span>
       </div>
-      <div className="shrink-0 text-[8px] font-bold text-muted-foreground">{formatSurfHistoryTime(item.closedAt)}</div>
+      <div className="shrink-0 text-[8px] font-bold text-muted-foreground">
+        {formatSurfHistoryTime(item.closedAt)}
+      </div>
     </div>
   );
 }
@@ -421,7 +442,8 @@ function SurfHistoryRow({ item }: { item: SurfHistoryEntry }) {
 function formatSurfHistoryLabel(item: SurfHistoryEntry) {
   if (item.result === "GREEN") return "GREEN SG";
   if (item.result === "RED") return "RED SG";
-  if (item.result === "EMPATE") return `EMPATE ${String(item.tieMultiplier ?? "").toUpperCase()}`.trim();
+  if (item.result === "EMPATE")
+    return `EMPATE ${String(item.tieMultiplier ?? "").toUpperCase()}`.trim();
   return item.label ?? item.statusLabel ?? item.result;
 }
 
@@ -459,13 +481,21 @@ function MemoryChip({
 
   return (
     <div className={cn("min-w-0 rounded-md border px-1.5 py-1", toneClass)}>
-      <div className="truncate text-[7px] font-black uppercase tracking-[0.08em] opacity-75">{label}</div>
+      <div className="truncate text-[7px] font-black uppercase tracking-[0.08em] opacity-75">
+        {label}
+      </div>
       <div className="mt-0.5 truncate font-black leading-none">{value}</div>
     </div>
   );
 }
 
-function SurfMaximaPanel({ snapshot, compact = false }: { snapshot: DailySurfMaxSnapshot; compact?: boolean }) {
+function SurfMaximaPanel({
+  snapshot,
+  compact = false,
+}: {
+  snapshot: DailySurfMaxSnapshot;
+  compact?: boolean;
+}) {
   const maxima = snapshot.dailyMaxSurf;
   const best = bestDailySurf(maxima);
 
@@ -485,7 +515,9 @@ function SurfMaximaPanel({ snapshot, compact = false }: { snapshot: DailySurfMax
 
   return (
     <div className="rounded-xl border border-neon-cyan/12 bg-background/24 p-2">
-      <div className="text-[9px] font-black uppercase tracking-[0.16em] text-neon-cyan">Maxima do Surf Hoje</div>
+      <div className="text-[9px] font-black uppercase tracking-[0.16em] text-neon-cyan">
+        Maxima do Surf Hoje
+      </div>
       <div className="mt-2 grid grid-cols-3 gap-1.5">
         <SurfMaxMiniCard label="Player" value={maxima.player} tone="player" />
         <SurfMaxMiniCard label="Empate" value={maxima.tie} tone="tie" />
@@ -569,7 +601,8 @@ type SurfCycleDecision = {
 function buildSurfView(alert: SurfAlert): SurfView {
   const memory = alert.dailySurfMemory;
   const memoryStatus = memory?.surfStatus;
-  const memorySide = memory?.surfBias ?? memory?.stretchedSide ?? memory?.recoverySide ?? memory?.dominantSide;
+  const memorySide =
+    memory?.surfBias ?? memory?.stretchedSide ?? memory?.recoverySide ?? memory?.dominantSide;
   const predictionSide =
     alert.surf_prediction_side && alert.surf_prediction_side !== "NONE"
       ? alert.surf_prediction_side
@@ -595,11 +628,16 @@ function buildSurfView(alert: SurfAlert): SurfView {
       : formatSurfStatus(alert.surf_status ?? alert.surf_phase);
   const blockedByMemory =
     memoryAligned && (memoryStatus === "RISCO_QUEBRA" || memoryStatus === "SURF_ESTICADO");
-  const isActive = Boolean(alert.surf_alert && !blockedByMemory && sideLabel !== "AGUARDAR" && confidence >= 60);
+  const isActive = Boolean(
+    alert.surf_alert && !blockedByMemory && sideLabel !== "AGUARDAR" && confidence >= 60,
+  );
   const cycleDecision = buildSurfCycleDecision(alert.surfCycle);
-  const decision = cycleDecision ?? buildSurfDecision(confidence, breakRisk, sideLabel, isActive, statusLabel, memoryStatus);
+  const decision =
+    cycleDecision ??
+    buildSurfDecision(confidence, breakRisk, sideLabel, isActive, statusLabel, memoryStatus);
   const effectiveStatusLabel = cycleDecision?.statusLabel ?? statusLabel;
-  const effectiveStatusTone = cycleDecision?.statusTone ?? (strengthBand.tone === "gold" ? "amber" : strengthBand.tone);
+  const effectiveStatusTone =
+    cycleDecision?.statusTone ?? (strengthBand.tone === "gold" ? "amber" : strengthBand.tone);
 
   return {
     side: side === "BANKER" || side === "PLAYER" ? side : "NONE",
@@ -762,7 +800,10 @@ function surfSideBorderClass(sideLabel: string) {
   return "border-success/30";
 }
 
-function bestDailySurf(maxima: DailySurfMaxSnapshot["dailyMaxSurf"]): { label: DailySurfSide; value: number } {
+function bestDailySurf(maxima: DailySurfMaxSnapshot["dailyMaxSurf"]): {
+  label: DailySurfSide;
+  value: number;
+} {
   return [
     { label: "BANKER" as const, value: maxima.banker },
     { label: "PLAYER" as const, value: maxima.player },

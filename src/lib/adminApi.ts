@@ -629,10 +629,53 @@ async function request<T>(session: AdminSession, path: string, init: RequestInit
       clearAdminSession();
       throw new Error("Sessão admin expirada ou não autorizada.");
     }
-    const text = await response.text();
-    throw new Error(text || "Falha ao conversar com a API admin.");
+    throw new Error(await readAdminApiError(response));
   }
   return (await response.json()) as T;
+}
+
+async function readAdminApiError(response: Response) {
+  const fallback =
+    response.status === 503
+      ? "O serviço de cadastros está temporariamente indisponível. Tente novamente em alguns segundos."
+      : `Falha ao conversar com a API admin (HTTP ${response.status}).`;
+
+  let raw = "";
+  try {
+    raw = (await response.text()).trim();
+  } catch {
+    return fallback;
+  }
+  if (!raw) return fallback;
+
+  try {
+    const message = extractAdminApiErrorMessage(JSON.parse(raw));
+    return message || fallback;
+  } catch {
+    const plainText = raw
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return plainText && plainText.length <= 280 ? plainText : fallback;
+  }
+}
+
+function extractAdminApiErrorMessage(payload: unknown): string {
+  if (typeof payload === "string") return payload.trim().slice(0, 280);
+  if (!payload || typeof payload !== "object") return "";
+
+  const object = payload as Record<string, unknown>;
+  for (const key of ["message", "error", "detail", "description"]) {
+    const value = object[key];
+    if (typeof value === "string" && value.trim()) return value.trim().slice(0, 280);
+    if (value && typeof value === "object") {
+      const nested = extractAdminApiErrorMessage(value);
+      if (nested) return nested;
+    }
+  }
+  return "";
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = DEFAULT_ADMIN_REQUEST_TIMEOUT_MS) {

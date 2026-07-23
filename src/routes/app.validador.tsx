@@ -10,6 +10,8 @@ import {
   History,
   Layers3,
   Loader2,
+  LockKeyhole,
+  Plus,
   RotateCcw,
   Save,
   Search,
@@ -19,13 +21,22 @@ import {
   Trophy,
   Wand2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { DesktopDashboardQuickNav } from "@/components/dashboard/DesktopDashboardQuickNav";
 import { AppBadge } from "@/components/ui-app/AppBadge";
 import { GlassCard } from "@/components/ui-app/GlassCard";
 import { SectionTitle } from "@/components/ui-app/SectionTitle";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -42,11 +53,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import { readAdminSession } from "@/lib/adminApi";
-import { hasFullAccess, readUserSession } from "@/lib/userSession";
+import { hasAdminRole, hasFullAccess, readUserSession } from "@/lib/userSession";
 import {
   DEFAULT_VALIDATOR_CONFIG,
   NeuralValidatorEngine,
@@ -87,9 +98,22 @@ import type {
   ValidatorResult,
 } from "@/types/neuralValidator";
 
+const TelegramRoomsPanel = lazy(() =>
+  import("./app.salas").then((module) => ({ default: module.TelegramRoomsPage })),
+);
+
 export const Route = createFileRoute("/app/validador")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    tab: normalizeValidatorTab(search.tab),
+  }),
   component: NeuralValidatorPage,
 });
+
+type ValidatorTab = "dashboard" | "validator" | "ai" | "saved" | "telegram";
+
+function normalizeValidatorTab(value: unknown): ValidatorTab {
+  return value === "ai" || value === "saved" || value === "telegram" ? value : "validator";
+}
 
 const engine = new NeuralValidatorEngine();
 const TELEGRAM_SENT_KEY = "sniper_neural_validator_telegram_sent_v3";
@@ -97,12 +121,12 @@ const VALIDATOR_DELETED_PATTERNS_KEY = "sniper_neural_validator_deleted_patterns
 const VALIDATOR_CLIENT_HISTORY_LIMIT = 200;
 
 const ENTRY_OPTIONS: Array<{ value: ValidatorEntryType; label: string }> = [
-  { value: "AI", label: "Entrada sugerida pela IA" },
-  { value: "BANKER", label: "Entrar no Banker" },
-  { value: "PLAYER", label: "Entrar no Player" },
-  { value: "TIE", label: "Entrar no Tie" },
-  { value: "OPPOSITE", label: "Entrar no lado oposto" },
-  { value: "SAME_LAST", label: "Mesmo lado do ultimo resultado" },
+  { value: "AI", label: "Direção sugerida pela IA" },
+  { value: "BANKER", label: "Direção Banker" },
+  { value: "PLAYER", label: "Direção Player" },
+  { value: "TIE", label: "Direção Tie" },
+  { value: "OPPOSITE", label: "Direção oposta" },
+  { value: "SAME_LAST", label: "Mesma direção do último resultado" },
 ];
 
 const DESTINATION_OPTIONS: Array<{ value: ValidatorDestination; label: string }> = [
@@ -114,24 +138,14 @@ const DESTINATION_OPTIONS: Array<{ value: ValidatorDestination; label: string }>
 ];
 
 type ValidatorTelegramModuleKey =
-  | "ai_patterns"
-  | "paying_numbers"
-  | "surf_alert"
-  | "ties_only"
-  | "validator";
+  "ai_patterns" | "paying_numbers" | "surf_alert" | "ties_only" | "validator";
 type ValidatorTelegramButtonConfig = {
   enabled: boolean;
   label: string;
   url: string;
 };
 type ValidatorTelegramTemplateKey =
-  | "entry"
-  | "analyzing"
-  | "green"
-  | "gale"
-  | "red"
-  | "expired"
-  | "canceled";
+  "entry" | "analyzing" | "green" | "gale" | "red" | "expired" | "canceled";
 type ValidatorTelegramModuleConfig = {
   enabled: boolean;
   entryType: "AUTO" | "BANKER" | "PLAYER" | "TIE";
@@ -193,35 +207,35 @@ const DEFAULT_TELEGRAM_MODULE_TEMPLATES: Record<ValidatorTelegramModuleKey, stri
   paying_numbers: `\u{1F48E} <b>N\u00DAMERO PAGANTE CONFIRMADO</b>\n\n\u{1F522} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entryLabel}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}\n\u{1F4CC} <b>Status:</b> {{status}}`,
   surf_alert: `\u{1F30A} <b>AVISO DE SURF CONFIRMADO</b>\n\n\u{1F3AF} <b>Entrada:</b> {{entryCompact}}\n\u26A0\uFE0F <b>Risco:</b> {{risk}}\n\u{1F4CA} <b>Confian\u00E7a:</b> {{confidence}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   ties_only: `\u{1F7E1} <b>POSS\u00CDVEL EMPATE</b>\n\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Cobertura:</b> at\u00E9 G{{tieCoverage}}\n\u{1F4CA} <b>N\u00EDvel:</b> {{level}}`,
-  validator: `\u{1F916} <b>PADR\u00C3O VALIDADOR</b>\n\n\u{1F3B2} <b>Mesa:</b> {{table}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}\n\u{1F4CA} <b>Assertividade:</b> {{percentage}}`,
+  validator: `\u{1F916} <b>AVISO DE PADR\u00C3O</b>\n\n\u{1F3B2} <b>Mesa:</b> {{table}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Padr\u00E3o observado:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Janela de valida\u00E7\u00E3o:</b> {{gale}}\n\u{1F4CA} <b>Hist\u00F3rico observado:</b> {{percentage}}`,
 };
 const DEFAULT_TELEGRAM_GREEN_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns: `\u2705 <b>{{result}}</b>\n\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   paying_numbers: `\u2705 <b>{{result}}</b>\n\n\u{1F48E} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   surf_alert: `\u2705 <b>{{result}}</b>\n\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   ties_only: `\u2705 <b>{{result}}</b>\n\n\u{1F7E1} <b>Empate confirmado</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
-  validator: `\u2705 <b>{{result}}</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
+  validator: `\u2705 <b>COMPAT\u00CDVEL</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Padr\u00E3o observado:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Janela de valida\u00E7\u00E3o:</b> {{gale}}`,
 };
 const DEFAULT_TELEGRAM_ANALYZING_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns: `\u{1F50E} <b>ANALISANDO PADR\u00C3O IA</b>\n\u{1F3B2} <b>Mesa:</b> {{table}}\n\u23F3 Aguardando confirma\u00E7\u00E3o real.`,
   paying_numbers: `\u{1F50E} <b>ANALISANDO N\u00DAMERO PAGANTE</b>\n\u{1F522} <b>N\u00FAmeros:</b> {{numbers}}\n\u23F3 Aguardando confirma\u00E7\u00E3o real.`,
   surf_alert: `\u{1F50E} <b>ANALISANDO SURF</b>\n\u{1F30A} <b>Dire\u00E7\u00E3o:</b> {{side}}\n\u23F3 Aguardando confirma\u00E7\u00E3o real.`,
   ties_only: `\u{1F50E} <b>ANALISANDO EMPATE</b>\n\u{1F7E1} <b>Press\u00E3o Tie:</b> {{tie_pressure}}\n\u23F3 Aguardando confirma\u00E7\u00E3o real.`,
-  validator: `\u{1F50E} <b>ANALISANDO VALIDADOR</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u23F3 Aguardando entrada validada.`,
+  validator: `\u{1F50E} <b>ANALISANDO VALIDADOR</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u23F3 Aguardando dire\u00E7\u00E3o validada.`,
 };
 const DEFAULT_TELEGRAM_GALE_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns: `\u{1F6E1}\uFE0F <b>FAZER {{gale}}</b>\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}`,
   paying_numbers: `\u{1F6E1}\uFE0F <b>FAZER {{gale}}</b>\n\u{1F522} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}`,
   surf_alert: `\u{1F6E1}\uFE0F <b>FAZER {{gale}}</b>\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}`,
   ties_only: `\u{1F6E1}\uFE0F <b>COBRIR EMPATE {{gale}}</b>\n\u{1F7E1} <b>Press\u00E3o:</b> {{tie_pressure}}`,
-  validator: `\u{1F6E1}\uFE0F <b>FAZER {{gale}}</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}`,
+  validator: `\u{1F6E1}\uFE0F <b>JANELA {{gale}}</b>\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Padr\u00E3o observado:</b> {{entry}}`,
 };
 const DEFAULT_TELEGRAM_RED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns: `\u274C <b>RED</b>\n\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   paying_numbers: `\u274C <b>RED</b>\n\n\u{1F48E} <b>N\u00FAmero:</b> {{number}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   surf_alert: `\u274C <b>RED</b>\n\n\u{1F30A} <b>M\u00F3dulo:</b> {{module}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
   ties_only: `\u274C <b>RED</b>\n\n\u{1F7E1} <b>Empate n\u00E3o confirmou</b>\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
-  validator: `\u274C <b>RED</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Entrada:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Prote\u00E7\u00E3o:</b> {{gale}}`,
+  validator: `\u274C <b>N\u00C3O COMPAT\u00CDVEL</b>\n\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}\n\u{1F3AF} <b>Padr\u00E3o observado:</b> {{entry}}\n\u{1F6E1}\uFE0F <b>Janela de valida\u00E7\u00E3o:</b> {{gale}}`,
 };
 const DEFAULT_TELEGRAM_EXPIRED_TEMPLATES: Record<ValidatorTelegramModuleKey, string> = {
   ai_patterns: `\u231B <b>SINAL EXPIRADO</b>\n\u{1F916} <b>M\u00F3dulo:</b> {{module}}\n\u{1F9E9} <b>Padr\u00E3o:</b> {{pattern}}`,
@@ -246,29 +260,40 @@ const DEFAULT_TELEGRAM_TIE_TEMPLATES: Record<ValidatorTelegramModuleKey, string>
 };
 
 function NeuralValidatorPage() {
+  const { tab: requestedTab } = Route.useSearch();
   const { data, mode } = useDashboardData();
   const session = readUserSession();
   const adminSession = readAdminSession();
   const hasClientSession = Boolean(session.clientToken);
-  const adminAccess = Boolean(adminSession?.token && !hasClientSession);
+  const adminAccess =
+    Boolean(adminSession?.token && !hasClientSession) || hasAdminRole(session);
   const fullAccess = adminAccess || hasFullAccess(session);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState<ValidatorTab>(requestedTab);
+
+  useEffect(() => {
+    setActiveTab(requestedTab);
+  }, [requestedTab]);
   const realTimeRounds = mode === "live" && !data.mockMode ? data.rounds : [];
-  const planLimits = adminAccess ? planLimitForSession("vip", true) : planLimitForSession(session.plan, fullAccess);
+  const planLimits = adminAccess
+    ? planLimitForSession("premium", true)
+    : planLimitForSession(session.plan, fullAccess);
   const [serverHistory, setServerHistory] = useState<Round[]>([]);
-  const [serverHistoryStatus, setServerHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [serverHistoryStatus, setServerHistoryStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
   const historyRounds = useMemo(
     () => mergeRoundSources([serverHistory, realTimeRounds]).slice(-VALIDATOR_CLIENT_HISTORY_LIMIT),
     [realTimeRounds, serverHistory],
   );
   const hasHistory = historyRounds.length > 0;
   const [notice, setNotice] = useState("");
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [upgradeModalReason, setUpgradeModalReason] = useState("");
 
   const [pattern, setPattern] = useState<ValidatorPatternToken[]>(() => {
     const draft = readPatternDraft();
     return draft.length ? draft : [{ side: "B" }, { side: "P" }, { side: "B" }];
   });
-  const [tokenScore, setTokenScore] = useState("");
   const [config, setConfig] = useState<ValidatorConfig>({
     ...DEFAULT_VALIDATOR_CONFIG,
     name: "Estrategia Neural",
@@ -276,9 +301,14 @@ function NeuralValidatorPage() {
     historySize: Math.min(DEFAULT_VALIDATOR_CONFIG.historySize, planLimits.history),
   });
   const [manualResult, setManualResult] = useState<ValidatorResult | null>(null);
-  const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() => readSavedPatterns());
+  const [manualResultLoading, setManualResultLoading] = useState(false);
+  const [savedPatterns, setSavedPatterns] = useState<SavedValidatorPattern[]>(() =>
+    readSavedPatterns().filter((item) => !readDeletedValidatorPatternIds().has(item.id)),
+  );
   const [channels, setChannels] = useState<ValidatorNotificationChannel[]>([]);
-  const [recentTelegramNotifications, setRecentTelegramNotifications] = useState<ValidatorTelegramNotification[]>([]);
+  const [recentTelegramNotifications, setRecentTelegramNotifications] = useState<
+    ValidatorTelegramNotification[]
+  >([]);
   const [testingTelegramId, setTestingTelegramId] = useState("");
   const [savingChannel, setSavingChannel] = useState(false);
   const [channelValidation, setChannelValidation] = useState({
@@ -325,7 +355,14 @@ function NeuralValidatorPage() {
   const hasValidationHistory = Boolean(manualResult?.analyzedRounds || historyRounds.length);
   const currentSavedPattern = useMemo(
     () => findSavedPattern(savedPatterns, pattern, config),
-    [savedPatterns, pattern, config.entryType, config.galeLimit, config.tableId, config.tieProtection],
+    [
+      savedPatterns,
+      pattern,
+      config.entryType,
+      config.galeLimit,
+      config.tableId,
+      config.tieProtection,
+    ],
   );
 
   const liveHits = useMemo(
@@ -369,7 +406,7 @@ function NeuralValidatorPage() {
     return () => {
       cancelled = true;
     };
-  }, [data.updatedAt]);
+  }, [session.email, session.clientToken, adminSession?.token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -399,15 +436,24 @@ function NeuralValidatorPage() {
 
         const syncedChannels = confirmedChannels ?? [];
         const deletedPatternIds = readDeletedValidatorPatternIds();
+        const localPatterns = readSavedPatterns();
+        const availableServerPatterns = serverPatterns.filter(
+          (item) => !deletedPatternIds.has(item.id),
+        );
+        const availableLocalPatterns = localPatterns.filter(
+          (item) => !deletedPatternIds.has(item.id),
+        );
         const mergedPatterns = autoPrepareAdminTelegramDelivery(
-          serverPatterns.filter((item) => !deletedPatternIds.has(item.id)),
+          mergeValidatorItems(availableServerPatterns, availableLocalPatterns),
           syncedChannels,
           adminAccess,
         );
         writeSavedPatterns(mergedPatterns);
         setSavedPatterns(mergedPatterns);
 
-        const patternsToSync = mergedPatterns.filter((item) => shouldSyncValidatorItem(item, serverPatterns));
+        const patternsToSync = mergedPatterns.filter((item) =>
+          shouldSyncValidatorItem(item, availableServerPatterns),
+        );
         await Promise.all([
           ...patternsToSync.map((item) => saveServerValidatorPattern(item).catch(() => null)),
         ]);
@@ -436,10 +482,11 @@ function NeuralValidatorPage() {
     async function validateCurrentPattern() {
       if (pattern.length < 1) {
         setManualResult(null);
+        setManualResultLoading(false);
         return;
       }
 
-      setManualResult(null);
+      setManualResultLoading(true);
       try {
         const result = await validatePatternOnServer(pattern, config);
         if (!cancelled) setManualResult(result);
@@ -449,11 +496,13 @@ function NeuralValidatorPage() {
         setManualResult(
           fallbackHistory.length
             ? engine.validatePattern(fallbackHistory, pattern, {
-              ...config,
-              historySize: fallbackHistory.length,
-            })
+                ...config,
+                historySize: fallbackHistory.length,
+              })
             : null,
         );
+      } finally {
+        if (!cancelled) setManualResultLoading(false);
       }
     }
 
@@ -468,7 +517,6 @@ function NeuralValidatorPage() {
     config.historySize,
     config.tableId,
     config.tieProtection,
-    data.updatedAt,
     historySignature,
     patternSignature,
   ]);
@@ -478,9 +526,7 @@ function NeuralValidatorPage() {
     setSiteAlerts((current) => {
       const byId = new Map(current.map((hit) => [hit.id, hit]));
       for (const hit of liveHits) byId.set(hit.id, hit);
-      return [...byId.values()]
-        .sort((a, b) => b.detectedRoundId - a.detectedRoundId)
-        .slice(0, 5);
+      return [...byId.values()].sort((a, b) => b.detectedRoundId - a.detectedRoundId).slice(0, 5);
     });
     void Promise.all(liveHits.map((hit) => sendLiveHitToTelegram(hit)));
     setSavedPatterns((current) => {
@@ -500,16 +546,18 @@ function NeuralValidatorPage() {
       if (changed) writeSavedPatterns(next);
       return changed ? next : current;
     });
-  }, [liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|"), validatorTelegramReadySignature]);
+  }, [
+    liveHits.map((hit) => `${hit.pattern.id}:${hit.detectedRoundId}`).join("|"),
+    validatorTelegramReadySignature,
+  ]);
 
-  function addToken(side: RoundResult, scoreText = tokenScore) {
+  function addToken(side: RoundResult, scoreText = "") {
     const score = Number(scoreText);
     const token: ValidatorPatternToken = {
       side,
       ...(Number.isFinite(score) && score > 0 ? { score } : {}),
     };
     setPattern((current) => [...current, token]);
-    setTokenScore("");
   }
 
   function saveCurrentPattern(
@@ -517,6 +565,10 @@ function NeuralValidatorPage() {
     sourcePattern = pattern,
     name = config.name,
   ) {
+    if (planLimits.patterns <= 0) {
+      showNotice("Salvar estrategias exige o plano Premium.");
+      return false;
+    }
     if (!sourcePattern.length) {
       showNotice("Monte pelo menos uma bolinha antes de salvar.");
       return false;
@@ -531,8 +583,7 @@ function NeuralValidatorPage() {
       return false;
     }
     const sourceHistory = validationHistoryRounds.length ? validationHistoryRounds : historyRounds;
-    const validation =
-      sourceResult ?? engine.validatePattern(sourceHistory, sourcePattern, config);
+    const validation = sourceResult ?? engine.validatePattern(sourceHistory, sourcePattern, config);
     const now = new Date().toISOString();
     const saved: SavedValidatorPattern = {
       id: createStorageId("pattern"),
@@ -561,10 +612,16 @@ function NeuralValidatorPage() {
     setSavedPatterns(next);
     void saveServerValidatorPattern(saved).then((serverPattern) => {
       if (!serverPattern) {
-        showNotice("Padrao salvo no navegador, mas o servidor nao confirmou. Telegram precisa do padrao no servidor.");
+        showNotice(
+          "Padrao salvo no navegador, mas o servidor nao confirmou. Telegram precisa do padrao no servidor.",
+        );
       }
     });
-    showNotice(sourceHistory.length ? "Padrao salvo em Padroes Salvos." : "Padrao salvo sem amostra historica.");
+    showNotice(
+      sourceHistory.length
+        ? "Padrao salvo em Padroes Salvos."
+        : "Padrao salvo sem amostra historica.",
+    );
     return true;
   }
 
@@ -583,13 +640,18 @@ function NeuralValidatorPage() {
 
   function removePattern(id: string) {
     markDeletedValidatorPatternId(id);
-    const nextPatterns = removeSavedPattern(id).filter((item) => item.id !== id);
+    const deletedPatternIds = readDeletedValidatorPatternIds();
+    const nextPatterns = removeSavedPattern(id).filter((item) => !deletedPatternIds.has(item.id));
     writeSavedPatterns(nextPatterns);
     setSavedPatterns(nextPatterns);
     void deleteServerValidatorPattern(id)
       .then(() => showNotice("Padrao excluido definitivamente."))
       .catch((error) => {
-        showNotice(error instanceof Error ? error.message : "Padrao removido localmente; servidor nao confirmou.");
+        showNotice(
+          error instanceof Error
+            ? error.message
+            : "Padrao removido localmente; servidor nao confirmou.",
+        );
       });
   }
 
@@ -601,11 +663,12 @@ function NeuralValidatorPage() {
       tieProtection: patternItem.tieProtection,
       tableId: patternItem.tableId,
     };
-    const validation = await validatePatternOnServer(patternItem.pattern, validationConfig).catch(() =>
-      engine.validatePattern(historyRounds, patternItem.pattern, {
-        ...validationConfig,
-        historySize: Math.min(historyRounds.length || 1, VALIDATOR_CLIENT_HISTORY_LIMIT),
-      }),
+    const validation = await validatePatternOnServer(patternItem.pattern, validationConfig).catch(
+      () =>
+        engine.validatePattern(historyRounds, patternItem.pattern, {
+          ...validationConfig,
+          historySize: Math.min(historyRounds.length || 1, VALIDATOR_CLIENT_HISTORY_LIMIT),
+        }),
     );
     const nextItem = {
       ...patternItem,
@@ -636,7 +699,10 @@ function NeuralValidatorPage() {
     showNotice("Placar do padrao zerado.");
   }
 
-  function updateSavedPattern(patternItem: SavedValidatorPattern, patch: Partial<SavedValidatorPattern>) {
+  function updateSavedPattern(
+    patternItem: SavedValidatorPattern,
+    patch: Partial<SavedValidatorPattern>,
+  ) {
     const updated = {
       ...patternItem,
       ...patch,
@@ -644,6 +710,34 @@ function NeuralValidatorPage() {
     };
     setSavedPatterns(upsertSavedPattern(updated));
     void saveServerValidatorPattern(updated);
+  }
+
+  function togglePatternAnalyticalAlert(
+    patternItem: SavedValidatorPattern,
+    channel: ValidatorNotificationChannel | null,
+    enabled: boolean,
+  ) {
+    if (!planLimits.telegram || planLimits.channels <= 0) {
+      openUpgradeModal(
+        "Avisos automáticos no Telegram estão disponíveis nos planos Premium e Premium Black.",
+      );
+      return;
+    }
+    if (enabled && !channel) {
+      showNotice("Conecte e teste um canal antes de ligar o aviso automático.");
+      return;
+    }
+
+    updateSavedPattern(patternItem, {
+      destination: enabled ? "site_telegram" : "site",
+      telegramChannelId: enabled && channel ? channel.id : patternItem.telegramChannelId,
+      isActive: true,
+    });
+    showNotice(
+      enabled
+        ? `Aviso automático ligado em ${channel?.name || "Telegram"}.`
+        : "Aviso automático desligado para este padrão.",
+    );
   }
 
   function updateAllSavedPatternDelivery(
@@ -675,11 +769,16 @@ function NeuralValidatorPage() {
 
   async function sendLiveHitToTelegram(hit: LiveValidatorHit) {
     const patternItem = hit.pattern;
-    if (patternItem.destination === "disabled" || patternItem.destination === "monitor") {
-      showNotice("Padrao detectado no site. Telegram nao enviado porque o destino esta monitorar/desativado.");
+    if (
+      patternItem.destination === "site" ||
+      patternItem.destination === "disabled" ||
+      patternItem.destination === "monitor"
+    ) {
+      showNotice("Padrão observado no site. O aviso automático do Telegram está desligado.");
       return;
     }
-    const channel = channels.find((item) => item.id === patternItem.telegramChannelId) ||
+    const channel =
+      channels.find((item) => item.id === patternItem.telegramChannelId) ||
       channels.find((item) => item.isActive && item.chatId) ||
       channels[0];
     if (!channel || !channel.isActive) {
@@ -689,7 +788,7 @@ function NeuralValidatorPage() {
         detectedRoundId: hit.detectedRoundId,
         channels: channels.length,
       });
-      showNotice("Padrao detectado no site. Telegram nao enviado: nenhum canal ativo.");
+      showNotice("Padrão observado no site. Conecte um canal para receber o aviso.");
       return;
     }
 
@@ -700,7 +799,7 @@ function NeuralValidatorPage() {
         channelId: channel.id,
         detectedRoundId: hit.detectedRoundId,
       });
-      showNotice("Padrao detectado no site. Telegram nao enviado: canal sem Chat ID.");
+      showNotice("Padrão observado no site. Conecte novamente o canal do Telegram.");
       return;
     }
 
@@ -712,7 +811,7 @@ function NeuralValidatorPage() {
         channelId: channel.id,
         detectedRoundId: hit.detectedRoundId,
       });
-      showNotice("Padrao detectado no site. Telegram nao enviado: Seguir Validador esta inativo.");
+      showNotice("Padrão observado no site. O aviso automático do Validador está desligado.");
       return;
     }
 
@@ -737,7 +836,7 @@ function NeuralValidatorPage() {
         channelId: channel.id,
         detectedRoundId: hit.detectedRoundId,
       });
-      showNotice(`Sinal enviado no Telegram: ${channel.name}.`);
+      showNotice(`Aviso de padrão enviado para ${channel.name}.`);
     } catch (error) {
       telegramSendKeysRef.current.delete(sendKey);
       forgetTelegramNotificationSent(sendKey);
@@ -747,7 +846,7 @@ function NeuralValidatorPage() {
         detectedRoundId: hit.detectedRoundId,
         error: error instanceof Error ? error.message : String(error),
       });
-      showNotice(error instanceof Error ? error.message : "Falha ao enviar sinal no Telegram.");
+      showNotice("Não foi possível enviar o aviso agora.");
     }
   }
 
@@ -766,9 +865,10 @@ function NeuralValidatorPage() {
       return sameName && sameChat;
     });
     const duplicateChannel = chatId
-      ? channels.find((channel) =>
-          normalizeValidatorChannelCode(channel.chatId) === normalizeValidatorChannelCode(chatId) &&
-          channel.id !== matchingChannel?.id
+      ? channels.find(
+          (channel) =>
+            normalizeValidatorChannelCode(channel.chatId) ===
+              normalizeValidatorChannelCode(chatId) && channel.id !== matchingChannel?.id,
         )
       : null;
     if (duplicateChannel) {
@@ -810,9 +910,17 @@ function NeuralValidatorPage() {
       updatedAt: now,
     } as ValidatorNotificationChannel;
     setSavingChannel(true);
-    void saveServerValidatorChannel(channel, token, channelValidation.key === validationKey ? channelValidation.code : "")
+    void saveServerValidatorChannel(
+      channel,
+      token,
+      channelValidation.key === validationKey ? channelValidation.code : "",
+    )
       .then((serverChannel) => {
-        setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(serverChannel))));
+        setChannels(
+          markServerConfirmedChannels(
+            upsertNotificationChannel(markServerConfirmedChannel(serverChannel)),
+          ),
+        );
         setChannelForm((current) => ({ ...current, botToken: "", chatId: "", buttonLink: "" }));
         setChannelValidation({ key: "", code: "", validatedAt: "" });
         showNotice("Canal salvo no servidor. Token fica mascarado depois de salvo.");
@@ -843,18 +951,32 @@ function NeuralValidatorPage() {
             method: "PATCH",
             cache: "no-store",
             headers: validatorApiHeaders(true),
-            body: JSON.stringify({ channel: { signalModules: updated.signalModules, isActive: updated.isActive } }),
+            body: JSON.stringify({
+              channel: { signalModules: updated.signalModules, isActive: updated.isActive },
+            }),
           }).then(async (response) => {
-            const data = (await response.json().catch(() => null)) as { channel?: ValidatorNotificationChannel; error?: string } | null;
-            if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou a atualizacao.");
+            const data = (await response.json().catch(() => null)) as {
+              channel?: ValidatorNotificationChannel;
+              error?: string;
+            } | null;
+            if (!response.ok)
+              throw new Error(data?.error || "Servidor nao confirmou a atualizacao.");
             if (!data?.channel) throw new Error("Servidor nao retornou o canal salvo.");
             return data.channel;
           })
         : saveServerValidatorChannel(updated);
     void savePromise
-      .then((serverChannel) => setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(serverChannel)))))
+      .then((serverChannel) =>
+        setChannels(
+          markServerConfirmedChannels(
+            upsertNotificationChannel(markServerConfirmedChannel(serverChannel)),
+          ),
+        ),
+      )
       .catch((error) => {
-        showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a atualizacao.");
+        showNotice(
+          error instanceof Error ? error.message : "Servidor nao confirmou a atualizacao.",
+        );
       });
   }
 
@@ -890,10 +1012,14 @@ function NeuralValidatorPage() {
     try {
       const serverChannel = await toggleServerValidatorMotor(channel.id, motorKey, enabled);
       applyChannelUpdate(markServerConfirmedChannel(serverChannel));
-      showNotice(`${moduleDisplayName(motorKey)} ${enabled ? "ativado" : "desativado"} e salvo no servidor.`);
+      showNotice(
+        `${moduleDisplayName(motorKey)} ${enabled ? "ativado" : "desativado"} e salvo no servidor.`,
+      );
     } catch (error) {
       applyChannelUpdate(channel);
-      showNotice(error instanceof Error ? error.message : "Servidor nao confirmou a ativacao do motor.");
+      showNotice(
+        error instanceof Error ? error.message : "Servidor nao confirmou a ativacao do motor.",
+      );
     }
   }
 
@@ -925,20 +1051,160 @@ function NeuralValidatorPage() {
     }
   }
 
+  async function connectSimpleTelegramChannel(
+    botKey: string,
+    botValidationCode: string,
+    channelReference: string,
+    selectedChannel: ValidatorNotificationChannel | null,
+  ) {
+    if (!planLimits.telegram || planLimits.channels <= 0) {
+      openUpgradeModal(
+        "O plano Free não inclui canais de estudo. Escolha Premium ou Premium Black para conectar o Telegram.",
+      );
+      return false;
+    }
+
+    const reference = channelReference.trim();
+    if (!reference) {
+      showNotice("Informe o @canal ou o ID para continuar.");
+      return false;
+    }
+
+    const sameSavedChannel =
+      selectedChannel &&
+      telegramChannelCanUpdateModules(selectedChannel) &&
+      normalizeValidatorChannelCode(selectedChannel.chatId) ===
+        normalizeValidatorChannelCode(reference);
+
+    if (sameSavedChannel) {
+      await testSavedChannel(selectedChannel);
+      return true;
+    }
+
+    const token = botKey.trim();
+    if (!token) {
+      showNotice("Na primeira conexão, cole a chave do bot.");
+      return false;
+    }
+    if (!botValidationCode.trim()) {
+      showNotice("Valide seu bot antes de testar o canal.");
+      return false;
+    }
+
+    const matchingChannel =
+      channels.find(
+        (channel) =>
+          normalizeValidatorChannelCode(channel.chatId) ===
+          normalizeValidatorChannelCode(reference),
+      ) || selectedChannel;
+
+    if (channels.length >= planLimits.channels && !matchingChannel) {
+      showNotice(
+        planLimits.channels === 1
+          ? "Seu plano permite um canal de estudo."
+          : `Seu plano permite até ${planLimits.channels} canais de estudo.`,
+      );
+      return false;
+    }
+
+    const now = new Date().toISOString();
+    const channel: ValidatorNotificationChannel = {
+      id: matchingChannel?.id || createStorageId("channel"),
+      userId: currentUserId(),
+      name: matchingChannel?.name || reference.replace(/^@/, "").trim() || "Canal de estudo",
+      botTokenMasked: maskBotToken(token),
+      botTokenEncoded: "",
+      chatId: reference,
+      buttonLink: matchingChannel?.buttonLink || "",
+      isActive: true,
+      analyzingEnabled: false,
+      analyzingCooldownRounds: 3,
+      templates: {
+        ...DEFAULT_MESSAGE_TEMPLATES,
+        ...matchingChannel?.templates,
+      },
+      signalModules: normalizeTelegramModuleConfigs(
+        matchingChannel?.signalModules || defaultTelegramModuleConfigs(),
+      ),
+      createdAt: matchingChannel?.createdAt || now,
+      updatedAt: now,
+    } as ValidatorNotificationChannel;
+
+    setTestingTelegramId("simple-connect");
+    setSavingChannel(true);
+    try {
+      const validation = await validateServerValidatorChannel(token, reference, botValidationCode);
+      const saved = markServerConfirmedChannel(
+        await saveServerValidatorChannel(channel, token, validation.validationCode),
+      );
+      setChannels(markServerConfirmedChannels(upsertNotificationChannel(saved)));
+      setChannelForm((current) => ({
+        ...current,
+        botToken: "",
+        chatId: "",
+        buttonLink: "",
+      }));
+      setChannelValidation({ key: "", code: "", validatedAt: "" });
+      showNotice("Canal conectado. O aviso de teste chegou no Telegram.");
+      return true;
+    } catch (error) {
+      showNotice(friendlyTelegramConnectionError(error));
+      return false;
+    } finally {
+      setTestingTelegramId("");
+      setSavingChannel(false);
+    }
+  }
+
+  async function validateSimpleTelegramBot(botKey: string) {
+    if (!planLimits.telegram || planLimits.channels <= 0) {
+      openUpgradeModal(
+        "O plano Free não inclui canais de estudo. Escolha Premium ou Premium Black para conectar o Telegram.",
+      );
+      return null;
+    }
+
+    const token = botKey.trim();
+    if (!token) {
+      showNotice("Cole a chave fornecida pelo BotFather.");
+      return null;
+    }
+
+    setTestingTelegramId("simple-bot");
+    try {
+      const validation = await validateServerValidatorBot(token);
+      showNotice(
+        validation.username
+          ? `Bot @${validation.username} validado para sua conta.`
+          : "Bot validado para sua conta.",
+      );
+      return validation;
+    } catch (error) {
+      showNotice(friendlyTelegramConnectionError(error));
+      return null;
+    } finally {
+      setTestingTelegramId("");
+    }
+  }
+
   async function testSavedChannel(channel: ValidatorNotificationChannel) {
     if (!isServerConfirmedChannel(channel)) {
-      showNotice("Canal ainda nao foi confirmado pelo servidor. Valide e salve novamente antes de testar.");
+      showNotice("Conecte novamente este canal antes de testar.");
       return;
     }
     setTestingTelegramId(channel.id);
     try {
       const result = await testServerValidatorChannel(channel.id);
       if (result.channel) {
-        setChannels(markServerConfirmedChannels(upsertNotificationChannel(markServerConfirmedChannel(result.channel))));
+        setChannels(
+          markServerConfirmedChannels(
+            upsertNotificationChannel(markServerConfirmedChannel(result.channel)),
+          ),
+        );
       }
-      showNotice(result.messageId ? `Teste enviado no Telegram. message_id ${result.messageId}.` : "Teste enviado no Telegram.");
+      showNotice("Aviso de teste enviado no Telegram.");
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : "Canal salvo sem token ou Chat ID no servidor.");
+      showNotice(friendlyTelegramConnectionError(error));
     } finally {
       setTestingTelegramId("");
     }
@@ -958,11 +1224,11 @@ function NeuralValidatorPage() {
         chatId: channel.chatId,
         buttonLink: channel.buttonLink || `${window.location.origin}/app/validador`,
         message:
-          "ENTRADA CONFIRMADA\n" +
+          "AVISO DE PADRÃO\n" +
           "Mesa: Bac Bo\n" +
           "\u{1F9E9} Padr\u00E3o: \u{1F534}10\u{1F535}7\u{1F7E1}6\n" +
-          "\u{1F3AF} Entrada: \u{1F534} BANKER\n" +
-          "\u{1F6E1}\uFE0F Prote\u00E7\u00E3o: At\u00E9 G1\n" +
+          "\u{1F3AF} Padr\u00E3o observado: \u{1F534} BANKER\n" +
+          "\u{1F6E1}\uFE0F Janela de valida\u00E7\u00E3o: At\u00E9 G1\n" +
           "\u{1F91D} Prote\u00E7\u00E3o Tie: Ativa\n" +
           `Canal: ${channel.name}`,
         buttonLabel: "Abrir Sniper Bo IA",
@@ -987,16 +1253,43 @@ function NeuralValidatorPage() {
     const next = channels.filter((item) => !idsToRemove.has(item.id));
     writeNotificationChannels(next);
     setChannels(next);
+    const affectedPatterns = savedPatterns.filter(
+      (patternItem) =>
+        patternItem.telegramChannelId && idsToRemove.has(patternItem.telegramChannelId),
+    );
+    if (affectedPatterns.length) {
+      const updatedAt = new Date().toISOString();
+      const nextPatterns = savedPatterns.map((patternItem) =>
+        patternItem.telegramChannelId && idsToRemove.has(patternItem.telegramChannelId)
+          ? {
+              ...patternItem,
+              destination: "site" as ValidatorDestination,
+              telegramChannelId: "",
+              updatedAt,
+            }
+          : patternItem,
+      );
+      writeSavedPatterns(nextPatterns);
+      setSavedPatterns(nextPatterns);
+      void Promise.all(nextPatterns.map((patternItem) => saveServerValidatorPattern(patternItem)));
+    }
     for (const channelId of idsToRemove) {
       removeNotificationChannel(channelId);
       void deleteServerValidatorChannel(channelId);
     }
-    showNotice(idsToRemove.size > 1 ? `${idsToRemove.size} canais duplicados removidos.` : "Canal removido.");
+    showNotice(
+      idsToRemove.size > 1 ? `${idsToRemove.size} canais duplicados removidos.` : "Canal removido.",
+    );
   }
 
   function showNotice(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3200);
+  }
+
+  function openUpgradeModal(reason: string) {
+    setUpgradeModalReason(reason);
+    setUpgradeModalOpen(true);
   }
 
   const currentChannelValidationKey = telegramChannelValidationKey(
@@ -1011,26 +1304,12 @@ function NeuralValidatorPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-black text-gradient-brand">Validador Neural de Estrategias</h1>
-            <AppBadge tone="blue" pulse>Módulo premium</AppBadge>
-            <AppBadge tone="green">Motor independente</AppBadge>
-          </div>
-          <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
-            Veja quais padroes ja bateram no historico, salve os melhores e monitore entrada ao vivo.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <AppBadge tone={hasHistory ? "green" : "amber"}>
-            {hasHistory ? `${historyRounds.length.toLocaleString("pt-BR")} rodadas reais` : "Sem historico real"}
-          </AppBadge>
-          <AppBadge tone={serverHistory.length ? "green" : serverHistoryStatus === "loading" ? "blue" : "amber"}>
-            Banco Validador: {serverHistory.length.toLocaleString("pt-BR")}
-          </AppBadge>
-          <AppBadge tone={fullAccess ? "green" : "amber"}>{planLimits.label}</AppBadge>
-        </div>
+      <div>
+        <h1 className="text-xl font-black text-gradient-brand">Validador Neural de Estrategias</h1>
+        <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+          Veja quais padrões já ocorreram no histórico, salve os melhores e monitore a direção
+          observada ao vivo.
+        </p>
       </div>
 
       {notice && (
@@ -1050,9 +1329,12 @@ function NeuralValidatorPage() {
           <div className="flex items-start gap-3">
             <DatabaseZap className="mt-0.5 size-5 text-warning" />
             <div>
-              <div className="text-sm font-black text-warning">Aguardando historico real da mesa</div>
+              <div className="text-sm font-black text-warning">
+                Aguardando historico real da mesa
+              </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                O validador nao calcula green, red ou assertividade com dados ficticios. Assim que a mesa enviar rodadas reais para o banco do Validador, a validacao fica ativa.
+                O Validador não calcula resultados ou compatibilidade histórica com dados fictícios.
+                Assim que a mesa enviar rodadas reais, a validação fica ativa.
               </p>
             </div>
           </div>
@@ -1060,13 +1342,7 @@ function NeuralValidatorPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-5">
-          <TabsTrigger value="dashboard" className="gap-1.5"><Activity className="size-3.5" /> Dashboard</TabsTrigger>
-          <TabsTrigger value="channels" className="gap-1.5"><Send className="size-3.5" /> Central Telegram</TabsTrigger>
-          <TabsTrigger value="validator" className="gap-1.5"><ShieldCheck className="size-3.5" /> Validador</TabsTrigger>
-          <TabsTrigger value="ai" className="gap-1.5"><Wand2 className="size-3.5" /> IA de Padroes</TabsTrigger>
-          <TabsTrigger value="saved" className="gap-1.5"><Save className="size-3.5" /> Padroes Salvos</TabsTrigger>
-        </TabsList>
+        <DesktopDashboardQuickNav />
 
         <TabsContent value="dashboard" className="space-y-4">
           <DashboardTab
@@ -1083,17 +1359,18 @@ function NeuralValidatorPage() {
           <ValidatorTab
             pattern={pattern}
             setPattern={setPattern}
-            tokenScore={tokenScore}
-            setTokenScore={setTokenScore}
             addToken={addToken}
             config={config}
             setConfig={setConfig}
             manualResult={manualResult}
+            manualResultLoading={manualResultLoading}
             saveCurrentPattern={saveCurrentPattern}
             saveAndClearPattern={saveAndClearPattern}
             hasHistory={hasValidationHistory}
             savedPatternName={currentSavedPattern?.name ?? ""}
             recentSavedPatterns={savedPatterns.slice(0, 4)}
+            historyLimit={planLimits.history}
+            saveLocked={planLimits.patterns <= 0}
           />
         </TabsContent>
 
@@ -1122,34 +1399,69 @@ function NeuralValidatorPage() {
             onRefresh={refreshPattern}
             onReset={resetPatternScore}
             onToggle={(patternItem) => {
-              const updated = { ...patternItem, isActive: !patternItem.isActive, updatedAt: new Date().toISOString() };
+              const updated = {
+                ...patternItem,
+                isActive: !patternItem.isActive,
+                updatedAt: new Date().toISOString(),
+              };
               setSavedPatterns(upsertSavedPattern(updated));
               void saveServerValidatorPattern(updated);
             }}
             onUpdate={updateSavedPattern}
-            onBulkDeliveryUpdate={updateAllSavedPatternDelivery}
           />
         </TabsContent>
 
-        <TabsContent value="channels" className="space-y-4">
-          <CentralTelegramTab
-            channels={channels}
-            channelForm={channelForm}
-            setChannelForm={setChannelForm}
-            onSave={saveChannel}
-            onRemove={removeChannel}
-            onTestForm={testChannelFromForm}
-            onTestChannel={testSavedChannel}
-            onUpdateChannel={updateNotificationChannel}
-            onToggleModule={toggleNotificationChannelModule}
-            isChannelFormValidated={isChannelFormValidated}
-            savingChannel={savingChannel}
-            telegramEnabled={planLimits.telegram}
-            testingTelegramId={testingTelegramId}
-            recentNotifications={recentTelegramNotifications}
-          />
+        <TabsContent value="telegram" className="space-y-4">
+          <Suspense
+            fallback={
+              <GlassCard className="flex min-h-40 items-center justify-center">
+                <Loader2 className="size-6 animate-spin text-neon-cyan" />
+              </GlassCard>
+            }
+          >
+            <TelegramRoomsPanel
+              embedded
+              initialRooms={channels}
+              initialPatterns={savedPatterns}
+            />
+          </Suspense>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={upgradeModalOpen} onOpenChange={setUpgradeModalOpen}>
+        <DialogContent className="border-gold/45 bg-background/95 sm:max-w-md">
+          <DialogHeader className="text-center sm:text-center">
+            <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full border border-gold/45 bg-gold/15 text-gold shadow-lg shadow-gold/15">
+              <LockKeyhole className="size-5" />
+            </div>
+            <DialogTitle className="text-xl font-black text-gold">
+              Libere avisos automáticos no Telegram
+            </DialogTitle>
+            <DialogDescription>
+              {upgradeModalReason || "Recurso disponível para os planos Premium e Premium Black."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2 rounded-xl border border-border/60 bg-secondary/20 p-4 text-sm">
+            {[
+              "Conecte e teste seu canal de estudo",
+              "Escolha quais padrões enviam avisos",
+              "Mantenha tudo salvo na sua conta",
+            ].map((benefit) => (
+              <div key={benefit} className="flex items-center gap-2">
+                <ShieldCheck className="size-4 shrink-0 text-neon-cyan" />
+                <span>{benefit}</span>
+              </div>
+            ))}
+          </div>
+          <Link
+            to="/app/planos"
+            onClick={() => setUpgradeModalOpen(false)}
+            className="btn-gold-grad glow-gold inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black"
+          >
+            <LockKeyhole className="size-4" /> Ver planos e ir para checkout
+          </Link>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1167,7 +1479,9 @@ function SitePatternAlerts({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-black uppercase tracking-wide text-neon-cyan">Sinais do site</div>
+        <div className="text-xs font-black uppercase tracking-wide text-neon-cyan">
+          Sinais do site
+        </div>
         {alerts.length > 1 && (
           <Button type="button" size="sm" variant="secondary" onClick={onClear}>
             Limpar sinais
@@ -1182,7 +1496,8 @@ function SitePatternAlerts({
                 <BellRing className="size-4" /> PADRAO SALVO DETECTADO
               </div>
               <div className="mt-2 text-xs text-muted-foreground">
-                Mesa: <span className="font-bold text-foreground">{hit.pattern.tableId || "Bac Bo"}</span>
+                Mesa:{" "}
+                <span className="font-bold text-foreground">{hit.pattern.tableId || "Bac Bo"}</span>
                 <span className="mx-2">|</span>
                 Rodada: <span className="font-bold text-foreground">{hit.detectedRoundId}</span>
               </div>
@@ -1192,9 +1507,9 @@ function SitePatternAlerts({
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="rounded-xl border border-border/70 bg-background/45 px-3 py-2 text-xs">
-                Entrada: <SideLabel side={hit.entry} />
+                Direção Observada: <SideLabel side={hit.entry} />
                 <span className="mx-2 text-muted-foreground">|</span>
-                Gale: ate G{hit.pattern.galeLimit}
+                Janela de Validação: até G{hit.pattern.galeLimit}
               </div>
               <Button type="button" size="sm" variant="secondary" onClick={() => onDismiss(hit.id)}>
                 Fechar
@@ -1225,16 +1540,36 @@ function DashboardTab({
   const activePatterns = savedPatterns.filter((pattern) => pattern.isActive);
   const totalWins = savedPatterns.reduce((sum, pattern) => sum + pattern.wins, 0);
   const totalLosses = savedPatterns.reduce((sum, pattern) => sum + pattern.losses, 0);
-  const accuracy = totalWins + totalLosses ? (totalWins / (totalWins + totalLosses)) * 100 : undefined;
+  const accuracy =
+    totalWins + totalLosses ? (totalWins / (totalWins + totalLosses)) * 100 : undefined;
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
-        <Metric label="Padroes salvos" value={savedPatterns.length} icon={<Layers3 className="size-4" />} />
-        <Metric label="Monitorando" value={activePatterns.length} icon={<Eye className="size-4" />} tone="text-neon-cyan" />
+        <Metric
+          label="Padroes salvos"
+          value={savedPatterns.length}
+          icon={<Layers3 className="size-4" />}
+        />
+        <Metric
+          label="Monitorando"
+          value={activePatterns.length}
+          icon={<Eye className="size-4" />}
+          tone="text-neon-cyan"
+        />
         <Metric label="Telegram" value={channels.length} icon={<Send className="size-4" />} />
-        <Metric label="Rodadas analisadas" value={historyRounds.length} icon={<History className="size-4" />} tone="text-success" />
-        <Metric label="Acerto salvo" value={formatPercent(accuracy)} icon={<Trophy className="size-4" />} tone="text-neon-cyan" />
+        <Metric
+          label="Rodadas analisadas"
+          value={historyRounds.length}
+          icon={<History className="size-4" />}
+          tone="text-success"
+        />
+        <Metric
+          label="Acerto salvo"
+          value={formatPercent(accuracy)}
+          icon={<Trophy className="size-4" />}
+          tone="text-neon-cyan"
+        />
       </div>
 
       {liveHits.length ? (
@@ -1254,8 +1589,10 @@ function DashboardTab({
                   </div>
                 </div>
                 <div className="rounded-xl border border-border/70 bg-secondary/25 p-3 text-xs">
-                  <div>Entrada: <SideLabel side={hit.entry} /></div>
-                  <div>Gale: ate G{hit.pattern.galeLimit}</div>
+                  <div>
+                    Direção Observada: <SideLabel side={hit.entry} />
+                  </div>
+                  <div>Janela de Validação: até G{hit.pattern.galeLimit}</div>
                   <div>Destino: {destinationLabel(hit.pattern.destination)}</div>
                   <div>Detectado na rodada {hit.detectedRoundId}</div>
                 </div>
@@ -1271,7 +1608,7 @@ function DashboardTab({
               <div className="text-sm font-black">Nenhum padrao ativo agora</div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {hasHistory
-                  ? "Quando um padrao salvo aparecer nas ultimas rodadas, a entrada sera mostrada aqui."
+                  ? "Quando um padrão salvo aparecer nas últimas rodadas, a direção observada será mostrada aqui."
                   : "Aguardando rodadas reais para ativar o monitoramento."}
               </p>
             </div>
@@ -1281,7 +1618,10 @@ function DashboardTab({
 
       <div className="grid gap-4 xl:grid-cols-2">
         <GlassCard>
-          <SectionTitle title="Melhores padroes encontrados" subtitle="Sequencia historica, entrada sugerida e taxa de acerto." />
+          <SectionTitle
+            title="Melhores padroes encontrados"
+            subtitle="Sequência histórica, direção observada e compatibilidade histórica."
+          />
           <div className="mt-4 space-y-2">
             {suggestions.slice(0, 4).map((suggestion, index) => (
               <SuggestionRow key={suggestion.id} suggestion={suggestion} rank={index + 1} />
@@ -1295,16 +1635,28 @@ function DashboardTab({
         </GlassCard>
 
         <GlassCard>
-          <SectionTitle title="Padroes que voce salvou" subtitle="Somente esses padroes podem aparecer no monitoramento ao vivo." />
+          <SectionTitle
+            title="Padroes que voce salvou"
+            subtitle="Somente esses padroes podem aparecer no monitoramento ao vivo."
+          />
           <div className="mt-4 space-y-2">
             {savedPatterns.slice(0, 4).map((pattern) => (
-              <div key={pattern.id} className="rounded-xl border border-border/70 bg-secondary/20 p-3">
+              <div
+                key={pattern.id}
+                className="rounded-xl border border-border/70 bg-secondary/20 p-3"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-bold">{pattern.name}</div>
-                    <PatternLine pattern={pattern.pattern} pulledSide={pattern.pulledSide} compact />
+                    <PatternLine
+                      pattern={pattern.pattern}
+                      pulledSide={pattern.pulledSide}
+                      compact
+                    />
                   </div>
-                  <AppBadge tone={pattern.isActive ? "green" : "muted"}>{pattern.isActive ? "ativo" : "inativo"}</AppBadge>
+                  <AppBadge tone={pattern.isActive ? "green" : "muted"}>
+                    {pattern.isActive ? "ativo" : "inativo"}
+                  </AppBadge>
                 </div>
               </div>
             ))}
@@ -1323,32 +1675,34 @@ function DashboardTab({
 function ValidatorTab(props: {
   pattern: ValidatorPatternToken[];
   setPattern: (pattern: ValidatorPatternToken[]) => void;
-  tokenScore: string;
-  setTokenScore: (score: string) => void;
   addToken: (side: RoundResult, score?: string) => void;
   config: ValidatorConfig;
   setConfig: (config: ValidatorConfig) => void;
   manualResult: ValidatorResult | null;
+  manualResultLoading: boolean;
   saveCurrentPattern: () => boolean;
   saveAndClearPattern: () => void;
   hasHistory: boolean;
   savedPatternName: string;
   recentSavedPatterns: SavedValidatorPattern[];
+  historyLimit: number;
+  saveLocked: boolean;
 }) {
   const {
     pattern,
     setPattern,
-    tokenScore,
-    setTokenScore,
     addToken,
     config,
     setConfig,
     manualResult,
+    manualResultLoading,
     saveCurrentPattern,
     saveAndClearPattern,
     hasHistory,
     savedPatternName,
     recentSavedPatterns,
+    historyLimit,
+    saveLocked,
   } = props;
 
   const [showDetails, setShowDetails] = useState(false);
@@ -1356,7 +1710,7 @@ function ValidatorTab(props: {
   const canSave = pattern.length >= 1 && !isPatternSaved;
   const totalSignals = manualResult?.totalSignals ?? 0;
   const setGaleLimit = (value: number) => {
-    setConfig({ ...config, galeLimit: Math.min(2, Math.max(0, value)) as ValidatorGaleLimit });
+    setConfig({ ...config, galeLimit: Math.min(4, Math.max(0, value)) as ValidatorGaleLimit });
   };
 
   return (
@@ -1364,24 +1718,36 @@ function ValidatorTab(props: {
       <GlassCard>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.44fr)]">
           <div className="space-y-3">
-            <div className="rounded-xl border border-border/60 bg-background/30 p-3">
+            <div className="rounded-xl bg-background/20 p-3">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Padrao</div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Padrao
+                    </div>
                     {isPatternSaved && <AppBadge tone="blue">Padrao ja salvo</AppBadge>}
                   </div>
                   <CompactPatternLine
                     pattern={pattern}
+                    entrySide={entryTypeToSide(config.entryType)}
                     className="mt-2"
-                    onRemove={(index) => setPattern(pattern.filter((_, tokenIndex) => tokenIndex !== index))}
+                    onRemove={(index) =>
+                      setPattern(pattern.filter((_, tokenIndex) => tokenIndex !== index))
+                    }
                   />
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-1.5">
-                  <IconToolButton label="Inverter" onClick={() => setPattern(pattern.map(invertToken))}>
+                  <IconToolButton
+                    label="Inverter"
+                    onClick={() => setPattern(pattern.map(invertToken))}
+                  >
                     <RotateCcw className="size-4" />
                   </IconToolButton>
-                  <IconToolButton label="Remover" onClick={() => setPattern(pattern.slice(0, -1))} disabled={!pattern.length}>
+                  <IconToolButton
+                    label="Remover"
+                    onClick={() => setPattern(pattern.slice(0, -1))}
+                    disabled={!pattern.length}
+                  >
                     <Trash2 className="size-4" />
                   </IconToolButton>
                   <IconToolButton label="Limpar" onClick={() => setPattern([])}>
@@ -1389,18 +1755,85 @@ function ValidatorTab(props: {
                   </IconToolButton>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                <QuickToken side="B" score={tokenScore} label="Banker" onClick={addToken} />
-                <QuickToken side="P" score={tokenScore} label="Player" onClick={addToken} />
-                <QuickToken side="T" score={tokenScore} label="Tie" onClick={addToken} />
-                <Input
-                  value={tokenScore}
-                  onChange={(event) => setTokenScore(event.target.value)}
-                  inputMode="numeric"
-                  placeholder="Numero"
-                  className="h-8 w-20 bg-secondary/30 text-center text-xs"
-                />
+              <div className="mx-auto mt-3 w-full max-w-sm rounded-xl bg-secondary/10 p-2.5">
+                <div className="text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Direção Observada
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1.5">
+                  <EntrySideButton
+                    side="P"
+                    selected={config.entryType === "PLAYER"}
+                    onClick={() => setConfig({ ...config, entryType: "PLAYER" })}
+                  />
+                  <EntrySideButton
+                    side="T"
+                    selected={config.entryType === "TIE"}
+                    onClick={() => setConfig({ ...config, entryType: "TIE" })}
+                  />
+                  <EntrySideButton
+                    side="B"
+                    selected={config.entryType === "BANKER"}
+                    onClick={() => setConfig({ ...config, entryType: "BANKER" })}
+                  />
+                </div>
+                <label className="mt-2 flex h-8 cursor-pointer items-center justify-between border-t border-border/30 px-1 text-xs">
+                  <span className="font-bold text-muted-foreground">Proteção no empate</span>
+                  <span className="inline-flex items-center gap-2 font-black">
+                    {config.tieProtection ? "Ativa" : "Inativa"}
+                    <Checkbox
+                      checked={config.tieProtection}
+                      onCheckedChange={(checked) =>
+                        setConfig({ ...config, tieProtection: checked === true })
+                      }
+                      className="border-warning data-[state=checked]:bg-warning data-[state=checked]:text-background"
+                    />
+                  </span>
+                </label>
+                <div className="grid h-8 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border/30 px-1 text-xs">
+                  <span className="font-bold text-muted-foreground">Janela de Validação</span>
+                  <div className="flex min-w-0 items-center justify-between">
+                    <button
+                      type="button"
+                      className="px-2 text-muted-foreground hover:text-neon-cyan"
+                      onClick={() => setGaleLimit(Number(config.galeLimit) - 1)}
+                    >
+                      -
+                    </button>
+                    <span className="font-black">Até G{Number(config.galeLimit)}</span>
+                    <button
+                      type="button"
+                      className="px-2 text-muted-foreground hover:text-neon-cyan"
+                      onClick={() => setGaleLimit(Number(config.galeLimit) + 1)}
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <div className="grid min-h-9 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t border-border/30 px-1 text-xs">
+                  <span className="font-bold text-muted-foreground">Histórico</span>
+                  <Select
+                    value={String(config.historySize)}
+                    onValueChange={(value) =>
+                      setConfig({
+                        ...config,
+                        historySize: Math.min(Number(value), historyLimit),
+                      })
+                    }
+                  >
+                    <SelectTrigger className="ml-auto h-7 w-32 border-0 bg-transparent px-2 text-xs font-black shadow-none focus:ring-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableHistoryOptions(historyLimit).map((option) => (
+                        <SelectItem key={option} value={String(option)}>
+                          {formatHistorySize(option)} rodadas
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+              <CompactTokenPicker onAdd={addToken} />
               <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                 <Input
                   value={config.name}
@@ -1409,45 +1842,16 @@ function ValidatorTab(props: {
                   className="h-9 bg-secondary/30 text-sm"
                 />
                 <div className="rounded-lg border border-border/60 bg-secondary/20 px-3 py-2 text-xs text-muted-foreground">
-                  Apareceu <span className="font-black text-neon-cyan">{totalSignals}</span> vezes
+                  {manualResultLoading ? (
+                    <span className="font-black text-neon-cyan">Atualizando...</span>
+                  ) : (
+                    <>
+                      Apareceu <span className="font-black text-neon-cyan">{totalSignals}</span>{" "}
+                      vezes
+                    </>
+                  )}
                 </div>
               </div>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-3">
-              <SimpleInfoCard label="Entrada">
-                <div className="mt-2 grid grid-cols-2 gap-1.5">
-                  <EntrySideButton
-                    side="B"
-                    selected={config.entryType === "BANKER"}
-                    onClick={() => setConfig({ ...config, entryType: "BANKER" })}
-                  />
-                  <EntrySideButton
-                    side="P"
-                    selected={config.entryType === "PLAYER"}
-                    onClick={() => setConfig({ ...config, entryType: "PLAYER" })}
-                  />
-                </div>
-              </SimpleInfoCard>
-
-              <SimpleInfoCard label="Gale">
-                <div className="mt-2 flex h-8 items-center justify-between rounded-md border border-border/60 bg-secondary/20 px-2">
-                  <button type="button" className="px-2 text-muted-foreground hover:text-neon-cyan" onClick={() => setGaleLimit(Number(config.galeLimit) - 1)}>-</button>
-                  <span className="text-xs font-black">Até G{Number(config.galeLimit)}</span>
-                  <button type="button" className="px-2 text-muted-foreground hover:text-neon-cyan" onClick={() => setGaleLimit(Number(config.galeLimit) + 1)}>+</button>
-                </div>
-              </SimpleInfoCard>
-
-              <SimpleInfoCard label="Proteção no empate">
-                <label className="mt-2 flex h-8 cursor-pointer items-center justify-between rounded-md border border-border/60 bg-secondary/20 px-3 text-xs">
-                  <span className="font-black">{config.tieProtection ? "Ativa" : "Inativa"}</span>
-                  <Checkbox
-                    checked={config.tieProtection}
-                    onCheckedChange={(checked) => setConfig({ ...config, tieProtection: checked === true })}
-                    className="border-warning data-[state=checked]:bg-warning data-[state=checked]:text-background"
-                  />
-                </label>
-              </SimpleInfoCard>
             </div>
 
             <div>
@@ -1457,12 +1861,73 @@ function ValidatorTab(props: {
                 </div>
               )}
               <div className="grid gap-2 sm:grid-cols-2">
-                <Button type="button" className="btn-primary-grad w-full" onClick={() => saveCurrentPattern()} disabled={!canSave}>
-                  {isPatternSaved ? "Padrao ja salvo" : "Salvar Padrao"}
-                </Button>
-                <Button type="button" variant="secondary" className="w-full" onClick={saveAndClearPattern} disabled={!canSave}>
-                  Salvar e limpar
-                </Button>
+                {saveLocked ? (
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full border border-gold/45 bg-gold/10 font-black text-gold hover:bg-gold/20 sm:col-span-2"
+                      >
+                        <LockKeyhole className="size-4" />
+                        Salvar estratégia
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="border-gold/45 bg-background/95 sm:max-w-md">
+                      <DialogHeader className="text-center sm:text-center">
+                        <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full border border-gold/45 bg-gold/15 text-gold shadow-lg shadow-gold/15">
+                          <LockKeyhole className="size-5" />
+                        </div>
+                        <DialogTitle className="text-xl font-black text-gold">
+                          Salve e acompanhe suas estratégias
+                        </DialogTitle>
+                        <DialogDescription>
+                          Acesso exclusivo para planos Premium e Premium Black.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-2 rounded-xl border border-border/60 bg-secondary/20 p-4 text-sm">
+                        {[
+                          "Salve seus padrões favoritos",
+                          "Acompanhe direções observadas em tempo real",
+                          "Veja greens, reds e compatibilidade histórica",
+                          "Monitore suas estratégias automaticamente",
+                        ].map((benefit) => (
+                          <div key={benefit} className="flex items-center gap-2">
+                            <ShieldCheck className="size-4 shrink-0 text-neon-cyan" />
+                            <span>{benefit}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <Link
+                        to="/app/planos"
+                        className="btn-gold-grad glow-gold inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black"
+                      >
+                        <LockKeyhole className="size-4" />
+                        Liberar Premium
+                      </Link>
+                    </DialogContent>
+                  </Dialog>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      className="btn-primary-grad w-full"
+                      onClick={() => saveCurrentPattern()}
+                      disabled={!canSave}
+                    >
+                      {isPatternSaved ? "Padrao ja salvo" : "Salvar Padrao"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={saveAndClearPattern}
+                      disabled={!canSave}
+                    >
+                      Salvar e limpar
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -1470,6 +1935,7 @@ function ValidatorTab(props: {
           <div className="space-y-3">
             <ValidationSummaryPanel
               result={manualResult}
+              isLoading={manualResultLoading}
               hasHistory={hasHistory}
               config={config}
               onToggleDetails={() => setShowDetails((value) => !value)}
@@ -1487,29 +1953,70 @@ function ValidatorTab(props: {
 
 function RecentSavedPatternsPanel({ patterns }: { patterns: SavedValidatorPattern[] }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-background/30 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Salvos recentes</div>
+    <div className="rounded-xl border border-border/60 bg-background/30 p-2">
+      <div className="flex items-center justify-between gap-2 px-1">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          Salvos recentes
+        </div>
         <span className="text-[10px] font-bold text-muted-foreground">{patterns.length}</span>
       </div>
-      <div className="mt-3 space-y-2">
-        {patterns.map((pattern) => (
-          <div key={pattern.id} className="rounded-lg border border-border/50 bg-secondary/15 px-3 py-2">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-xs font-black">{pattern.name}</div>
-                <div className="mt-1">
-                  <PatternLine pattern={pattern.pattern} pulledSide={pattern.pulledSide} compact />
-                </div>
+      <div className="mt-2 space-y-1">
+        {patterns.map((pattern) => {
+          const visibleTokens = pattern.pattern.slice(0, 5);
+          const hiddenTokens = Math.max(0, pattern.pattern.length - visibleTokens.length);
+
+          return (
+            <div
+              key={pattern.id}
+              title={`${pattern.name}: ${pattern.pattern.map(formatToken).join(" → ")}`}
+              className="grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-border/50 bg-secondary/15 px-2.5 py-1.5"
+            >
+              <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
+                <span className="min-w-0 flex-1 truncate text-[11px] font-black">
+                  {pattern.name}
+                </span>
+
+                <span className="flex shrink-0 items-center gap-0.5">
+                  {visibleTokens.map((token, index) => (
+                    <span
+                      key={`${token.side}-${token.score ?? "side"}-${index}`}
+                      className="flex items-center gap-0.5"
+                    >
+                      <span
+                        className={`inline-flex size-5 items-center justify-center rounded-full border text-[8px] font-black shadow-md ${tokenCircleClass(token.side)}`}
+                      >
+                        {token.score ?? ""}
+                      </span>
+                      {index < visibleTokens.length - 1 && (
+                        <span className="text-[8px] text-muted-foreground">›</span>
+                      )}
+                    </span>
+                  ))}
+                  {hiddenTokens > 0 && (
+                    <span className="ml-0.5 text-[8px] font-bold text-muted-foreground">
+                      +{hiddenTokens}
+                    </span>
+                  )}
+                </span>
+
+                {pattern.pulledSide ? (
+                  <span className="flex shrink-0 items-center gap-1 text-[9px] font-black uppercase">
+                    <span className={`size-1.5 rounded-full ${sideDotClass(pattern.pulledSide)}`} />
+                    {sideName(pattern.pulledSide)}
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-[9px] font-bold text-warning">sem amostra</span>
+                )}
               </div>
-              <span className="shrink-0 text-xs font-black text-neon-cyan">
+
+              <span className="shrink-0 text-[11px] font-black text-neon-cyan">
                 {formatPercent(pattern.validation?.accuracy)}
               </span>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {!patterns.length && (
-          <div className="rounded-lg border border-border/50 bg-secondary/15 px-3 py-2 text-xs text-muted-foreground">
+          <div className="rounded-lg border border-border/50 bg-secondary/15 px-2.5 py-2 text-xs text-muted-foreground">
             Nenhum padrao salvo ainda.
           </div>
         )}
@@ -1540,62 +2047,141 @@ function AiPatternsTab({
   return (
     <div className="space-y-4">
       <GlassCard>
-        <SectionTitle title="Filtros da IA" subtitle="A IA minera apenas o historico real da mesa." />
+        <SectionTitle
+          title="Filtros da IA"
+          subtitle="A IA minera apenas o historico real da mesa."
+        />
         <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           <Field label="Historico">
-            <Select value={String(filters.historySize)} onValueChange={(value) => setFilters({ ...filters, historySize: Math.min(Number(value), historyLimit) })}>
-              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+            <Select
+              value={String(filters.historySize)}
+              onValueChange={(value) =>
+                setFilters({ ...filters, historySize: Math.min(Number(value), historyLimit) })
+              }
+            >
+              <SelectTrigger className="bg-secondary/30">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
-                {availableHistoryOptions(historyLimit).map((option) => <SelectItem key={option} value={String(option)}>{option / 1000}k</SelectItem>)}
+                {availableHistoryOptions(historyLimit).map((option) => (
+                  <SelectItem key={option} value={String(option)}>
+                    {option / 1000}k
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Field>
           <Field label="Tamanho">
-            <Select value={String(filters.patternLength)} onValueChange={(value) => setFilters({ ...filters, patternLength: Number(value) })}>
-              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+            <Select
+              value={String(filters.patternLength)}
+              onValueChange={(value) => setFilters({ ...filters, patternLength: Number(value) })}
+            >
+              <SelectTrigger className="bg-secondary/30">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
-                {[2, 3, 4, 5].map((value) => <SelectItem key={value} value={String(value)}>{value} resultados</SelectItem>)}
+                {[2, 3, 4, 5].map((value) => (
+                  <SelectItem key={value} value={String(value)}>
+                    {value} resultados
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Entrada">
-            <Select value={filters.entryType} onValueChange={(value) => setFilters({ ...filters, entryType: value as ValidatorEntryType })}>
-              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+          <Field label="Direção Observada">
+            <Select
+              value={filters.entryType}
+              onValueChange={(value) =>
+                setFilters({ ...filters, entryType: value as ValidatorEntryType })
+              }
+            >
+              <SelectTrigger className="bg-secondary/30">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
-                {ENTRY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                {ENTRY_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Gale maximo">
-            <Select value={String(filters.galeLimit)} onValueChange={(value) => setFilters({ ...filters, galeLimit: Number(value) as ValidatorGaleLimit })}>
-              <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+          <Field label="Janela de Validação">
+            <Select
+              value={String(filters.galeLimit)}
+              onValueChange={(value) =>
+                setFilters({ ...filters, galeLimit: Number(value) as ValidatorGaleLimit })
+              }
+            >
+              <SelectTrigger className="bg-secondary/30">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="0">SG</SelectItem>
                 <SelectItem value="1">G1</SelectItem>
                 <SelectItem value="2">G2</SelectItem>
+                <SelectItem value="3">G3</SelectItem>
+                <SelectItem value="4">G4</SelectItem>
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Assertividade minima">
-            <Input type="number" value={filters.minAccuracy} onChange={(event) => setFilters({ ...filters, minAccuracy: Number(event.target.value) || 0 })} />
+          <Field label="Compatibilidade Histórica mínima">
+            <Input
+              type="number"
+              value={filters.minAccuracy}
+              onChange={(event) =>
+                setFilters({ ...filters, minAccuracy: Number(event.target.value) || 0 })
+              }
+            />
           </Field>
           <Field label="Minimo aparicoes">
-            <Input type="number" value={filters.minOccurrences} onChange={(event) => setFilters({ ...filters, minOccurrences: Number(event.target.value) || 1 })} />
+            <Input
+              type="number"
+              value={filters.minOccurrences}
+              onChange={(event) =>
+                setFilters({ ...filters, minOccurrences: Number(event.target.value) || 1 })
+              }
+            />
           </Field>
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          <FilterSwitch label="Incluir Tie" checked={filters.includeTie} onCheckedChange={(checked) => setFilters({ ...filters, includeTie: checked })} />
-          <FilterSwitch label="Incluir numeros" checked={filters.includeNumbers} onCheckedChange={(checked) => setFilters({ ...filters, includeNumbers: checked })} />
-          <FilterSwitch label="Lado oposto" checked={filters.includeOpposite} onCheckedChange={(checked) => setFilters({ ...filters, includeOpposite: checked })} />
-          <FilterSwitch label="Apenas quentes" checked={filters.hotOnly} onCheckedChange={(checked) => setFilters({ ...filters, hotOnly: checked })} />
-          <FilterSwitch label="Baixo RED" checked={filters.lowRedOnly} onCheckedChange={(checked) => setFilters({ ...filters, lowRedOnly: checked })} />
+          <FilterSwitch
+            label="Incluir Tie"
+            checked={filters.includeTie}
+            onCheckedChange={(checked) => setFilters({ ...filters, includeTie: checked })}
+          />
+          <FilterSwitch
+            label="Incluir numeros"
+            checked={filters.includeNumbers}
+            onCheckedChange={(checked) => setFilters({ ...filters, includeNumbers: checked })}
+          />
+          <FilterSwitch
+            label="Lado oposto"
+            checked={filters.includeOpposite}
+            onCheckedChange={(checked) => setFilters({ ...filters, includeOpposite: checked })}
+          />
+          <FilterSwitch
+            label="Apenas quentes"
+            checked={filters.hotOnly}
+            onCheckedChange={(checked) => setFilters({ ...filters, hotOnly: checked })}
+          />
+          <FilterSwitch
+            label="Baixo RED"
+            checked={filters.lowRedOnly}
+            onCheckedChange={(checked) => setFilters({ ...filters, lowRedOnly: checked })}
+          />
         </div>
       </GlassCard>
 
       {!aiEnabled && (
         <GlassCard className="border-warning/40">
-          <div className="text-sm font-black text-warning">IA de Padroes liberada para VIP/Admin.</div>
-          <p className="mt-1 text-xs text-muted-foreground">Clientes Free podem validar poucos padroes manualmente, sem mineracao completa.</p>
+          <div className="text-sm font-black text-warning">
+            IA de Padrões liberada para Premium, Premium Black e Admin.
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Clientes Free podem validar poucos padroes manualmente, sem mineracao completa.
+          </p>
         </GlassCard>
       )}
 
@@ -1612,7 +2198,9 @@ function AiPatternsTab({
       </div>
       {hasHistory && aiEnabled && !suggestions.length && (
         <GlassCard>
-          <div className="text-sm text-muted-foreground">Nenhum padrao encontrou a assertividade minima com amostra real suficiente.</div>
+          <div className="text-sm text-muted-foreground">
+            Nenhum padrão encontrou a compatibilidade histórica mínima com amostra real suficiente.
+          </div>
         </GlassCard>
       )}
     </div>
@@ -1627,7 +2215,6 @@ function SavedPatternsTab({
   onReset,
   onToggle,
   onUpdate,
-  onBulkDeliveryUpdate,
 }: {
   patterns: SavedValidatorPattern[];
   channels: ValidatorNotificationChannel[];
@@ -1636,72 +2223,20 @@ function SavedPatternsTab({
   onReset: (pattern: SavedValidatorPattern) => void;
   onToggle: (pattern: SavedValidatorPattern) => void;
   onUpdate: (pattern: SavedValidatorPattern, patch: Partial<SavedValidatorPattern>) => void;
-  onBulkDeliveryUpdate: (destination: ValidatorDestination, telegramChannelId: string) => void;
 }) {
-  const [bulkDestination, setBulkDestination] = useState<ValidatorDestination>("site_telegram");
-  const [bulkChannelId, setBulkChannelId] = useState("");
-  const activeChannels = channels.filter((channel) => channel.isActive);
-  const selectedBulkChannelId = bulkChannelId || activeChannels[0]?.id || channels[0]?.id || "";
-  const bulkNeedsTelegram = bulkDestination === "telegram" || bulkDestination === "site_telegram";
-
   return (
     <div className="space-y-3">
       <GlassCard className="rounded-xl p-4">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.95fr)] lg:items-start">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <SectionTitle
             title="Padroes salvos"
-            subtitle="Configure destino, canal e mensagem somente depois que o padrao estiver salvo."
+            subtitle="Edite a estrategia aqui. Destino, sala e mensagens ficam na Central Telegram."
           />
-          <div className="rounded-xl border border-neon-cyan/20 bg-neon-cyan/5 p-3">
-            <div className="text-xs font-black uppercase tracking-wider text-neon-cyan">
-              Envio em massa
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <Select
-                value={bulkDestination}
-                onValueChange={(value) => setBulkDestination(value as ValidatorDestination)}
-              >
-                <SelectTrigger className="bg-secondary/30">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="site">Todos no site</SelectItem>
-                  <SelectItem value="telegram">Todos no Telegram</SelectItem>
-                  <SelectItem value="site_telegram">Site + Telegram</SelectItem>
-                  <SelectItem value="monitor">Apenas monitorar</SelectItem>
-                  <SelectItem value="disabled">Desativar envio</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={selectedBulkChannelId || "none"}
-                onValueChange={(value) => setBulkChannelId(value === "none" ? "" : value)}
-                disabled={!bulkNeedsTelegram}
-              >
-                <SelectTrigger className="bg-secondary/30">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Nenhum canal</SelectItem>
-                  {channels.map((channel) => (
-                    <SelectItem key={channel.id} value={channel.id}>
-                      {channel.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button
-              type="button"
-              className="btn-primary-grad mt-3 w-full"
-              onClick={() => onBulkDeliveryUpdate(bulkDestination, bulkNeedsTelegram ? selectedBulkChannelId : "")}
-              disabled={!patterns.length || (bulkNeedsTelegram && !selectedBulkChannelId)}
-            >
-              Aplicar em todos os padroes
-            </Button>
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Atualiza todos os padroes salvos de uma vez. O canal individual pode ser ajustado depois.
-            </p>
-          </div>
+          <Button type="button" variant="secondary" asChild>
+            <Link to="/app/salas">
+              <Send className="mr-2 size-4" /> Abrir Central Telegram
+            </Link>
+          </Button>
         </div>
       </GlassCard>
       {patterns.map((pattern) => {
@@ -1712,24 +2247,35 @@ function SavedPatternsTab({
               <div className="min-w-0 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-base font-black">{pattern.name}</h3>
-                  <AppBadge tone={pattern.isActive ? "green" : "muted"}>{pattern.isActive ? "ativo" : "inativo"}</AppBadge>
+                  <AppBadge tone={pattern.isActive ? "green" : "muted"}>
+                    {pattern.isActive ? "ativo" : "inativo"}
+                  </AppBadge>
                   <AppBadge tone="blue">{destinationLabel(pattern.destination)}</AppBadge>
                 </div>
                 <PatternLine pattern={pattern.pattern} pulledSide={pattern.pulledSide} />
                 <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-7">
-                  <MiniStat label="Entrada" value={sideName(pattern.pulledSide)} />
-                  <MiniStat label="Gale" value={`G${pattern.galeLimit}`} />
+                  <MiniStat label="Direção Observada" value={sideName(pattern.pulledSide)} />
+                  <MiniStat label="Janela de Validação" value={`Até G${pattern.galeLimit}`} />
                   <MiniStat label="Tie" value={pattern.tieProtection ? "protegido" : "normal"} />
                   <MiniStat label="Sinais" value={pattern.validation?.totalSignals ?? 0} />
                   <MiniStat label="Green" value={pattern.wins} tone="text-success" />
                   <MiniStat label="Red" value={pattern.losses} tone="text-destructive" />
-                  <MiniStat label="Assert." value={formatPercent(pattern.validation?.accuracy)} tone="text-neon-cyan" />
+                  <MiniStat
+                    label="Compatibilidade Histórica"
+                    value={formatPercent(pattern.validation?.accuracy)}
+                    tone="text-neon-cyan"
+                  />
                 </div>
                 <div className="text-[11px] text-muted-foreground">
-                  Canal: {channel?.name || "nenhum"} | Ultima deteccao: {pattern.lastDetectedAt ? new Date(pattern.lastDetectedAt).toLocaleString("pt-BR") : "ainda nao detectado"}
+                  Canal: {channel?.name || "nenhum"} | Ultima deteccao:{" "}
+                  {pattern.lastDetectedAt
+                    ? new Date(pattern.lastDetectedAt).toLocaleString("pt-BR")
+                    : "ainda nao detectado"}
                 </div>
                 <details className="rounded-xl border border-border/60 bg-background/30 p-3 text-xs">
-                  <summary className="cursor-pointer font-bold text-muted-foreground">Configurar envio</summary>
+                  <summary className="cursor-pointer font-bold text-muted-foreground">
+                    Editar estrategia
+                  </summary>
                   <div className="mt-3 grid gap-2 md:grid-cols-2">
                     <Input
                       value={pattern.name}
@@ -1741,58 +2287,53 @@ function SavedPatternsTab({
                       onChange={(event) => onUpdate(pattern, { tableId: event.target.value })}
                       placeholder="Mesa"
                     />
-                    <Select
-                      value={pattern.destination}
-                      onValueChange={(value) => onUpdate(pattern, { destination: value as ValidatorDestination })}
-                    >
-                      <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {DESTINATION_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Select
-                      value={pattern.telegramChannelId || "none"}
-                      onValueChange={(value) => onUpdate(pattern, { telegramChannelId: value === "none" ? "" : value })}
-                    >
-                      <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Nenhum canal</SelectItem>
-                        {channels.map((channelItem) => (
-                          <SelectItem key={channelItem.id} value={channelItem.id}>{channelItem.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                     <Input
                       value={pattern.cooldownRounds}
-                      onChange={(event) => onUpdate(pattern, { cooldownRounds: Math.max(0, Number(event.target.value) || 0) })}
+                      onChange={(event) =>
+                        onUpdate(pattern, {
+                          cooldownRounds: Math.max(0, Number(event.target.value) || 0),
+                        })
+                      }
                       type="number"
                       placeholder="Cooldown"
                     />
-                    <div className="flex min-h-9 items-center rounded-md border border-border/60 bg-secondary/20 px-3 text-xs text-muted-foreground">
-                      Destino atual: {destinationLabel(pattern.destination)}
-                    </div>
+                    <Button type="button" variant="outline" asChild>
+                      <Link to="/app/salas">Configurar destino e mensagem</Link>
+                    </Button>
                   </div>
-                  <Textarea
-                    value={pattern.messageOverride ?? ""}
-                    onChange={(event) => onUpdate(pattern, { messageOverride: event.target.value })}
-                    placeholder="Mensagem personalizada opcional. Use {{pattern}}, {{entry}}, {{percentage}}, {{table}}"
-                    className="mt-3 min-h-20"
-                  />
                 </details>
               </div>
               <div className="flex flex-wrap gap-2 lg:justify-end">
-                <Button type="button" variant="secondary" size="sm" onClick={() => onToggle(pattern)}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onToggle(pattern)}
+                >
                   {pattern.isActive ? "Desativar" : "Ativar"}
                 </Button>
-                <Button type="button" variant="secondary" size="sm" onClick={() => onRefresh(pattern)}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onRefresh(pattern)}
+                >
                   Atualizar
                 </Button>
-                <Button type="button" variant="secondary" size="sm" onClick={() => onReset(pattern)}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onReset(pattern)}
+                >
                   Zerar
                 </Button>
-                <Button type="button" variant="destructive" size="sm" onClick={() => onRemove(pattern.id)}>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => onRemove(pattern.id)}
+                >
                   Excluir
                 </Button>
               </div>
@@ -1802,9 +2343,464 @@ function SavedPatternsTab({
       })}
       {!patterns.length && (
         <GlassCard>
-          <div className="text-sm text-muted-foreground">Nenhum padrao salvo ainda. Valide uma estrategia e clique em salvar padrao.</div>
+          <div className="text-sm text-muted-foreground">
+            Nenhum padrao salvo ainda. Valide uma estrategia e clique em salvar padrao.
+          </div>
         </GlassCard>
       )}
+    </div>
+  );
+}
+
+function ValidatorTelegramTab({
+  channels,
+  patterns,
+  telegramEnabled,
+  channelLimit,
+  testingTelegramId,
+  onTestChannel,
+  onRemoveChannel,
+  onValidateBot,
+  onConnectChannel,
+  onTogglePattern,
+  onRequestUpgrade,
+}: {
+  channels: ValidatorNotificationChannel[];
+  patterns: SavedValidatorPattern[];
+  telegramEnabled: boolean;
+  channelLimit: number;
+  testingTelegramId: string;
+  onTestChannel: (channel: ValidatorNotificationChannel) => void;
+  onRemoveChannel: (channelId: string) => void;
+  onValidateBot: (botKey: string) => Promise<{
+    validationCode: string;
+    username: string;
+    name: string;
+  } | null>;
+  onConnectChannel: (
+    botKey: string,
+    botValidationCode: string,
+    channelReference: string,
+    channel: ValidatorNotificationChannel | null,
+  ) => Promise<boolean>;
+  onTogglePattern: (
+    pattern: SavedValidatorPattern,
+    channel: ValidatorNotificationChannel | null,
+    enabled: boolean,
+  ) => void;
+  onRequestUpgrade: () => void;
+}) {
+  const newChannelId = "__new_validator_telegram_channel__";
+  const [selectedChannelId, setSelectedChannelId] = useState("");
+  const [botKey, setBotKey] = useState("");
+  const [botValidation, setBotValidation] = useState({
+    code: "",
+    username: "",
+    name: "",
+  });
+  const [channelReference, setChannelReference] = useState("");
+  const [channelToRemoveId, setChannelToRemoveId] = useState("");
+  const creatingNewChannel = selectedChannelId === newChannelId;
+  const selectedChannel = creatingNewChannel
+    ? null
+    : channels.find((channel) => channel.id === selectedChannelId) ||
+      channels.find((channel) => telegramChannelCanUpdateModules(channel)) ||
+      channels[0] ||
+      null;
+  const channelToRemove =
+    channels.find((channel) => channel.id === channelToRemoveId) || selectedChannel;
+  const connected = telegramChannelCanUpdateModules(selectedChannel);
+  const limitReached = !telegramEnabled || channelLimit <= 0;
+  const canAddChannel = !limitReached && channels.length < channelLimit;
+  const validatingBot = testingTelegramId === "simple-bot";
+  const testing =
+    testingTelegramId === "simple-connect" ||
+    Boolean(selectedChannel && testingTelegramId === selectedChannel.id);
+  const botReady = connected || Boolean(botValidation.code);
+  const activeNotices = patterns.filter(
+    (pattern) =>
+      (pattern.destination === "telegram" || pattern.destination === "site_telegram") &&
+      pattern.telegramChannelId === selectedChannel?.id,
+  ).length;
+  const currentReference = channelReference.trim();
+  const testingSavedChannel = Boolean(
+    connected &&
+    currentReference &&
+    normalizeValidatorChannelCode(currentReference) ===
+      normalizeValidatorChannelCode(selectedChannel?.chatId || ""),
+  );
+
+  useEffect(() => {
+    setChannelReference(selectedChannel?.chatId || "");
+  }, [selectedChannel?.id, selectedChannel?.chatId]);
+
+  function selectChannel(channelId: string) {
+    setSelectedChannelId(channelId);
+    setBotKey("");
+    setBotValidation({ code: "", username: "", name: "" });
+  }
+
+  function startNewChannel() {
+    if (!canAddChannel) return;
+    selectChannel(newChannelId);
+    setChannelReference("");
+  }
+
+  function confirmRemoveChannel() {
+    if (!channelToRemoveId) return;
+    onRemoveChannel(channelToRemoveId);
+    setChannelToRemoveId("");
+    selectChannel("");
+  }
+
+  async function validateBot() {
+    if (limitReached) {
+      onRequestUpgrade();
+      return;
+    }
+    const validation = await onValidateBot(botKey);
+    if (validation) {
+      setBotValidation({
+        code: validation.validationCode,
+        username: validation.username,
+        name: validation.name,
+      });
+    }
+  }
+
+  async function connectOrTest() {
+    if (limitReached) {
+      onRequestUpgrade();
+      return;
+    }
+    if (testingSavedChannel && selectedChannel) {
+      onTestChannel(selectedChannel);
+      return;
+    }
+    const connectedNow = await onConnectChannel(
+      botKey,
+      botValidation.code,
+      channelReference,
+      selectedChannel,
+    );
+    if (connectedNow) {
+      setBotKey("");
+      setBotValidation({ code: "", username: "", name: "" });
+      setSelectedChannelId("");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <GlassCard className="rounded-xl p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-black uppercase tracking-wide text-neon-cyan">
+              Telegram em 3 passos
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Conecte um canal de estudo e escolha quais padrões podem enviar avisos.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {!limitReached && (
+              <AppBadge tone={channels.length >= channelLimit ? "green" : "muted"}>
+                {channels.length} de {channelLimit} salas
+              </AppBadge>
+            )}
+            {channels.length > 0 && canAddChannel && (
+              <Button type="button" size="sm" variant="outline" onClick={startNewChannel}>
+                <Plus className="size-4" /> Adicionar sala
+              </Button>
+            )}
+            {selectedChannel && (
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                onClick={() => setChannelToRemoveId(selectedChannel.id)}
+              >
+                <Trash2 className="size-4" /> Apagar sala
+              </Button>
+            )}
+            <AppBadge tone={connected ? "green" : limitReached ? "amber" : "muted"}>
+              {connected
+                ? "Canal pronto"
+                : limitReached
+                  ? "Disponível nos planos pagos"
+                  : creatingNewChannel
+                    ? "Nova sala"
+                    : "Comece aqui"}
+            </AppBadge>
+          </div>
+        </div>
+      </GlassCard>
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        <GlassCard className="rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <StepNumber number={1} complete={botReady} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-black">Valide seu bot</div>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Cole a chave do bot que você criou no BotFather. Usamos somente o bot da sua conta.
+              </p>
+              {!connected && !limitReached && (
+                <div className="mt-3 space-y-2">
+                  <Field label="Chave do bot">
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                      <Input
+                        type="password"
+                        value={botKey}
+                        onChange={(event) => {
+                          setBotKey(event.target.value);
+                          setBotValidation({ code: "", username: "", name: "" });
+                        }}
+                        placeholder="Cole a chave fornecida pelo BotFather"
+                        autoComplete="off"
+                        className="h-10 bg-secondary/30"
+                      />
+                      <Button
+                        type="button"
+                        className="h-10"
+                        onClick={validateBot}
+                        disabled={validatingBot || !botKey.trim()}
+                      >
+                        {validatingBot ? (
+                          <>
+                            <Loader2 className="size-4 animate-spin" /> Validando...
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="size-4" /> Validar Bot
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </Field>
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    A chave fica protegida e vinculada somente à sua conta depois da conexão.
+                  </p>
+                  {botValidation.code && (
+                    <div className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs font-bold text-success">
+                      {botValidation.username
+                        ? `Bot @${botValidation.username} validado.`
+                        : `${botValidation.name} validado.`}
+                    </div>
+                  )}
+                </div>
+              )}
+              {connected && (
+                <div className="mt-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs font-bold text-success">
+                  Bot deste canal já está validado para sua conta.
+                </div>
+              )}
+            </div>
+          </div>
+        </GlassCard>
+
+        <GlassCard className="rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <StepNumber number={2} complete={connected} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-black">Conecte e teste</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Adicione o bot validado como administrador e informe o @canal ou o ID.
+              </p>
+              {channels.length > 0 && (
+                <div className="mt-3">
+                  <Field label="Sala do Telegram">
+                    <Select
+                      value={creatingNewChannel ? newChannelId : selectedChannel?.id || ""}
+                      onValueChange={selectChannel}
+                    >
+                      <SelectTrigger className="h-10 bg-secondary/30">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {channels.map((channel) => (
+                          <SelectItem key={channel.id} value={channel.id}>
+                            {channel.name}
+                          </SelectItem>
+                        ))}
+                        {canAddChannel && (
+                          <SelectItem value={newChannelId}>+ Adicionar outra sala</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              )}
+              <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <Input
+                  value={channelReference}
+                  onChange={(event) => setChannelReference(event.target.value)}
+                  placeholder="@meucanal ou ID"
+                  className="h-10 bg-secondary/30"
+                  disabled={limitReached || (!connected && !botReady)}
+                  aria-label="Arroba ou ID do canal de estudo"
+                />
+                <Button
+                  type="button"
+                  className="h-10"
+                  variant={connected ? "secondary" : "default"}
+                  onClick={connectOrTest}
+                  disabled={
+                    !limitReached &&
+                    (testing || !channelReference.trim() || (!connected && !botReady))
+                  }
+                >
+                  {limitReached ? (
+                    <>
+                      <LockKeyhole className="size-4" /> Liberar
+                    </>
+                  ) : testing ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" /> Testando...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="size-4" />
+                      Testar Canal
+                    </>
+                  )}
+                </Button>
+              </div>
+              <div
+                className={`mt-3 rounded-lg border px-3 py-2 text-xs font-bold ${
+                  connected
+                    ? "border-success/30 bg-success/10 text-success"
+                    : "border-border/60 bg-background/30 text-muted-foreground"
+                }`}
+              >
+                {connected
+                  ? `${selectedChannel?.name || "Canal de estudo"} está pronto.`
+                  : botReady
+                    ? "Bot validado. Agora teste se ele pode enviar avisos neste canal."
+                    : "Valide seu bot no passo 1 para liberar o teste do canal."}
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+      </div>
+
+      <GlassCard className="rounded-xl p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <StepNumber number={3} complete={connected && activeNotices > 0} />
+            <div>
+              <div className="text-sm font-black">Ative os avisos</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Escolha quais padrões salvos podem enviar aviso automático.
+              </p>
+            </div>
+          </div>
+          <AppBadge tone={activeNotices ? "green" : "muted"}>
+            {activeNotices} de {patterns.length} ligados
+          </AppBadge>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {patterns.map((pattern) => {
+            const noticeEnabled =
+              (pattern.destination === "telegram" || pattern.destination === "site_telegram") &&
+              pattern.telegramChannelId === selectedChannel?.id;
+            return (
+              <div
+                key={pattern.id}
+                className="flex flex-col gap-3 rounded-xl border border-border/60 bg-background/30 p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-black">{pattern.name}</div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                    <span>
+                      Padrão observado:{" "}
+                      <b className="text-foreground">{sideName(pattern.pulledSide)}</b>
+                    </span>
+                    <span>
+                      Janela de validação:{" "}
+                      <b className="text-foreground">até G{pattern.galeLimit}</b>
+                    </span>
+                    <span>
+                      Histórico observado:{" "}
+                      <b className="text-neon-cyan">
+                        {formatPercent(pattern.validation?.accuracy)}
+                      </b>
+                    </span>
+                  </div>
+                </div>
+                <label
+                  className={`flex shrink-0 items-center justify-between gap-3 rounded-lg border border-border/60 bg-secondary/20 px-3 py-2 text-xs font-black ${
+                    !limitReached && !connected ? "cursor-not-allowed opacity-55" : "cursor-pointer"
+                  }`}
+                >
+                  <span>{noticeEnabled ? "Aviso ligado" : "Aviso desligado"}</span>
+                  <Switch
+                    checked={noticeEnabled}
+                    disabled={!limitReached && !connected}
+                    onCheckedChange={(checked) =>
+                      limitReached
+                        ? onRequestUpgrade()
+                        : onTogglePattern(pattern, selectedChannel, checked)
+                    }
+                    aria-label={`Aviso automático ${pattern.name}`}
+                  />
+                </label>
+              </div>
+            );
+          })}
+          {!patterns.length && (
+            <div className="rounded-xl border border-border/60 bg-background/30 px-4 py-5 text-sm text-muted-foreground">
+              Nenhum padrão salvo ainda. Salve um padrão no Validador para ativar o aviso
+              automático.
+            </div>
+          )}
+          {!connected && patterns.length > 0 && !limitReached && (
+            <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+              Conecte e teste o canal antes de ligar os avisos.
+            </div>
+          )}
+        </div>
+      </GlassCard>
+
+      <Dialog
+        open={Boolean(channelToRemoveId)}
+        onOpenChange={(open) => !open && setChannelToRemoveId("")}
+      >
+        <DialogContent className="border-destructive/40 bg-background/95 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Apagar esta sala?</DialogTitle>
+            <DialogDescription>
+              A sala <b className="text-foreground">{channelToRemove?.name || "selecionada"}</b>{" "}
+              será removida somente da sua conta. Os avisos ligados a ela voltarão para somente no
+              site.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button type="button" variant="secondary" onClick={() => setChannelToRemoveId("")}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="destructive" onClick={confirmRemoveChannel}>
+              <Trash2 className="size-4" /> Apagar sala
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function StepNumber({ number, complete }: { number: number; complete: boolean }) {
+  return (
+    <div
+      className={`flex size-8 shrink-0 items-center justify-center rounded-full border text-xs font-black ${
+        complete
+          ? "border-success/40 bg-success/15 text-success"
+          : "border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan"
+      }`}
+      aria-label={`Passo ${number}${complete ? " concluído" : ""}`}
+    >
+      {complete ? <ShieldCheck className="size-4" /> : number}
     </div>
   );
 }
@@ -1832,7 +2828,10 @@ function CentralTelegramTab({
   onRemove: (id: string) => void;
   onTestForm: () => void;
   onTestChannel: (channel: ValidatorNotificationChannel) => void;
-  onUpdateChannel: (channel: ValidatorNotificationChannel, patch: Partial<ValidatorNotificationChannel>) => void;
+  onUpdateChannel: (
+    channel: ValidatorNotificationChannel,
+    patch: Partial<ValidatorNotificationChannel>,
+  ) => void;
   onToggleModule: (
     channel: ValidatorNotificationChannel,
     motorKey: ValidatorTelegramModuleKey,
@@ -1845,8 +2844,10 @@ function CentralTelegramTab({
   recentNotifications: ValidatorTelegramNotification[];
 }) {
   const [selectedChannelId, setSelectedChannelId] = useState("");
-  const [selectedModuleKey, setSelectedModuleKey] = useState<ValidatorTelegramModuleKey>("ai_patterns");
-  const [configuringModuleKey, setConfiguringModuleKey] = useState<ValidatorTelegramModuleKey | null>(null);
+  const [selectedModuleKey, setSelectedModuleKey] =
+    useState<ValidatorTelegramModuleKey>("ai_patterns");
+  const [configuringModuleKey, setConfiguringModuleKey] =
+    useState<ValidatorTelegramModuleKey | null>(null);
   const validatingChannelForm = testingTelegramId === "form";
   const saveBlockedByValidation = false;
   const selectedChannel =
@@ -1854,13 +2855,22 @@ function CentralTelegramTab({
     channels.find((channel) => channel.isActive) ||
     channels[0] ||
     null;
-  const selectedChannelModules = selectedChannel ? channelSignalModules(selectedChannel) : defaultTelegramModuleConfigs();
+  const selectedChannelModules = selectedChannel
+    ? channelSignalModules(selectedChannel)
+    : defaultTelegramModuleConfigs();
   const connected = telegramChannelCanUpdateModules(selectedChannel);
-  const engineActive = connected && TELEGRAM_MODULE_OPTIONS.some((option) => selectedChannelModules[option.key]?.enabled);
-  const preparedModulesCount = TELEGRAM_MODULE_OPTIONS.filter((option) => selectedChannelModules[option.key]?.enabled).length;
+  const engineActive =
+    connected &&
+    TELEGRAM_MODULE_OPTIONS.some((option) => selectedChannelModules[option.key]?.enabled);
+  const preparedModulesCount = TELEGRAM_MODULE_OPTIONS.filter(
+    (option) => selectedChannelModules[option.key]?.enabled,
+  ).length;
   const activeConfigModuleKey = configuringModuleKey || selectedModuleKey;
 
-  function patchChannelModule(key: ValidatorTelegramModuleKey, patch: Partial<ValidatorTelegramModuleConfig>) {
+  function patchChannelModule(
+    key: ValidatorTelegramModuleKey,
+    patch: Partial<ValidatorTelegramModuleConfig>,
+  ) {
     if (!selectedChannel) return;
     if (typeof patch.enabled === "boolean" && Object.keys(patch).length === 1) {
       void onToggleModule(selectedChannel, key, patch.enabled);
@@ -1884,10 +2894,17 @@ function CentralTelegramTab({
         <div className="space-y-4">
           <GlassCard>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <SectionTitle title="Salas Telegram" subtitle="Selecione a sala individual do Validador e configure seu modulo." />
+              <SectionTitle
+                title="Salas Telegram"
+                subtitle="Selecione a sala individual do Validador e configure seu modulo."
+              />
               <div className="flex flex-wrap gap-2">
-                <AppBadge tone={connected ? "green" : "amber"}>{connected ? "Canal conectado" : "Canal pendente"}</AppBadge>
-                <AppBadge tone={engineActive ? "green" : "amber"}>{engineActive ? "Motor ativo" : "Motor inativo"}</AppBadge>
+                <AppBadge tone={connected ? "green" : "amber"}>
+                  {connected ? "Canal conectado" : "Canal pendente"}
+                </AppBadge>
+                <AppBadge tone={engineActive ? "green" : "amber"}>
+                  {engineActive ? "Motor ativo" : "Motor inativo"}
+                </AppBadge>
               </div>
             </div>
             <div className="mt-3 rounded-xl border border-border/60 bg-secondary/15 px-3 py-2 text-xs text-muted-foreground">
@@ -1903,13 +2920,16 @@ function CentralTelegramTab({
 
           {!telegramEnabled && (
             <GlassCard className="border-warning/40">
-              <div className="text-sm font-black text-warning">Telegram bloqueado no plano Free.</div>
+              <div className="text-sm font-black text-warning">
+                Telegram bloqueado no plano Free.
+              </div>
             </GlassCard>
           )}
 
           <div className="grid gap-3 md:grid-cols-2">
             {TELEGRAM_MODULE_OPTIONS.map((option) => {
-              const moduleConfig = selectedChannelModules[option.key] || defaultTelegramModuleConfig(option.key);
+              const moduleConfig =
+                selectedChannelModules[option.key] || defaultTelegramModuleConfig(option.key);
               return (
                 <TelegramModeCard
                   key={option.key}
@@ -1919,7 +2939,9 @@ function CentralTelegramTab({
                   ready={connected}
                   disabled={!telegramEnabled || !selectedChannel || !connected}
                   selected={selectedModuleKey === option.key}
-                  onToggle={() => patchChannelModule(option.key, { enabled: !moduleConfig.enabled })}
+                  onToggle={() =>
+                    patchChannelModule(option.key, { enabled: !moduleConfig.enabled })
+                  }
                   onConfigure={() => {
                     setSelectedModuleKey(option.key);
                     setConfiguringModuleKey(option.key);
@@ -1932,10 +2954,21 @@ function CentralTelegramTab({
 
         <div className="space-y-4">
           <GlassCard>
-            <SectionTitle title="Status do motor" subtitle={selectedChannel?.name || "Nenhum canal selecionado"} />
+            <SectionTitle
+              title="Status do motor"
+              subtitle={selectedChannel?.name || "Nenhum canal selecionado"}
+            />
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-              <MiniStat label="Canal" value={connected ? "Conectado" : "Pendente"} tone={connected ? "text-success" : "text-warning"} />
-              <MiniStat label="Motor" value={engineActive ? "Ativo" : "Inativo"} tone={engineActive ? "text-success" : "text-warning"} />
+              <MiniStat
+                label="Canal"
+                value={connected ? "Conectado" : "Pendente"}
+                tone={connected ? "text-success" : "text-warning"}
+              />
+              <MiniStat
+                label="Motor"
+                value={engineActive ? "Ativo" : "Inativo"}
+                tone={engineActive ? "text-success" : "text-warning"}
+              />
             </div>
             <div className="mt-3 rounded-xl border border-border/60 bg-background/35 p-3 text-xs text-muted-foreground">
               {connected
@@ -1946,10 +2979,14 @@ function CentralTelegramTab({
               <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                 <Field label="Canal Telegram">
                   <Select value={selectedChannel?.id || ""} onValueChange={setSelectedChannelId}>
-                    <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="bg-secondary/30">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       {channels.map((channel) => (
-                        <SelectItem key={channel.id} value={channel.id}>{channel.name}</SelectItem>
+                        <SelectItem key={channel.id} value={channel.id}>
+                          {channel.name}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1959,7 +2996,9 @@ function CentralTelegramTab({
                   variant="secondary"
                   className="mt-5 h-9"
                   onClick={() => selectedChannel && onTestChannel(selectedChannel)}
-                  disabled={!telegramEnabled || !selectedChannel || testingTelegramId === selectedChannel.id}
+                  disabled={
+                    !telegramEnabled || !selectedChannel || testingTelegramId === selectedChannel.id
+                  }
                 >
                   <Send className="size-4" /> Testar
                 </Button>
@@ -1978,7 +3017,10 @@ function CentralTelegramTab({
 
           {!channels.length ? (
             <GlassCard className="border-neon-cyan/30">
-              <SectionTitle title="Nenhuma sala conectada" subtitle="O Validador aguarda uma sala individual autorizada." />
+              <SectionTitle
+                title="Nenhuma sala conectada"
+                subtitle="O Validador aguarda uma sala individual autorizada."
+              />
               <Link
                 to="/app/salas"
                 className="btn-primary-grad mt-4 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-black"
@@ -1993,8 +3035,14 @@ function CentralTelegramTab({
         </div>
       </div>
 
-      <Sheet open={Boolean(configuringModuleKey && selectedChannel)} onOpenChange={(open) => !open && setConfiguringModuleKey(null)}>
-        <SheetContent side="right" className="flex h-full w-full flex-col overflow-y-auto border-neon-cyan/30 bg-background p-4 sm:max-w-2xl lg:max-w-3xl">
+      <Sheet
+        open={Boolean(configuringModuleKey && selectedChannel)}
+        onOpenChange={(open) => !open && setConfiguringModuleKey(null)}
+      >
+        <SheetContent
+          side="right"
+          className="flex h-full w-full flex-col overflow-y-auto border-neon-cyan/30 bg-background p-4 sm:max-w-2xl lg:max-w-3xl"
+        >
           <SheetHeader className="pr-8">
             <SheetTitle>Configurar {moduleDisplayName(activeConfigModuleKey)}</SheetTitle>
             <SheetDescription>
@@ -2007,12 +3055,17 @@ function CentralTelegramTab({
               selectedChannelId={selectedChannel.id}
               onSelectedChannelChange={setSelectedChannelId}
               moduleKey={activeConfigModuleKey}
-              config={selectedChannelModules[activeConfigModuleKey] || defaultTelegramModuleConfig(activeConfigModuleKey)}
+              config={
+                selectedChannelModules[activeConfigModuleKey] ||
+                defaultTelegramModuleConfig(activeConfigModuleKey)
+              }
               onSave={(nextConfig) => {
                 patchChannelModule(activeConfigModuleKey, { ...nextConfig, enabled: true });
                 setConfiguringModuleKey(null);
               }}
-              onPreview={(message, buttons) => previewServerValidatorChannel(selectedChannel.id, message, buttons)}
+              onPreview={(message, buttons) =>
+                previewServerValidatorChannel(selectedChannel.id, message, buttons)
+              }
             />
           ) : null}
         </SheetContent>
@@ -2057,7 +3110,13 @@ function TelegramModeCard({
         </div>
       )}
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
-        <Button type="button" className="h-10 w-full" variant={active ? "secondary" : "default"} onClick={onToggle} disabled={disabled}>
+        <Button
+          type="button"
+          className="h-10 w-full"
+          variant={active ? "secondary" : "default"}
+          onClick={onToggle}
+          disabled={disabled}
+        >
           {active ? "Desativar" : ready ? "Ativar envio" : "Conecte o canal"}
         </Button>
         <Button type="button" className="h-10 w-full" variant="secondary" onClick={onConfigure}>
@@ -2149,20 +3208,28 @@ function TelegramModuleConfigPanel({
     <div className="mt-4 flex min-h-0 flex-1 flex-col space-y-3">
       <Field label="Canal Telegram">
         <Select value={selectedChannelId} onValueChange={onSelectedChannelChange}>
-          <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="bg-secondary/30">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             {channels.map((channel) => (
-              <SelectItem key={channel.id} value={channel.id}>{channel.name}</SelectItem>
+              <SelectItem key={channel.id} value={channel.id}>
+                {channel.name}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </Field>
-      <Field label="Tipo de entrada">
+      <Field label="Direção Observada">
         <Select
           value={draft.entryType}
-          onValueChange={(value) => setDraft({ ...draft, entryType: value as ValidatorTelegramModuleConfig["entryType"] })}
+          onValueChange={(value) =>
+            setDraft({ ...draft, entryType: value as ValidatorTelegramModuleConfig["entryType"] })
+          }
         >
-          <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="bg-secondary/30">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="AUTO">Automatico</SelectItem>
             <SelectItem value="BANKER">Banker</SelectItem>
@@ -2172,14 +3239,16 @@ function TelegramModuleConfigPanel({
         </Select>
       </Field>
       <div className="grid gap-2 sm:grid-cols-3">
-        <Field label="Proteção de gale">
+        <Field label="Janela de Validação">
           <Select
             value={String(draft.galeLimit)}
             onValueChange={(value) => setDraft({ ...draft, galeLimit: Number(value) || 0 })}
           >
-            <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="bg-secondary/30">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent>
-              <SelectItem value="0">Sem gale</SelectItem>
+              <SelectItem value="0">Sem janela adicional</SelectItem>
               <SelectItem value="1">G1</SelectItem>
               <SelectItem value="2">G2</SelectItem>
               <SelectItem value="3">G3</SelectItem>
@@ -2193,16 +3262,26 @@ function TelegramModuleConfigPanel({
             min={0}
             max={300}
             value={draft.cooldownSeconds}
-            onChange={(event) => setDraft({
-              ...draft,
-              cooldownSeconds: clampTelegramModuleNumber(event.target.value, draft.cooldownSeconds, 0, 300),
-            })}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                cooldownSeconds: clampTelegramModuleNumber(
+                  event.target.value,
+                  draft.cooldownSeconds,
+                  0,
+                  300,
+                ),
+              })
+            }
           />
         </Field>
         <Field label="Cobrir empate">
           <div className="flex h-9 items-center justify-between rounded-md border border-input bg-secondary/20 px-3">
             <span className="text-sm">{draft.coverTie ? "Sim" : "Nao"}</span>
-            <Switch checked={draft.coverTie} onCheckedChange={(checked) => setDraft({ ...draft, coverTie: checked })} />
+            <Switch
+              checked={draft.coverTie}
+              onCheckedChange={(checked) => setDraft({ ...draft, coverTie: checked })}
+            />
           </div>
         </Field>
       </div>
@@ -2210,7 +3289,9 @@ function TelegramModuleConfigPanel({
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="text-xs font-black">Mensagens do motor</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">Cada aba salva uma mensagem independente deste motor.</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              Cada aba salva uma mensagem independente deste motor.
+            </div>
           </div>
           <AppBadge tone="blue">{telegramTemplateStorageLabel(moduleKey)}</AppBadge>
         </div>
@@ -2238,15 +3319,22 @@ function TelegramModuleConfigPanel({
           <Field label={telegramTemplateLabel(templateKey)}>
             <Textarea
               value={activeTemplate}
-              onChange={(event) => setDraft(patchTelegramModuleTemplate(draft, templateKey, event.target.value))}
+              onChange={(event) =>
+                setDraft(patchTelegramModuleTemplate(draft, templateKey, event.target.value))
+              }
               className="min-h-52 resize-y font-mono text-xs"
             />
           </Field>
           <div className="rounded-lg border border-border/60 bg-background/30 p-3">
-            <div className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">Variaveis disponiveis</div>
+            <div className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+              Variaveis disponiveis
+            </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {variables.map((variable) => (
-                <span key={variable} className="rounded-full border border-neon-cyan/35 bg-neon-cyan/10 px-2 py-1 text-[11px] font-bold text-neon-cyan">
+                <span
+                  key={variable}
+                  className="rounded-full border border-neon-cyan/35 bg-neon-cyan/10 px-2 py-1 text-[11px] font-bold text-neon-cyan"
+                >
                   {`{{${variable}}}`}
                 </span>
               ))}
@@ -2268,42 +3356,61 @@ function TelegramModuleConfigPanel({
         </div>
         <div className="space-y-2">
           {draft.buttons.map((button, index) => (
-            <div key={`telegram-button-${index}`} className="rounded-lg border border-border/60 bg-background/30 p-3">
+            <div
+              key={`telegram-button-${index}`}
+              className="rounded-lg border border-border/60 bg-background/30 p-3"
+            >
               <div className="flex items-center justify-between gap-3">
                 <span className="text-xs font-black">Botao {index + 1}</span>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {button.enabled ? "Sim" : "Nao"}
                   <Switch
                     checked={button.enabled}
-                    onCheckedChange={(checked) => setDraft({
-                      ...draft,
-                      buttons: patchTelegramModuleButton(draft.buttons, index, { enabled: checked }),
-                    })}
+                    onCheckedChange={(checked) =>
+                      setDraft({
+                        ...draft,
+                        buttons: patchTelegramModuleButton(draft.buttons, index, {
+                          enabled: checked,
+                        }),
+                      })
+                    }
                   />
                 </div>
               </div>
               {button.enabled && (
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <label className="space-y-1.5">
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Texto do botao</span>
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Texto do botao
+                    </span>
                     <Input
                       value={button.label}
                       maxLength={64}
-                      onChange={(event) => setDraft({
-                        ...draft,
-                        buttons: patchTelegramModuleButton(draft.buttons, index, { label: event.target.value }),
-                      })}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          buttons: patchTelegramModuleButton(draft.buttons, index, {
+                            label: event.target.value,
+                          }),
+                        })
+                      }
                       placeholder={DEFAULT_TELEGRAM_BUTTON_LABEL}
                     />
                   </label>
                   <label className="space-y-1.5">
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Link do botao</span>
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Link do botao
+                    </span>
                     <Input
                       value={button.url}
-                      onChange={(event) => setDraft({
-                        ...draft,
-                        buttons: patchTelegramModuleButton(draft.buttons, index, { url: event.target.value }),
-                      })}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          buttons: patchTelegramModuleButton(draft.buttons, index, {
+                            url: event.target.value,
+                          }),
+                        })
+                      }
                       placeholder="https://t.me/seu-canal"
                     />
                   </label>
@@ -2348,11 +3455,7 @@ function TelegramModuleConfigPanel({
           {previewing ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
           Enviar previa
         </Button>
-        <Button
-          type="button"
-          className="h-10 w-full btn-primary-grad"
-          onClick={saveDraft}
-        >
+        <Button type="button" className="h-10 w-full btn-primary-grad" onClick={saveDraft}>
           <Save className="size-4" /> Salvar e ativar
         </Button>
       </div>
@@ -2360,7 +3463,11 @@ function TelegramModuleConfigPanel({
   );
 }
 
-function TelegramDayPerformanceCards({ notifications }: { notifications: ValidatorTelegramNotification[] }) {
+function TelegramDayPerformanceCards({
+  notifications,
+}: {
+  notifications: ValidatorTelegramNotification[];
+}) {
   const stats = telegramDayStats(notifications);
   return (
     <GlassCard>
@@ -2369,7 +3476,11 @@ function TelegramDayPerformanceCards({ notifications }: { notifications: Validat
         <MiniStat label="Sinais enviados hoje" value={stats.sent} tone="text-neon-cyan" />
         <MiniStat label="Greens" value={stats.greens} tone="text-success" />
         <MiniStat label="Reds" value={stats.reds} tone="text-destructive" />
-        <MiniStat label="Assertividade" value={stats.assertiveness} tone="text-neon-cyan" />
+        <MiniStat
+          label="Compatibilidade Histórica"
+          value={stats.assertiveness}
+          tone="text-neon-cyan"
+        />
         <div className="col-span-2">
           <MiniStat label="Ultimo sinal" value={stats.lastSignal} />
         </div>
@@ -2378,14 +3489,24 @@ function TelegramDayPerformanceCards({ notifications }: { notifications: Validat
   );
 }
 
-function RecentTelegramSignals({ notifications }: { notifications: ValidatorTelegramNotification[] }) {
+function RecentTelegramSignals({
+  notifications,
+}: {
+  notifications: ValidatorTelegramNotification[];
+}) {
   const signals = notifications.slice(0, 10);
   return (
     <GlassCard>
-      <SectionTitle title="Ultimos sinais enviados" subtitle="Linha rapida do que saiu no Telegram." />
+      <SectionTitle
+        title="Ultimos sinais enviados"
+        subtitle="Linha rapida do que saiu no Telegram."
+      />
       <div className="mt-4 space-y-2">
         {signals.map((notification) => (
-          <div key={notification.id} className="rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-xs">
+          <div
+            key={notification.id}
+            className="rounded-lg border border-border/60 bg-secondary/15 px-3 py-2 text-xs"
+          >
             {formatTelegramSignalLine(notification)}
           </div>
         ))}
@@ -2401,12 +3522,14 @@ function RecentTelegramSignals({ notifications }: { notifications: ValidatorTele
 
 function ValidationSummaryPanel({
   result,
+  isLoading,
   hasHistory,
   config,
   onToggleDetails,
   showDetails,
 }: {
   result: ValidatorResult | null;
+  isLoading: boolean;
   hasHistory: boolean;
   config: ValidatorConfig;
   onToggleDetails: () => void;
@@ -2415,7 +3538,9 @@ function ValidationSummaryPanel({
   const noSampleText = !hasHistory
     ? "Banco do Validador sem rodadas"
     : !result
-      ? "Aguardando validacao"
+      ? isLoading
+        ? "Atualizando historico"
+        : "Aguardando validacao"
       : !result.totalValidated
         ? "Padrao sem ocorrencia validada"
         : "";
@@ -2423,12 +3548,16 @@ function ValidationSummaryPanel({
   if (noSampleText) {
     return (
       <div className="rounded-xl border border-border/60 bg-background/30 p-4">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Resultado</div>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          Resultado
+        </div>
         <div className="mt-3 text-sm font-black text-warning">{noSampleText}</div>
         <div className="mt-3 text-xs text-muted-foreground">
           {!hasHistory
             ? "Envie rodadas reais para o banco do Validador para liberar o calculo."
-            : "Esse padrao ainda nao teve amostra finalizada no historico real disponivel."}
+            : isLoading
+              ? "Consultando o banco oficial sem carregar as rodadas no navegador."
+              : "Esse padrao ainda nao teve amostra finalizada no historico real disponivel."}
         </div>
       </div>
     );
@@ -2439,11 +3568,19 @@ function ValidationSummaryPanel({
   return (
     <div className="rounded-xl border border-border/60 bg-background/30 p-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Resultado</div>
-        <AppBadge tone="green">{result.status}</AppBadge>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          Resultado
+        </div>
+        <AppBadge tone={isLoading ? "blue" : "green"}>
+          {isLoading ? "Atualizando" : result.status}
+        </AppBadge>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
-        <SummaryMetric label="Assertividade" value={formatPercent(result.accuracy)} tone="text-neon-cyan" />
+        <SummaryMetric
+          label="Compatibilidade Histórica"
+          value={formatPercent(result.accuracy)}
+          tone="text-neon-cyan"
+        />
         <SummaryMetric label="Greens" value={greens} tone="text-success" />
         <SummaryMetric label="Reds" value={result.losses} tone="text-destructive" />
         <SummaryMetric label="Seq." value={result.currentGreenStreak} tone="text-neon-cyan" />
@@ -2461,7 +3598,13 @@ function ValidationSummaryPanel({
   );
 }
 
-function ValidationDetailsPanel({ result, config }: { result: ValidatorResult | null; config: ValidatorConfig }) {
+function ValidationDetailsPanel({
+  result,
+  config,
+}: {
+  result: ValidatorResult | null;
+  config: ValidatorConfig;
+}) {
   const selectedEntry = entryTypeToSide(config.entryType) ?? result?.entry ?? null;
 
   if (!result || !result.totalValidated) {
@@ -2479,8 +3622,11 @@ function ValidationDetailsPanel({ result, config }: { result: ValidatorResult | 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-black">Detalhes da validacao</div>
         <div className="flex flex-wrap gap-2 text-xs">
-          <ResultChip label="Entrada" side={selectedEntry ?? result.entry} />
-          <ResultChip label="Empate" value={config.tieProtection ? "TIE coberto" : "TIE sem cobertura"} />
+          <ResultChip label="Direção Observada" side={selectedEntry ?? result.entry} />
+          <ResultChip
+            label="Empate"
+            value={config.tieProtection ? "TIE coberto" : "TIE sem cobertura"}
+          />
           <ResultChip label="Rodadas" value={result.analyzedRounds.toLocaleString("pt-BR")} />
         </div>
       </div>
@@ -2488,24 +3634,77 @@ function ValidationDetailsPanel({ result, config }: { result: ValidatorResult | 
       <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
         <ResultLine label="Total de sinais" value={result.totalSignals} tone="text-neon-cyan" />
         <ResultLine label="Validados" value={result.totalValidated} />
-        <ResultLine label="Sem Gale" value={formatCountPercent(result.sgWins, result.totalValidated)} tone="text-success" />
-        <ResultLine label="Green G1" value={formatCountPercent(result.g1Wins, result.totalValidated)} tone="text-neon-cyan" />
-        <ResultLine label="Green G2" value={formatCountPercent(result.g2Wins, result.totalValidated)} tone="text-neon-cyan" />
-        <ResultLine label="Empates" value={result.ties ? result.ties : "Nenhum empate registrado."} tone="text-warning" />
-        <ResultLine label="Acertos" value={formatCountPercent(totalGreen, result.totalValidated)} tone="text-success" />
-        <ResultLine label="Sequencia desde o ultimo loss" value={result.currentGreenStreak} tone="text-neon-cyan" />
+        <ResultLine
+          label="Sem janela adicional"
+          value={formatCountPercent(result.sgWins, result.totalValidated)}
+          tone="text-success"
+        />
+        <ResultLine
+          label="Green G1"
+          value={formatCountPercent(result.g1Wins, result.totalValidated)}
+          tone="text-neon-cyan"
+        />
+        <ResultLine
+          label="Green G2"
+          value={formatCountPercent(result.g2Wins, result.totalValidated)}
+          tone="text-neon-cyan"
+        />
+        <ResultLine
+          label="Empates"
+          value={result.ties ? result.ties : "Nenhum empate registrado."}
+          tone="text-warning"
+        />
+        <ResultLine
+          label="Acertos"
+          value={formatCountPercent(totalGreen, result.totalValidated)}
+          tone="text-success"
+        />
+        <ResultLine
+          label="Sequencia desde o ultimo loss"
+          value={result.currentGreenStreak}
+          tone="text-neon-cyan"
+        />
         <ResultLine label="Maior sequencia" value={result.bestGreenStreak} tone="text-success" />
-        <ResultLine label="Maior sequencia de loss" value={result.bestLossStreak} tone="text-destructive" />
-        <ResultLine label="Erros" value={formatCountPercent(result.losses, result.totalValidated)} tone="text-destructive" />
-        <ResultLine label="Assertividade" value={formatPercent(result.accuracy)} tone="text-neon-cyan" />
+        <ResultLine
+          label="Maior sequencia de loss"
+          value={result.bestLossStreak}
+          tone="text-destructive"
+        />
+        <ResultLine
+          label="Erros"
+          value={formatCountPercent(result.losses, result.totalValidated)}
+          tone="text-destructive"
+        />
+        <ResultLine
+          label="Compatibilidade Histórica"
+          value={formatPercent(result.accuracy)}
+          tone="text-neon-cyan"
+        />
       </div>
 
       <div className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
-        {result.details.slice(-24).reverse().map((detail) => (
-          <div key={`${detail.roundId}-${detail.status}-${detail.galeUsed}`} className="rounded-lg bg-background/35 px-3 py-2 text-xs">
-            {detail.roundLabel} - Entrada <SideLabel side={detail.entry} /> - <span className={detail.status === "RED" ? "text-destructive" : detail.status === "TIE" ? "text-warning" : "text-success"}>{detail.status}</span>
-          </div>
-        ))}
+        {result.details
+          .slice(-24)
+          .reverse()
+          .map((detail) => (
+            <div
+              key={`${detail.roundId}-${detail.status}-${detail.galeUsed}`}
+              className="rounded-lg bg-background/35 px-3 py-2 text-xs"
+            >
+              {detail.roundLabel} - Direção Observada <SideLabel side={detail.entry} /> -{" "}
+              <span
+                className={
+                  detail.status === "RED"
+                    ? "text-destructive"
+                    : detail.status === "TIE"
+                      ? "text-warning"
+                      : "text-success"
+                }
+              >
+                {detail.status}
+              </span>
+            </div>
+          ))}
         {!result.details.length && (
           <div className="rounded-lg bg-background/35 px-3 py-2 text-xs text-muted-foreground">
             Nenhuma rodada validada ainda para este padrao.
@@ -2531,12 +3730,14 @@ function SuggestionCard({
     <GlassCard className="rounded-xl">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 text-sm font-black">
-            Padrao IA Top {rank}
+          <div className="flex items-center gap-2 text-sm font-black">Padrao IA Top {rank}</div>
+          <div className="mt-2">
+            <PatternLine pattern={suggestion.pattern} pulledSide={suggestion.pulledSide} />
           </div>
-          <div className="mt-2"><PatternLine pattern={suggestion.pattern} pulledSide={suggestion.pulledSide} /></div>
         </div>
-        <AppBadge tone={suggestion.status === "quente" ? "green" : "blue"}>{suggestion.status}</AppBadge>
+        <AppBadge tone={suggestion.status === "quente" ? "green" : "blue"}>
+          {suggestion.status}
+        </AppBadge>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
         <MiniStat label="Apareceu" value={suggestion.occurrences} />
@@ -2544,14 +3745,24 @@ function SuggestionCard({
         <MiniStat label="G1" value={suggestion.validation.g1Wins} tone="text-neon-cyan" />
         <MiniStat label="RED" value={suggestion.validation.losses} tone="text-destructive" />
         <MiniStat label="TIE" value={suggestion.validation.ties} tone="text-warning" />
-        <MiniStat label="Assert." value={formatPercent(suggestion.validation.accuracy)} tone="text-neon-cyan" />
+        <MiniStat
+          label="Compatibilidade Histórica"
+          value={formatPercent(suggestion.validation.accuracy)}
+          tone="text-neon-cyan"
+        />
         <MiniStat label="Risco" value={suggestion.risk} />
         <MiniStat label="Loss max" value={suggestion.validation.bestLossStreak} />
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        <Button type="button" size="sm" className="btn-primary-grad" onClick={onValidate}>Validar</Button>
-        <Button type="button" size="sm" variant="secondary" onClick={onSave}>Salvar padrao</Button>
-        <Button type="button" size="sm" variant="secondary" onClick={onSave}>Monitorar ao vivo</Button>
+        <Button type="button" size="sm" className="btn-primary-grad" onClick={onValidate}>
+          Validar
+        </Button>
+        <Button type="button" size="sm" variant="secondary" onClick={onSave}>
+          Salvar padrao
+        </Button>
+        <Button type="button" size="sm" variant="secondary" onClick={onSave}>
+          Monitorar ao vivo
+        </Button>
       </div>
     </GlassCard>
   );
@@ -2561,9 +3772,15 @@ function SuggestionRow({ suggestion, rank }: { suggestion: PatternSuggestion; ra
   return (
     <div className="rounded-xl border border-border/70 bg-secondary/20 p-3">
       <div className="flex items-center gap-2 text-xs">
-        <span className="flex size-7 items-center justify-center rounded-lg bg-neon-cyan/10 font-black text-neon-cyan">{rank}</span>
-        <div className="min-w-0 flex-1"><PatternLine pattern={suggestion.pattern} pulledSide={suggestion.pulledSide} compact /></div>
-        <span className="font-black text-neon-cyan">{formatPercent(suggestion.validation.accuracy)}</span>
+        <span className="flex size-7 items-center justify-center rounded-lg bg-neon-cyan/10 font-black text-neon-cyan">
+          {rank}
+        </span>
+        <div className="min-w-0 flex-1">
+          <PatternLine pattern={suggestion.pattern} pulledSide={suggestion.pulledSide} compact />
+        </div>
+        <span className="font-black text-neon-cyan">
+          {formatPercent(suggestion.validation.accuracy)}
+        </span>
       </div>
     </div>
   );
@@ -2579,7 +3796,9 @@ function PatternLine({
   compact?: boolean;
 }) {
   return (
-    <div className={`flex min-w-0 flex-wrap items-end gap-x-1.5 gap-y-2 ${compact ? "text-xs" : "text-sm"}`}>
+    <div
+      className={`flex min-w-0 flex-wrap items-end gap-x-1.5 gap-y-2 ${compact ? "text-xs" : "text-sm"}`}
+    >
       <span className="mb-3 font-semibold text-muted-foreground">Sequencia:</span>
       {pattern.map((token, index) => (
         <span key={`${formatToken(token)}-${index}`} className="inline-flex items-start gap-1">
@@ -2587,7 +3806,7 @@ function PatternLine({
           {index < pattern.length - 1 && <span className="mt-2 text-muted-foreground">&rarr;</span>}
         </span>
       ))}
-      <span className="mb-3 text-muted-foreground">= entrada</span>
+      <span className="mb-3 text-muted-foreground">= direção observada</span>
       {pulledSide === undefined ? (
         <span className="mb-3 text-muted-foreground">aguardando teste</span>
       ) : pulledSide ? (
@@ -2602,15 +3821,14 @@ function PatternLine({
 }
 
 function TokenPill({ token }: { token: ValidatorPatternToken }) {
-  const value = token.score ? String(token.score) : sideEmoji(token.side);
+  const value = token.score ? String(token.score) : null;
 
   return (
-    <span className="inline-flex shrink-0 flex-col items-center gap-0.5">
-      <span className={`inline-flex size-8 items-center justify-center rounded-full border text-[11px] font-black leading-none shadow-lg ${tokenCircleClass(token.side)}`}>
+    <span className="inline-flex shrink-0 items-center">
+      <span
+        className={`inline-flex size-8 items-center justify-center rounded-full border text-[11px] font-black leading-none shadow-lg ${tokenCircleClass(token.side)}`}
+      >
         {value}
-      </span>
-      <span className={`text-[8px] font-black leading-none ${sideTone(token.side)}`}>
-        {sideEmoji(token.side)}
       </span>
     </span>
   );
@@ -2618,10 +3836,12 @@ function TokenPill({ token }: { token: ValidatorPatternToken }) {
 
 function CompactPatternLine({
   pattern,
+  entrySide,
   className = "",
   onRemove,
 }: {
   pattern: ValidatorPatternToken[];
+  entrySide?: RoundResult | null;
   className?: string;
   onRemove?: (index: number) => void;
 }) {
@@ -2634,7 +3854,9 @@ function CompactPatternLine({
   }
 
   return (
-    <div className={`flex min-w-0 flex-wrap items-start gap-x-2 gap-y-3 pt-1 text-base font-black ${className}`}>
+    <div
+      className={`flex min-w-0 flex-wrap items-start gap-x-2 gap-y-3 pt-1 text-base font-black ${className}`}
+    >
       {pattern.map((token, index) => (
         <span key={`${formatToken(token)}-${index}`} className="inline-flex items-start gap-1.5">
           <span className="relative inline-flex">
@@ -2651,9 +3873,23 @@ function CompactPatternLine({
               </button>
             ) : null}
           </span>
-          {index < pattern.length - 1 && <span className="mt-2 text-sm text-muted-foreground">&rarr;</span>}
+          {index < pattern.length - 1 && (
+            <span className="mt-2 text-sm text-muted-foreground">&rarr;</span>
+          )}
         </span>
       ))}
+      {entrySide ? (
+        <span className="inline-flex items-center gap-2 self-center rounded-full border border-border/60 bg-secondary/25 py-1 pl-2.5 pr-3 text-xs shadow-sm">
+          <span className="text-base font-black text-foreground">=</span>
+          <span
+            aria-hidden="true"
+            className={`inline-flex size-6 shrink-0 rounded-full border shadow-md ${tokenCircleClass(entrySide)}`}
+          />
+          <span className={`font-black uppercase tracking-wide ${sideTone(entrySide)}`}>
+            {sideName(entrySide)}
+          </span>
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -2661,7 +3897,9 @@ function CompactPatternLine({
 function SimpleInfoCard({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="rounded-xl border border-border/60 bg-background/30 p-3">
-      <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
       {children}
     </div>
   );
@@ -2676,28 +3914,71 @@ function SideLabel({ side }: { side: RoundResult | null | undefined }) {
   );
 }
 
-function QuickToken({
+function CompactTokenPicker({ onAdd }: { onAdd: (side: RoundResult, score?: string) => void }) {
+  return (
+    <div className="mx-auto mt-3 max-w-[820px]">
+      <div className="mb-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-muted-foreground">
+        Adicionar ao padrão
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <NumberPickerCard side="P" label="Player" onAdd={onAdd} />
+        <NumberPickerCard side="T" label="Tie" onAdd={onAdd} />
+        <NumberPickerCard side="B" label="Banker" onAdd={onAdd} />
+      </div>
+    </div>
+  );
+}
+
+function NumberPickerCard({
+  side,
+  label,
+  onAdd,
+}: {
+  side: RoundResult;
+  label: string;
+  onAdd: (side: RoundResult, score?: string) => void;
+}) {
+  return (
+    <div className={`rounded-lg border p-2 ${tokenPanelClass(side)}`}>
+      <div className="mb-1.5 text-center text-[9px] font-black uppercase tracking-[0.08em]">
+        {label}
+      </div>
+      <div className="grid grid-cols-4 place-items-center gap-1">
+        <TokenPickerBall side={side} label={`${label} sem número`} onClick={() => onAdd(side)} />
+        {Array.from({ length: 11 }, (_, index) => index + 2).map((score) => (
+          <TokenPickerBall
+            key={`${side}:${score}`}
+            side={side}
+            score={score}
+            label={`${label} número ${score}`}
+            onClick={() => onAdd(side, String(score))}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TokenPickerBall({
   side,
   score,
   label,
   onClick,
 }: {
   side: RoundResult;
-  score?: string;
+  score?: number;
   label: string;
-  onClick: (side: RoundResult, score?: string) => void;
+  onClick: () => void;
 }) {
-  const scoreText = score?.trim();
-
   return (
     <button
       type="button"
-      onClick={() => onClick(side, score)}
-      className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-full border px-2.5 text-xs font-black transition hover:-translate-y-0.5 ${tokenClass(side)}`}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={`inline-flex size-7 items-center justify-center rounded-full border text-[9px] font-black shadow-md transition hover:-translate-y-0.5 hover:scale-105 ${tokenCircleClass(side)}`}
     >
-      <span className="text-base leading-none">{sideEmoji(side)}</span>
-      {scoreText ? <span>{scoreText}</span> : null}
-      <span>{label}</span>
+      {score ?? null}
     </button>
   );
 }
@@ -2727,22 +4008,39 @@ function IconToolButton({
   );
 }
 
-function EntrySideButton({ side, selected, onClick }: { side: RoundResult; selected: boolean; onClick: () => void }) {
+function EntrySideButton({
+  side,
+  selected,
+  onClick,
+}: {
+  side: RoundResult;
+  selected: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={`flex h-8 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-black transition ${
-        selected ? `${tokenClass(side)} ring-1 ring-current` : "border-border/70 bg-secondary/20 text-muted-foreground hover:bg-secondary/40"
+        selected
+          ? `${tokenClass(side)} ring-1 ring-current`
+          : "border-transparent bg-secondary/20 text-muted-foreground hover:border-border/40 hover:bg-secondary/40"
       }`}
     >
-      <span className="text-base leading-none">{sideEmoji(side)}</span>
       {sideName(side)}
     </button>
   );
 }
 
-function ResultChip({ label, side, value }: { label: string; side?: RoundResult | null; value?: string | number }) {
+function ResultChip({
+  label,
+  side,
+  value,
+}: {
+  label: string;
+  side?: RoundResult | null;
+  value?: string | number;
+}) {
   return (
     <div className="inline-flex items-center gap-2 rounded-xl border border-border/70 bg-secondary/20 px-3 py-2 text-xs">
       <span className="text-muted-foreground">{label}:</span>
@@ -2751,7 +4049,15 @@ function ResultChip({ label, side, value }: { label: string; side?: RoundResult 
   );
 }
 
-function ResultLine({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
+function ResultLine({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+}) {
   return (
     <div className="flex flex-wrap items-baseline gap-2">
       <span className="font-bold">{label}:</span>
@@ -2760,7 +4066,15 @@ function ResultLine({ label, value, tone }: { label: string; value: string | num
   );
 }
 
-function SummaryMetric({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
+function SummaryMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+}) {
   return (
     <div>
       <div className="text-muted-foreground">{label}</div>
@@ -2769,7 +4083,17 @@ function SummaryMetric({ label, value, tone }: { label: string; value: string | 
   );
 }
 
-function Metric({ label, value, icon, tone }: { label: string; value: string | number; icon: ReactNode; tone?: string }) {
+function Metric({
+  label,
+  value,
+  icon,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  icon: ReactNode;
+  tone?: string;
+}) {
   return (
     <GlassCard className="rounded-xl p-3">
       <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -2781,7 +4105,15 @@ function Metric({ label, value, icon, tone }: { label: string; value: string | n
   );
 }
 
-function MiniStat({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
+function MiniStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  tone?: string;
+}) {
   return (
     <div className="rounded-lg border border-border/60 bg-background/35 px-3 py-2">
       <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
@@ -2799,7 +4131,15 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function FilterSwitch({ label, checked, onCheckedChange }: { label: string; checked: boolean; onCheckedChange: (checked: boolean) => void }) {
+function FilterSwitch({
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
   return (
     <label className="flex items-center justify-between rounded-xl border border-border/70 bg-secondary/20 px-3 py-2 text-sm">
       <span>{label}</span>
@@ -2817,7 +4157,10 @@ function TelegramModulesEditor({
 }) {
   const normalized = normalizeTelegramModuleConfigs(modules);
 
-  function patchModule(key: ValidatorTelegramModuleKey, patch: Partial<ValidatorTelegramModuleConfig>) {
+  function patchModule(
+    key: ValidatorTelegramModuleKey,
+    patch: Partial<ValidatorTelegramModuleConfig>,
+  ) {
     onChange({
       ...normalized,
       [key]: {
@@ -2845,9 +4188,13 @@ function TelegramModulesEditor({
                 <Field label="Gale">
                   <Select
                     value={String(moduleConfig.galeLimit)}
-                    onValueChange={(value) => patchModule(option.key, { galeLimit: Number(value) || 0 })}
+                    onValueChange={(value) =>
+                      patchModule(option.key, { galeLimit: Number(value) || 0 })
+                    }
                   >
-                    <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="bg-secondary/30">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="0">SG</SelectItem>
                       <SelectItem value="1">G1</SelectItem>
@@ -2860,9 +4207,13 @@ function TelegramModulesEditor({
                 <Field label="Empate">
                   <Select
                     value={String(moduleConfig.tieCoverage)}
-                    onValueChange={(value) => patchModule(option.key, { tieCoverage: Number(value) || 0 })}
+                    onValueChange={(value) =>
+                      patchModule(option.key, { tieCoverage: Number(value) || 0 })
+                    }
                   >
-                    <SelectTrigger className="bg-secondary/30"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="bg-secondary/30">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="0">Seco</SelectItem>
                       <SelectItem value="1">G1</SelectItem>
@@ -2878,9 +4229,11 @@ function TelegramModulesEditor({
                     min={0}
                     max={300}
                     value={moduleConfig.cooldownSeconds}
-                    onChange={(event) => patchModule(option.key, {
-                      cooldownSeconds: clampTelegramModuleNumber(event.target.value, 0, 0, 300),
-                    })}
+                    onChange={(event) =>
+                      patchModule(option.key, {
+                        cooldownSeconds: clampTelegramModuleNumber(event.target.value, 0, 0, 300),
+                      })
+                    }
                   />
                 </Field>
                 <Field label="Template">
@@ -2905,7 +4258,9 @@ function defaultTelegramModuleConfigs() {
 
 function normalizeTelegramModuleConfigs(value: unknown) {
   const record = moduleRecord(value);
-  return TELEGRAM_MODULE_OPTIONS.reduce<Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>>(
+  return TELEGRAM_MODULE_OPTIONS.reduce<
+    Record<ValidatorTelegramModuleKey, ValidatorTelegramModuleConfig>
+  >(
     (acc, option) => {
       const defaults = defaultTelegramModuleConfig(option.key);
       const raw = moduleRecord(record[option.key]);
@@ -2918,7 +4273,12 @@ function normalizeTelegramModuleConfigs(value: unknown) {
           ? moduleBoolean(raw.coverTie)
           : defaults.coverTie,
         tieCoverage: clampTelegramModuleNumber(raw.tieCoverage, defaults.tieCoverage, 0, 4),
-        cooldownSeconds: clampTelegramModuleNumber(raw.cooldownSeconds, defaults.cooldownSeconds, 0, 300),
+        cooldownSeconds: clampTelegramModuleNumber(
+          raw.cooldownSeconds,
+          defaults.cooldownSeconds,
+          0,
+          300,
+        ),
         template: resolveTelegramModuleTemplate(option.key, raw.template, defaults.template),
         analyzingTemplate: moduleString(raw.analyzingTemplate) || defaults.analyzingTemplate,
         greenTemplate: moduleString(raw.greenTemplate) || defaults.greenTemplate,
@@ -2935,12 +4295,19 @@ function normalizeTelegramModuleConfigs(value: unknown) {
   );
 }
 
-function resolveTelegramModuleTemplate(key: ValidatorTelegramModuleKey, value: unknown, defaultTemplate: string) {
+function resolveTelegramModuleTemplate(
+  key: ValidatorTelegramModuleKey,
+  value: unknown,
+  defaultTemplate: string,
+) {
   const template = moduleString(value);
   return shouldUseDefaultTelegramModuleTemplate(key, template) ? defaultTemplate : template;
 }
 
-function shouldUseDefaultTelegramModuleTemplate(_key: ValidatorTelegramModuleKey, template: string) {
+function shouldUseDefaultTelegramModuleTemplate(
+  _key: ValidatorTelegramModuleKey,
+  template: string,
+) {
   const text = normalizeTelegramModuleTemplateFingerprint(template);
   if (!text) return true;
   return text.includes("ENTRADA CONFIRMADA");
@@ -2956,7 +4323,9 @@ function normalizeTelegramModuleTemplateFingerprint(value: string) {
     .toUpperCase();
 }
 
-function defaultTelegramModuleConfig(key: ValidatorTelegramModuleKey): ValidatorTelegramModuleConfig {
+function defaultTelegramModuleConfig(
+  key: ValidatorTelegramModuleKey,
+): ValidatorTelegramModuleConfig {
   return {
     enabled: true,
     entryType: "AUTO",
@@ -3018,7 +4387,9 @@ function normalizeTelegramModuleButtons(
   const normalized = source.map((item) => {
     const record = moduleRecord(item);
     return {
-      enabled: Object.prototype.hasOwnProperty.call(record, "enabled") ? moduleBoolean(record.enabled) : true,
+      enabled: Object.prototype.hasOwnProperty.call(record, "enabled")
+        ? moduleBoolean(record.enabled)
+        : true,
       label: (moduleString(record.label) || DEFAULT_TELEGRAM_BUTTON_LABEL).slice(0, 64),
       url: moduleString(record.url),
     };
@@ -3034,7 +4405,10 @@ function normalizeTelegramModuleButtons(
         enabled: Object.prototype.hasOwnProperty.call(legacyRecord, "buttonEnabled")
           ? moduleBoolean(legacyRecord.buttonEnabled)
           : true,
-        label: (moduleString(legacyRecord.buttonLabel) || DEFAULT_TELEGRAM_BUTTON_LABEL).slice(0, 64),
+        label: (moduleString(legacyRecord.buttonLabel) || DEFAULT_TELEGRAM_BUTTON_LABEL).slice(
+          0,
+          64,
+        ),
         url: moduleString(legacyRecord.buttonUrl),
       });
     } else {
@@ -3053,9 +4427,9 @@ function patchTelegramModuleButton(
   index: number,
   patch: Partial<ValidatorTelegramButtonConfig>,
 ) {
-  return normalizeTelegramModuleButtons(buttons).map((button, buttonIndex) => (
-    buttonIndex === index ? { ...button, ...patch } : button
-  ));
+  return normalizeTelegramModuleButtons(buttons).map((button, buttonIndex) =>
+    buttonIndex === index ? { ...button, ...patch } : button,
+  );
 }
 
 function telegramTemplateOptionsForModule(config: ValidatorTelegramModuleConfig) {
@@ -3091,7 +4465,10 @@ function telegramTemplateStorageLabel(key: ValidatorTelegramModuleKey) {
   return "telegram_templates.validator";
 }
 
-function getTelegramModuleTemplate(config: ValidatorTelegramModuleConfig, key: ValidatorTelegramTemplateKey) {
+function getTelegramModuleTemplate(
+  config: ValidatorTelegramModuleConfig,
+  key: ValidatorTelegramTemplateKey,
+) {
   if (key === "entry") return config.template;
   if (key === "analyzing") return config.analyzingTemplate;
   if (key === "green") return config.greenTemplate;
@@ -3119,21 +4496,54 @@ function telegramTemplateVariablesForModule(
   key: ValidatorTelegramModuleKey,
   templateKey: ValidatorTelegramTemplateKey,
 ) {
-  const common = ["module", "table", "entry", "entryLabel", "entryCompact", "gale", "protection", "result", "time", "round", "confidence", "percentage", "channel", "tieCoverage", "tieProtection"];
+  const common = [
+    "module",
+    "table",
+    "entry",
+    "entryLabel",
+    "entryCompact",
+    "gale",
+    "protection",
+    "result",
+    "time",
+    "round",
+    "confidence",
+    "percentage",
+    "channel",
+    "tieCoverage",
+    "tieProtection",
+  ];
   const byModule: Record<ValidatorTelegramModuleKey, string[]> = {
     ai_patterns: ["pattern", "score", "side", "status", "risk"],
     paying_numbers: ["numbers", "number", "side", "score", "status", "risk", "level"],
     surf_alert: ["side", "score", "status", "risk", "level"],
-    ties_only: ["numbers", "number", "tie_pressure", "side", "score", "level", "status", "risk", "tieMultiplier"],
+    ties_only: [
+      "numbers",
+      "number",
+      "tie_pressure",
+      "side",
+      "score",
+      "level",
+      "status",
+      "risk",
+      "tieMultiplier",
+    ],
     validator: ["pattern", "score", "side", "status", "risk"],
   };
   const resultOnly = templateKey === "green" || templateKey === "gale" || templateKey === "red";
   return [...new Set([...common, ...byModule[key], ...(resultOnly ? ["result"] : [])])].sort();
 }
 
-function validateTelegramModuleConfig(key: ValidatorTelegramModuleKey, config: ValidatorTelegramModuleConfig) {
+function validateTelegramModuleConfig(
+  key: ValidatorTelegramModuleKey,
+  config: ValidatorTelegramModuleConfig,
+) {
   for (const option of telegramTemplateOptionsForModule(config)) {
-    const error = validateTelegramTemplate(key, option.key, getTelegramModuleTemplate(config, option.key));
+    const error = validateTelegramTemplate(
+      key,
+      option.key,
+      getTelegramModuleTemplate(config, option.key),
+    );
     if (error) return `${option.label}: ${error}`;
   }
   return "";
@@ -3154,7 +4564,23 @@ function validateTelegramTemplate(
 
 function validateTelegramHtmlTags(template: string) {
   const stack: string[] = [];
-  const supportedTags = new Set(["b", "strong", "i", "em", "u", "ins", "s", "strike", "del", "code", "pre", "a", "spoiler", "tg-spoiler", "blockquote"]);
+  const supportedTags = new Set([
+    "b",
+    "strong",
+    "i",
+    "em",
+    "u",
+    "ins",
+    "s",
+    "strike",
+    "del",
+    "code",
+    "pre",
+    "a",
+    "spoiler",
+    "tg-spoiler",
+    "blockquote",
+  ]);
   for (const match of template.matchAll(/<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>/g)) {
     const raw = match[0];
     const tag = match[1].toLowerCase();
@@ -3174,11 +4600,13 @@ function validateTelegramHtmlTags(template: string) {
 function channelSignalModules(channel: ValidatorNotificationChannel) {
   const channelRecord = channel as ValidatorChannelWithModules;
   const templatesRecord = moduleRecord(channel.templates);
-  return normalizeTelegramModuleConfigs(channelRecord.signalModules || templatesRecord.signalModules);
+  return normalizeTelegramModuleConfigs(
+    channelRecord.signalModules || templatesRecord.signalModules,
+  );
 }
 
 function moduleRecord(value: unknown) {
-  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
 function moduleString(value: unknown) {
@@ -3187,7 +4615,9 @@ function moduleString(value: unknown) {
 
 function moduleBoolean(value: unknown) {
   if (typeof value === "boolean") return value;
-  return ["1", "true", "sim", "yes", "on", "active", "ativo"].includes(moduleString(value).toLowerCase());
+  return ["1", "true", "sim", "yes", "on", "active", "ativo"].includes(
+    moduleString(value).toLowerCase(),
+  );
 }
 
 function moduleEntryType(value: unknown, fallback: ValidatorTelegramModuleConfig["entryType"]) {
@@ -3205,7 +4635,10 @@ function clampTelegramModuleNumber(value: unknown, fallback: number, min: number
 }
 
 function moduleDisplayName(key: ValidatorTelegramModuleKey) {
-  return TELEGRAM_MODULE_OPTIONS.find((option) => option.key === key)?.label.replace("SEGUIR ", "") || key;
+  return (
+    TELEGRAM_MODULE_OPTIONS.find((option) => option.key === key)?.label.replace("SEGUIR ", "") ||
+    key
+  );
 }
 
 function telegramModuleDescription(key: ValidatorTelegramModuleKey) {
@@ -3216,8 +4649,12 @@ function telegramModuleDescription(key: ValidatorTelegramModuleKey) {
   return "Segue as estrategias salvas no Validador.";
 }
 
-function telegramModulePreview(key: ValidatorTelegramModuleKey, config: ValidatorTelegramModuleConfig) {
-  const previewSide = key === "ties_only" ? "TIE" : config.entryType === "AUTO" ? "PLAYER" : config.entryType;
+function telegramModulePreview(
+  key: ValidatorTelegramModuleKey,
+  config: ValidatorTelegramModuleConfig,
+) {
+  const previewSide =
+    key === "ties_only" ? "TIE" : config.entryType === "AUTO" ? "PLAYER" : config.entryType;
   const variables: Record<string, string> = {
     table: "Bac Bo",
     pattern: "\u{1F535}\u{1F534}\u{1F535}7",
@@ -3245,14 +4682,22 @@ function telegramModulePreview(key: ValidatorTelegramModuleKey, config: Validato
     result: "Green G1",
     tieMultiplier: "4x",
   };
-  const message = config.template.replace(/{{\s*([a-zA-Z_]+)\s*}}/g, (_, variable: string) => variables[variable] ?? "");
-  const activeButtons = normalizeTelegramModuleButtons(config.buttons).filter((button) => button.enabled);
+  const message = config.template.replace(
+    /{{\s*([a-zA-Z_]+)\s*}}/g,
+    (_, variable: string) => variables[variable] ?? "",
+  );
+  const activeButtons = normalizeTelegramModuleButtons(config.buttons).filter(
+    (button) => button.enabled,
+  );
   if (!activeButtons.length) return message;
   return [
     message,
     "",
     "Botoes:",
-    ...activeButtons.map((button, index) => `${index + 1}. ${button.label || DEFAULT_TELEGRAM_BUTTON_LABEL} - ${button.url || "link do canal"}`),
+    ...activeButtons.map(
+      (button, index) =>
+        `${index + 1}. ${button.label || DEFAULT_TELEGRAM_BUTTON_LABEL} - ${button.url || "link do canal"}`,
+    ),
   ].join("\n");
 }
 
@@ -3279,10 +4724,16 @@ function telegramEntryPreviewCompactLabel(entryType: ValidatorTelegramModuleConf
 
 function telegramDayStats(notifications: ValidatorTelegramNotification[]) {
   const today = new Date().toISOString().slice(0, 10);
-  const todaySignals = notifications.filter((notification) => (notification.sentAt || notification.updatedAt).slice(0, 10) === today);
+  const todaySignals = notifications.filter(
+    (notification) => (notification.sentAt || notification.updatedAt).slice(0, 10) === today,
+  );
   const sent = todaySignals.filter((notification) => notification.status === "sent").length;
-  const greens = todaySignals.filter((notification) => telegramSignalResult(notification).toLowerCase().startsWith("green")).length;
-  const reds = todaySignals.filter((notification) => telegramSignalResult(notification).toLowerCase() === "red").length;
+  const greens = todaySignals.filter((notification) =>
+    telegramSignalResult(notification).toLowerCase().startsWith("green"),
+  ).length;
+  const reds = todaySignals.filter(
+    (notification) => telegramSignalResult(notification).toLowerCase() === "red",
+  ).length;
   const closed = greens + reds;
   return {
     sent,
@@ -3305,16 +4756,21 @@ function compactTelegramSignal(notification: ValidatorTelegramNotification) {
 function telegramSignalType(notification: ValidatorTelegramNotification) {
   const payload = moduleRecord(notification.payloadJson);
   const moduleKey = moduleString(payload.moduleKey);
-  if (moduleKey === "ai_patterns" || notification.type === "module:ai_patterns") return "Padroes IA";
-  if (moduleKey === "paying_numbers" || notification.type === "module:paying_numbers") return "Numeros Pagantes";
-  if (moduleKey === "surf_alert" || notification.type === "module:surf_alert") return "Aviso de Surf";
+  if (moduleKey === "ai_patterns" || notification.type === "module:ai_patterns")
+    return "Padroes IA";
+  if (moduleKey === "paying_numbers" || notification.type === "module:paying_numbers")
+    return "Numeros Pagantes";
+  if (moduleKey === "surf_alert" || notification.type === "module:surf_alert")
+    return "Aviso de Surf";
   if (moduleKey === "ties_only" || notification.type === "module:ties_only") return "Empate";
   return "Validador";
 }
 
 function telegramSignalEntry(notification: ValidatorTelegramNotification) {
   const payload = moduleRecord(notification.payloadJson);
-  return signalEntryLabel(payload.entryText || payload.entry || payload.expectedSide || "Aguardando");
+  return signalEntryLabel(
+    payload.entryText || payload.entry || payload.expectedSide || "Aguardando",
+  );
 }
 
 function telegramSignalProtection(notification: ValidatorTelegramNotification) {
@@ -3374,7 +4830,7 @@ async function fetchValidatorRoundHistory(limit: number) {
     lastStatus = response.status;
     if (!response.ok) continue;
 
-    const payload = await response.json().catch(() => null) as { rounds?: unknown[] } | null;
+    const payload = (await response.json().catch(() => null)) as { rounds?: unknown[] } | null;
     return Array.isArray(payload?.rounds) ? payload.rounds.filter(isValidatorRound) : [];
   }
 
@@ -3397,7 +4853,10 @@ async function validatePatternOnServer(pattern: ValidatorPatternToken[], config:
       historySize: config.historySize,
     }),
   });
-  const payload = await response.json().catch(() => null) as { result?: unknown; error?: string } | null;
+  const payload = (await response.json().catch(() => null)) as {
+    result?: unknown;
+    error?: string;
+  } | null;
   if (!response.ok) throw new Error(payload?.error || "Falha ao validar no servidor.");
   if (!isValidatorResult(payload?.result)) throw new Error("Resultado do Validador invalido.");
   return payload.result;
@@ -3409,7 +4868,9 @@ async function fetchServerValidatorPatterns() {
     headers: validatorApiHeaders(),
   });
   if (!response.ok) throw new Error("Backend do Validador indisponivel.");
-  const data = await response.json().catch(() => null) as { patterns?: SavedValidatorPattern[] } | null;
+  const data = (await response.json().catch(() => null)) as {
+    patterns?: SavedValidatorPattern[];
+  } | null;
   return Array.isArray(data?.patterns) ? data.patterns : [];
 }
 
@@ -3421,7 +4882,9 @@ async function saveServerValidatorPattern(pattern: SavedValidatorPattern) {
     body: JSON.stringify({ pattern }),
   });
   if (!response.ok) return null;
-  const data = await response.json().catch(() => null) as { pattern?: SavedValidatorPattern } | null;
+  const data = (await response.json().catch(() => null)) as {
+    pattern?: SavedValidatorPattern;
+  } | null;
   return data?.pattern ?? null;
 }
 
@@ -3431,7 +4894,7 @@ async function deleteServerValidatorPattern(patternId: string) {
     cache: "no-store",
     headers: validatorApiHeaders(),
   });
-  const data = await response.json().catch(() => null) as { error?: string } | null;
+  const data = (await response.json().catch(() => null)) as { error?: string } | null;
   if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou a exclusao do padrao.");
 }
 
@@ -3441,7 +4904,9 @@ async function fetchServerValidatorChannels() {
     headers: validatorApiHeaders(),
   });
   if (!response.ok) throw new Error("Backend do Validador indisponivel.");
-  const data = await response.json().catch(() => null) as { channels?: ValidatorNotificationChannel[] } | null;
+  const data = (await response.json().catch(() => null)) as {
+    channels?: ValidatorNotificationChannel[];
+  } | null;
   return Array.isArray(data?.channels) ? data.channels : [];
 }
 
@@ -3451,7 +4916,9 @@ async function fetchServerValidatorNotifications() {
     headers: validatorApiHeaders(),
   });
   if (!response.ok) throw new Error("Backend do Validador indisponivel.");
-  const data = await response.json().catch(() => null) as { notifications?: ValidatorTelegramNotification[] } | null;
+  const data = (await response.json().catch(() => null)) as {
+    notifications?: ValidatorTelegramNotification[];
+  } | null;
   return Array.isArray(data?.notifications) ? data.notifications : [];
 }
 
@@ -3472,13 +4939,43 @@ async function saveServerValidatorChannel(
       ...(validationCode?.trim() ? { validationCode: validationCode.trim() } : {}),
     }),
   });
-  const data = await response.json().catch(() => null) as { channel?: ValidatorNotificationChannel; error?: string } | null;
+  const data = (await response.json().catch(() => null)) as {
+    channel?: ValidatorNotificationChannel;
+    error?: string;
+  } | null;
   if (!response.ok) throw new Error(data?.error || "Servidor nao confirmou o canal.");
   if (!data?.channel) throw new Error("Servidor nao retornou o canal salvo.");
   return data.channel;
 }
 
-async function validateServerValidatorChannel(botToken: string, chatId: string) {
+async function validateServerValidatorBot(botToken: string) {
+  const response = await fetch("/telegram/bots/validate", {
+    method: "POST",
+    cache: "no-store",
+    headers: validatorApiHeaders(true),
+    body: JSON.stringify({ botToken: botToken.trim() }),
+  });
+  const data = (await response.json().catch(() => null)) as {
+    bot?: { username?: string; name?: string };
+    validationCode?: string;
+    error?: string;
+  } | null;
+  if (!response.ok) throw new Error(data?.error || "Não foi possível validar seu bot.");
+  if (!data?.validationCode) {
+    throw new Error("Bot validado, mas o servidor não confirmou o vínculo com sua conta.");
+  }
+  return {
+    validationCode: data.validationCode,
+    username: data.bot?.username || "",
+    name: data.bot?.name || "Bot Telegram",
+  };
+}
+
+async function validateServerValidatorChannel(
+  botToken: string,
+  chatId: string,
+  botValidationCode = "",
+) {
   const response = await fetch("/telegram/channels/validate", {
     method: "POST",
     cache: "no-store",
@@ -3486,11 +4983,16 @@ async function validateServerValidatorChannel(botToken: string, chatId: string) 
     body: JSON.stringify({
       botToken: botToken.trim(),
       chatId: chatId.trim(),
+      ...(botValidationCode.trim() ? { botValidationCode: botValidationCode.trim() } : {}),
     }),
   });
-  const data = await response.json().catch(() => null) as { validationCode?: string; error?: string } | null;
+  const data = (await response.json().catch(() => null)) as {
+    validationCode?: string;
+    error?: string;
+  } | null;
   if (!response.ok) throw new Error(data?.error || "Falha ao validar grupo no Telegram.");
-  if (!data?.validationCode) throw new Error("Grupo validado, mas o servidor nao confirmou o salvamento.");
+  if (!data?.validationCode)
+    throw new Error("Grupo validado, mas o servidor nao confirmou o salvamento.");
   return { validationCode: data?.validationCode || "" };
 }
 
@@ -3509,7 +5011,7 @@ async function testServerValidatorChannel(channelId: string) {
     headers: validatorApiHeaders(true),
     body: JSON.stringify({ channelId }),
   });
-  const data = await response.json().catch(() => null) as {
+  const data = (await response.json().catch(() => null)) as {
     error?: string;
     messageId?: number | string | null;
     channel?: ValidatorNotificationChannel;
@@ -3529,7 +5031,7 @@ async function toggleServerValidatorMotor(
     headers: validatorApiHeaders(true),
     body: JSON.stringify({ channelId, motorKey, enabled }),
   });
-  const data = await response.json().catch(() => null) as {
+  const data = (await response.json().catch(() => null)) as {
     channel?: ValidatorNotificationChannel;
     error?: string;
   } | null;
@@ -3555,7 +5057,7 @@ async function previewServerValidatorChannel(
         .map((button) => ({ label: button.label, url: button.url })),
     }),
   });
-  const data = await response.json().catch(() => null) as { error?: string } | null;
+  const data = (await response.json().catch(() => null)) as { error?: string } | null;
   if (!response.ok) throw new Error(data?.error || "Falha ao enviar previa no Telegram.");
 }
 
@@ -3570,7 +5072,7 @@ async function postValidatorLiveHitTelegram(payload: {
     headers: validatorApiHeaders(true),
     body: JSON.stringify(payload),
   });
-  const data = await response.json().catch(() => null) as { error?: string } | null;
+  const data = (await response.json().catch(() => null)) as { error?: string } | null;
   if (!response.ok) throw new Error(data?.error || "Falha ao enviar sinal salvo no Telegram.");
 }
 
@@ -3586,7 +5088,10 @@ function validatorApiHeaders(withJson = false) {
   };
 }
 
-function mergeValidatorItems<T extends { id: string; updatedAt: string }>(primary: T[], secondary: T[]) {
+function mergeValidatorItems<T extends { id: string; updatedAt: string }>(
+  primary: T[],
+  secondary: T[],
+) {
   const byId = new Map<string, T>();
   for (const item of [...secondary, ...primary]) {
     const existing = byId.get(item.id);
@@ -3597,7 +5102,10 @@ function mergeValidatorItems<T extends { id: string; updatedAt: string }>(primar
   return [...byId.values()].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }
 
-function mergeValidatorChannels(primary: ValidatorNotificationChannel[], secondary: ValidatorNotificationChannel[] = []) {
+function mergeValidatorChannels(
+  primary: ValidatorNotificationChannel[],
+  secondary: ValidatorNotificationChannel[] = [],
+) {
   const byKey = new Map<string, ValidatorNotificationChannel>();
   for (const channel of [...secondary, ...primary]) {
     const key = validatorChannelDedupeKey(channel);
@@ -3619,7 +5127,9 @@ function replaceValidatorChannel(
   return mergeValidatorChannels(replaced);
 }
 
-function markServerConfirmedChannel(channel: ValidatorNotificationChannel): ValidatorNotificationChannel {
+function markServerConfirmedChannel(
+  channel: ValidatorNotificationChannel,
+): ValidatorNotificationChannel {
   return { ...channel, serverConfirmed: true } as ValidatorChannelRuntimeState;
 }
 
@@ -3628,7 +5138,9 @@ function markServerConfirmedChannels(channels: ValidatorNotificationChannel[]) {
 }
 
 function markLocalFallbackChannels(channels: ValidatorNotificationChannel[]) {
-  return channels.map((channel) => ({ ...channel, serverConfirmed: false }) as ValidatorChannelRuntimeState);
+  return channels.map(
+    (channel) => ({ ...channel, serverConfirmed: false }) as ValidatorChannelRuntimeState,
+  );
 }
 
 function isServerConfirmedChannel(channel: ValidatorNotificationChannel | null | undefined) {
@@ -3638,23 +5150,26 @@ function isServerConfirmedChannel(channel: ValidatorNotificationChannel | null |
 function telegramChannelConnectionStatus(channel: ValidatorNotificationChannel | null | undefined) {
   const status = channel?.connectionStatus;
   if (status === "connected" || status === "invalid" || status === "pending") return status;
-  if (channel?.isActive && channel.chatId && (channel.botTokenMasked || channel.botTokenEncoded)) return "connected";
+  if (channel?.isActive && channel.chatId && (channel.botTokenMasked || channel.botTokenEncoded))
+    return "connected";
   return "pending";
 }
 
 function telegramChannelCanUpdateModules(channel: ValidatorNotificationChannel | null | undefined) {
   return Boolean(
     channel &&
-      isServerConfirmedChannel(channel) &&
-      telegramChannelConnectionStatus(channel) === "connected" &&
-      channel.id &&
-      channel.isActive &&
-      channel.chatId &&
-      (channel.botTokenMasked || (channel as ValidatorChannelWithModules).botTokenEncoded),
+    isServerConfirmedChannel(channel) &&
+    telegramChannelConnectionStatus(channel) === "connected" &&
+    channel.id &&
+    channel.isActive &&
+    channel.chatId &&
+    (channel.botTokenMasked || (channel as ValidatorChannelWithModules).botTokenEncoded),
   );
 }
 
-function validatorChannelDedupeKey(channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">) {
+function validatorChannelDedupeKey(
+  channel: Pick<ValidatorNotificationChannel, "id" | "userId" | "name" | "chatId">,
+) {
   const userId = (channel.userId || currentUserId()).trim().toLowerCase();
   const chatId = normalizeValidatorChannelCode(channel.chatId);
   if (chatId) return `${userId}:chat:${chatId}`;
@@ -3671,7 +5186,29 @@ function telegramChannelValidationKey(botToken: string, chatId: string) {
   return token && code ? `${token}:${code}` : "";
 }
 
-function shouldSyncValidatorItem<T extends { id: string; updatedAt: string }>(item: T, serverItems: T[]) {
+function friendlyTelegramConnectionError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const normalized = message.toLowerCase();
+  if (normalized.includes("administrador") || normalized.includes("permiss")) {
+    return "Adicione o bot como administrador do canal e tente novamente.";
+  }
+  if (normalized.includes("token") || normalized.includes("chave")) {
+    return "A chave do bot não foi reconhecida. Confira e tente novamente.";
+  }
+  if (
+    normalized.includes("chat id") ||
+    normalized.includes("canal") ||
+    normalized.includes("grupo")
+  ) {
+    return "Não encontramos esse canal. Confira o @canal ou o ID.";
+  }
+  return "Não foi possível conectar agora. Confira os dados e tente novamente.";
+}
+
+function shouldSyncValidatorItem<T extends { id: string; updatedAt: string }>(
+  item: T,
+  serverItems: T[],
+) {
   const serverItem = serverItems.find((candidate) => candidate.id === item.id);
   if (!serverItem) return true;
   return Date.parse(item.updatedAt || "") > Date.parse(serverItem.updatedAt || "");
@@ -3726,7 +5263,7 @@ async function postValidatorTelegramMessage(payload: {
     body: JSON.stringify(payload),
   });
 
-  const data = await response.json().catch(() => null) as { error?: string } | null;
+  const data = (await response.json().catch(() => null)) as { error?: string } | null;
   if (!response.ok) {
     throw new Error(data?.error || `Telegram retornou ${response.status}.`);
   }
@@ -3759,15 +5296,18 @@ function findSavedPattern(
     config.tieProtection,
     config.tableId,
   );
-  return patterns.find((savedPattern) =>
-    validatorPatternSaveKey(
-      savedPattern.pattern,
-      savedPattern.entryType,
-      savedPattern.galeLimit,
-      savedPattern.tieProtection,
-      savedPattern.tableId,
-    ) === currentKey
-  ) ?? null;
+  return (
+    patterns.find(
+      (savedPattern) =>
+        validatorPatternSaveKey(
+          savedPattern.pattern,
+          savedPattern.entryType,
+          savedPattern.galeLimit,
+          savedPattern.tieProtection,
+          savedPattern.tableId,
+        ) === currentKey,
+    ) ?? null
+  );
 }
 
 function validatorPatternSaveKey(
@@ -3835,12 +5375,17 @@ function detectLiveHits(patterns: SavedValidatorPattern[], rounds: Round[]): Liv
   const latestRound = rounds.at(-1);
   if (!latestRound) return [];
   return patterns
-    .filter((pattern) => pattern.isActive && pattern.destination !== "disabled" && pattern.pattern.length)
+    .filter(
+      (pattern) => pattern.isActive && pattern.destination !== "disabled" && pattern.pattern.length,
+    )
     .filter((pattern) => {
       const cooldown = Math.max(0, Number(pattern.cooldownRounds) || 0);
-      if (pattern.lastDetectedRoundId && latestRound.id - pattern.lastDetectedRoundId <= cooldown) return false;
-      return rounds.length >= pattern.pattern.length &&
-        matchesPattern(rounds.slice(-pattern.pattern.length), pattern.pattern);
+      if (pattern.lastDetectedRoundId && latestRound.id - pattern.lastDetectedRoundId <= cooldown)
+        return false;
+      return (
+        rounds.length >= pattern.pattern.length &&
+        matchesPattern(rounds.slice(-pattern.pattern.length), pattern.pattern)
+      );
     })
     .map((pattern) => ({
       id: `hit-${pattern.id}-${latestRound.id}`,
@@ -3863,8 +5408,12 @@ function deletedValidatorPatternsStorageKey() {
 function readDeletedValidatorPatternIds() {
   if (typeof window === "undefined") return new Set<string>();
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(deletedValidatorPatternsStorageKey()) || "[]") as unknown;
-    const ids = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+    const parsed = JSON.parse(
+      window.localStorage.getItem(deletedValidatorPatternsStorageKey()) || "[]",
+    ) as unknown;
+    const ids = Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
     return new Set(ids);
   } catch {
     return new Set<string>();
@@ -3882,8 +5431,12 @@ function markDeletedValidatorPatternId(id: string) {
 function readTelegramSentKeys() {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(telegramSentStorageKey()) || "[]") as unknown;
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+    const parsed = JSON.parse(
+      window.localStorage.getItem(telegramSentStorageKey()) || "[]",
+    ) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
   } catch {
     return [];
   }
@@ -3911,12 +5464,6 @@ function invertToken(token: ValidatorPatternToken): ValidatorPatternToken {
   return token;
 }
 
-function sideEmoji(side: RoundResult) {
-  if (side === "B") return "B";
-  if (side === "P") return "P";
-  return "T";
-}
-
 function entryTypeToSide(entryType: ValidatorEntryType): RoundResult | null {
   if (entryType === "BANKER") return "B";
   if (entryType === "PLAYER") return "P";
@@ -3928,6 +5475,12 @@ function tokenClass(side: RoundResult) {
   if (side === "B") return "border-banker/40 bg-banker/10 text-banker";
   if (side === "P") return "border-player/40 bg-player/10 text-player";
   return "border-warning/50 bg-warning/10 text-warning";
+}
+
+function tokenPanelClass(side: RoundResult) {
+  if (side === "B") return "border-banker/20 bg-banker/5 text-banker";
+  if (side === "P") return "border-player/20 bg-player/5 text-player";
+  return "border-warning/25 bg-warning/5 text-warning";
 }
 
 function tokenCircleClass(side: RoundResult) {
@@ -3954,15 +5507,33 @@ function destinationLabel(destination: ValidatorDestination) {
 
 function planLimitForSession(plan: string, fullAccess: boolean) {
   if (!fullAccess) {
-    return { label: "Free", history: 1000, patterns: 3, channels: 0, telegram: false, ai: false };
+    return { label: "Free", history: 1000, patterns: 0, channels: 0, telegram: false, ai: false };
   }
-  if (plan === "vip") {
-    return { label: "VIP/Admin", history: 20000, patterns: 80, channels: 10, telegram: true, ai: true };
+  if (plan === "premium") {
+    return {
+      label: "Premium Black/Admin",
+      history: 50000,
+      patterns: 80,
+      channels: 3,
+      telegram: true,
+      ai: true,
+    };
   }
-  return { label: "Premium", history: 10000, patterns: 20, channels: 3, telegram: true, ai: true };
+  return {
+    label: "Premium",
+    history: 10000,
+    patterns: 20,
+    channels: 1,
+    telegram: true,
+    ai: true,
+  };
 }
 
 function availableHistoryOptions(limit: number) {
   const options = VALIDATOR_HISTORY_OPTIONS.filter((option) => option <= limit);
   return options.length ? options : [limit];
+}
+
+function formatHistorySize(value: number) {
+  return value.toLocaleString("pt-BR");
 }

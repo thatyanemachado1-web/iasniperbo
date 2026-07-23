@@ -43,7 +43,7 @@ URGENT_SIGNAL_CONNECT_TIMEOUT = 0.25
 URGENT_SIGNAL_READ_TIMEOUT = 0.9
 UPLOAD_WARNING_MS = 2000.0
 DIRECT_TELEGRAM_TARGET_MS = 300.0
-DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 0.0
+DIRECT_TELEGRAM_RESULT_TO_ENTRY_DELAY_SECONDS = 2.0
 DIRECT_TELEGRAM_PENDING_MAX_ROUND_AGE = 8
 DIRECT_TELEGRAM_PENDING_MAX_SECONDS = 180.0
 DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS = {
@@ -52,6 +52,7 @@ DIRECT_TELEGRAM_HANDLED_BLOCK_REASONS = {
     "module_inactive",
     "channel_inactive",
     "duplicate_chat_id",
+    "missing_pending_entry",
 }
 PATTERN_MINER_HISTORY_LIMIT = 15000
 PATTERN_MINER_MIN_OCCURRENCES = 3
@@ -155,7 +156,9 @@ def load_env_file(path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
+        # Windows editors commonly persist .env files as UTF-8 with BOM.  The
+        # BOM belongs to the file encoding, not to the first variable name.
+        values[key.strip().lstrip("\ufeff")] = value.strip().strip('"').strip("'")
     return values
 
 
@@ -2155,6 +2158,23 @@ def direct_result_message(pending: dict[str, Any], outcome: dict[str, Any]) -> s
     variables = pending.get("variables") if isinstance(pending.get("variables"), dict) else {}
     pattern = str(variables.get("pattern") or pending.get("pattern") or "").strip()
     pattern_line = [f"🧩 <b>Padrão:</b> {pattern}"] if pattern else []
+    if status.endswith("_ACTIVE"):
+        return "\n".join([
+            f"🛡️ <b>{label}</b>",
+            "",
+            *pattern_line,
+            f"🎯 <b>Entrada:</b> {entry}",
+            f"📌 <b>Status:</b> {label}",
+        ])
+    if status == "TIE_PROTECTION":
+        tie_text = f"EMPATE / PROTEÇÃO {tie_multiplier}".strip()
+        return "\n".join([
+            f"🟡 <b>{tie_text}</b>",
+            "",
+            *pattern_line,
+            f"🎯 <b>Entrada:</b> {entry}",
+            "📌 <b>Status:</b> PROTEGIDO / AGUARDANDO DEFINIÇÃO",
+        ])
     if status == "RED":
         return "\n".join([
             "❌ <b>RED</b>",
@@ -2170,7 +2190,7 @@ def direct_result_message(pending: dict[str, Any], outcome: dict[str, Any]) -> s
             "",
             *pattern_line,
             f"🎯 <b>Entrada:</b> {entry}",
-            "✅ <b>Empate confirmado</b>",
+            "✅ <b>EMPATE CONFIRMADO</b>",
         ])
     return "\n".join([
         f"✅ <b>{label}</b>",
@@ -2211,7 +2231,20 @@ def resolve_direct_telegram_outcome(pending: dict[str, Any], payload: dict[str, 
         return None
 
     entry = str(pending.get("entry") or "")
+    module_key = str(pending.get("moduleKey") or "")
     max_gale = int(pending.get("maxGale") or 1)
+    gale_notice_round_ids = {
+        str(value)
+        for key in ("galeNoticeRoundIds", "g1NoticeRoundIds")
+        for value in (pending.get(key) if isinstance(pending.get(key), list) else [])
+        if str(value)
+    }
+    tie_notice_round_ids = {
+        str(value)
+        for value in (pending.get("tieNoticeRoundIds") if isinstance(pending.get("tieNoticeRoundIds"), list) else [])
+        if str(value)
+    }
+    confirms_tie = module_key == "ties_only" or entry == "TIE"
     attempts = 0
     for round_item in rounds[trigger_index + 1:]:
         if not isinstance(round_item, dict):
@@ -2221,19 +2254,31 @@ def resolve_direct_telegram_outcome(pending: dict[str, Any], payload: dict[str, 
             round_id = int(float(round_item.get("id") or round_item.get("round_id") or round_item.get("roundId") or 0))
         except (TypeError, ValueError):
             round_id = 0
-        if side == "TIE":
+        round_key = str(round_id)
+        if side == "TIE" and confirms_tie:
             return {
                 "status": "TIE",
-                "label": "Empate",
+                "label": "EMPATE CONFIRMADO",
                 "roundId": round_id,
                 "gale": "SG" if attempts <= 0 else f"G{min(4, attempts)}",
                 "tieMultiplier": direct_tie_multiplier(round_item),
             }
-        if side == entry:
+        if side == "TIE":
+            if round_key in tie_notice_round_ids:
+                continue
+            return {
+                "status": "TIE_PROTECTION",
+                "label": "EMPATE / PROTEÇÃO",
+                "roundId": round_id,
+                "gale": "SG" if attempts <= 0 else f"G{min(4, attempts)}",
+                "tieMultiplier": direct_tie_multiplier(round_item),
+                "intermediate": True,
+            }
+        if not confirms_tie and side == entry:
             gale = "SG" if attempts <= 0 else f"G{min(4, attempts)}"
             return {
                 "status": "GREEN",
-                "label": "Green" if attempts <= 0 else f"Green G{min(4, attempts)}",
+                "label": "GREEN SG" if attempts <= 0 else f"GREEN G{min(4, attempts)}",
                 "roundId": round_id,
                 "gale": gale,
                 "tieMultiplier": "",
@@ -2246,6 +2291,16 @@ def resolve_direct_telegram_outcome(pending: dict[str, Any], payload: dict[str, 
                 "roundId": round_id,
                 "gale": f"G{max_gale}" if max_gale > 0 else "SG",
                 "tieMultiplier": "",
+            }
+        if round_key and round_key not in gale_notice_round_ids:
+            gale = f"G{min(4, attempts)}"
+            return {
+                "status": f"{gale}_ACTIVE",
+                "label": f"PROTEÇÃO {gale} ATIVA",
+                "roundId": round_id,
+                "gale": gale,
+                "tieMultiplier": "",
+                "intermediate": True,
             }
     return None
 
@@ -2517,11 +2572,12 @@ def main() -> int:
                 aggregate_result_key = direct_result_dedupe_key(pending, outcome)
                 if result_key in direct_telegram_result_keys or aggregate_result_key in direct_telegram_result_keys:
                     continue
+                intermediate_result = bool(outcome.get("intermediate"))
                 result_signal = {
                     "moduleKey": pending.get("moduleKey"),
                     "signalKey": result_key,
                     "resolvesSignalKey": pending.get("signalKey"),
-                    "finalResult": True,
+                    "finalResult": not intermediate_result,
                     "roundId": outcome.get("roundId"),
                     "entry": pending.get("entry"),
                     "variables": {
@@ -2560,6 +2616,31 @@ def main() -> int:
                     result_block_reasons = direct_telegram_block_reasons(result_reason)
                     result_handled = direct_telegram_block_handled(result_reason)
                     if result_ok or result_handled:
+                        if intermediate_result:
+                            if result_ok or result_block_reasons == {"duplicate_signal"}:
+                                direct_telegram_result_keys.add(result_key)
+                                direct_telegram_result_keys.add(aggregate_result_key)
+                                notice_round_id = str(outcome.get("roundId") or "")
+                                next_pending = dict(pending)
+                                if outcome.get("status") == "TIE_PROTECTION":
+                                    previous_notices = pending.get("tieNoticeRoundIds")
+                                    next_pending["tieNoticeRoundIds"] = list(dict.fromkeys([
+                                        *(previous_notices if isinstance(previous_notices, list) else []),
+                                        notice_round_id,
+                                    ]))
+                                else:
+                                    previous_notices = [
+                                        *(pending.get("galeNoticeRoundIds") if isinstance(pending.get("galeNoticeRoundIds"), list) else []),
+                                        *(pending.get("g1NoticeRoundIds") if isinstance(pending.get("g1NoticeRoundIds"), list) else []),
+                                    ]
+                                    next_notices = list(dict.fromkeys([
+                                        *previous_notices,
+                                        notice_round_id,
+                                    ]))
+                                    next_pending["galeNoticeRoundIds"] = next_notices
+                                    next_pending["g1NoticeRoundIds"] = next_notices
+                                next_direct_pending.append(next_pending)
+                            continue
                         # /engine/signal atomically closes the pending entry. Commit
                         # that success locally before the recovery-only call so a
                         # timeout in /engine/results can never re-open/re-send it.

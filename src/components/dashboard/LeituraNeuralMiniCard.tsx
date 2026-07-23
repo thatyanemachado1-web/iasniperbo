@@ -53,10 +53,10 @@ type LeituraNeuralCardProps = NeuralReading & {
 export type { LeituraNeuralCardProps };
 
 const SCANNING_READING: NeuralReading = { mode: "SCANNING" };
-const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
+const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v5";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
 const VISIBLE_ENTRY_HISTORY = 100;
-const OFFICIAL_ENTRY_RESULT_HOLD_MS = 900;
+const OFFICIAL_ENTRY_RESULT_HOLD_MS = 5_000;
 const RESOLVED_ENTRY_SUPPRESS_MS = 900;
 
 export function LeituraNeuralMiniCard({
@@ -76,20 +76,26 @@ export function LeituraNeuralMiniCard({
   const displayEntrySide = normalizeDisplayEntrySide(displaySide);
   const isDisplayEntry =
     (displayState === "entry_confirmed" || displayState === "waiting_result") && displayEntrySide;
-  const data = !isDisplayEntry && shouldHideResolvedReading(rawData, neuralEntryLastResult)
-    ? scanningReadingAfterClosedEntry(rawData)
-    : rawData;
+  const data =
+    !isDisplayEntry && shouldHideResolvedReading(rawData, neuralEntryLastResult)
+      ? scanningReadingAfterClosedEntry(rawData)
+      : rawData;
   const mode = data.mode ?? "SCANNING";
-  const hasNumber = neuralDisplayNumber(data) !== null && Boolean(data.origem || data.triggerSide || data.oppositeSide);
+  const hasNumber =
+    neuralDisplayNumber(data) !== null &&
+    Boolean(data.origem || data.triggerSide || data.oppositeSide);
   const pullingSide = data.direcao ?? data.origem;
   const openCycleSide = isOpenNeuralCycle(data)
     ? normalizeDisplayEntrySide(data.targetSide ?? data.direcao ?? data.origem)
     : null;
-  const rawConfirmedSide = isDisplayEntry ? displayEntrySide : openCycleSide ?? (mode === "ACTIVE" ? pullingSide : null);
-  const confirmedSide = !isDisplayEntry && shouldHideResolvedEntry(rawConfirmedSide, neuralEntryLastResult)
-    ? null
-    : rawConfirmedSide;
-  const numberTokenSide = hasNumber && confirmedSide ? confirmedSide : null;
+  const rawConfirmedSide = isDisplayEntry
+    ? displayEntrySide
+    : (openCycleSide ?? (mode === "ACTIVE" ? pullingSide : null));
+  const confirmedSide =
+    !isDisplayEntry && shouldHideResolvedEntry(rawConfirmedSide, neuralEntryLastResult)
+      ? null
+      : rawConfirmedSide;
+  const numberTokenSide = hasNumber ? neuralNumberOriginSide(data) : null;
   const generalScore = buildGeneralScore(neuralScoreboard, data);
   const accuracy = accuracyFrom(data.assertividade, data.acertos, data.erros);
   const view = buildNeuralView(
@@ -104,7 +110,9 @@ export function LeituraNeuralMiniCard({
   );
 
   const [entryResult, setEntryResult] = useState<NeuralEntryDisplayResult | null>(null);
-  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() => readNeuralEntryHistory());
+  const [entryHistory, setEntryHistory] = useState<NeuralEntryHistoryItem[]>(() =>
+    readNeuralEntryHistory(),
+  );
   const lastOfficialResultRef = useRef<string | null>(null);
   const entryResultTimeoutRef = useRef<number | null>(null);
   const mountedAtRef = useRef(Date.now());
@@ -122,7 +130,10 @@ export function LeituraNeuralMiniCard({
 
     setEntryResult(result);
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
-    entryResultTimeoutRef.current = window.setTimeout(() => setEntryResult(null), 900);
+    entryResultTimeoutRef.current = window.setTimeout(
+      () => setEntryResult(null),
+      OFFICIAL_ENTRY_RESULT_HOLD_MS,
+    );
   }, [neuralEntryLastResult]);
 
   useEffect(() => {
@@ -211,7 +222,9 @@ export function LeituraNeuralMiniCard({
       <div className={DASHBOARD_MODULE_CARD_BODY}>
         {resultView ? (
           <div className={cn("rounded-xl border px-3 py-2.5 text-center", resultView.panelClass)}>
-            <div className={cn("text-lg font-black uppercase leading-none", resultView.actionClass)}>
+            <div
+              className={cn("text-lg font-black uppercase leading-none", resultView.actionClass)}
+            >
               {resultView.action}
             </div>
             <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
@@ -220,7 +233,9 @@ export function LeituraNeuralMiniCard({
           </div>
         ) : (
           <div className={cn("rounded-xl border px-3 py-2.5 text-center", view.panelClass)}>
-            <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>{view.action}</div>
+            <div className={cn("text-lg font-black uppercase leading-none", view.actionClass)}>
+              {view.action}
+            </div>
             <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               {view.headline}
             </div>
@@ -241,6 +256,12 @@ export function LeituraNeuralMiniCard({
           <NeuralStatChip label="Validade" value={data.validade ?? "G1"} tone="muted" />
         </div>
 
+        <details className="group rounded-lg border border-white/10 bg-background/20">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-2 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-neon-cyan marker:content-none [&::-webkit-details-marker]:hidden">
+            <span>Ver mais — resultados e detalhes</span>
+            <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="space-y-2 border-t border-white/10 p-2">
         <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px] text-muted-foreground">
           <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
             Placar geral - reseta 00:00 (BR)
@@ -253,17 +274,25 @@ export function LeituraNeuralMiniCard({
 
         {hasNumber && pullingSide ? (
           <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[9px]">
-            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">Leitura ativa</div>
+            <div className="font-black uppercase tracking-[0.08em] text-muted-foreground">
+              Leitura ativa
+            </div>
             <div className="mt-0.5 font-semibold text-foreground">
-              <span className={sideClass(data.origem)}>{formatNeuralNumber(data)}</span>
+              <NeuralNumberToken label={formatNeuralNumber(data)} side={numberTokenSide} />
               {" - puxando "}
               <span className={sideClass(pullingSide)}>{sideLabel(pullingSide)}</span>
-              {data.origemTipo === "OPOSTO" ? " - gatilho oposto" : data.postTie ? " - pos-empate" : ""}
+              {data.origemTipo === "OPOSTO"
+                ? " - gatilho oposto"
+                : data.postTie
+                  ? " - pos-empate"
+                  : ""}
             </div>
           </div>
         ) : null}
 
-        {data.strategyType && (hasNumber || hasStrategyOrigin(data)) ? <NeuralStrategyDetails data={data} /> : null}
+        {data.strategyType && (hasNumber || hasStrategyOrigin(data)) ? (
+          <NeuralStrategyDetails data={data} />
+        ) : null}
 
         {data.formationCandidates?.length ? (
           <NeuralFormationCandidates candidates={data.formationCandidates} />
@@ -281,6 +310,8 @@ export function LeituraNeuralMiniCard({
         ) : null}
 
         <NeuralEntryHistoryList history={entryHistory} />
+          </div>
+        </details>
         <div className={DASHBOARD_MODULE_CARD_FILL} aria-hidden />
       </div>
     </GlassCard>
@@ -297,7 +328,8 @@ function buildNeuralView(
   forceOfficialEntryDisplay = false,
   isAwaitingG1 = false,
 ) {
-  const strengthLabel = accuracy !== null ? `${Math.round(accuracy)}%` : formatPercent(generalScore.accuracy);
+  const strengthLabel =
+    accuracy !== null ? `${Math.round(accuracy)}%` : formatPercent(generalScore.accuracy);
   const validity = data.validade ?? "G1";
   const originKind = neuralOriginKind(data);
 
@@ -307,7 +339,11 @@ function buildNeuralView(
       badge: data.blocked ? "Bloqueado" : "Risco alto",
       badgeTone: "red" as const,
       pulse: false,
-      action: data.blocked ? "Bloqueado" : riskEntrySide ? `Entrada ${entrySideToken(riskEntrySide)}` : "Entrada",
+      action: data.blocked
+        ? "Bloqueado"
+        : riskEntrySide
+          ? `Entrada ${entrySideToken(riskEntrySide)}`
+          : "Entrada",
       headline: data.paganteAlert ?? "Estrategia atingiu 3 reds recentes",
       actionClass: riskEntrySide ? sideActionClass(riskEntrySide) : "text-destructive",
       panelClass: "border-destructive/35 bg-destructive/10",
@@ -389,26 +425,44 @@ function buildNeuralView(
 
 function NeuralStrategyDetails({ data }: { data: NeuralReading }) {
   const target = normalizeDisplayEntrySide(data.targetSide ?? data.direcao);
-  const origin = strategyOriginLabel(data);
-  const delay = typeof data.delayHouses === "number" && data.delayHouses > 0 ? `${data.delayHouses} casas` : "imediato";
-  const sample = data.sampleLabel ?? (typeof data.samples === "number" ? `${data.samples} amostras` : "--");
+  const originNumber = strategyOriginNumber(data);
+  const originSide = neuralNumberOriginSide(data);
+  const originKind =
+    data.origemTipo === "OPOSTO" || isOppositeStrategy(data) ? "oposto" : "pagante";
+  const sample =
+    data.sampleLabel ?? (typeof data.samples === "number" ? `${data.samples} amostras` : "--");
 
   return (
     <div className="rounded-lg border border-white/10 bg-background/20 px-2 py-1.5 text-[8.5px] text-muted-foreground">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-black uppercase tracking-[0.08em] text-muted-foreground">Origem tecnica</span>
-        <span className="truncate font-semibold text-neon-cyan">{strategyTypeLabel(data.strategyType)}</span>
+        <span className="font-black uppercase tracking-[0.08em] text-muted-foreground">
+          Origem tecnica
+        </span>
+        <span className="truncate font-semibold text-neon-cyan">
+          {strategyTypeLabel(data.strategyType)}
+        </span>
       </div>
       <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5 font-semibold">
-        <span className="truncate text-foreground">{origin}</span>
-        <span className="truncate text-right">Delay {delay}</span>
+        <span className="flex min-w-0 items-center gap-1 text-foreground">
+          Numero <NeuralNumberToken label={String(originNumber ?? "--")} side={originSide} />
+          <span className={cn("truncate", sideClass(originSide))}>
+            {originSide ? sideLabel(originSide).toUpperCase() : ""} {originKind}
+          </span>
+        </span>
+        <span className="truncate text-right">{strategyTypeLabel(data.strategyType)}</span>
         <span className="truncate">
           Puxou:{" "}
-          <span className={sideClass(target)}>{target ? sideLabel(target).toUpperCase() : "--"}</span>
+          <span className={sideClass(target)}>
+            {target ? sideLabel(target).toUpperCase() : "--"}
+          </span>
         </span>
-        <span className="truncate text-right">{data.accuracyLabel ?? formatPercent(optionalNumberFrom(data.accuracy))}</span>
+        <span className="truncate text-right">
+          {data.accuracyLabel ?? formatPercent(optionalNumberFrom(data.accuracy))}
+        </span>
         <span className="truncate">Amostra: {sample}</span>
-        <span className="truncate text-right">Reds: {formatCount(optionalNumberFrom(data.recentReds))}</span>
+        <span className="truncate text-right">
+          Reds: {formatCount(optionalNumberFrom(data.recentReds))}
+        </span>
       </div>
     </div>
   );
@@ -423,7 +477,9 @@ function NeuralFormationCandidates({
   return (
     <div className="rounded-lg border border-white/8 bg-background/12 px-2 py-1.5 text-[8px]">
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="font-black uppercase tracking-[0.08em] text-muted-foreground">Em formacao</span>
+        <span className="font-black uppercase tracking-[0.08em] text-muted-foreground">
+          Em formacao
+        </span>
         <span className="text-muted-foreground/70">{candidates.length} no radar</span>
       </div>
       <div className="space-y-0.5">
@@ -436,7 +492,9 @@ function NeuralFormationCandidates({
             >
               <span className="min-w-0 truncate text-muted-foreground">
                 {formationOriginLabel(candidate)} puxando{" "}
-                <span className={sideClass(target)}>{target ? sideLabel(target).toUpperCase() : "--"}</span>
+                <span className={sideClass(target)}>
+                  {target ? sideLabel(target).toUpperCase() : "--"}
+                </span>
               </span>
               <span className="shrink-0 text-warning">
                 {candidate.accuracyLabel ?? formatPercent(optionalNumberFrom(candidate.accuracy))}{" "}
@@ -474,7 +532,9 @@ function NeuralEntryHistoryList({ history }: { history: NeuralEntryHistoryItem[]
                 className="flex items-center justify-between gap-1 rounded-md border border-white/5 bg-secondary/8 px-1.5 py-0.5 text-[7.5px] font-semibold leading-tight"
               >
                 <span className="min-w-0 truncate">
-                  <span className={sideClass(item.side)}>{entrySideHistoryLabel(item)}</span>
+                  <span className={item.kind === "tie" ? "text-tie" : sideClass(item.side)}>
+                    {entrySideHistoryLabel(item)}
+                  </span>
                   {item.kind !== "tie" ? (
                     <>
                       {" "}
@@ -541,7 +601,10 @@ function mergeNeuralEntryHistories(
 }
 
 function upsertNeuralEntryHistory(history: NeuralEntryHistoryItem[], item: NeuralEntryHistoryItem) {
-  const merged = [item, ...history.filter((entry) => entry.id !== item.id)].slice(0, MAX_NEURAL_ENTRY_HISTORY);
+  const merged = [item, ...history.filter((entry) => entry.id !== item.id)].slice(
+    0,
+    MAX_NEURAL_ENTRY_HISTORY,
+  );
   return neuralEntryHistoryEquals(history, merged) ? history : merged;
 }
 
@@ -556,17 +619,24 @@ function normalizeNeuralEntryHistoryItem(value: unknown): NeuralEntryHistoryItem
   if (!isNeuralEntryResultKind(record.kind) || !isNeuralSide(record.side)) return null;
 
   return {
-    id: typeof record.id === "string" && record.id ? record.id : `restored:${Date.now()}:${Math.random()}`,
+    id:
+      typeof record.id === "string" && record.id
+        ? record.id
+        : `restored:${Date.now()}:${Math.random()}`,
     kind: record.kind,
     side: record.side,
     multiplier:
-      typeof record.multiplier === "number" && Number.isFinite(record.multiplier) ? record.multiplier : null,
+      typeof record.multiplier === "number" && Number.isFinite(record.multiplier)
+        ? record.multiplier
+        : null,
     attempt: record.attempt === "G1" ? "G1" : record.attempt === "SG" ? "SG" : null,
     minute: typeof record.minute === "string" && record.minute ? record.minute : "--",
   };
 }
 
-function neuralEntryHistoryFromPersistentResult(value: DashboardPersistentResult): NeuralEntryHistoryItem | null {
+function neuralEntryHistoryFromPersistentResult(
+  value: DashboardPersistentResult,
+): NeuralEntryHistoryItem | null {
   if (value.moduleKey !== "LEITURA_NEURAL_NUMERO_PAGANTE") return null;
   const side = normalizeDisplayEntrySide(value.side);
   if (!side) return null;
@@ -581,13 +651,17 @@ function neuralEntryHistoryFromPersistentResult(value: DashboardPersistentResult
     typeof value.tieMultiplier === "number"
       ? value.tieMultiplier
       : Number(String(value.tieMultiplier || "").replace(/\D+/g, "")) || null;
+  const semanticId = ["neural", value.signalId ?? value.resultId, value.roundId ?? "", kind].join(
+    ":",
+  );
   return {
-    id: value.resultId,
+    id: semanticId,
     kind,
     side,
     multiplier,
     attempt: value.attempt === "G1" ? "G1" : "SG",
-    minute: minuteLabelFromTimeText(value.displayTimeBR) ?? minuteLabelFromIso(value.createdAt) ?? "--",
+    minute:
+      minuteLabelFromTimeText(value.displayTimeBR) ?? minuteLabelFromIso(value.createdAt) ?? "--",
   };
 }
 
@@ -762,13 +836,7 @@ function NeuralStatChip({
   );
 }
 
-function NeuralNumberToken({
-  label,
-  side,
-}: {
-  label: string;
-  side?: NeuralSide | null;
-}) {
+function NeuralNumberToken({ label, side }: { label: string; side?: NeuralSide | null }) {
   const compactLabel = compactNumberTokenLabel(label);
   return (
     <span
@@ -802,15 +870,22 @@ function numberTokenClass(side?: NeuralSide | null) {
   return "border-white/20 bg-white/10 text-foreground";
 }
 
-function buildGeneralScore(scoreboard: NeuralScoreboard | undefined, fallbackReading: NeuralReading) {
+function buildGeneralScore(
+  scoreboard: NeuralScoreboard | undefined,
+  fallbackReading: NeuralReading,
+) {
   const sg = optionalNumberFrom(scoreboard?.greenSemGale ?? fallbackReading.greenSemGale);
   const g1 = optionalNumberFrom(scoreboard?.greenG1 ?? fallbackReading.greenG1);
   const splitGreens = sg !== null || g1 !== null ? numberFrom(sg) + numberFrom(g1) : null;
   const greens = optionalNumberFrom(
     splitGreens ?? scoreboard?.greens ?? scoreboard?.acertos ?? fallbackReading.acertos,
   );
-  const reds = optionalNumberFrom(scoreboard?.reds ?? scoreboard?.erros ?? fallbackReading.reds ?? fallbackReading.erros);
-  const accuracy = accuracyFrom(null, greens, reds) ?? optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
+  const reds = optionalNumberFrom(
+    scoreboard?.reds ?? scoreboard?.erros ?? fallbackReading.reds ?? fallbackReading.erros,
+  );
+  const accuracy =
+    accuracyFrom(null, greens, reds) ??
+    optionalNumberFrom(scoreboard?.assertividade ?? fallbackReading.assertividade);
 
   return { sg, g1, reds, accuracy };
 }
@@ -829,10 +904,10 @@ function displayResultFromOfficialEntry(result: NeuralEntryLastResult | null | u
     result.attempt === "G1" || result.kind === "g1" || result.kind === "tie_g1" ? "G1" : "SG";
 
   return {
-    id: result.id,
+    id: ["neural", result.key || result.id, result.resultRoundKey || "", kind].join(":"),
     kind,
     side: kind === "tie" ? "TIE" : side,
-    multiplier: kind === "tie" ? result.tieMultiplier ?? null : null,
+    multiplier: kind === "tie" ? (result.tieMultiplier ?? null) : null,
     attempt,
   };
 }
@@ -864,18 +939,23 @@ function originSubtitle(data: NeuralReading) {
   return "numero pagante";
 }
 
-function strategyOriginLabel(data: NeuralReading) {
+function strategyOriginNumber(data: NeuralReading) {
   if (data.origemTipo === "OPOSTO" || isOppositeStrategy(data)) {
-    const number = data.oppositeNumber ?? data.numero;
-    const side = normalizeDisplayEntrySide(data.oppositeSide ?? data.origem);
-    return `Numero ${number ?? "--"} ${side ? sideLabel(side).toUpperCase() : ""} oposto`.trim();
+    return data.oppositeNumber ?? data.numero;
   }
-  const number = data.triggerNumber ?? data.numero;
-  const side = normalizeDisplayEntrySide(data.triggerSide ?? data.origem);
-  return `Numero ${number ?? "--"} ${side ? sideLabel(side).toUpperCase() : ""} pagante`.trim();
+  return data.triggerNumber ?? data.numero;
 }
 
-function formationOriginLabel(candidate: NonNullable<NeuralReading["formationCandidates"]>[number]) {
+function neuralNumberOriginSide(data: NeuralReading) {
+  if (data.origemTipo === "OPOSTO" || isOppositeStrategy(data)) {
+    return normalizeDisplayEntrySide(data.oppositeSide ?? data.origem);
+  }
+  return normalizeDisplayEntrySide(data.triggerSide ?? data.origem);
+}
+
+function formationOriginLabel(
+  candidate: NonNullable<NeuralReading["formationCandidates"]>[number],
+) {
   if (candidate.oppositeNumber !== null && candidate.oppositeNumber !== undefined) {
     const side = normalizeDisplayEntrySide(candidate.oppositeSide);
     return `${candidate.oppositeNumber}${side ? ` ${sideLabel(side).toUpperCase()}` : ""} oposto`;
@@ -886,8 +966,6 @@ function formationOriginLabel(candidate: NonNullable<NeuralReading["formationCan
 
 function strategyTypeLabel(value: unknown) {
   const text = String(value || "");
-  if (text === "PAGANTE_DELAY_2_CASAS") return "Pagante delay 2";
-  if (text === "OPOSTO_DELAY_2_CASAS") return "Oposto delay 2";
   if (text === "PAGANTE_OPOSTO") return "Pagante oposto";
   if (text === "PAGANTE_DIRETO") return "Pagante direto";
   return "Motor neural";
@@ -978,7 +1056,11 @@ function sideNumberTone(side: NeuralSide | null | undefined) {
   return "muted" as const;
 }
 
-function accuracyFrom(assertividade?: number | null, acertos?: number | null, erros?: number | null) {
+function accuracyFrom(
+  assertividade?: number | null,
+  acertos?: number | null,
+  erros?: number | null,
+) {
   if (typeof acertos === "number" || typeof erros === "number") {
     const total = (acertos ?? 0) + (erros ?? 0);
     return total > 0 ? calculateMotorAssertiveness(acertos ?? 0, erros ?? 0) : null;
@@ -1041,7 +1123,8 @@ function shouldHideResolvedReading(
 ) {
   if (!result?.id || !result.finishedAt || reading.mode !== "ACTIVE") return false;
   const finishedAt = new Date(result.finishedAt).getTime();
-  if (Number.isNaN(finishedAt) || Date.now() - finishedAt >= RESOLVED_ENTRY_SUPPRESS_MS) return false;
+  if (Number.isNaN(finishedAt) || Date.now() - finishedAt >= RESOLVED_ENTRY_SUPPRESS_MS)
+    return false;
 
   const readingKey = neuralReadingEntryKey(reading);
   if (readingKey && result.key && readingKey === result.key) return true;
@@ -1050,11 +1133,11 @@ function shouldHideResolvedReading(
   const resultSide = normalizeEntrySide(result.expectedSide ?? result.origem);
   return Boolean(
     readingSide &&
-      resultSide &&
-      readingSide === resultSide &&
-      reading.numero === result.numero &&
-      reading.origem === result.origem &&
-      reading.origemTipo === result.origemTipo,
+    resultSide &&
+    readingSide === resultSide &&
+    reading.numero === result.numero &&
+    reading.origem === result.origem &&
+    reading.origemTipo === result.origemTipo,
   );
 }
 

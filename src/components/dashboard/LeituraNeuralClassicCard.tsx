@@ -61,7 +61,7 @@ export type { LeituraNeuralClassicCardProps };
 const TIE_MULTIPLIER_LABELS = ["4x", "6x", "10x", "25x", "88x"] as const;
 const NEURAL_ENTRY_HISTORY_STORAGE_KEY = "sniper_neural_entry_history_official_v2";
 const MAX_NEURAL_ENTRY_HISTORY = 100;
-const OFFICIAL_ENTRY_RESULT_HOLD_MS = 900;
+const OFFICIAL_ENTRY_RESULT_HOLD_MS = 5_000;
 const RESOLVED_ENTRY_SUPPRESS_MS = 900;
 
 const SCANNING_READING: NeuralReading = {
@@ -143,7 +143,7 @@ export function LeituraNeuralClassicCard({
     setEntryResult(result);
 
     if (entryResultTimeoutRef.current) window.clearTimeout(entryResultTimeoutRef.current);
-    entryResultTimeoutRef.current = window.setTimeout(() => setEntryResult(null), 900);
+    entryResultTimeoutRef.current = window.setTimeout(() => setEntryResult(null), OFFICIAL_ENTRY_RESULT_HOLD_MS);
   }, [neuralEntryLastResult]);
 
   useEffect(() => {

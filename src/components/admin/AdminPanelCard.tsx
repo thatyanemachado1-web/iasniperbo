@@ -18,14 +18,20 @@ const fallbackOverview: AdminPanelOverview = {
 };
 
 export function AdminPanelCard({
-  overview = fallbackOverview,
+  overview,
   loading = false,
+  unavailable = false,
 }: {
-  overview?: Partial<AdminPanelOverview>;
+  overview?: Partial<AdminPanelOverview> | null;
   loading?: boolean;
+  unavailable?: boolean;
 }) {
-  const stats = { ...fallbackOverview, ...overview };
-  const metricValue = (value: number) => (loading ? "..." : value);
+  const hasOverview = overview != null;
+  const stats = { ...fallbackOverview, ...(overview ?? {}) };
+  const statusValue = (value: string) =>
+    loading ? "..." : unavailable || !hasOverview ? "—" : value;
+  const metricValue = (value: number) =>
+    loading ? "..." : unavailable || !hasOverview ? "—" : value;
 
   return (
     <GlassCard className="md:col-span-2 border-neon-cyan/35">
@@ -47,14 +53,14 @@ export function AdminPanelCard({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <AppBadge tone="green" pulse>
-              Engine: {stats.engineStatus}
+            <AppBadge tone="green" pulse={hasOverview && !loading && !unavailable}>
+              Engine: {statusValue(stats.engineStatus)}
             </AppBadge>
-            <AppBadge tone="blue" pulse>
-              Mesa: {stats.tableStatus}
+            <AppBadge tone="blue" pulse={hasOverview && !loading && !unavailable}>
+              Mesa: {statusValue(stats.tableStatus)}
             </AppBadge>
             <AppBadge tone="gold">
-              Último sinal: {stats.lastSignal} - {stats.lastSignalAt}
+              Último sinal: {statusValue(stats.lastSignal)} - {statusValue(stats.lastSignalAt)}
             </AppBadge>
           </div>
         </div>

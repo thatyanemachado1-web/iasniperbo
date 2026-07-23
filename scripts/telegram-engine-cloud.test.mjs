@@ -79,7 +79,12 @@ try {
       button_url: "https://sniperbo.com/app/validador",
       signalModules: {
         ai_patterns: { enabled: true, cooldownSeconds: 0 },
-        paying_numbers: { enabled: true, cooldownSeconds: 0 },
+        paying_numbers: {
+          enabled: true,
+          cooldownSeconds: 0,
+          galeTemplate: "CUSTOM INTERMEDIARIO {{result}} | {{number}} | {{gale}}",
+          greenTemplate: "CUSTOM RESULTADO {{result}} | {{number}} | {{gale}}",
+        },
         surf_alert: { enabled: true, cooldownSeconds: 0 },
         ties_only: { enabled: true, cooldownSeconds: 0 },
         validator: { enabled: true, cooldownSeconds: 0 },
@@ -145,10 +150,10 @@ try {
       userId,
       channelId: "canal-1",
       moduleKey: "validator",
-      signalKey: "validator-http-entry",
+      signalKey: "validator-http-result",
       roundId: 100,
       entry: "PLAYER",
-      result: "Aguardando resultado",
+      result: "Green",
       variables: { pattern: "B P B" },
     }),
   }));
@@ -174,7 +179,7 @@ try {
       entry: "TIE",
       variables: { tieMultiplier: "8x" },
     },
-    { moduleKey: "validator", signalKey: "validator:entry:5", roundId: 105, result: "Aguardando resultado", entry: "PLAYER" },
+    { moduleKey: "validator", signalKey: "validator:result:5", roundId: 105, result: "Red", entry: "PLAYER" },
   ];
 
   for (const item of cases) {
@@ -248,7 +253,10 @@ try {
   const secondDedupe = await engine.dispatchSignal(dedupeSignal);
   const secondDedupeBody = await secondDedupe.json();
   assert.equal(secondDedupeBody.sent.length, 0);
-  assert.equal(secondDedupeBody.blocked[0].reason, "duplicate_signal");
+  assert.ok(
+    ["duplicate_signal", "pending_result"].includes(secondDedupeBody.blocked[0].reason),
+    "the repeated pending entry must not send twice",
+  );
 
   dashboardPayload = {
     rounds: [{ id: 300, result: "B", bankerScore: 8, playerScore: 6, time: "10:10" }],
@@ -313,10 +321,10 @@ try {
     "test",
   );
   assert.ok(g1Dispatch.sentCount >= 1);
-  const g1Message = sentMessages.slice(beforeG1Messages).find((item) => /Número:<\/b> 🔵7/.test(item.payload.text));
+  const g1Message = sentMessages.slice(beforeG1Messages).find((item) => /CUSTOM INTERMEDIARIO/.test(item.payload.text));
   assert.ok(g1Message, "paying_numbers G1 message should be sent");
   assert.match(g1Message.payload.text, /Proteção G1 ATIVA/i);
-  assert.match(g1Message.payload.text, /Status:<\/b> G1 ATIVO/);
+  assert.match(g1Message.payload.text, /G1/);
 
   const beforeFinalMessages = sentMessages.length;
   const finalDispatch = await engine.dispatchPendingOfficialModuleResults(
@@ -330,10 +338,10 @@ try {
     "test",
   );
   assert.ok(finalDispatch.sentCount >= 1);
-  const finalMessage = sentMessages.slice(beforeFinalMessages).find((item) => /Número:<\/b> 🔵7/.test(item.payload.text));
+  const finalMessage = sentMessages.slice(beforeFinalMessages).find((item) => /CUSTOM RESULTADO/.test(item.payload.text));
   assert.ok(finalMessage, "paying_numbers final message should be sent");
-  assert.match(finalMessage.payload.text, /GREEN G1/);
-  assert.match(finalMessage.payload.text, /Status:<\/b> FINALIZADO/);
+  assert.match(finalMessage.payload.text, /CUSTOM RESULTADO GREEN G1/);
+  assert.match(finalMessage.payload.text, /G1/);
 
   for (const [id, roomChatId] of [["canal-2", "-1001234567891"], ["canal-3", "-1001234567892"]]) {
     const roomValidation = await engine.validateChannel(userId, {
