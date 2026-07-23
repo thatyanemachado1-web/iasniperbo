@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AuthPanel } from "@/components/landing/AuthPanel";
@@ -9,7 +9,6 @@ import { LandingFooter } from "@/components/landing/LandingFooter";
 import { LandingHero } from "@/components/landing/LandingHero";
 import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { PlatformFeatures } from "@/components/landing/PlatformFeatures";
-import { PricingSection } from "@/components/landing/PricingSection";
 import { ResponsibleGamingNotice } from "@/components/landing/ResponsibleGamingNotice";
 import { SupportedEnvironments } from "@/components/landing/SupportedEnvironments";
 import { getSalesSettings } from "@/lib/accessApi";
@@ -42,7 +41,6 @@ export const Route = createFileRoute("/")({
 });
 
 function LandingPage() {
-  const navigate = useNavigate();
   const [salesClosed, setSalesClosed] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
@@ -66,8 +64,9 @@ function LandingPage() {
     setAuthOpen(true);
   }
 
-  function goPlatform() {
-    void navigate({ to: "/app" });
+  function openRegister() {
+    setAuthMode(salesClosed ? "login" : "register");
+    setAuthOpen(true);
   }
 
   return (
@@ -75,12 +74,11 @@ function LandingPage() {
       <ResponsibleGamingNotice />
       <LandingNavbar />
       <main>
-        <LandingHero onPrimary={goPlatform} onSecondary={openLogin} />
-        <PricingSection onCta={goPlatform} />
+        <LandingHero onPrimary={openRegister} onSecondary={openLogin} />
         <SupportedEnvironments />
         <HowItWorks />
         <PlatformFeatures />
-        <FinalCTA onCta={goPlatform} />
+        <FinalCTA onCta={openRegister} />
         <InstitutionalNotice />
       </main>
       <LandingFooter />
