@@ -7,7 +7,7 @@ interface LandingHeroProps {
 
 export function LandingHero({ onPrimary, onSecondary }: LandingHeroProps) {
   return (
-    <section className="relative overflow-hidden">
+    <section className="relative overflow-x-clip overflow-y-visible">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
@@ -73,23 +73,25 @@ export function LandingHero({ onPrimary, onSecondary }: LandingHeroProps) {
           </div>
         </div>
 
-        <div className="relative min-w-0">
+        <div className="relative min-w-0 px-2 sm:px-4 lg:px-0">
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 -z-10"
+            className="pointer-events-none absolute inset-x-4 inset-y-0 -z-10 sm:inset-x-8"
             style={{
               background:
                 "radial-gradient(ellipse 60% 50% at 50% 55%, rgba(37,139,255,0.35), transparent 65%), radial-gradient(ellipse 40% 40% at 60% 70%, rgba(133,84,255,0.28), transparent 70%)",
               filter: "blur(10px)",
             }}
           />
-          <img
-            src={notebookImg}
-            alt="Notebook exibindo painel de análise do Sniper BO IA"
-            width={1600}
-            height={1200}
-            className="relative mx-auto w-full max-w-[720px] drop-shadow-[0_40px_80px_rgba(19,40,90,0.55)]"
-          />
+          <div className="relative mx-auto flex w-full max-w-[680px] items-center justify-center overflow-visible py-4 sm:py-6 lg:max-w-[660px] xl:max-w-[700px]">
+            <img
+              src={notebookImg}
+              alt="Notebook exibindo painel de análise do Sniper BO IA"
+              width={1408}
+              height={1008}
+              className="relative block h-auto w-full object-contain drop-shadow-[0_34px_70px_rgba(19,40,90,0.5)]"
+            />
+          </div>
         </div>
       </div>
     </section>
