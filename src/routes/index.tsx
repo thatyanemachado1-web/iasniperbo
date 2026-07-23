@@ -76,10 +76,10 @@ function LandingPage() {
       <LandingNavbar />
       <main>
         <LandingHero onPrimary={goPlatform} onSecondary={openLogin} />
+        <PricingSection onCta={goPlatform} />
         <SupportedEnvironments />
         <HowItWorks />
         <PlatformFeatures />
-        <PricingSection onCta={goPlatform} />
         <FinalCTA onCta={goPlatform} />
         <InstitutionalNotice />
       </main>
