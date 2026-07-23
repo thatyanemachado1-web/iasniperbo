@@ -9,6 +9,7 @@ import { LandingFooter } from "@/components/landing/LandingFooter";
 import { LandingHero } from "@/components/landing/LandingHero";
 import { LandingNavbar } from "@/components/landing/LandingNavbar";
 import { PlatformFeatures } from "@/components/landing/PlatformFeatures";
+import { PricingSection } from "@/components/landing/PricingSection";
 import { ResponsibleGamingNotice } from "@/components/landing/ResponsibleGamingNotice";
 import { SupportedEnvironments } from "@/components/landing/SupportedEnvironments";
 import { getSalesSettings } from "@/lib/accessApi";
@@ -78,6 +79,7 @@ function LandingPage() {
         <SupportedEnvironments />
         <HowItWorks />
         <PlatformFeatures />
+        <PricingSection onCta={goPlatform} />
         <FinalCTA onCta={goPlatform} />
         <InstitutionalNotice />
       </main>
