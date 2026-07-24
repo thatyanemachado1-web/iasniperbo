@@ -4,7 +4,6 @@ import { AppShell } from "@/components/layout/AppShell";
 import { getSalesSettings, refreshAccessSession } from "@/lib/accessApi";
 import { isPublicLiveDashboardPath } from "@/lib/publicLiveSignals";
 import {
-  clearUserSession,
   hasFullAccess,
   isAdminOwnerEmail,
   readUserSession,
@@ -124,13 +123,10 @@ function ProtectedAppRoute() {
           expiresAt: current.expiresAt,
         };
         const access = await refreshAccessSession();
-        if (stopped) return;
-        if (!access) {
-          clearUserSession();
-          setSession(readUserSession());
-          await navigate({ to: "/", replace: true });
-          return;
-        }
+        // Mobile browsers can briefly return an inconclusive auth response when
+        // a suspended tab resumes. Keep the signed local session instead of
+        // turning one transient refresh failure into an involuntary logout.
+        if (stopped || !access) return;
 
         const changed =
           before.accessMode !== access.access_mode ||

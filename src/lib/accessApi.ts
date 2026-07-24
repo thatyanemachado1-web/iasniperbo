@@ -19,6 +19,10 @@ export class AccessApiTimeoutError extends Error {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+let accessRefreshInFlight: {
+  sessionKey: string;
+  promise: Promise<ClientAccess | null>;
+} | null = null;
 
 export interface ClientAccess {
   registered: boolean;
@@ -189,10 +193,25 @@ export function validateLoginAccess(access: ClientAccess) {
   return { ok: true as const, access };
 }
 
-export async function refreshAccessSession() {
+export function refreshAccessSession() {
   const session = readUserSession();
-  if (!session.clientToken) return null;
+  if (!session.clientToken) return Promise.resolve(null);
 
+  const sessionKey = `${session.email}\u0000${session.clientToken}`;
+  if (accessRefreshInFlight?.sessionKey === sessionKey) {
+    return accessRefreshInFlight.promise;
+  }
+
+  const promise = refreshAccessSessionOnce(session).finally(() => {
+    if (accessRefreshInFlight?.promise === promise) {
+      accessRefreshInFlight = null;
+    }
+  });
+  accessRefreshInFlight = { sessionKey, promise };
+  return promise;
+}
+
+async function refreshAccessSessionOnce(session: ReturnType<typeof readUserSession>) {
   try {
     const data = await apiRequest<{ valid: boolean; access?: ClientAccess }>("/auth/verify", {
       method: "POST",
@@ -203,6 +222,11 @@ export async function refreshAccessSession() {
 
     const access = normalizeClientAccess(data.access, session.email);
     if (!access.registered || !access.client_token) return null;
+
+    const current = readUserSession();
+    if (current.email !== session.email || current.clientToken !== session.clientToken) {
+      return null;
+    }
 
     saveAccessSession(access, session.email);
     return access;

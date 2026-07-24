@@ -25,6 +25,26 @@ public class LiveHousePlugin extends Plugin {
     private ViewGroup liveParent;
     private String currentUrl = "";
 
+    @Override
+    protected void handleOnPause() {
+        if (liveWebView == null) return;
+        getActivity().runOnUiThread(() -> {
+            if (liveWebView == null) return;
+            liveWebView.onPause();
+            CookieManager.getInstance().flush();
+        });
+    }
+
+    @Override
+    protected void handleOnResume() {
+        if (liveWebView == null) return;
+        getActivity().runOnUiThread(() -> {
+            if (liveWebView != null && liveWebView.getVisibility() == View.VISIBLE) {
+                liveWebView.onResume();
+            }
+        });
+    }
+
     @PluginMethod
     public void show(PluginCall call) {
         final String url = call.getString("url", "");
@@ -36,6 +56,7 @@ public class LiveHousePlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             ensureWebView();
             applyBounds(call);
+            liveWebView.onResume();
             liveWebView.setVisibility(View.VISIBLE);
             liveWebView.bringToFront();
             if (!url.equals(currentUrl)) {
@@ -65,7 +86,11 @@ public class LiveHousePlugin extends Plugin {
     @PluginMethod
     public void hide(PluginCall call) {
         getActivity().runOnUiThread(() -> {
-            if (liveWebView != null) liveWebView.setVisibility(View.GONE);
+            if (liveWebView != null) {
+                liveWebView.onPause();
+                liveWebView.setVisibility(View.GONE);
+                CookieManager.getInstance().flush();
+            }
             call.resolve(status());
         });
     }
@@ -75,7 +100,9 @@ public class LiveHousePlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             if (liveWebView != null) {
                 liveWebView.stopLoading();
+                liveWebView.onPause();
                 liveWebView.setVisibility(View.GONE);
+                CookieManager.getInstance().flush();
                 if (liveParent != null) liveParent.removeView(liveWebView);
                 liveWebView.destroy();
                 liveWebView = null;
@@ -119,6 +146,7 @@ public class LiveHousePlugin extends Plugin {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                CookieManager.getInstance().flush();
                 JSObject event = new JSObject();
                 event.put("url", url == null ? "" : url);
                 event.put("requestedUrl", currentUrl);
